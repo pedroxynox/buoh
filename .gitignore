@@ -1,0 +1,61 @@
+# Secretos y configuración local
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.mobileprovision
+
+# Dependencias y artefactos TypeScript/Node
+node_modules/
+.pnpm-store/
+.turbo/
+.next/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Python e investigación local
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+*.py[cod]
+
+# Datos locales y artefactos de investigación
+/data/
+/datasets/
+/artifacts/
+*.parquet
+*.arrow
+*.feather
+*.sqlite
+*.db
+
+# Registros, cachés y archivos temporales
+*.log
+logs/
+tmp/
+.cache/
+
+# Aplicaciones móviles y escritorio
+.expo/
+.expo-shared/
+android/.gradle/
+android/build/
+ios/Pods/
+ios/build/
+src-tauri/target/
+
+# Sistema operativo y editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
