@@ -60,7 +60,8 @@ buoh es un bot multiplataforma de investigación cuantitativa, señales trazable
 ## Flujo de GitHub y revisión
 
 - El repositorio de buoh comienza privado.
-- El agente prepara cambios en ramas de trabajo, crea y actualiza los pull requests; nunca sube cambios directamente a `main`.
-- El usuario revisa los pull requests y conserva la decisión de aprobar, solicitar cambios o fusionarlos.
+- El agente prepara cambios y los sube a ramas de trabajo; nunca sube cambios directamente a `main` ni crea pull requests mediante una identidad de agente.
+- El usuario crea el pull request desde la rama ya subida con su identidad de GitHub, lo revisa y conserva la decisión de aprobar, solicitar cambios o fusionarlo.
+- El agente no altera configuración de Git, identidad, autoría ni atribución para ocultar quién realizó un cambio.
 - Antes de abrir un pull request, revisar `CONTRIBUTING.md`, ejecutar las verificaciones disponibles y resumir alcance, riesgos y documentación afectada.
 - No incluir secretos, datos reales de mercado, tokens de Deriv, credenciales ni resultados sensibles en commits o pull requests.
