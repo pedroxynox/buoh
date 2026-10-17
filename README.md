@@ -2,7 +2,18 @@
 
 **buoh** será un bot algorítmico multiplataforma para investigar patrones, publicar señales trazables y, cuando supere sus puertas de seguridad y cumplimiento, ejecutar operaciones autorizadas sobre índices de Deriv. Su nombre, lenguaje visual y comportamiento se inspiran en un búho: observación paciente, visión nocturna y decisiones explicables.
 
-> **Estado:** fundación v2. La meta incluye señales y ejecución; aún no existe una estrategia validada, una rentabilidad demostrada ni una integración de dinero real aprobada.
+> **Estado vigente:** consulta [`PROJECT_STATUS.md`](PROJECT_STATUS.md). Aún no se presume estrategia validada, rentabilidad demostrada ni integración de dinero real.
+
+Este README es un resumen de navegación; no sustituye las fuentes canónicas indicadas en [`AGENTS.md`](AGENTS.md).
+
+## Empieza aquí
+
+Cualquier persona o motor de IA debe leer, en orden:
+
+1. [`AGENTS.md`](AGENTS.md): reglas de trabajo y jerarquía de autoridad.
+2. [`PROJECT_STATUS.md`](PROJECT_STATUS.md): estado vigente y siguiente tarea.
+3. [Plan ejecutable de Fase 1](docs/plan/fase-1-fundacion-de-datos.md).
+4. Contratos, ADR y runbooks afectados por la tarea.
 
 ## Propósito
 
@@ -50,6 +61,8 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 
 ## Documentos de decisión
 
+- [Estado actual](PROJECT_STATUS.md)
+- [Plan ejecutable de Fase 1](docs/plan/fase-1-fundacion-de-datos.md)
 - [Visión y alcance](docs/producto/vision-y-alcance.md)
 - [Roadmap por puertas de calidad](docs/producto/roadmap.md)
 - [Modelo de lanzamiento y comercialización](docs/producto/modelo-de-lanzamiento.md)
@@ -57,6 +70,7 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 - [ADR-0001: plataforma y stack](docs/arquitectura/adr/0001-plataforma-y-stack.md)
 - [ADR-0002: señales y ejecución controlada](docs/arquitectura/adr/0002-senales-y-ejecucion-controlada.md)
 - [ADR-0003: lenguajes y límites](docs/arquitectura/adr/0003-lenguajes-y-limites.md)
+- [ADR-0004: pipeline y reproducción de datos de Fase 1](docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md)
 - [Contratos de dominio y eventos](docs/arquitectura/contratos-de-dominio.md)
 - [Seguridad y rigor cuantitativo](docs/gobierno/seguridad-y-rigor-cuantitativo.md)
 - [Protocolo de validación de estrategias](docs/gobierno/protocolo-de-validacion-de-estrategias.md)

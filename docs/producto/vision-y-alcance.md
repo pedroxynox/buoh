@@ -102,7 +102,7 @@ Una tasa de acierto aislada, una curva de capital única o un resultado favorabl
 La interfaz debe sentirse como un observatorio nocturno, no como una mesa de casino:
 
 - densidad de información con jerarquía clara y lenguaje preciso;
-- modo de bot visible en toda pantalla: `shadow`, `demo`, `real` o `pausado`;
+- modo de ejecución visible en toda pantalla: `shadow`, `demo` o `real`, junto a un estado operativo separado como `healthy`, `degraded` o `paused`;
 - confirmaciones explícitas y reautenticación para cambios de riesgo o ejecución;
 - señales con símbolo, condición, evidencia, hora, vencimiento, estrategia y política aplicable;
 - avisos claros de riesgo y estado de conectividad antes de acciones sensibles;

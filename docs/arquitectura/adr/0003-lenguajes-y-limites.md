@@ -18,6 +18,12 @@ Se usará configuración estricta, sin `any` implícito, validación en tiempo d
 
 **Por qué es la mejor elección principal para buoh:** comparte modelos y contratos entre cinco superficies, reduce traducciones de negocio, permite un equipo y monorepo coherentes, y es suficiente para un sistema principalmente orientado a WebSocket, I/O y reglas de negocio. La corrección de una orden y su auditoría importan más que una optimización prematura de CPU.
 
+### Baseline de toolchain para Fase 1
+
+El primer scaffolding fijará **Node.js 24.22.0 LTS** y **pnpm 12.14.0** mediante archivo de runtime, `packageManager` y lockfile. No se usará `latest` en CI o despliegue. Las dependencias de desarrollo se fijarán en el lockfile y solo se actualizarán mediante PR con `pnpm run verify`.
+
+La selección se revisó el 2026-10-17 contra [releases oficiales de Node.js](https://nodejs.org/en/about/previous-releases) y [pnpm 12.14.0](https://pnpm.io/blog/releases/12.14.0). El contenido externo fue reformulado para cumplir restricciones de licencia.
+
 ### Python — investigación cuantitativa aislada
 
 Python se limita a `research/python`: exploración estadística, transformación tabular, validación de hipótesis, simulaciones y generación de artefactos reproducibles. Se preferirán entornos bloqueados y bibliotecas explícitas de cálculo/estadística; sus resultados atraviesan la frontera hacia TypeScript mediante contratos y datos versionados.
@@ -26,7 +32,7 @@ Python se limita a `research/python`: exploración estadística, transformación
 
 ### SQL — lenguaje de datos y auditoría
 
-SQL para PostgreSQL/TimescaleDB define migraciones, invariantes, consultas de series temporales y auditoría. Los registros transaccionales de autorización, intención, orden y reconciliación deben apoyarse en restricciones de base de datos además de validaciones de aplicación.
+SQL para PostgreSQL y, solo si una necesidad medida lo justifica, TimescaleDB, define migraciones, invariantes, consultas temporales y auditoría. Los registros transaccionales de autorización, intención, orden y reconciliación deben apoyarse en restricciones de base de datos además de validaciones de aplicación.
 
 ### Rust — limitado al contenedor Windows y extensiones justificadas
 

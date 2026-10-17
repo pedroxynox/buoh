@@ -2,7 +2,7 @@
 
 ## Alcance de este documento
 
-Este documento define barreras técnicas y operativas para un bot de señales y ejecución. No prescribe una estrategia de inversión, límites financieros concretos ni asesoría legal. Los valores de riesgo se decidirán por entorno, instrumento, jurisdicción y usuario autorizado; no se codificarán como supuestos permanentes.
+Este documento define barreras técnicas y operativas para un bot de señales y ejecución. No prescribe una estrategia de inversión, límites financieros concretos ni asesoría legal. Los valores de riesgo se decidirán por `execution_mode`, instrumento, jurisdicción y usuario autorizado; no se codificarán como supuestos permanentes.
 
 ## 1. Objetivo operativo
 
@@ -17,16 +17,18 @@ seguridad de usuarios y controles
   > crecimiento de señales o volumen
 ```
 
-## 2. Entornos incompatibles
+## 2. Modos de ejecución y despliegue
 
-| Entorno | Propósito | Puede hablar con Deriv autenticado | Puede afectar dinero real |
+`deployment_environment` (`development`, `test`, `staging`, `production`) indica dónde corre un servicio. `execution_mode` indica si una capacidad puede afectar una cuenta:
+
+| `execution_mode` | Propósito | Puede hablar con Deriv autenticado | Puede afectar dinero real |
 |---|---|---:|---:|
-| `research` | análisis histórico | no | no |
-| `shadow` | evaluación con datos vivos y posiciones hipotéticas | no | no |
-| `demo` | prueba integral de ejecución | sí, cuenta demo | no |
-| `real` | ejecución limitada aprobada | sí, cuenta real autorizada | sí |
+| `disabled` | datos e investigación sin acciones de cuenta | no | no |
+| `shadow` | señales y posiciones hipotéticas | no | no |
+| `demo` | prueba integral con cuenta demo | sí, cuenta demo | no |
+| `real` | ejecución limitada y autorizada | sí, cuenta real autorizada | sí |
 
-Los datos, permisos, claves de configuración, bases y colas de cada entorno están separados. Una estrategia, señal, autorización y política declaran su entorno; una mezcla de entornos es un error bloqueante.
+`service_health` y `strategy_lifecycle` son ejes independientes. Datos, permisos, configuración, bases y colas se separan por `deployment_environment`; estrategia, señal, autorización y política declaran `execution_mode`. Mezclar modos o despliegues es un error bloqueante.
 
 ## 3. Objetos de dominio que no se confunden
 
@@ -42,7 +44,7 @@ Los datos, permisos, claves de configuración, bases y colas de cada entorno est
 Toda política configura, al menos:
 
 - instrumentos y tipos de contrato permitidos;
-- entorno permitido (`demo` o `real`);
+- `execution_mode` permitido (`demo` o `real`);
 - estrategia y versiones aptas;
 - autorización requerida y vigencia;
 - máximo por acción, exposición concurrente y frecuencia;
@@ -91,14 +93,14 @@ El sistema se pausa por defecto ante datos degradados, reloj inconsistente, erro
 - Intercambio de código exclusivamente desde el backend.
 - Tokens cifrados en reposo, con acceso limitado al servicio que los necesita.
 - Revocación de cuenta, cambio de política y activación real requieren reautenticación y auditoría.
-- Las autorizaciones son explícitas, con alcance, entorno, vencimiento y estado revocable.
+- Las autorizaciones son explícitas, con alcance, `execution_mode`, vencimiento y estado revocable.
 - Un cliente web o móvil nunca recibe un secreto con capacidad directa de ejecución.
 
 ## 8. Reconciliación, observabilidad e incidentes
 
-Los paneles operativos deben mostrar, por entorno: frescura de datos, latencia, señales emitidas, intenciones rechazadas, estados sin reconciliar, fallos de proveedor, activaciones de *kill switch* y versión de estrategia/política activa.
+Los paneles operativos deben mostrar por `deployment_environment` y `execution_mode`: frescura de datos, latencia, señales emitidas, intenciones rechazadas, estados sin reconciliar, fallos de proveedor, activaciones de *kill switch* y versión de estrategia/política activa.
 
-Todo incidente genera un registro con línea de tiempo, alcance, estrategia, entorno, cuentas afectadas, decisión de pausa, evidencia y resolución. La reapertura exige confirmar datos y reconciliación.
+Todo incidente genera un registro con línea de tiempo, alcance, estrategia, `deployment_environment`, `execution_mode`, cuentas afectadas, decisión de pausa, evidencia y resolución. La reapertura exige confirmar datos y reconciliación.
 
 Antes de dinero real se practicarán escenarios de: pérdida de WebSocket, respuesta ambigua, orden duplicada, datos fuera de orden, token revocado, despliegue fallido, regla de riesgo rota y activación del *kill switch*.
 

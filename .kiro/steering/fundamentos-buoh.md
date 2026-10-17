@@ -8,6 +8,12 @@ inclusion: always
 
 buoh es un bot multiplataforma de investigación cuantitativa, señales trazables y ejecución algorítmica controlada para índices de Deriv. Favorece evidencia reproducible, seguridad, control de riesgo y claridad antes que velocidad, apariencia o promesas de rendimiento.
 
+## Protocolo obligatorio para agentes
+
+- Antes de trabajar, leer [`AGENTS.md`](../../AGENTS.md), [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md) y el plan activo enlazado allí.
+- Las conversaciones no sustituyen las fuentes canónicas del repositorio.
+- Ante conflicto o decisión ausente, seguir el protocolo de `AGENTS.md`; no improvisar silenciosamente.
+
 ## Alcance, público y etapas
 
 - El primer público es el fundador en **uso propio**. La evolución a suscriptores externos y señales pagas es una decisión de producto aceptada, no un objetivo opcional.
@@ -36,7 +42,7 @@ buoh es un bot multiplataforma de investigación cuantitativa, señales trazable
 
 ## Seguridad y ejecución
 
-- Tratar `shadow`, `demo`, `real` y `pausado` como entornos incompatibles y visibles en API/UI/auditoría.
+- Mantener separados `deployment_environment`, `execution_mode`, `strategy_lifecycle` y `service_health`. Los modos son `disabled`, `shadow`, `demo` y `real`; `paused` es un estado operativo o de estrategia, nunca un entorno.
 - Rechazar una intención de ejecución si autorización, política, frescura/calidad de datos, idempotencia, salud de bróker o *kill switch* no son válidos.
 - Persistir y correlacionar intentos, respuestas, reintentos, órdenes, posiciones y reconciliaciones. Nunca reintentar ciegamente un resultado ambiguo.
 - Todo cambio de datos, plataforma, seguridad, riesgo o alcance necesita documentación de decisión y puerta de calidad.
@@ -46,17 +52,19 @@ buoh es un bot multiplataforma de investigación cuantitativa, señales trazable
 
 - TypeScript estricto es el lenguaje principal: Next.js/React (web), Expo/React Native (móvil), Fastify (API), `market-data-worker`, `signal-engine`, futuro `execution-gateway`, y paquetes compartidos de contratos/dominio/estrategia/riesgo/diseño.
 - Python se limita a investigación cuantitativa por lotes, con contratos versionados con el resto del sistema; no es la ruta directa de órdenes.
-- SQL/PostgreSQL + TimescaleDB protege invariantes, metadatos, auditoría y series; Parquet en almacenamiento S3-compatible guarda datos crudos; Redis solo sirve estado efímero/colas.
+- SQL/PostgreSQL protege invariantes, metadatos, auditoría y series; Parquet en almacenamiento S3-compatible guarda normalizados. Fase 1 usa PostgreSQL estándar y difiere TimescaleDB/Redis hasta demostrar su necesidad.
 - Rust se limita al futuro contenedor Tauri 2 para Windows y a extensiones de rendimiento demostradas. Kotlin/Swift solo pueden aparecer en puentes nativos mínimos de Android/iOS.
 - Mantener un contrato versionado entre TypeScript y Python; no duplicar fórmulas de producción sin vectores de prueba compartidos.
 
 ## Forma de trabajar
 
 - Antes de agregar una capacidad, confirmar su etapa, su límite de seguridad y su puerta de calidad.
+- Actualizar `PROJECT_STATUS.md` cuando cambien fase, objetivo, siguiente tarea, bloqueos o evidencia; no usarlo como changelog.
 - Preferir cambios pequeños, auditables y documentados cuando afecten seguridad, datos, plataforma, riesgo o alcance.
 - No introducir dependencias, servicios cloud, credenciales ni integraciones de terceros sin justificación técnica y revisión explícita.
 - Usar español claro en documentación de producto y nombrar los conceptos de dominio de forma precisa y consistente.
 - La identidad visual es nocturna, serena, accesible y orientada a observación; nunca gamificar riesgo o urgencia.
+
 ## Flujo de GitHub y revisión
 
 - El repositorio de buoh comienza privado.

@@ -1,0 +1,15 @@
+{
+  "dataset_state": "not_published",
+  "emitted_tick_count": 0,
+  "execution_mode": "disabled",
+  "incident_evidence": {
+    "reason": "synthetic_injected_failure",
+    "stage": "raw_object_write"
+  },
+  "incident_type": "persistence_unavailable",
+  "last_durable_observation_id": null,
+  "required_action": "close_connection_then_recover",
+  "schema_version": "1.0.0",
+  "service_health": "paused",
+  "source_event_count": 0
+}

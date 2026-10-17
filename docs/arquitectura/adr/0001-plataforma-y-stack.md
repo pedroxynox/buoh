@@ -15,8 +15,8 @@ Una solución de un solo cliente, una API ligada a la interfaz o cálculos no re
 1. Usar un **monorepo TypeScript** con `pnpm` y `Turborepo` para API, web, móvil, contratos y dominio compartido.
 2. Construir el laboratorio con **Next.js/React**, el compañero móvil con **Expo/React Native** y la API con **Fastify**.
 3. Conservar investigación estadística de alto nivel en **Python**, ejecutada como trabajos aislados y reproducibles; los resultados cruzan la frontera mediante archivos y contratos versionados.
-4. Mantener datos crudos inmutables en **Parquet/S3-compatible**, metadatos en **PostgreSQL + TimescaleDB** y estado efímero en **Redis**.
-5. Hacer que el MVP sea **solo de observación e investigación**: datos públicos, experimentos, *backtests* y alertas; sin vinculación de cuentas ni envío de órdenes.
+4. Mantener datos crudos inmutables en almacenamiento S3-compatible, metadatos en PostgreSQL y reservar TimescaleDB/Redis para necesidades demostradas. El corte exacto de Fase 1 está fijado por [ADR-0004](0004-pipeline-y-reproduccion-de-datos-fase-1.md).
+5. ~~Hacer que el MVP sea solo de observación e investigación.~~ **Sustituida por [ADR-0002](0002-senales-y-ejecucion-controlada.md):** el producto objetivo incluye señales y ejecución; la primera etapa sigue siendo `shadow` sin órdenes reales.
 6. Diseñar Windows para una futura aplicación **Tauri 2** que reutilice paquetes React/TypeScript; no construirla hasta validar el núcleo web y móvil.
 7. Tratar la capa sobre otras aplicaciones como una capacidad Android opcional, pasiva y posterior; iOS tendrá capacidades nativas equivalentes de sistema, no una promesa de superposición global.
 
@@ -25,14 +25,14 @@ Una solución de un solo cliente, una API ligada a la interfaz o cálculos no re
 - Los modelos de dominio, validaciones y lenguaje visual se comparten entre superficies.
 - Los cálculos investigables pueden aprovechar el ecosistema Python sin filtrar complejidad a clientes.
 - La procedencia de datos y resultados puede mantenerse de extremo a extremo.
-- La ausencia de ejecución real reduce significativamente el impacto de un error de producto.
+- La ausencia de ejecución real en la etapa `shadow` reduce el impacto inicial; ADR-0002 define su incorporación posterior y controlada.
 - La futura versión Windows no obliga a migrar la aplicación web ni a adoptar Electron.
 
 ## Consecuencias y costes aceptados
 
 - Mantendremos TypeScript y Python, con un contrato explícito entre ambos; no se permitirá intercambio ad hoc de CSV sin esquema.
 - Expo será suficiente para el móvil general, pero una futura capa Android requerirá compilación nativa y no funcionará en Expo Go.
-- TimescaleDB, MinIO y Redis añaden servicios locales; se justifican por la naturaleza de series temporales y reproducibilidad, no por moda.
+- PostgreSQL y almacenamiento S3-compatible añaden servicios locales justificados por procedencia y reproducción. TimescaleDB y Redis permanecen condicionados a una necesidad medida y ADR posterior.
 - La primera versión puede parecer menos espectacular que un bot operativo, pero estará en condiciones de demostrar evidencia antes de asumir riesgo.
 
 ## Alternativas descartadas

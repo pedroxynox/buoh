@@ -1,0 +1,11 @@
+{
+  "allowed_symbols": [
+    "SYNTH_100"
+  ],
+  "gap_detection": "after_reconnection",
+  "maximum_delivery_delay_ms": 2000,
+  "maximum_event_gap_ms": 2000,
+  "profile_id": "synthetic-v1",
+  "quality_rule_version": "1.0.0",
+  "source": "synthetic"
+}
