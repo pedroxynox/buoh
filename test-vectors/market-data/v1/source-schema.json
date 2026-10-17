@@ -1,0 +1,43 @@
+{
+  "$id": "urn:buoh:test-vector:synthetic-tick:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "msg_type": {
+      "const": "tick"
+    },
+    "tick": {
+      "additionalProperties": false,
+      "properties": {
+        "epoch": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pip_size": {
+          "maximum": 18,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "quote": {
+          "type": "number"
+        },
+        "symbol": {
+          "const": "SYNTH_100"
+        }
+      },
+      "required": [
+        "epoch",
+        "pip_size",
+        "quote",
+        "symbol"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "msg_type",
+    "tick"
+  ],
+  "title": "Synthetic tick fixture v1",
+  "type": "object"
+}

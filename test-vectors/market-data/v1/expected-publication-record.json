@@ -1,0 +1,10 @@
+{
+  "dataset_id": "sha256:611d83367d6b86a210ebdb30a2e73aa30dc35f8efd59f07fb43febf60c98defd",
+  "manifest_document_sha256": "b83d3017fbc4901e5c33b1a2241d3c5f963f692e0d7cc54b267d40a9a3742af8",
+  "manifest_object_bytes_sha256": "b83d3017fbc4901e5c33b1a2241d3c5f963f692e0d7cc54b267d40a9a3742af8",
+  "manifest_object_uri": "fixture://expected-dataset.canonical.json",
+  "publication_id": "019b76da-cb28-7003-8000-000000000001",
+  "published_at_utc": "2026-01-01T00:00:09.000Z",
+  "schema_version": "1.0.0",
+  "state": "active"
+}

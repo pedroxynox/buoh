@@ -2,66 +2,133 @@
 
 ## Alcance
 
-Este runbook cubre el futuro `market-data-worker` de buoh durante Fase 1 y Fase 2. El servicio recibe datos públicos de Deriv, los valida, conserva el evento crudo y publica derivados solo después de registrar su calidad.
+Este runbook cubre `market-data-worker` durante Fase 1 y Fase 2. Debe leerse junto al [plan de Fase 1](../plan/fase-1-fundacion-de-datos.md), [ADR-0004](../arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md) y [contratos de dominio](../arquitectura/contratos-de-dominio.md).
 
-No cubre ejecución de órdenes ni credenciales de trading.
+El servicio recibe datos públicos de Deriv, persiste el evento de fuente antes de normalizar y publica derivados solo con calidad explícita. No cubre credenciales ni ejecución.
+
+## Ejes de estado
+
+- `deployment_environment`: dónde corre el servicio.
+- `execution_mode`: `disabled` durante Fase 1.
+- `service_health`: salud operativa descrita abajo.
+
+No se usa `paused` como entorno ni modo de ejecución.
 
 ## Estados de salud
 
 | Estado | Significado | Acción automática |
 |---|---|---|
-| `healthy` | flujo continuo dentro de tolerancia | continuar |
-| `degraded` | hueco, retraso, duplicado anómalo o reconexiones repetidas | marcar datos y detener señales dependientes si aplica |
-| `paused` | pérdida de integridad, almacenamiento no disponible o configuración inválida | no publicar derivados ni señales |
-| `recovering` | reconexión y verificación en curso | registrar, recuperar y reconciliar antes de volver a `healthy` |
+| `starting` | inicialización y validación de dependencias | no aceptar/publicar ticks aún |
+| `healthy` | conexión esperada, almacenamiento disponible y raw confirmado | continuar |
+| `degraded` | continuidad no demostrada o incidencia abierta no crítica | conservar datos, marcar calidad y bloquear consumidores que exijan continuidad |
+| `recovering` | reconexión o verificación histórica en curso | buffer acotado; no declarar continuidad |
+| `paused` | durabilidad/backpressure/configuración operativa impide procesar seguro | cerrar suscripción y no emitir normalizados |
+| `failed` | contrato o versión incompatible, corrupción o fallo no recuperable | detener proceso y requerir intervención |
 
-Los umbrales concretos se configurarán por fuente e instrumento; no se codifican como valores universales.
+Los umbrales live pertenecen a un perfil versionado por fuente/símbolo. El perfil sintético v1 fija 2000 ms para pruebas; no se copia a producción sin medición y decisión.
 
-## Principios operativos
+## Invariantes operativos
 
-- Conservar primero el evento crudo y sus metadatos; no corregir ni descartar silenciosamente.
-- Mantener marca de tiempo de fuente y de recepción separadas.
-- Usar reconexión con espera progresiva y aleatorización para evitar reintentos simultáneos.
-- Verificar continuidad tras cada reconexión mediante rango, secuencia o consulta histórica disponible.
-- Publicar banderas de calidad junto a los datos derivados.
-- Tratar una desconexión o despliegue como situación normal recuperable, nunca como ausencia de datos.
+- Persistir `RawSourceFrame` antes de emitir `MarketTick`.
+- Conservar tiempo de fuente y recepción por separado.
+- No reserializar el texto fuente antes de calcular su hash.
+- No descartar frames por presión de memoria: pausar/cerrar y recuperar.
+- Verificar hashes, versiones y continuidad después de reinicio o reconexión.
+- Mantener incidencias append-only: las derivables se referencian desde el dataset; persistencia/límites no derivables permanecen en el registro operativo PostgreSQL.
+- Verificar límites por bytes antes de parsear o descomprimir contenido externo.
+- No reportar `healthy` si el último frame aceptado no está confirmado como duradero.
 
-## Procedimientos de incidente
+## Procedimientos
 
-### Desconexión de WebSocket o proveedor
+### Inicio
 
-1. Registrar causa, instancia, símbolo y último evento confirmado.
-2. Cambiar a `recovering`; impedir que datos incompletos alimenten señales elegibles.
-3. Reconectar con espera progresiva.
-4. Recuperar el intervalo faltante si la fuente lo permite.
-5. Persistir huecos o imposibilidad de recuperación como incidencia.
-6. Reanudar `healthy` solo tras validar continuidad y frescura.
+1. Validar configuración y versiones de contratos/conector/calidad.
+2. Comprobar PostgreSQL y object storage.
+3. Recuperar último cursor, high-watermark y segmento no finalizado.
+4. Verificar hashes de objetos pendientes.
+5. Abrir el WebSocket y pasar de `starting` a `healthy` solo después de persistir/confirmar el primer evento esperado.
 
-### Datos duplicados, fuera de orden o con formato inválido
+### Desconexión de WebSocket
 
-1. Conservar el evento crudo con bandera de calidad.
-2. No usarlo para construir derivados hasta aplicar la regla de normalización versionada.
-3. Incrementar métrica de incidencia y evaluar transición a `degraded`.
-4. Abrir investigación si supera el umbral configurado o cambia el formato de fuente.
+1. Persistir `ConnectionClosed` con `closure_type`, símbolos afectados y motivo.
+2. Leer y conservar `IngestionCursor` durable por símbolo; no incrustarlo en el evento de cierre.
+3. Si no fue solicitado, crear `connection_lost` y `OperationalConditionEvent.opened`; cambiar a `recovering`.
+4. Reconectar con espera exponencial y jitter inyectable; no crear bucle agresivo.
+5. Consultar `ticks_history` para el intervalo según cursor, perfil y capacidad de fuente.
+6. Validar/persistir recuperación antes de liberar frames live del buffer.
+7. Al reconectar, persistir `ConnectionOpened.supersedes_connection_id` y resolver la condición de conexión.
+8. Si no se demuestra continuidad por símbolo, crear `event_gap_unresolved`, abrir su condición y quedar `degraded`.
+9. Volver a `healthy` solo si no queda condición bloqueante y continuidad, hashes y almacenamiento se verifican.
 
-### Almacenamiento no disponible
+### Frame inválido
 
-1. Cambiar inmediatamente a `paused` antes de perder trazabilidad.
-2. No emitir señales ni posiciones hipotéticas basadas en eventos no persistidos.
-3. Alertar al operador y comprobar base de datos, object storage y cola.
-4. Recuperar desde el último punto confirmado; documentar cualquier hueco.
+1. Persistir el raw exacto.
+2. Crear `invalid_source_frame` con hash y error estructurado sanitizado.
+3. No emitir `MarketTick` para ese frame.
+4. Evaluar `degraded` o `failed` según frecuencia y compatibilidad del esquema fijado.
+
+### Duplicado, conflicto, retraso o fuera de orden
+
+1. Conservar cada observación con ID propio.
+2. Calcular fingerprint y high-watermark según ADR-0004.
+3. Añadir flag al tick e incidencia append-only.
+4. No borrar, sobrescribir ni reordenar el log de fuente.
+5. Los consumidores usan la política de calidad; el worker no oculta la observación.
+
+### Límite de fuente excedido
+
+1. Rechazar antes de reservar memoria fuera del límite.
+2. Crear `source_limit_exceeded` con recurso, unidad, valor observado y máximo cuando exista persistencia segura.
+3. Aplicar exactamente la matriz de ADR-0004: frame/cola → `paused`; esquema/ZIP → `failed`.
+4. No truncar ni interpretar parcialmente un frame o archivo como válido.
+5. Reabrir solo con configuración versionada y continuidad verificada.
+
+### Almacenamiento no disponible o backlog lleno por conteo/bytes
+
+1. Cambiar inmediatamente a `paused`.
+2. Dejar de emitir normalizados.
+3. Cerrar la suscripción/conexión de forma controlada antes de desbordar el buffer.
+4. Registrar `persistence_unavailable` donde exista durabilidad disponible; si no, emitir alerta operativa sin afirmar persistencia.
+5. Recuperar desde el último frame confirmado.
+6. Verificar continuidad y publicar/reconciliar segmentos pendientes antes de reabrir.
+
+### Publicación interrumpida
+
+1. No exponer un dataset hasta que objetos, manifiesto canónico y hashes estén verificados y la transacción final lo marque `published`.
+2. Si falla antes del commit, dejar objetos como huérfanos no visibles y reanudar desde contenido verificado.
+3. No reescribir contenido bajo una clave cuyo hash físico sea distinto.
+4. Si object storage deja de estar disponible después del commit, cambiar salud a `degraded`/`paused`; nunca afirmar replay exitoso hasta recuperar y verificar.
+5. Limpiar huérfanos solo después del período de seguridad y sin referencias publicadas.
 
 ### Despliegue o reinicio programado
 
-1. Marcar la instancia como no apta para aceptar nueva partición de símbolos.
-2. Drenar/confirmar eventos en curso y persistir el cursor operativo.
-3. Reiniciar y comprobar versión de esquema/configuración.
-4. Verificar continuidad y estado de salud antes de reactivar derivados.
+1. Cambiar a drenaje y no aceptar una nueva partición de símbolos.
+2. Confirmar frames en curso y persistir cursor/high-watermark.
+3. Cerrar segmento y conexión.
+4. Reiniciar; validar versiones y dependencias.
+5. Ejecutar recuperación de inicio y confirmar continuidad antes de `healthy`.
 
-## Evidencia mínima de cada incidente
+## Reporte y evidencia
 
-Guardar identificación, periodo UTC, símbolos, versión del worker, causa observada, último evento confirmado, datos afectados, transición de estado, acción de recuperación, resultado y responsable de cierre.
+`pnpm run data:health -- --json` emitirá el `HealthReport` canónico. Todo incidente conserva:
+
+- IDs y rango UTC;
+- fuente, símbolos y conexión;
+- versiones de worker, conector, contratos y reglas;
+- último frame confirmado y objetos afectados;
+- eventos append-only de apertura/resolución de condiciones;
+- transición de salud;
+- acción, resultado y responsable operativo.
+
+No se registran payloads completos, secretos ni datos personales en logs operativos; el raw se consulta por referencia con acceso controlado.
+
+## Verificación periódica
+
+- Pruebas offline y vectores en cada cambio relevante.
+- Smoke público de Deriv opt-in, con resultado sanitizado y fecha.
+- Ensayo de reinicio y fallo de almacenamiento antes de cerrar Fase 1.
+- Verificación de replay y `dataset_id` en la puerta de salida.
 
 ## Puerta de salida de Fase 1
 
-La ingesta se considera apta cuando puede reiniciarse y reconectarse sin ocultar huecos, cada lote es reconstruible desde sus metadatos y el panel expone salud/frescura/incidencias de forma comprensible.
+Aplican exactamente la Definition of Done y matriz de evidencia del [plan de Fase 1](../plan/fase-1-fundacion-de-datos.md). Este runbook no define una puerta alternativa.

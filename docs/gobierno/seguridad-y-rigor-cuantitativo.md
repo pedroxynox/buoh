@@ -47,20 +47,9 @@ No se permite usar en nombre de producto, interfaz o marketing términos que imp
 
 ## 4. Contrato de datos
 
-Cada lote de datos tendrá:
+La forma y semántica canónicas están en [contratos de dominio](../arquitectura/contratos-de-dominio.md) y, para Fase 1, en [ADR-0004](../arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md). Gobierno no mantiene una segunda definición de campos.
 
-| Campo | Propósito |
-|---|---|
-| `source` | proveedor y versión del conector |
-| `symbol` | identificador de instrumento sin ambigüedad |
-| `event_time_utc` | tiempo declarado por la fuente |
-| `received_at_utc` | tiempo de recepción de buoh |
-| `sequence_or_hash` | detección de duplicados/orden cuando exista |
-| `schema_version` | lectura compatible a futuro |
-| `quality_flags` | hueco, duplicado, retraso, orden anómalo u observación |
-| `dataset_id` | huella inmutable usada por el experimento |
-
-Los datos se almacenan primero como eventos crudos. Velas, indicadores, señales y posiciones hipotéticas son derivados regenerables, nunca sustitutos del dato fuente.
+Todo frame crudo conserva fuente, conexión, tiempo de recepción, payload UTF-8 exacto, hash y versión del conector. Los ticks válidos añaden símbolo, tiempo de evento y cotización decimal. Incidencias, normalizados y manifiestos son append-only o regenerables; nunca sustituyen ni corrigen silenciosamente el raw.
 
 ## 5. Seguridad de aplicación
 

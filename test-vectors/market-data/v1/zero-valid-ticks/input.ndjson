@@ -1,0 +1,1 @@
+{"connection_id":"019b76da-a800-7100-8000-000000000000","fixture_sequence":1,"kind":"source_frame","observation_id":"019b76da-a864-7100-8000-000000000001","payload_utf8":"{\"msg_type\":\"tick\",\"tick\":{\"epoch\":1767225600,\"quote\":\"invalid\",\"symbol\":\"SYNTH_100\"}}","received_at_utc":"2026-01-01T00:00:00.100Z"}

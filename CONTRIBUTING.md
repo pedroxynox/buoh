@@ -2,54 +2,90 @@
 
 ## Propósito
 
-buoh es un sistema de investigación, señales y futura ejecución controlada. Cada cambio debe mejorar trazabilidad, seguridad o evidencia; no se aceptan atajos que mezclen experimentación con ejecución.
+buoh es un sistema de investigación, señales y futura ejecución controlada. Cada cambio debe aportar evidencia verificable; no se aceptan atajos que mezclen experimentación con ejecución.
 
 ## Antes de modificar
 
-1. Lee [`README.md`](README.md), las reglas en [`.kiro/steering/fundamentos-buoh.md`](.kiro/steering/fundamentos-buoh.md) y los documentos de dominio afectados.
-2. Comprueba que el cambio pertenece a la fase actual del roadmap.
-3. Si altera datos, estrategias, riesgo, ejecución, seguridad o plataforma, añade o actualiza una decisión/documentación antes del código.
-4. No agregues cuentas reales, secretos, pagos ni ejecución de dinero real sin una puerta de calidad aprobada.
+1. Sigue el orden de lectura de [`AGENTS.md`](AGENTS.md).
+2. Confirma fase, estado y siguiente tarea en [`PROJECT_STATUS.md`](PROJECT_STATUS.md).
+3. Relaciona el cambio con IDs del plan activo.
+4. Lee código, contratos, ADR y runbooks afectados antes de proponer cambios.
+5. Si altera datos, contratos, estrategia, riesgo, ejecución, seguridad, infraestructura o alcance, actualiza la fuente canónica o crea una ADR antes del código.
 
-## Organización del trabajo
+No agregues cuentas reales, secretos, pagos ni ejecución con dinero real sin una puerta aprobada.
 
-- `apps/`: clientes y servicios desplegables; se crea durante el scaffolding de Fase 1.
-- `packages/`: contratos, dominio, estrategia, riesgo y diseño compartidos.
-- `research/python/`: investigación reproducible; nunca ejecuta órdenes directamente.
-- `docs/`: fuente de verdad de producto, arquitectura, gobierno y operación.
+## Fuentes de verdad
 
-No crees código fuera de esta estructura sin una decisión documentada.
+La autoridad está asignada por materia en `AGENTS.md`; `docs/` no es una única fuente intercambiable. En particular:
+
+- el plan activo gobierna alcance y aceptación;
+- las ADR aceptadas gobiernan decisiones duraderas;
+- `packages/contracts`, cuando exista, gobierna forma ejecutable de datos;
+- `PROJECT_STATUS.md` gobierna el estado actual;
+- README resume y enlaza, pero no decide.
+
+Ante un conflicto, no elijas una interpretación silenciosa: aplica el protocolo de `AGENTS.md`.
+
+## Organización autorizada para Fase 1
+
+- `apps/market-data-worker/`: adaptación de fuente y orquestación de ingesta.
+- `packages/contracts/`: esquemas runtime y JSON Schema generado.
+- `packages/domain/`: normalización y reglas puras de datos de mercado.
+- `infra/`: PostgreSQL estándar y almacenamiento S3-compatible local.
+- `test-vectors/`: oráculos sintéticos compartidos.
+- `docs/`: planes, decisiones, semántica y operación.
+
+No crees componentes futuros o directorios vacíos fuera del [corte de Fase 1](docs/plan/fase-1-fundacion-de-datos.md).
 
 ## Reglas de implementación
 
-- TypeScript estricto es el lenguaje principal; Python queda aislado para investigación cuantitativa.
-- Valida entradas externas en tiempo de ejecución; los tipos estáticos no bastan.
-- Usa UTC, identificadores correlacionables y versiones de esquema para datos/eventos.
-- No uses números de punto flotante binario para importes, precios o límites monetarios; conserva una representación decimal explícita.
-- Las funciones de dominio y riesgo deben ser puras, deterministas y tener pruebas.
-- `shadow`, `demo` y `real` son entornos incompatibles. Un cambio no puede promover una estrategia por defecto.
-- Los clientes no contienen secretos de servidor ni credenciales con capacidad directa de ejecución.
+- TypeScript estricto es el lenguaje principal; Python queda fuera de la ruta inicial de ingesta.
+- Valida toda entrada externa en runtime; los tipos estáticos no bastan.
+- Usa UTC, UUIDv7 inyectable, esquemas versionados y SHA-256 según ADR-0004.
+- Cotizaciones e importes usan representación decimal canónica, nunca punto flotante binario de dominio.
+- Funciones de normalización, calidad y riesgo deben ser puras, deterministas y probadas.
+- `deployment_environment`, `execution_mode`, `strategy_lifecycle` y `service_health` son ejes distintos.
+- Los clientes no contienen secretos ni credenciales con capacidad directa de ejecución.
+- Los datos reales de mercado y artefactos sensibles no entran en Git.
 
-## Calidad y revisión
+## Calidad y evidencia
 
-Cuando exista el scaffolding, cada cambio debe ejecutar los comandos documentados de formato, tipos, pruebas y compilación. No inventes comandos o resultados antes de que existan los archivos de configuración.
+El primer PR de código debe implementar la interfaz de comandos definida en el plan. Desde entonces, cada cambio ejecuta los comandos aplicables, incluyendo `pnpm run verify`.
 
-Una propuesta de cambio debe indicar:
+- Las pruebas se derivan del requisito y de vectores independientes, no de la implementación terminada.
+- No afirmes que algo fue verificado si no ejecutaste la comprobación.
+- Un código de salida cero no demuestra por sí solo todos los criterios: registra evidencia por ID.
+- Pruebas live de Deriv son opt-in y no sustituyen pruebas offline.
+- No actualices snapshots o expected outputs para hacer pasar una prueba sin justificar el cambio de contrato.
 
-- propósito y fase del roadmap;
-- archivos o contratos afectados;
-- evidencia de prueba o motivo por el que aún no aplica;
-- impacto en datos, riesgo, seguridad, operación o compatibilidad;
-- documentación/ADR actualizada, si corresponde.
+## Documentación y estado
+
+Revisa impacto documental en todo PR. Actualiza `PROJECT_STATUS.md` cuando cambien fase, objetivo, siguiente tarea, bloqueos, decisiones pendientes, componentes autorizados o evidencia de salida. No lo conviertas en un changelog.
+
+La guardia documental de `F1-GOV-001` automatizará el mapa de impacto, pero ADR, seguridad y riesgo siempre requieren revisión humana.
+
+## Pull requests
+
+Usa [la plantilla](.github/pull_request_template.md) y declara:
+
+- fase e IDs atendidos;
+- alcance y no-alcance;
+- decisiones y supuestos;
+- comandos realmente ejecutados y resultados;
+- evidencia reproducible;
+- impacto técnico/documental;
+- riesgos, límites y siguiente relevo.
+
+El usuario conserva la decisión de solicitar cambios o fusionar. No subas directamente a `main`.
 
 ## Git y commits
 
-Cuando el repositorio se inicialice, usar ramas cortas con prefijo `feat/`, `fix/`, `docs/`, `chore/` o `refactor/`. Los commits usan el formato:
+Usa ramas cortas con prefijo `feat/`, `fix/`, `docs/`, `chore/`, `test/` o `refactor/`. Los commits siguen:
 
 ```text
 type(scope): resumen imperativo
 ```
 
-Ejemplo: `docs(contracts): define event metadata`.
+Ejemplo: `feat(contracts): validate market tick schema`.
 
 No incluyas secretos, datos de clientes, tokens de Deriv, archivos Parquet reales ni resultados no anonimizados en Git.

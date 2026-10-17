@@ -1,0 +1,2 @@
+{"fault_id":"019b76da-a832-7000-9000-000000000000","fixture_sequence":1,"kind":"persistence_fault_armed","occurred_at_utc":"2026-01-01T00:00:00.050Z","reason":"synthetic_injected_failure","scope":"next_raw_object_write","stage":"raw_object_write"}
+{"connection_id":"019b76da-a800-7000-9000-000000000001","fixture_sequence":2,"kind":"source_frame","observation_id":"019b76da-a864-7000-9000-000000000002","payload_utf8":"{\"msg_type\":\"tick\",\"tick\":{\"epoch\":1767225600,\"pip_size\":3,\"quote\":100.125,\"symbol\":\"SYNTH_100\"}}","received_at_utc":"2026-01-01T00:00:00.100Z"}

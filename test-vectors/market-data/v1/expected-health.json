@@ -1,0 +1,16 @@
+{
+  "backlog_bytes": 0,
+  "backlog_count": 0,
+  "connection_state": "connected",
+  "execution_mode": "disabled",
+  "last_event_time_utc": "2026-01-01T00:00:06.000Z",
+  "last_observation_id": "019b76da-c940-7000-8000-000000000012",
+  "last_published_dataset_id": "sha256:611d83367d6b86a210ebdb30a2e73aa30dc35f8efd59f07fb43febf60c98defd",
+  "last_received_at_utc": "2026-01-01T00:00:08.500Z",
+  "open_condition_types": [
+    "event_gap_unresolved"
+  ],
+  "schema_version": "1.0.0",
+  "service_health": "degraded",
+  "source": "synthetic"
+}

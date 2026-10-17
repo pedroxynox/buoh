@@ -2,7 +2,9 @@
 
 Este roadmap ordena el trabajo por evidencia y reducción de riesgo, no por fechas cosméticas. buoh sí llegará a señales pagas y ejecución con dinero real, pero ninguna fase de mayor riesgo comienza por presión comercial o por un resultado histórico aislado.
 
-## Fase 0 — Fundación v2 (actual)
+## Fase 0 — Fundación v2 (completada)
+
+**Estado:** `done`.
 
 **Objetivo:** fijar el producto como bot de investigación, señales y ejecución controlada.
 
@@ -12,15 +14,17 @@ Este roadmap ordena el trabajo por evidencia y reducción de riesgo, no por fech
 
 ## Fase 1 — Fundación de datos
 
+El estado vigente se consulta únicamente en [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md). El alcance y aceptación autoritativos están en el [plan ejecutable de Fase 1](../plan/fase-1-fundacion-de-datos.md).
+
 **Objetivo:** demostrar que un flujo de datos de Deriv puede capturarse, validarse, almacenarse y reproducirse.
 
 **Incrementos:**
 
-1. monorepo y entorno local reproducible;
-2. catálogo de símbolos y condiciones disponibles;
-3. conector público de *ticks* sin credenciales;
-4. almacenamiento crudo versionado, control de huecos y panel de salud;
-5. contrato de datos y conjunto de prueba estable.
+1. toolchain, contratos runtime, vectores y guardia documental;
+2. normalización y reglas de calidad puras;
+3. almacenamiento crudo/versionado, publicación y replay;
+4. catálogo y conector público de Deriv;
+5. reconexión, recuperación y reporte de salud estructurado.
 
 **Criterio de salida:** un lote se reconstruye desde `dataset_id`, y el sistema expone continuidad, retraso, duplicados y datos fuera de orden sin ocultarlos.
 
@@ -49,7 +53,7 @@ Este roadmap ordena el trabajo por evidencia y reducción de riesgo, no por fech
 1. panel web de desempeño, estrategias, evidencia y estado de bot;
 2. app React Native Android/iOS para alertas, favoritos, estado y lectura de evidencia;
 3. permisos y preferencias de notificación;
-4. modos visuales inconfundibles: `shadow`, `demo`, `real`, `pausado`;
+4. modo de ejecución inconfundible: `shadow`, `demo` o `real`, y estado operativo separado (`healthy`, `degraded`, `paused`);
 5. límites de frecuencia, historial, vencimiento y trazabilidad de cada señal;
 6. contenido de riesgo y métricas contextualizadas.
 

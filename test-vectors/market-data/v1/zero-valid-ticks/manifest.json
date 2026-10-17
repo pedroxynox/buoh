@@ -1,0 +1,61 @@
+{
+  "empty_sequence_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "expected": {
+    "condition_event_count": 0,
+    "dataset_id": "sha256:7768d9551e4f5a2a0c16adaf1e93f98461b5cf894dac0c0c8fa7b1c1fe8d431f",
+    "event_time_from_utc": null,
+    "event_time_to_utc": null,
+    "incident_count": 1,
+    "normalized_tick_count": 0,
+    "raw_frame_count": 1,
+    "source_event_count": 1
+  },
+  "files": [
+    {
+      "bytes": 0,
+      "path": "expected-conditions.ndjson",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes": 4143,
+      "path": "expected-dataset.canonical.json",
+      "sha256": "5e412791008d6514088b4bf1a72e097744004bc240b72c5e0537b15d015bda21"
+    },
+    {
+      "bytes": 5040,
+      "path": "expected-dataset.json",
+      "sha256": "a90efde267cfe653f818eac1be6e8a0960b583624ce88ee98de9ade683df312e"
+    },
+    {
+      "bytes": 500,
+      "path": "expected-incidents.ndjson",
+      "sha256": "32ae650b94f662f1b313eba8002b813849939899b33505be05e8a7bb3e45d353"
+    },
+    {
+      "bytes": 541,
+      "path": "expected-publication-record.json",
+      "sha256": "8e689b36c4c0171ff5268adc2bc4fc5aaa68a69914e5df2a81f55e8c5884f45f"
+    },
+    {
+      "bytes": 471,
+      "path": "expected-source-events.ndjson",
+      "sha256": "f1829712d346b0aa64924fb9b42c02acaef00cb741eecb39543e9fe8eaa9d127"
+    },
+    {
+      "bytes": 0,
+      "path": "expected-ticks.ndjson",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes": 321,
+      "path": "input.ndjson",
+      "sha256": "9a7d335132d5d90c66f92926dca56c40f484ae2075c94bdd9f1764fec4074a66"
+    }
+  ],
+  "profile_jcs_sha256": "403d468124608715938f4bab6100ac412712dbd54d3c8d1814672ac1b7db3d4f",
+  "profile_ref": "../quality-profile.json",
+  "schema_jcs_sha256": "9f65cc1cf89e4e28e0351dd16c013f6354480fcc6046c8b090588e7ba2982925",
+  "schema_ref": "../source-schema.json",
+  "schema_version": "1.0.0",
+  "vector_id": "market-data-v1-zero-valid-ticks"
+}

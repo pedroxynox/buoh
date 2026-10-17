@@ -9,12 +9,16 @@ Una pantalla no coloca órdenes. Un modelo no coloca órdenes. Solo una pasarela
 ## Topología objetivo
 
 ```text
-Deriv: datos públicos ──► ingesta/validación ──► datos crudos inmutables
-                                                   │
-                                                   ▼
-                                             investigación Python
-                                                   │
-                                      registro versionado de estrategias
+Deriv: datos públicos ──► ingesta/validación ──► almacenamiento reproducible
+                                                   ├── frames fuente NDJSON/gzip (S3-compatible)
+                                                   ├── ticks normalizados Parquet
+                                                   └── metadatos/manifiestos PostgreSQL
+                                                                  │
+                                                                  ▼
+                                                        investigación Python
+                                                                  │
+                                                                  ▼
+                                                registro versionado de estrategias
                                                    │
                                                    ▼
                    estrategia apta ──► motor de señales ──► SignalEvent firmado
@@ -73,9 +77,10 @@ buoh/
 | Móvil | Expo + React Native | Un código de producto para Android e iOS; módulos nativos aislados cuando hagan falta. |
 | API | Fastify + TypeScript | Validación explícita, REST y streaming para el producto. |
 | Investigación cuantitativa | Python | Ecosistema analítico maduro, aislado de la ruta de órdenes. |
-| Datos crudos | Parquet en almacenamiento S3-compatible | Procedencia, reproducción y coste controlado. |
-| Metadatos / órdenes | PostgreSQL + TimescaleDB | Integridad transaccional, series temporales y auditoría relacional. |
-| Cola/caché | Redis | Estado efímero, control de flujo y trabajos; nunca fuente de verdad. |
+| Frames crudos | NDJSON/gzip en almacenamiento S3-compatible | Conserva texto fuente exacto y permite reproducción del adaptador. |
+| Ticks normalizados | Parquet en almacenamiento S3-compatible | Consulta analítica portable y económica. |
+| Metadatos / órdenes | PostgreSQL; TimescaleDB solo con necesidad medida | Integridad transaccional, procedencia y futura auditoría. |
+| Cola/caché futura | Redis cuando exista concurrencia que lo requiera | Estado efímero y control de flujo; nunca fuente de verdad. |
 | Escritorio Windows futuro | Tauri 2 + React compartido | Huella reducida y reutilización de paquetes TypeScript. |
 | Herramientas | pnpm + Turborepo + Docker Compose | Entorno local y tareas deterministas. |
 
@@ -83,7 +88,7 @@ buoh/
 
 ### Datos e investigación
 
-Los datos se registran primero como eventos crudos con `source`, `symbol`, `event_time_utc`, `received_at_utc`, versión de esquema y banderas de calidad. Las velas, indicadores, señales y métricas son derivados regenerables.
+Los frames se registran primero con fuente, conexión, tiempo de recepción, payload UTF-8 exacto y hash. `symbol` y `event_time_utc` solo aparecen después de una normalización válida. Velas, indicadores, señales y métricas son derivados regenerables.
 
 Una estrategia es una versión inmutable que recibe datos explícitos y devuelve una intención declarativa; no tiene acceso a red, reloj global, credenciales ni base de datos. Python puede investigar y proponer una estrategia, pero la versión que se publica en vivo debe ejecutarse por el motor controlado y tener un contrato determinista.
 
@@ -139,7 +144,8 @@ Tauri encapsulará un cliente React que reutiliza `packages/domain`, `packages/c
 
 ## Despliegue y fiabilidad
 
-- **Desarrollo:** Docker Compose para PostgreSQL/TimescaleDB, Redis y MinIO; datos sintéticos y demo aislados.
+- **Desarrollo de Fase 1:** Docker Compose para PostgreSQL estándar y almacenamiento S3-compatible local; datos sintéticos y públicos.
+- **Fases posteriores:** TimescaleDB o Redis se incorporan solo si una ADR documenta la necesidad medida.
 - **Preproducción:** estrategia *shadow*, pruebas de resiliencia, telemetría, migraciones y prueba demo sin secretos productivos.
 - **Producción de señales:** observabilidad de datos, eventos y latencia; interrupción automática si la calidad se degrada.
 - **Producción de ejecución:** entorno separado, acceso mínimo, despliegues canary, monitorización de reconciliación, alarmas y pruebas periódicas de *kill switch*.

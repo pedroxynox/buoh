@@ -1,0 +1,106 @@
+{
+  "canonicalization": "RFC8785",
+  "empty_sequence_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "expected": {
+    "condition_event_count": 3,
+    "dataset_id": "sha256:611d83367d6b86a210ebdb30a2e73aa30dc35f8efd59f07fb43febf60c98defd",
+    "final_service_health": "degraded",
+    "incident_count": 8,
+    "normalized_tick_count": 7,
+    "raw_frame_count": 8,
+    "source_event_count": 11
+  },
+  "files": [
+    {
+      "bytes": 1455,
+      "path": "expected-conditions.ndjson",
+      "sha256": "9958131b607b123a4dafcdc2fdce4fc770158073558a053430b2dc15e3c7215b"
+    },
+    {
+      "bytes": 4697,
+      "path": "expected-dataset.canonical.json",
+      "sha256": "b83d3017fbc4901e5c33b1a2241d3c5f963f692e0d7cc54b267d40a9a3742af8"
+    },
+    {
+      "bytes": 5732,
+      "path": "expected-dataset.json",
+      "sha256": "a20fcd35208a3e5377c8266d68f9bdb5ea7d65e29506ed6c59fe3f385140d728"
+    },
+    {
+      "bytes": 538,
+      "path": "expected-health.json",
+      "sha256": "a2b1cfbe2e7921a541ae92cd1cc094f1935ab8f46ba8c40be5487f0ee35a442a"
+    },
+    {
+      "bytes": 4021,
+      "path": "expected-incidents.ndjson",
+      "sha256": "47d2a3d72e03b32c1ecccd49c37d3096ba0de605c505db0f80628815096209bf"
+    },
+    {
+      "bytes": 429,
+      "path": "expected-persistence-failure.json",
+      "sha256": "91712a9deb90bc976487fb51642f5f93d2fe45ea39ec9a8d481e0943f7a8d8f7"
+    },
+    {
+      "bytes": 524,
+      "path": "expected-publication-record.json",
+      "sha256": "0471efbb69a3c22fd54da2fe77b7562fa20d590c8a224fa173ef25c09ec2d2e8"
+    },
+    {
+      "bytes": 2881,
+      "path": "expected-source-events-000000.ndjson",
+      "sha256": "54f6040c6443d25182d88198b175a6b864f37fa4fb48dd8efe3ae06ea31b968a"
+    },
+    {
+      "bytes": 1993,
+      "path": "expected-source-events-000001.ndjson",
+      "sha256": "188ddb63101f15c391265e32b2e91027c6b5a1c06abe6d34c1e9fe05de5019e6"
+    },
+    {
+      "bytes": 3640,
+      "path": "expected-ticks.ndjson",
+      "sha256": "07378d8675958540756da62a3cdd53979dc8870f6bf1d009a96d8f4d3b2d01f4"
+    },
+    {
+      "bytes": 3749,
+      "path": "input-frames.ndjson",
+      "sha256": "0fef065451281eab337e11e442a1a100928eb55ed418c4085e2df3e68e25f417"
+    },
+    {
+      "bytes": 580,
+      "path": "input-persistence-failure.ndjson",
+      "sha256": "5dd434e59628d7afb9f32507b3adb57d6b71a90d73f3de57de8a62098ccbcb98"
+    },
+    {
+      "bytes": 249,
+      "jcs_sha256": "403d468124608715938f4bab6100ac412712dbd54d3c8d1814672ac1b7db3d4f",
+      "path": "quality-profile.json",
+      "sha256": "8273ba9ecb2317425147b43bbbff24ca7fc673ef241a8c796e6cf5be36a76626"
+    },
+    {
+      "bytes": 847,
+      "jcs_sha256": "9f65cc1cf89e4e28e0351dd16c013f6354480fcc6046c8b090588e7ba2982925",
+      "path": "source-schema.json",
+      "sha256": "533a48ff53012c6bd519028209dec22a9658d7ebd54848b8e4ed5f9e69676e74"
+    },
+    {
+      "bytes": 2050,
+      "path": "zero-valid-ticks/manifest.json",
+      "sha256": "f4a3b320ca85e6375d89c99f8d2ead1dfa1a2f3bb7aac739c900f4d50ba8d8b7"
+    }
+  ],
+  "profile": {
+    "connector_version": "fixture-v1",
+    "execution_mode": "disabled",
+    "maximum_delivery_delay_ms": 2000,
+    "maximum_event_gap_ms": 2000,
+    "normalizer_version": "1.0.0",
+    "quality_profile_id": "synthetic-v1",
+    "quality_rule_version": "1.0.0",
+    "source": "synthetic",
+    "source_schema_release": "synthetic-v1",
+    "symbol": "SYNTH_100"
+  },
+  "schema_version": "1.0.0",
+  "vector_id": "market-data-v1"
+}
