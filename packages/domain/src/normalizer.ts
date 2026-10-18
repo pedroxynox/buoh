@@ -134,6 +134,14 @@ export function normalizeRawFrame(
     return invalid('symbol_not_allowed');
   }
 
+  // ADR-0004 §4: epoch entero en segundos, sin fracciones inventadas; pip_size 0..18. Se exigen
+  // aquí además del esquema de fuente para no depender de un esquema más laxo.
+  if (!/^(?:0|[1-9]\d*)$/u.test(pipNode.lexeme) || Number(pipNode.lexeme) > 18) {
+    return invalid('schema_validation_failed');
+  }
+  if (!/^-?(?:0|[1-9]\d*)$/u.test(epochNode.lexeme)) {
+    return invalid('event_time_out_of_range');
+  }
   const eventTime = epochSecondsToUtc(Number(epochNode.lexeme));
   if (eventTime === null) {
     return invalid('event_time_out_of_range');

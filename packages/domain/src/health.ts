@@ -39,7 +39,9 @@ export interface HealthInput {
 /**
  * Deriva el `HealthReport` del estado durable: conexión según el último evento de ciclo de vida,
  * último raw durable, último tiempo de evento normalizado y condiciones cuya última acción es
- * `opened`. Nunca reporta `healthy` sin raw durable, conexión activa y cero condiciones abiertas.
+ * `opened`. Nunca reporta `healthy` sin raw durable, conexión activa, continuidad demostrada,
+ * backlog bajo límites y cero condiciones abiertas. F1.2 solo recibe condiciones derivables del
+ * dataset; las operativas (`persistence_unavailable`, `source_limit_exceeded`) llegan con F1.3/F1.5.
  */
 export function deriveHealthReport(input: HealthInput): HealthReport {
   const events = input.sourceEvents.map((event) => sourceEventSchema.parse(event));
@@ -55,20 +57,25 @@ export function deriveHealthReport(input: HealthInput): HealthReport {
   const lastRaw = events.filter((event) => event.kind === 'raw_source_frame').at(-1);
   const openTypes = input.derived.openConditionTypes as (keyof typeof CONDITION_HEALTH)[];
 
-  let health: ServiceHealth;
-  if (openTypes.length > 0) {
-    health = openTypes
-      .map((type) => CONDITION_HEALTH[type])
-      .reduce((worst, candidate) =>
-        SEVERITY_RANK[candidate] > SEVERITY_RANK[worst] ? candidate : worst,
-      );
-  } else if (lastRaw === undefined) {
-    health = 'starting';
-  } else if (
+  // Cada causa impone una salud mínima; gana la más severa.
+  const minimums: ServiceHealth[] = openTypes.map((type) => CONDITION_HEALTH[type]);
+  if (input.derived.pendingContinuitySymbols.length > 0) {
+    minimums.push('recovering');
+  }
+  if (
     evaluateSourceLimit('in_memory_queue_events', input.backlog_count) !== null ||
     evaluateSourceLimit('in_memory_queue_bytes', input.backlog_bytes) !== null
   ) {
-    health = 'paused';
+    minimums.push('paused');
+  }
+
+  let health: ServiceHealth;
+  if (minimums.length > 0) {
+    health = minimums.reduce((worst, candidate) =>
+      SEVERITY_RANK[candidate] > SEVERITY_RANK[worst] ? candidate : worst,
+    );
+  } else if (lastRaw === undefined) {
+    health = 'starting';
   } else if (!connected) {
     // Cierre solicitado sin reapertura: no se procesa entrada, pero no hay incidencia abierta.
     health = 'paused';

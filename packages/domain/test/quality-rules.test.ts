@@ -210,6 +210,130 @@ describe('reglas de conexión y continuidad', () => {
   });
 });
 
+describe('continuidad tras reconexión (gap_detection = after_reconnection)', () => {
+  function reconnection(firstEpochAfter: number) {
+    return persisted([
+      frame(1, CONNECTION_A, tickPayload(1767225600, '100.125'), '2026-01-01T00:00:00.100Z'),
+      {
+        affected_symbols: ['SYNTH_100'],
+        closure_type: 'timeout',
+        connection_id: CONNECTION_A,
+        event_id: id(2),
+        fixture_sequence: 2,
+        kind: 'connection_closed',
+        occurred_at_utc: '2026-01-01T00:00:00.500Z',
+        reason: 'heartbeat_timeout',
+      },
+      {
+        connection_id: CONNECTION_B,
+        event_id: id(3),
+        fixture_sequence: 3,
+        kind: 'connection_opened',
+        occurred_at_utc: '2026-01-01T00:00:00.600Z',
+        supersedes_connection_id: CONNECTION_A,
+      },
+      frame(
+        4,
+        CONNECTION_B,
+        tickPayload(firstEpochAfter, '100.150'),
+        new Date(firstEpochAfter * 1000 + 100).toISOString(),
+      ),
+    ]);
+  }
+
+  function healthOf(segments: ReturnType<typeof persisted>) {
+    return deriveHealthReport({
+      backlog_bytes: 0,
+      backlog_count: 0,
+      derived: deriveMarketData(segments, profile),
+      last_published_dataset_id: null,
+      source: 'synthetic',
+      sourceEvents: segments.flat(),
+    }).service_health;
+  }
+
+  it('un hueco mayor que el umbral sin HistoryRecoveryResult deja continuidad pendiente', () => {
+    const segments = reconnection(1767225609);
+    const derived = deriveMarketData(segments, profile);
+    expect(derived.pendingContinuitySymbols).toEqual(['SYNTH_100']);
+    expect(derived.incidents.map((incident) => incident.incident_type)).toEqual([
+      'connection_lost',
+    ]);
+    expect(healthOf(segments)).toBe('recovering');
+  });
+
+  it('una separación dentro del umbral demuestra continuidad', () => {
+    const segments = reconnection(1767225602);
+    expect(deriveMarketData(segments, profile).pendingContinuitySymbols).toEqual([]);
+    expect(healthOf(segments)).toBe('healthy');
+  });
+});
+
+describe('versiones y harness', () => {
+  it('aborta ante source events de otra schema_version', () => {
+    const [segment = []] = persisted([
+      frame(1, CONNECTION_A, tickPayload(1767225600, '100.125'), '2026-01-01T00:00:00.100Z'),
+    ]);
+    const altered = segment.map((event) => ({ ...event, schema_version: '2.0.0' }));
+    expect(() => deriveMarketData([altered], profile)).toThrow(/schema_version 2\.0\.0/u);
+  });
+
+  it('aborta si un fallo armado no se consume', () => {
+    expect(() =>
+      ingestSyntheticStimuli(
+        [
+          {
+            fault_id: id(9),
+            fixture_sequence: 1,
+            kind: 'persistence_fault_armed',
+            occurred_at_utc: '2026-01-01T00:00:00.050Z',
+            reason: 'synthetic_injected_failure',
+            scope: 'next_raw_object_write',
+            stage: 'raw_object_write',
+          },
+        ],
+        profile,
+      ),
+    ).toThrow(/no fue consumido/u);
+  });
+
+  it('exige epoch entero y pip_size 0..18 aunque el esquema de fuente sea más laxo', () => {
+    const looseSchema = {
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      properties: {
+        tick: {
+          properties: {
+            epoch: { type: 'number' },
+            pip_size: { type: 'integer' },
+            quote: { type: 'number' },
+            symbol: { type: 'string' },
+          },
+          required: ['epoch', 'pip_size', 'quote', 'symbol'],
+          type: 'object',
+        },
+      },
+      required: ['tick'],
+      type: 'object',
+    };
+    const loose = createPipelineProfile({
+      connector_version: 'fixture-v1',
+      quality_profile_bytes: readFileSync(resolve(vectorRoot, 'quality-profile.json')),
+      source_schema_bytes: Buffer.from(JSON.stringify(looseSchema)),
+      source_schema_release: 'loose-test',
+    });
+    const payload = (epoch: string, pip: string) =>
+      `{"tick":{"epoch":${epoch},"pip_size":${pip},"quote":100.125,"symbol":"SYNTH_100"}}`;
+    expect(normalizeRawFrame(rawFrame(payload('1767225600.5', '3')), loose)).toMatchObject({
+      ok: false,
+      reason: 'event_time_out_of_range',
+    });
+    expect(normalizeRawFrame(rawFrame(payload('1767225600', '19')), loose)).toMatchObject({
+      ok: false,
+      reason: 'schema_validation_failed',
+    });
+  });
+});
+
 describe('límites de fuente (ADR-0004 §7)', () => {
   it('aplica unidad, máximo y salud por recurso', () => {
     expect(evaluateSourceLimit('websocket_frame', 1_048_576)).toBeNull();

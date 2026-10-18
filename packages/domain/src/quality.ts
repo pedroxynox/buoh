@@ -45,6 +45,12 @@ export interface DerivedMarketData {
   readonly incidents: DataQualityIncident[];
   /** Tipos cuya última acción es `opened`, únicos y ordenados. */
   readonly openConditionTypes: string[];
+  /**
+   * Símbolos cuya continuidad tras una pérdida de conexión aún no está demostrada: ni la separación
+   * respecto del high-watermark quedó dentro de `maximum_event_gap_ms` ni existe todavía un
+   * `HistoryRecoveryResult`. No produce incidencia; impide reportar `healthy`.
+   */
+  readonly pendingContinuitySymbols: string[];
   /** Ticks en orden canónico: `event_time_utc`, `tick_fingerprint_sha256`, `observation_id`. */
   readonly ticks: MarketTick[];
 }
@@ -115,6 +121,7 @@ export function deriveMarketData(
   const events: SourceEvent[] = segments.flat().map((event) => sourceEventSchema.parse(event));
   const source = profile.source;
   const maximumDelay = profile.quality_profile.maximum_delivery_delay_ms;
+  const maximumGap = profile.quality_profile.maximum_event_gap_ms;
 
   const incidents: DataQualityIncident[] = [];
   const conditions: OperationalConditionEvent[] = [];
@@ -125,6 +132,11 @@ export function deriveMarketData(
   const highWatermark = new Map<string, { eventTime: string; observationId: string }>();
   const openConnection = new Map<string, OperationalConditionEvent>();
   const openGap = new Map<string, OperationalConditionEvent>();
+  /**
+   * Continuidad pendiente por símbolo: high-watermark al cierre no solicitado y si el primer tick
+   * posterior ya excedió el umbral (entonces solo un HistoryRecoveryResult la decide).
+   */
+  const pendingContinuity = new Map<string, { requiresRecovery: boolean; watermark: string }>();
 
   const addFlag = (observationId: string, type: IncidentType) => {
     const set = flags.get(observationId) ?? new Set<IncidentType>();
@@ -166,6 +178,11 @@ export function deriveMarketData(
   };
 
   const assertProvenance = (event: SourceEvent) => {
+    if (event.schema_version !== CONTRACT_SCHEMA_VERSION) {
+      throw new TypeError(
+        `schema_version ${event.schema_version} de source event no soportada; se esperaba ${CONTRACT_SCHEMA_VERSION}.`,
+      );
+    }
     if (event.source !== source) {
       throw new TypeError(`Source event de otra fuente: ${event.source}; se esperaba ${source}.`);
     }
@@ -251,6 +268,18 @@ export function deriveMarketData(
       highWatermark.set(tick.symbol, { eventTime: tick.event_time_utc, observationId });
     }
 
+    // gap_detection = after_reconnection: el primer tick posterior al cierre demuestra continuidad
+    // si su separación respecto del high-watermark previo no supera el perfil; si la supera, la
+    // continuidad sigue pendiente hasta un HistoryRecoveryResult.
+    const pending = pendingContinuity.get(tick.symbol);
+    if (pending !== undefined && !pending.requiresRecovery) {
+      if (Date.parse(tick.event_time_utc) - Date.parse(pending.watermark) <= maximumGap) {
+        pendingContinuity.delete(tick.symbol);
+      } else {
+        pendingContinuity.set(tick.symbol, { ...pending, requiresRecovery: true });
+      }
+    }
+
     // delivery_delayed: recepción menos evento supera el perfil.
     const delay = Date.parse(tick.received_at_utc) - Date.parse(tick.event_time_utc);
     if (delay > maximumDelay) {
@@ -267,6 +296,12 @@ export function deriveMarketData(
   const onConnectionClosed = (event: ConnectionClosed) => {
     if (event.closure_type === 'requested') {
       return;
+    }
+    for (const symbol of event.affected_symbols) {
+      const watermark = highWatermark.get(symbol);
+      if (watermark !== undefined) {
+        pendingContinuity.set(symbol, { requiresRecovery: false, watermark: watermark.eventTime });
+      }
     }
     const incident = emitIncident({
       evidence: {
@@ -345,6 +380,9 @@ export function deriveMarketData(
   };
 
   const onHistoryRecovery = (event: HistoryRecoveryResult) => {
+    // Cualquier resultado decide la continuidad: complete la demuestra; partial/unavailable la
+    // convierten en un hueco explícito.
+    pendingContinuity.delete(event.symbol);
     const conditionKey = deriveGapConditionKey({
       from_event_time_utc: event.from_event_time_utc,
       source,
@@ -446,6 +484,7 @@ export function deriveMarketData(
     conditions: causality.conditions,
     incidents: orderedIncidents,
     openConditionTypes: causality.openConditionTypes,
+    pendingContinuitySymbols: [...pendingContinuity.keys()].sort(),
     ticks,
   };
 }

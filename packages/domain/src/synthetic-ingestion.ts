@@ -213,5 +213,10 @@ export function ingestSyntheticStimuli(
     }
   }
 
+  if (armedFault !== undefined) {
+    throw new TypeError(
+      `El fallo armado ${armedFault.fault_id} no fue consumido por ninguna escritura.`,
+    );
+  }
   return { segments: durableSegments(), status: 'persisted' };
 }

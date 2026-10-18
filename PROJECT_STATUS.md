@@ -25,7 +25,6 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
 - La fundación de producto, arquitectura, seguridad y operación está aprobada.
 - F1.1 proporciona monorepo reproducible, contratos runtime, JSON Schema generado, vectores verificables y guardia documental.
 - F1.2 proporciona `packages/domain`: adaptador sintético, normalización, reglas de calidad 1.0.0, construcción de publicación y salud, todo puro y determinista.
-- GitHub Actions ejecuta `DOCS_BASE_REF=origin/main pnpm run verify:pr` en cada PR hacia `main` y en cada push a `main`.
 - No existe todavía worker operativo, integración con Deriv, PostgreSQL, almacenamiento de objetos ni despliegue.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
 
@@ -53,7 +52,7 @@ No crea todavía conexión Deriv, web, móvil, señales ni ejecución.
 - `pnpm run test:vectors` regenera desde los estímulos ambos escenarios firmados (principal multi-segmento y `zero-valid-ticks`) y compara byte a byte segmentos de source events, ticks, incidencias, condiciones, documento canónico, manifiesto legible, `PublishedManifestRecord`, objetos físicos y salud; recomputar desde los source events persistidos produce los mismos `dataset_id`.
 - El escenario de persistencia raw fallida produce exactamente `expected-persistence-failure.json`.
 - La suite congela el reloj en otra fecha y prohíbe `Math.random`, `crypto.randomUUID` y `fetch` durante el pipeline.
-- 21 pruebas de dominio (10 de vectores y 11 de reglas no cubiertas por el vector) pasan offline.
+- 26 pruebas de dominio (10 de vectores y 16 de reglas, continuidad, versiones y límites no cubiertos por el vector) pasan offline.
 
 ## Decisiones vigentes relevantes
 
