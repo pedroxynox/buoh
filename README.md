@@ -25,7 +25,7 @@ pnpm run verify
 pnpm run test:vectors
 ```
 
-pnpm usa el runtime Node fijado por el proyecto. Consulta [`packages/contracts`](packages/contracts/) para los esquemas ejecutables.
+pnpm usa el runtime Node fijado por el proyecto. Consulta [`packages/contracts`](packages/contracts/) para los esquemas ejecutables y [`packages/domain`](packages/domain/) para la normalización y las reglas de calidad puras (F1.2).
 
 ## Propósito
 

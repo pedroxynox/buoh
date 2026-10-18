@@ -14,6 +14,7 @@ Fase 1 implementa `SourceEvent`, `MarketTick`, `DataQualityIncident`, `Operation
 - `canonicalize` implementa RFC 8785 para IDs y hashes estructurados.
 - `pnpm run schemas:generate` produce ocho JSON Schema; `schemas:check` detecta deriva.
 - `pnpm run test:vectors` verifica manifiestos, raw hashes, IDs derivados, publicaciones y escenarios principal/cero-ticks sin red.
+- Desde F1.2, `test:vectors` además regenera con `packages/domain` todos los artefactos de ambos escenarios y los compara byte a byte.
 
 ## Taxonomías independientes
 
@@ -408,6 +409,33 @@ open_condition_types: ("connection_lost" | "event_gap_unresolved" |
 - `source_limit_exceeded`: entrada excede el valor y unidad fijados para su recurso.
 
 El perfil sintético v1 usa 2000 ms para retraso y separación tras reconexión. Ningún símbolo real hereda estos valores.
+
+### Semántica ejecutable de reglas 1.0.0
+
+Desde F1.2, [`packages/domain`](../../packages/domain/) implementa estas reglas como funciones puras sobre source events en orden de observación; el vector v1 fija su resultado. Precisiones que el vector determina o que el código necesita para no elegir silenciosamente:
+
+| `incident_type` | `severity` | `observed_ref` / `observed_at_utc` | `related_refs` | Flag en tick |
+|---|---|---|---|---|
+| `invalid_source_frame` | `error` | raw / recepción | `[]` | no hay tick |
+| `duplicate_exact` | `warning` | raw / recepción | primera observación con el mismo fingerprint | el duplicado |
+| `source_time_conflict` | `error` | raw / recepción | primera observación de ese `source + symbol + event_time_utc` | el conflictivo |
+| `out_of_order` | `warning` | raw / recepción | observación que fijó el high-watermark | el atrasado |
+| `delivery_delayed` | `warning` | raw / recepción | `[]` | el retrasado |
+| `connection_lost` | `warning` | `ConnectionClosed` / cierre | `[]` | — |
+| `event_gap_unresolved` | `error` | `HistoryRecoveryResult` / resultado | tick previo y tick posterior que delimitan el rango, entre los ya observados | el tick posterior |
+
+- Conflicto se evalúa contra la primera observación del instante; una observación idéntica a esa es solo duplicado.
+- El high-watermark avanza solo con un tiempo estrictamente mayor; igual tiempo no es fuera de orden.
+- Límites del hueco: el tick de mayor tiempo anterior a `from_event_time_utc` y el de menor tiempo posterior a `to_event_time_utc`; empates, la primera observación.
+- `partial` y `unavailable` crean incidencia; abren condición solo si la clave no está abierta. `complete` resuelve una clave abierta con `resolution_reason = history_recovered`; la reconexión usa `connection_reestablished`. Ambas resoluciones citan el evento fuente y la apertura.
+- Un frame inválido se atribuye al `tick.symbol` del payload si es un símbolo permitido; si no, al único símbolo del perfil. Con varios símbolos permitidos y sin atribución posible, la derivación aborta.
+- `evidence.reason` de `invalid_source_frame` en normalizador 1.0.0: `payload_not_json` (incluye claves duplicadas y JSON no estricto), `schema_validation_failed`, `symbol_not_allowed`, `event_time_out_of_range`, `quote_exponent_not_supported` y `quote_precision_exceeds_pip_size`.
+- `quote_decimal` sale del lexema numérico del payload: completar con ceros hasta `pip_size` es exacto; más decimales o exponente invalidan el frame en lugar de redondear.
+- `symbols` del manifiesto es la unión ordenada de símbolos de ticks, incidencias, recuperaciones y `affected_symbols`.
+- Continuidad tras `ConnectionClosed` no solicitado (`gap_detection = after_reconnection`): cada símbolo afectado con high-watermark queda pendiente desde ese high-watermark (inicio del hueco). Decide solo el primer tick estrictamente posterior al high-watermark vigente en el último cierre; uno igual o anterior no informa sobre el intervalo. Si su separación respecto del inicio no supera `maximum_event_gap_ms` y el hueco no se había declarado excedido, demuestra continuidad; si no, el hueco queda excedido y ese tick fija su fin. Un nuevo cierre de un símbolo pendiente conserva inicio y estado excedido y espera un nuevo fin, de modo que una sola recuperación debe cubrirlos todos. Solo decide un `HistoryRecoveryResult` del símbolo registrado después de fijado el fin y cuyo rango cubra desde el inicio + 1 ms hasta el fin − 1 ms (`complete` la demuestra; `partial`/`unavailable` crean `event_gap_unresolved`); uno anterior o que no cubre no decide y la salud permanece `recovering`. Pendiente no crea incidencia: la recuperación la solicita el worker (F1.5).
+- Salud derivada: cada causa impone un mínimo y gana el más severo: `connection_lost` → `recovering`, continuidad pendiente → `recovering`, `event_gap_unresolved` → `degraded`, `persistence_unavailable`, `source_limit_exceeded` o cola sobre su límite → `paused`. Sin causas: `starting` sin raw durable, `paused` si la última conexión se cerró a petición, `healthy` en otro caso. `last_event_time_utc` es el extremo final de los ticks canónicos. F1.2 solo recibe condiciones derivables del dataset; las operativas se incorporan con su registro.
+- Source events con `schema_version` distinta de la implementada abortan la derivación; no se migran.
+- `persistence_unavailable` y `source_limit_exceeded` no se derivan de un dataset: F1.2 fija su resultado fail-closed y su evidencia; el registro operativo con severidad y referencias se define junto a la persistencia (F1.3/F1.5).
 
 ## Contratos futuros
 

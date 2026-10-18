@@ -27,7 +27,7 @@
     "schemas:generate": "pnpm --filter @buoh/contracts run schemas:generate",
     "test": "pnpm run test:docs && turbo run test",
     "test:docs": "node --test scripts/check-doc-impact.test.mjs",
-    "test:vectors": "pnpm --filter @buoh/contracts run test:vectors",
+    "test:vectors": "turbo run test:vectors",
     "typecheck": "turbo run typecheck",
     "verify": "pnpm run verify:core && pnpm run docs:check",
     "verify:core": "pnpm run runtime:check && pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run schemas:check",

@@ -7,10 +7,16 @@
     },
     "test": {
       "dependsOn": ["build"],
-      "outputs": []
+      "outputs": [],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/test-vectors/**"]
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],
+      "outputs": []
+    },
+    "test:vectors": {
+      "dependsOn": ["build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/test-vectors/**"],
       "outputs": []
     }
   }
