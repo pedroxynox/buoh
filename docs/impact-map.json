@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0.0",
+  "rules": [
+    {
+      "id": "contracts",
+      "description": "Los contratos runtime deben mantener su semántica canónica.",
+      "includes": ["packages/contracts/**"],
+      "requires_any": ["docs/arquitectura/contratos-de-dominio.md"]
+    },
+    {
+      "id": "toolchain",
+      "description": "Cambios de toolchain deben reflejar decisión o estado vigente.",
+      "includes": [
+        ".node-version",
+        ".npmrc",
+        ".prettierignore",
+        ".prettierrc.json",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "tsconfig*.json",
+        "turbo.json",
+        "eslint.config.mjs",
+        "scripts/check-runtime.mjs"
+      ],
+      "requires_any": ["docs/arquitectura/adr/0003-lenguajes-y-limites.md", "PROJECT_STATUS.md"]
+    },
+    {
+      "id": "market-data-worker",
+      "description": "La operación del worker debe conservar un runbook vigente.",
+      "includes": ["apps/market-data-worker/**"],
+      "requires_any": [
+        "docs/operacion/runbook-ingesta-de-datos.md",
+        "docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md"
+      ]
+    },
+    {
+      "id": "infrastructure",
+      "description": "Persistencia y despliegue requieren revisar arquitectura u operación.",
+      "includes": ["infra/**", "render.yaml"],
+      "requires_any": [
+        "docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md",
+        "docs/operacion/runbook-ingesta-de-datos.md"
+      ]
+    },
+    {
+      "id": "test-vectors",
+      "description": "Cambiar el oráculo requiere justificar el contrato o la decisión.",
+      "includes": ["test-vectors/**"],
+      "requires_any": [
+        "docs/arquitectura/contratos-de-dominio.md",
+        "docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md"
+      ]
+    },
+    {
+      "id": "documentation-guard",
+      "description": "La política del guard debe permanecer explicada para contribuidores.",
+      "includes": ["docs/impact-map.json", "scripts/check-doc-impact.*"],
+      "requires_any": ["AGENTS.md", "CONTRIBUTING.md"]
+    }
+  ]
+}

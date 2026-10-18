@@ -1,0 +1,311 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/DatasetManifest",
+  "$defs": {
+    "DatasetManifest": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "dataset_id": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "publication_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "state": {
+          "type": "string",
+          "const": "published"
+        },
+        "published_at_utc": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+        },
+        "manifest_core": {
+          "$ref": "#/$defs/DatasetManifestCore"
+        },
+        "storage_objects": {
+          "minItems": 6,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "artifact_id": {
+                "type": "string",
+                "pattern": "^(?:source_events|normalized_ticks|quality_incidents|operational_conditions|source_schema|quality_profile):\\d{6}$"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "source_events",
+                  "normalized_ticks",
+                  "quality_incidents",
+                  "operational_conditions",
+                  "source_schema",
+                  "quality_profile"
+                ]
+              },
+              "uri": {
+                "type": "string",
+                "format": "uri"
+              },
+              "media_type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "compression": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "gzip"
+                ]
+              },
+              "size_bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "object_bytes_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "logical_content_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "writer_name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "writer_version": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "artifact_id",
+              "role",
+              "uri",
+              "media_type",
+              "compression",
+              "size_bytes",
+              "object_bytes_sha256",
+              "logical_content_sha256"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "dataset_id",
+        "publication_id",
+        "state",
+        "published_at_utc",
+        "manifest_core",
+        "storage_objects"
+      ],
+      "additionalProperties": false,
+      "title": "DatasetManifest"
+    },
+    "DatasetManifestCore": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "canonicalization_version": {
+          "type": "string",
+          "const": "RFC8785"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_schema_release": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_schema_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "connector_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "normalizer_version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "quality_rule_version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "quality_profile_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quality_profile_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "segment_policy_version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "source_event_schema_version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "market_tick_schema_version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "incident_schema_version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "condition_event_schema_version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "symbols": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "event_time_from_utc": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event_time_to_utc": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_event_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "raw_frame_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "normalized_tick_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "incident_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "condition_event_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "logical_artifacts": {
+          "minItems": 4,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "artifact_id": {
+                "type": "string",
+                "pattern": "^(?:source_events|normalized_ticks|quality_incidents|operational_conditions|source_schema|quality_profile):\\d{6}$"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "source_events",
+                  "normalized_ticks",
+                  "quality_incidents",
+                  "operational_conditions"
+                ]
+              },
+              "segment_index": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 999999
+              },
+              "record_count": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "logical_content_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "required": [
+              "artifact_id",
+              "role",
+              "segment_index",
+              "record_count",
+              "logical_content_sha256"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "canonicalization_version",
+        "source",
+        "source_schema_release",
+        "source_schema_sha256",
+        "connector_version",
+        "normalizer_version",
+        "quality_rule_version",
+        "quality_profile_id",
+        "quality_profile_sha256",
+        "segment_policy_version",
+        "source_event_schema_version",
+        "market_tick_schema_version",
+        "incident_schema_version",
+        "condition_event_schema_version",
+        "symbols",
+        "event_time_from_utc",
+        "event_time_to_utc",
+        "source_event_count",
+        "raw_frame_count",
+        "normalized_tick_count",
+        "incident_count",
+        "condition_event_count",
+        "logical_artifacts"
+      ],
+      "additionalProperties": false,
+      "title": "DatasetManifestCore"
+    }
+  }
+}

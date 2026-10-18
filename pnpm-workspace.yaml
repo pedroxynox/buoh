@@ -1,0 +1,8 @@
+packages:
+  - 'packages/*'
+
+engineStrict: true
+strictPeerDependencies: true
+
+allowBuilds:
+  esbuild: true

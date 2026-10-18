@@ -24,6 +24,17 @@ El primer scaffolding fijará **Node.js 24.22.0 LTS** y **pnpm 12.14.0** mediant
 
 La selección se revisó el 2026-10-17 contra [releases oficiales de Node.js](https://nodejs.org/en/about/previous-releases) y [pnpm 12.14.0](https://pnpm.io/blog/releases/12.14.0). El contenido externo fue reformulado para cumplir restricciones de licencia.
 
+### Herramientas ejecutables de F1.1
+
+- TypeScript 6 estricto compila contratos; el lockfile fija la versión exacta compatible con `typescript-eslint`.
+- Zod 4 es la única fuente de estructura runtime y usa su [conversión nativa a JSON Schema](https://zod.dev/json-schema).
+- `canonicalize` implementa JSON Canonicalization Scheme para identidades independientes del lenguaje.
+- Vitest ejecuta pruebas offline; ESLint usa configuración plana y reglas TypeScript con tipos; Prettier limita formato a código/configuración y no toca vectores firmados.
+- Turborepo coordina `build`, `typecheck` y `test` sin introducir servicios.
+- pnpm permite scripts de instalación únicamente para `esbuild`, dependencia transitiva necesaria para el toolchain; cualquier permiso adicional requiere revisión explícita.
+
+`package.json`, `pnpm-lock.yaml` y `pnpm-workspace.yaml` son canónicos para versiones y permisos exactos. Este ADR registra motivos, no duplica el inventario mutable.
+
 ### Python — investigación cuantitativa aislada
 
 Python se limita a `research/python`: exploración estadística, transformación tabular, validación de hipótesis, simulaciones y generación de artefactos reproducibles. Se preferirán entornos bloqueados y bibliotecas explícitas de cálculo/estadística; sus resultados atraviesan la frontera hacia TypeScript mediante contratos y datos versionados.

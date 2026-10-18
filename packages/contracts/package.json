@@ -1,0 +1,30 @@
+{
+  "name": "@buoh/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist",
+    "generated"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./json-schema/*": "./generated/json-schema/*.schema.json",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "schemas:check": "tsx scripts/generate-json-schemas.ts --check",
+    "schemas:generate": "tsx scripts/generate-json-schemas.ts",
+    "test": "vitest run",
+    "test:vectors": "vitest run test/vector-integrity.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "canonicalize": "5.1.0",
+    "zod": "4.6.7"
+  }
+}
