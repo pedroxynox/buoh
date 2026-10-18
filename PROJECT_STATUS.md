@@ -52,7 +52,7 @@ No crea todavía conexión Deriv, web, móvil, señales ni ejecución.
 - `pnpm run test:vectors` regenera desde los estímulos ambos escenarios firmados (principal multi-segmento y `zero-valid-ticks`) y compara byte a byte segmentos de source events, ticks, incidencias, condiciones, documento canónico, manifiesto legible, `PublishedManifestRecord`, objetos físicos y salud; recomputar desde los source events persistidos produce los mismos `dataset_id`.
 - El escenario de persistencia raw fallida produce exactamente `expected-persistence-failure.json`.
 - La suite congela el reloj en otra fecha y prohíbe `Math.random`, `crypto.randomUUID` y `fetch` durante el pipeline.
-- 26 pruebas de dominio (10 de vectores y 16 de reglas, continuidad, versiones y límites no cubiertos por el vector) pasan offline.
+- 29 pruebas de dominio (10 de vectores y 19 de reglas, continuidad, versiones y límites no cubiertos por el vector) pasan offline.
 
 ## Decisiones vigentes relevantes
 

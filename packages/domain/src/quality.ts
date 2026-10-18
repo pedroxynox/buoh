@@ -133,10 +133,11 @@ export function deriveMarketData(
   const openConnection = new Map<string, OperationalConditionEvent>();
   const openGap = new Map<string, OperationalConditionEvent>();
   /**
-   * Continuidad pendiente por símbolo: high-watermark al cierre no solicitado y si el primer tick
-   * posterior ya excedió el umbral (entonces solo un HistoryRecoveryResult la decide).
+   * Continuidad pendiente por símbolo: high-watermark al cierre no solicitado y, si el primer tick
+   * posterior excedió el umbral, su tiempo (entonces solo un HistoryRecoveryResult que cubra el
+   * hueco la decide).
    */
-  const pendingContinuity = new Map<string, { requiresRecovery: boolean; watermark: string }>();
+  const pendingContinuity = new Map<string, { firstAfter?: string; watermark: string }>();
 
   const addFlag = (observationId: string, type: IncidentType) => {
     const set = flags.get(observationId) ?? new Set<IncidentType>();
@@ -271,12 +272,21 @@ export function deriveMarketData(
     // gap_detection = after_reconnection: el primer tick posterior al cierre demuestra continuidad
     // si su separación respecto del high-watermark previo no supera el perfil; si la supera, la
     // continuidad sigue pendiente hasta un HistoryRecoveryResult.
+    // Solo decide un tick estrictamente posterior al high-watermark del cierre: uno igual o anterior
+    // no informa sobre el intervalo posterior.
     const pending = pendingContinuity.get(tick.symbol);
-    if (pending !== undefined && !pending.requiresRecovery) {
+    if (
+      pending !== undefined &&
+      pending.firstAfter === undefined &&
+      tick.event_time_utc > pending.watermark
+    ) {
       if (Date.parse(tick.event_time_utc) - Date.parse(pending.watermark) <= maximumGap) {
         pendingContinuity.delete(tick.symbol);
       } else {
-        pendingContinuity.set(tick.symbol, { ...pending, requiresRecovery: true });
+        pendingContinuity.set(tick.symbol, {
+          firstAfter: tick.event_time_utc,
+          watermark: pending.watermark,
+        });
       }
     }
 
@@ -299,8 +309,9 @@ export function deriveMarketData(
     }
     for (const symbol of event.affected_symbols) {
       const watermark = highWatermark.get(symbol);
-      if (watermark !== undefined) {
-        pendingContinuity.set(symbol, { requiresRecovery: false, watermark: watermark.eventTime });
+      // Un símbolo ya pendiente conserva su hueco original: reconexiones sucesivas no lo borran.
+      if (watermark !== undefined && !pendingContinuity.has(symbol)) {
+        pendingContinuity.set(symbol, { watermark: watermark.eventTime });
       }
     }
     const incident = emitIncident({
@@ -380,9 +391,16 @@ export function deriveMarketData(
   };
 
   const onHistoryRecovery = (event: HistoryRecoveryResult) => {
-    // Cualquier resultado decide la continuidad: complete la demuestra; partial/unavailable la
-    // convierten en un hueco explícito.
-    pendingContinuity.delete(event.symbol);
+    // Un resultado que cubre el hueco pendiente lo decide: complete demuestra continuidad;
+    // partial/unavailable la convierten en un hueco explícito. Un rango que no lo cubre no decide.
+    const pending = pendingContinuity.get(event.symbol);
+    if (
+      pending?.firstAfter !== undefined &&
+      Date.parse(event.from_event_time_utc) <= Date.parse(pending.watermark) + 1 &&
+      Date.parse(event.to_event_time_utc) >= Date.parse(pending.firstAfter) - 1
+    ) {
+      pendingContinuity.delete(event.symbol);
+    }
     const conditionKey = deriveGapConditionKey({
       from_event_time_utc: event.from_event_time_utc,
       source,

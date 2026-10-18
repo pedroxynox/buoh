@@ -262,6 +262,85 @@ describe('continuidad tras reconexión (gap_detection = after_reconnection)', ()
     expect(healthOf(segments)).toBe('recovering');
   });
 
+  const close = (sequence: number, connection: string, at: string) => ({
+    affected_symbols: ['SYNTH_100'],
+    closure_type: 'transport_error',
+    connection_id: connection,
+    event_id: id(sequence),
+    fixture_sequence: sequence,
+    kind: 'connection_closed',
+    occurred_at_utc: at,
+    reason: 'reset',
+  });
+  const open = (sequence: number, connection: string, supersedes: string, at: string) => ({
+    connection_id: connection,
+    event_id: id(sequence),
+    fixture_sequence: sequence,
+    kind: 'connection_opened',
+    occurred_at_utc: at,
+    supersedes_connection_id: supersedes,
+  });
+  const CONNECTION_C = '019b76da-a800-7000-8000-00000000c000';
+
+  it('un segundo cierre no borra un hueco ya detectado', () => {
+    const segments = persisted([
+      frame(1, CONNECTION_A, tickPayload(1767225600, '100.125'), '2026-01-01T00:00:00.100Z'),
+      close(2, CONNECTION_A, '2026-01-01T00:00:00.500Z'),
+      open(3, CONNECTION_B, CONNECTION_A, '2026-01-01T00:00:00.600Z'),
+      frame(4, CONNECTION_B, tickPayload(1767225609, '100.150'), '2026-01-01T00:00:09.100Z'),
+      close(5, CONNECTION_B, '2026-01-01T00:00:09.500Z'),
+      open(6, CONNECTION_C, CONNECTION_B, '2026-01-01T00:00:09.600Z'),
+      frame(7, CONNECTION_C, tickPayload(1767225610, '100.160'), '2026-01-01T00:00:10.100Z'),
+    ]);
+    expect(deriveMarketData(segments, profile).pendingContinuitySymbols).toEqual(['SYNTH_100']);
+    expect(healthOf(segments)).toBe('recovering');
+  });
+
+  it('un tick no posterior al high-watermark no demuestra continuidad', () => {
+    const segments = persisted([
+      frame(1, CONNECTION_A, tickPayload(1767225601, '100.125'), '2026-01-01T00:00:01.100Z'),
+      close(2, CONNECTION_A, '2026-01-01T00:00:01.500Z'),
+      open(3, CONNECTION_B, CONNECTION_A, '2026-01-01T00:00:01.600Z'),
+      frame(4, CONNECTION_B, tickPayload(1767225600, '100.120'), '2026-01-01T00:00:01.700Z'),
+      frame(5, CONNECTION_B, tickPayload(1767225601, '100.125'), '2026-01-01T00:00:01.800Z'),
+      frame(6, CONNECTION_B, tickPayload(1767225611, '100.170'), '2026-01-01T00:00:11.100Z'),
+    ]);
+    expect(deriveMarketData(segments, profile).pendingContinuitySymbols).toEqual(['SYNTH_100']);
+  });
+
+  it('solo una recuperación que cubre el hueco lo decide', () => {
+    const recovery = (sequence: number, from: string, to: string) => ({
+      connection_id: CONNECTION_B,
+      event_id: id(sequence),
+      fixture_sequence: sequence,
+      from_event_time_utc: from,
+      kind: 'history_recovery_result',
+      occurred_at_utc: '2026-01-01T00:00:09.200Z',
+      recovered_event_count: 0,
+      status: 'complete',
+      symbol: 'SYNTH_100',
+      to_event_time_utc: to,
+    });
+    const base = [
+      frame(1, CONNECTION_A, tickPayload(1767225600, '100.125'), '2026-01-01T00:00:00.100Z'),
+      close(2, CONNECTION_A, '2026-01-01T00:00:00.500Z'),
+      open(3, CONNECTION_B, CONNECTION_A, '2026-01-01T00:00:00.600Z'),
+      frame(4, CONNECTION_B, tickPayload(1767225609, '100.150'), '2026-01-01T00:00:09.100Z'),
+    ];
+    const unrelated = persisted([
+      ...base,
+      recovery(5, '2026-01-01T00:00:00.001Z', '2026-01-01T00:00:03.000Z'),
+    ]);
+    expect(deriveMarketData(unrelated, profile).pendingContinuitySymbols).toEqual(['SYNTH_100']);
+
+    const covering = persisted([
+      ...base,
+      recovery(5, '2026-01-01T00:00:00.001Z', '2026-01-01T00:00:08.999Z'),
+    ]);
+    expect(deriveMarketData(covering, profile).pendingContinuitySymbols).toEqual([]);
+    expect(healthOf(covering)).toBe('healthy');
+  });
+
   it('una separación dentro del umbral demuestra continuidad', () => {
     const segments = reconnection(1767225602);
     expect(deriveMarketData(segments, profile).pendingContinuitySymbols).toEqual([]);
