@@ -323,6 +323,20 @@ describe('continuidad tras reconexión (gap_detection = after_reconnection)', ()
     expect(healthOf(segments)).toBe('recovering');
   });
 
+  it('un tick atrasado tras un segundo cierre no demuestra un hueco ya excedido', () => {
+    const segments = persisted([
+      frame(1, CONNECTION_A, tickPayload(1767225600, '100.125'), '2026-01-01T00:00:00.100Z'),
+      close(2, CONNECTION_A, '2026-01-01T00:00:00.500Z'),
+      open(3, CONNECTION_B, CONNECTION_A, '2026-01-01T00:00:00.600Z'),
+      frame(4, CONNECTION_B, tickPayload(1767225609, '100.150'), '2026-01-01T00:00:09.100Z'),
+      close(5, CONNECTION_B, '2026-01-01T00:00:09.500Z'),
+      open(6, CONNECTION_C, CONNECTION_B, '2026-01-01T00:00:09.600Z'),
+      frame(7, CONNECTION_C, tickPayload(1767225601, '100.130'), '2026-01-01T00:00:09.700Z'),
+    ]);
+    expect(deriveMarketData(segments, profile).pendingContinuitySymbols).toEqual(['SYNTH_100']);
+    expect(healthOf(segments)).toBe('recovering');
+  });
+
   it('un tick no posterior al high-watermark no demuestra continuidad', () => {
     const segments = persisted([
       frame(1, CONNECTION_A, tickPayload(1767225601, '100.125'), '2026-01-01T00:00:01.100Z'),

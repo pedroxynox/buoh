@@ -133,11 +133,16 @@ export function deriveMarketData(
   const openConnection = new Map<string, OperationalConditionEvent>();
   const openGap = new Map<string, OperationalConditionEvent>();
   /**
-   * Continuidad pendiente por símbolo: high-watermark al cierre no solicitado y, si el primer tick
-   * posterior excedió el umbral, su tiempo (entonces solo un HistoryRecoveryResult que cubra el
-   * hueco la decide).
+   * Continuidad pendiente por símbolo:
+   * - `watermark`: high-watermark en el primer cierre no solicitado (inicio del hueco);
+   * - `closeWatermark`: high-watermark en el último cierre; solo decide un tick posterior a él;
+   * - `exceeded`: ya se supo que el hueco supera el umbral; solo una recuperación lo decide;
+   * - `end`: tiempo del primer tick posterior al último cierre (fin del hueco a cubrir).
    */
-  const pendingContinuity = new Map<string, { firstAfter?: string; watermark: string }>();
+  const pendingContinuity = new Map<
+    string,
+    { closeWatermark: string; end?: string; exceeded: boolean; watermark: string }
+  >();
 
   const addFlag = (observationId: string, type: IncidentType) => {
     const set = flags.get(observationId) ?? new Set<IncidentType>();
@@ -269,23 +274,26 @@ export function deriveMarketData(
       highWatermark.set(tick.symbol, { eventTime: tick.event_time_utc, observationId });
     }
 
-    // gap_detection = after_reconnection: el primer tick posterior al cierre demuestra continuidad
-    // si su separación respecto del high-watermark previo no supera el perfil; si la supera, la
-    // continuidad sigue pendiente hasta un HistoryRecoveryResult.
-    // Solo decide un tick estrictamente posterior al high-watermark del cierre: uno igual o anterior
-    // no informa sobre el intervalo posterior.
+    // gap_detection = after_reconnection: decide solo el primer tick estrictamente posterior al
+    // high-watermark del último cierre (uno igual o anterior no informa sobre el intervalo). Si el
+    // hueco no estaba excedido y la separación desde su inicio no supera el perfil, demuestra
+    // continuidad; si no, fija el fin del hueco y solo un HistoryRecoveryResult lo decide.
     const pending = pendingContinuity.get(tick.symbol);
     if (
       pending !== undefined &&
-      pending.firstAfter === undefined &&
-      tick.event_time_utc > pending.watermark
+      pending.end === undefined &&
+      tick.event_time_utc > pending.closeWatermark
     ) {
-      if (Date.parse(tick.event_time_utc) - Date.parse(pending.watermark) <= maximumGap) {
+      if (
+        !pending.exceeded &&
+        Date.parse(tick.event_time_utc) - Date.parse(pending.watermark) <= maximumGap
+      ) {
         pendingContinuity.delete(tick.symbol);
       } else {
         pendingContinuity.set(tick.symbol, {
-          firstAfter: tick.event_time_utc,
-          watermark: pending.watermark,
+          ...pending,
+          end: tick.event_time_utc,
+          exceeded: true,
         });
       }
     }
@@ -311,11 +319,19 @@ export function deriveMarketData(
       const watermark = highWatermark.get(symbol);
       const pending = pendingContinuity.get(symbol);
       if (pending !== undefined) {
-        // Ya pendiente: conserva el high-watermark original y amplía el hueco; el siguiente tick
-        // posterior vuelve a fijar su extremo, así una recuperación debe cubrir todos los huecos.
-        pendingContinuity.set(symbol, { watermark: pending.watermark });
+        // Ya pendiente: conserva el inicio y lo ya sabido del hueco; el siguiente tick posterior al
+        // high-watermark actual fija el nuevo fin, así una recuperación debe cubrir todos los huecos.
+        pendingContinuity.set(symbol, {
+          closeWatermark: watermark?.eventTime ?? pending.closeWatermark,
+          exceeded: pending.exceeded,
+          watermark: pending.watermark,
+        });
       } else if (watermark !== undefined) {
-        pendingContinuity.set(symbol, { watermark: watermark.eventTime });
+        pendingContinuity.set(symbol, {
+          closeWatermark: watermark.eventTime,
+          exceeded: false,
+          watermark: watermark.eventTime,
+        });
       }
     }
     const incident = emitIncident({
@@ -399,9 +415,9 @@ export function deriveMarketData(
     // partial/unavailable la convierten en un hueco explícito. Un rango que no lo cubre no decide.
     const pending = pendingContinuity.get(event.symbol);
     if (
-      pending?.firstAfter !== undefined &&
+      pending?.end !== undefined &&
       Date.parse(event.from_event_time_utc) <= Date.parse(pending.watermark) + 1 &&
-      Date.parse(event.to_event_time_utc) >= Date.parse(pending.firstAfter) - 1
+      Date.parse(event.to_event_time_utc) >= Date.parse(pending.end) - 1
     ) {
       pendingContinuity.delete(event.symbol);
     }
