@@ -309,8 +309,12 @@ export function deriveMarketData(
     }
     for (const symbol of event.affected_symbols) {
       const watermark = highWatermark.get(symbol);
-      // Un símbolo ya pendiente conserva su hueco original: reconexiones sucesivas no lo borran.
-      if (watermark !== undefined && !pendingContinuity.has(symbol)) {
+      const pending = pendingContinuity.get(symbol);
+      if (pending !== undefined) {
+        // Ya pendiente: conserva el high-watermark original y amplía el hueco; el siguiente tick
+        // posterior vuelve a fijar su extremo, así una recuperación debe cubrir todos los huecos.
+        pendingContinuity.set(symbol, { watermark: pending.watermark });
+      } else if (watermark !== undefined) {
         pendingContinuity.set(symbol, { watermark: watermark.eventTime });
       }
     }

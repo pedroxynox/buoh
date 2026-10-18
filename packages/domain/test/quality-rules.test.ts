@@ -296,6 +296,33 @@ describe('continuidad tras reconexión (gap_detection = after_reconnection)', ()
     expect(healthOf(segments)).toBe('recovering');
   });
 
+  it('una recuperación que cubre solo el primer hueco no demuestra el segundo', () => {
+    const segments = persisted([
+      frame(1, CONNECTION_A, tickPayload(1767225600, '100.125'), '2026-01-01T00:00:00.100Z'),
+      close(2, CONNECTION_A, '2026-01-01T00:00:00.500Z'),
+      open(3, CONNECTION_B, CONNECTION_A, '2026-01-01T00:00:00.600Z'),
+      frame(4, CONNECTION_B, tickPayload(1767225609, '100.150'), '2026-01-01T00:00:09.100Z'),
+      frame(5, CONNECTION_B, tickPayload(1767225610, '100.155'), '2026-01-01T00:00:10.100Z'),
+      close(6, CONNECTION_B, '2026-01-01T00:00:10.500Z'),
+      open(7, CONNECTION_C, CONNECTION_B, '2026-01-01T00:00:10.600Z'),
+      frame(8, CONNECTION_C, tickPayload(1767225630, '100.160'), '2026-01-01T00:00:30.100Z'),
+      {
+        connection_id: CONNECTION_C,
+        event_id: id(9),
+        fixture_sequence: 9,
+        from_event_time_utc: '2026-01-01T00:00:00.001Z',
+        kind: 'history_recovery_result',
+        occurred_at_utc: '2026-01-01T00:00:30.200Z',
+        recovered_event_count: 8,
+        status: 'complete',
+        symbol: 'SYNTH_100',
+        to_event_time_utc: '2026-01-01T00:00:08.999Z',
+      },
+    ]);
+    expect(deriveMarketData(segments, profile).pendingContinuitySymbols).toEqual(['SYNTH_100']);
+    expect(healthOf(segments)).toBe('recovering');
+  });
+
   it('un tick no posterior al high-watermark no demuestra continuidad', () => {
     const segments = persisted([
       frame(1, CONNECTION_A, tickPayload(1767225601, '100.125'), '2026-01-01T00:00:01.100Z'),
