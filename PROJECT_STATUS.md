@@ -1,14 +1,14 @@
 ---
 schema_version: "1.0.0"
-status_version: 2
-updated_at_utc: "2026-10-18T00:47:22.000Z"
+status_version: 3
+updated_at_utc: "2026-10-18T01:19:59.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
-next_delivery: "F1.2"
+next_delivery: "F1.3"
 next_requirements:
-  - "F1-VECTOR-001"
-  - "F1-QUALITY-001"
+  - "F1-STREAM-001"
+  - "F1-DATASET-001"
 plan: "docs/plan/fase-1-fundacion-de-datos.md"
 ---
 
@@ -24,16 +24,18 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
 
 - La fundación de producto, arquitectura, seguridad y operación está aprobada.
 - F1.1 proporciona monorepo reproducible, contratos runtime, JSON Schema generado, vectores verificables y guardia documental.
+- F1.2 proporciona `packages/domain`: adaptador sintético, normalización, reglas de calidad 1.0.0, construcción de publicación y salud, todo puro y determinista.
+- GitHub Actions ejecuta `DOCS_BASE_REF=origin/main pnpm run verify:pr` en cada PR hacia `main` y en cada push a `main`.
 - No existe todavía worker operativo, integración con Deriv, PostgreSQL, almacenamiento de objetos ni despliegue.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
 
 ## Siguiente tarea autorizada
 
-**`F1.2` — Normalización y calidad puras.**
+**`F1.3` — Persistencia, publicación y replay.**
 
-Implementar en `packages/domain` la transformación determinista de los estímulos sintéticos a `SourceEvent`, `MarketTick`, `DataQualityIncident` y `OperationalConditionEvent`. Debe completar `F1-VECTOR-001` y `F1-QUALITY-001` reproduciendo exactamente ambos escenarios firmados, sin red, reloj real ni almacenamiento externo.
+Implementar PostgreSQL estándar, almacenamiento S3-compatible local, log de source events, publicación atómica y `pnpm run data:replay -- --dataset <id>` (`F1-STREAM-001`, `F1-DATASET-001`), reutilizando `packages/domain` para normalizar y recomputar. Incluye la rotación de segmentos por bytes, frames y ventana de `segment_policy_version = 1.0.0` y el registro operativo de `persistence_unavailable`/`source_limit_exceeded`.
 
-No crea todavía infraestructura, conexión Deriv, web, móvil, señales ni ejecución.
+No crea todavía conexión Deriv, web, móvil, señales ni ejecución.
 
 ## Evidencia de F1.1
 
@@ -45,6 +47,13 @@ No crea todavía infraestructura, conexión Deriv, web, móvil, señales ni ejec
   - principal: `sha256:611d83367d6b86a210ebdb30a2e73aa30dc35f8efd59f07fb43febf60c98defd`;
   - cero ticks: `sha256:7768d9551e4f5a2a0c16adaf1e93f98461b5cf894dac0c0c8fa7b1c1fe8d431f`.
 - El guard relaciona contratos, toolchain, worker, infraestructura y vectores con sus fuentes documentales.
+
+## Evidencia de F1.2
+
+- `pnpm run test:vectors` regenera desde los estímulos ambos escenarios firmados (principal multi-segmento y `zero-valid-ticks`) y compara byte a byte segmentos de source events, ticks, incidencias, condiciones, documento canónico, manifiesto legible, `PublishedManifestRecord`, objetos físicos y salud; recomputar desde los source events persistidos produce los mismos `dataset_id`.
+- El escenario de persistencia raw fallida produce exactamente `expected-persistence-failure.json`.
+- La suite congela el reloj en otra fecha y prohíbe `Math.random`, `crypto.randomUUID` y `fetch` durante el pipeline.
+- 21 pruebas de dominio (10 de vectores y 11 de reglas no cubiertas por el vector) pasan offline.
 
 ## Decisiones vigentes relevantes
 

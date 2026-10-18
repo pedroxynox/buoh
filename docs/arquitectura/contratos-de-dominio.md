@@ -14,6 +14,7 @@ Fase 1 implementa `SourceEvent`, `MarketTick`, `DataQualityIncident`, `Operation
 - `canonicalize` implementa RFC 8785 para IDs y hashes estructurados.
 - `pnpm run schemas:generate` produce ocho JSON Schema; `schemas:check` detecta deriva.
 - `pnpm run test:vectors` verifica manifiestos, raw hashes, IDs derivados, publicaciones y escenarios principal/cero-ticks sin red.
+- Desde F1.2, `test:vectors` además regenera con `packages/domain` todos los artefactos de ambos escenarios y los compara byte a byte.
 
 ## Taxonomías independientes
 
@@ -408,6 +409,31 @@ open_condition_types: ("connection_lost" | "event_gap_unresolved" |
 - `source_limit_exceeded`: entrada excede el valor y unidad fijados para su recurso.
 
 El perfil sintético v1 usa 2000 ms para retraso y separación tras reconexión. Ningún símbolo real hereda estos valores.
+
+### Semántica ejecutable de reglas 1.0.0
+
+Desde F1.2, [`packages/domain`](../../packages/domain/) implementa estas reglas como funciones puras sobre source events en orden de observación; el vector v1 fija su resultado. Precisiones que el vector determina o que el código necesita para no elegir silenciosamente:
+
+| `incident_type` | `severity` | `observed_ref` / `observed_at_utc` | `related_refs` | Flag en tick |
+|---|---|---|---|---|
+| `invalid_source_frame` | `error` | raw / recepción | `[]` | no hay tick |
+| `duplicate_exact` | `warning` | raw / recepción | primera observación con el mismo fingerprint | el duplicado |
+| `source_time_conflict` | `error` | raw / recepción | primera observación de ese `source + symbol + event_time_utc` | el conflictivo |
+| `out_of_order` | `warning` | raw / recepción | observación que fijó el high-watermark | el atrasado |
+| `delivery_delayed` | `warning` | raw / recepción | `[]` | el retrasado |
+| `connection_lost` | `warning` | `ConnectionClosed` / cierre | `[]` | — |
+| `event_gap_unresolved` | `error` | `HistoryRecoveryResult` / resultado | tick previo y tick posterior que delimitan el rango, entre los ya observados | el tick posterior |
+
+- Conflicto se evalúa contra la primera observación del instante; una observación idéntica a esa es solo duplicado.
+- El high-watermark avanza solo con un tiempo estrictamente mayor; igual tiempo no es fuera de orden.
+- Límites del hueco: el tick de mayor tiempo anterior a `from_event_time_utc` y el de menor tiempo posterior a `to_event_time_utc`; empates, la primera observación.
+- `partial` y `unavailable` crean incidencia; abren condición solo si la clave no está abierta. `complete` resuelve una clave abierta con `resolution_reason = history_recovered`; la reconexión usa `connection_reestablished`. Ambas resoluciones citan el evento fuente y la apertura.
+- Un frame inválido se atribuye al `tick.symbol` del payload si es un símbolo permitido; si no, al único símbolo del perfil. Con varios símbolos permitidos y sin atribución posible, la derivación aborta.
+- `evidence.reason` de `invalid_source_frame` en normalizador 1.0.0: `payload_not_json` (incluye claves duplicadas y JSON no estricto), `schema_validation_failed`, `symbol_not_allowed`, `event_time_out_of_range`, `quote_exponent_not_supported` y `quote_precision_exceeds_pip_size`.
+- `quote_decimal` sale del lexema numérico del payload: completar con ceros hasta `pip_size` es exacto; más decimales o exponente invalidan el frame en lugar de redondear.
+- `symbols` del manifiesto es la unión ordenada de símbolos de ticks, incidencias, recuperaciones y `affected_symbols`.
+- Salud derivada: cada condición abierta impone un mínimo (`connection_lost` → `recovering`, `event_gap_unresolved` → `degraded`, `persistence_unavailable` y `source_limit_exceeded` → `paused`) y gana el más severo. Sin condiciones abiertas: `starting` sin raw durable, `paused` si la cola supera su límite o la última conexión se cerró a petición, `healthy` en otro caso. `last_event_time_utc` es el extremo final de los ticks canónicos.
+- `persistence_unavailable` y `source_limit_exceeded` no se derivan de un dataset: F1.2 fija su resultado fail-closed y su evidencia; el registro operativo con severidad y referencias se define junto a la persistencia (F1.3/F1.5).
 
 ## Contratos futuros
 
