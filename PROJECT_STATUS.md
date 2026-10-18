@@ -1,15 +1,14 @@
 ---
 schema_version: "1.0.0"
-status_version: 1
-updated_at_utc: "2026-10-17T22:32:08.000Z"
+status_version: 2
+updated_at_utc: "2026-10-18T00:47:22.000Z"
 current_phase: "Fase 1 — Fundación de datos"
-phase_status: "ready"
+phase_status: "active"
 active_work: null
-next_delivery: "F1.1"
+next_delivery: "F1.2"
 next_requirements:
-  - "F1-FOUND-001"
-  - "F1-CONTRACT-001"
-  - "F1-GOV-001"
+  - "F1-VECTOR-001"
+  - "F1-QUALITY-001"
 plan: "docs/plan/fase-1-fundacion-de-datos.md"
 ---
 
@@ -24,28 +23,41 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
 ## Situación
 
 - La fundación de producto, arquitectura, seguridad y operación está aprobada.
-- El contrato de implementación de Fase 1 está listo para iniciar código.
-- No existe todavía monorepo ejecutable, worker, integración de datos, base de datos ni despliegue.
+- F1.1 proporciona monorepo reproducible, contratos runtime, JSON Schema generado, vectores verificables y guardia documental.
+- No existe todavía worker operativo, integración con Deriv, PostgreSQL, almacenamiento de objetos ni despliegue.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
 
 ## Siguiente tarea autorizada
 
-**`F1.1` — Toolchain, contratos y guardia documental.**
+**`F1.2` — Normalización y calidad puras.**
 
-Crear Node/pnpm fijados, configuración raíz, `packages/contracts`, el validador de integridad de vectores y el mapa/chequeo de impacto documental. Debe atender `F1-FOUND-001`, `F1-CONTRACT-001` y `F1-GOV-001`. No crea todavía infraestructura, conexión Deriv, web, móvil, señales ni ejecución.
+Implementar en `packages/domain` la transformación determinista de los estímulos sintéticos a `SourceEvent`, `MarketTick`, `DataQualityIncident` y `OperationalConditionEvent`. Debe completar `F1-VECTOR-001` y `F1-QUALITY-001` reproduciendo exactamente ambos escenarios firmados, sin red, reloj real ni almacenamiento externo.
+
+No crea todavía infraestructura, conexión Deriv, web, móvil, señales ni ejecución.
+
+## Evidencia de F1.1
+
+- Runtime efectivo: Node.js 24.22.0 y pnpm 12.14.0, verificado por `pnpm run runtime:check`.
+- `pnpm run verify` cubre formato, lint, tipos, build, pruebas, esquemas y documentación.
+- 7 pruebas del guard documental y 22 pruebas de contratos, JSON Schema, causalidad y seguridad de vectores pasan offline.
+- 8 JSON Schema se generan desde Zod y `schemas:check` confirma que están actualizados.
+- `test:vectors` valida los datasets firmados:
+  - principal: `sha256:611d83367d6b86a210ebdb30a2e73aa30dc35f8efd59f07fb43febf60c98defd`;
+  - cero ticks: `sha256:7768d9551e4f5a2a0c16adaf1e93f98461b5cf894dac0c0c8fa7b1c1fe8d431f`.
+- El guard relaciona contratos, toolchain, worker, infraestructura y vectores con sus fuentes documentales.
 
 ## Decisiones vigentes relevantes
 
 - TypeScript estricto es el lenguaje principal; Python queda fuera de la ruta de ingesta inicial.
 - Fase 1 usa PostgreSQL estándar y almacenamiento S3-compatible; TimescaleDB y Redis están diferidos hasta demostrar su necesidad.
-- El adaptador inicial usa únicamente el WebSocket público de Deriv, sin autenticación.
+- El adaptador inicial usará únicamente el WebSocket público de Deriv, sin autenticación.
 - Datos crudos y normalizados son artefactos distintos; una incidencia nunca reescribe el dato crudo.
-- El primer incremento implementa `pnpm run verify` y validación de integridad/esquemas de los vectores; la comparación completa del pipeline llega en F1.2.
-- Las pruebas offline sintéticas son bloqueantes. El smoke público de Deriv aparece en F1.4, es explícito y nunca constituye el único criterio de merge.
+- JSON Schema representa estructura interoperable; las invariantes criptográficas y relacionales requieren validación runtime.
+- Las pruebas offline sintéticas son bloqueantes. El smoke público de Deriv aparece en F1.4 y nunca constituye el único criterio de merge.
 
 ## Bloqueos
 
-Ninguno para iniciar `F1.1`.
+Ninguno para iniciar `F1.2`.
 
 ## Decisiones pendientes que no bloquean Fase 1
 

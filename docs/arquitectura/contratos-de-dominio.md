@@ -2,9 +2,18 @@
 
 ## Autoridad y alcance
 
-Antes de existir código, este documento es canónico para semántica y forma. Cuando se cree `packages/contracts`, sus esquemas runtime serán canónicos para estructura, tipos y validación; este documento conservará significado. JSON Schema se generará desde esa única fuente y no se editará manualmente.
+Desde F1.1, [`packages/contracts`](../../packages/contracts/) es canónico para estructura, tipos y validación runtime; este documento conserva semántica y decisiones. Los JSON Schema de `packages/contracts/generated/json-schema` se generan desde Zod y no se editan manualmente.
+
+Las validaciones que JSON Schema no expresa —hashes derivados, orden, cardinalidad entre artifacts y relaciones entre campos— permanecen en los esquemas runtime y sus pruebas. Un consumidor no debe sustituir la validación runtime por validar únicamente el JSON Schema.
 
 Fase 1 implementa `SourceEvent`, `MarketTick`, `DataQualityIncident`, `OperationalConditionEvent`, `IngestionCursor`, `DatasetManifest`, `PublishedManifestRecord` y `HealthReport`. Estrategias, señales y ejecución permanecen conceptuales.
+
+## Evidencia de F1.1
+
+- Zod 4 mantiene contratos estrictos y uniones discriminadas.
+- `canonicalize` implementa RFC 8785 para IDs y hashes estructurados.
+- `pnpm run schemas:generate` produce ocho JSON Schema; `schemas:check` detecta deriva.
+- `pnpm run test:vectors` verifica manifiestos, raw hashes, IDs derivados, publicaciones y escenarios principal/cero-ticks sin red.
 
 ## Taxonomías independientes
 
@@ -62,7 +71,7 @@ payload_utf8: string
 raw_payload_sha256: Sha256Hex
 ```
 
-El hash se calcula sobre bytes UTF-8 exactos de `payload_utf8`, sin parsear ni reserializar. Un payload inválido sigue siendo raw válido si pudo persistirse.
+El hash se calcula sobre bytes UTF-8 exactos de `payload_utf8`, sin parsear ni reserializar. Se rechazan strings JavaScript con surrogates aislados porque no representan texto Unicode bien formado. Un payload inválido respecto al esquema de fuente sigue siendo raw válido si pudo persistirse.
 
 ### `ConnectionOpened`
 
@@ -232,6 +241,8 @@ resolution_reason: string                    # requerido solo si action = resolv
 
 `resolution_reason` está requerido solo para `resolved` y prohibido para `opened`.
 
+`condition_event_id` autentica el evento, pero `condition_key` depende de su causa. Por ello, todo lote de condiciones debe atravesar `validateConditionCausality({ sourceEvents, incidents, conditions })`; validar eventos aislados no autoriza persistencia ni salud. Los rechazos contextuales usan `ContractContextError` con `code`, `path` y `context` estables.
+
 `condition_key` tiene forma `<condition_type>:sha256:<digest>`, donde digest es SHA-256 de JCS de la identidad:
 
 | Tipo | Identidad para digest |
@@ -303,7 +314,7 @@ source_event_schema_version: SchemaVersion
 market_tick_schema_version: SchemaVersion
 incident_schema_version: SchemaVersion
 condition_event_schema_version: SchemaVersion
-symbols: Symbol[]
+symbols: Symbol[]                            # no vacío, único y ordenado
 event_time_from_utc: UtcTimestampMs | null
 event_time_to_utc: UtcTimestampMs | null
 source_event_count: NonNegativeInteger
@@ -367,7 +378,7 @@ open_condition_types: ("connection_lost" | "event_gap_unresolved" |
                        "persistence_unavailable" | "source_limit_exceeded")[]
 ```
 
-`open_condition_types` se deriva del reducer de `OperationalConditionEvent`, es único y ordenado. `healthy` exige conexión esperada, almacenamiento disponible, backlog por conteo y bytes bajo límites y último raw aceptado durable.
+`open_condition_types` se deriva del validador/reducer contextual, es único y ordenado. `healthy` exige conexión `connected`, ninguna condición abierta, último raw durable y backlog bajo límites; un reporte visiblemente contradictorio falla en runtime.
 
 `persistence_unavailable` y `source_limit_exceeded` son incidencias operativas cuando impiden crear un source event durable; permanecen en el registro operativo PostgreSQL y no se insertan retroactivamente en un dataset publicado. Los artifacts `quality_incidents` y `operational_conditions` del dataset contienen únicamente eventos derivables de sus source events.
 
@@ -412,4 +423,4 @@ El perfil sintético v1 usa 2000 ms para retraso y separación tras reconexión.
 
 ## Oráculo inicial
 
-[`test-vectors/market-data/v1`](../../test-vectors/market-data/v1/) es normativo para serialización lógica, hashes, calidad, salud y fallo de persistencia. Sus datos son sintéticos.
+[`test-vectors/market-data/v1`](../../test-vectors/market-data/v1/) es normativo para serialización lógica, hashes, calidad, salud y fallo de persistencia. Sus datos son sintéticos. El verificador limita cada archivo a 8 MiB y cada manifiesto a 64 MiB declarados, rechaza paths absolutos, traversal y symlinks, y valida expectativas/perfiles además de checksums.

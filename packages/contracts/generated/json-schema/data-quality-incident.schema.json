@@ -1,0 +1,1004 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/DataQualityIncident",
+  "$defs": {
+    "DataQualityIncident": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "schema_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "incident_id": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "info",
+                "warning",
+                "error",
+                "critical"
+              ]
+            },
+            "quality_rule_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observed_at_utc": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            "observed_ref": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              ]
+            },
+            "related_refs": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  }
+                ]
+              }
+            },
+            "incident_type": {
+              "type": "string",
+              "const": "invalid_source_frame"
+            },
+            "symbol": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence": {
+              "type": "object",
+              "properties": {
+                "raw_payload_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "raw_payload_sha256",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema_version",
+            "incident_id",
+            "severity",
+            "quality_rule_version",
+            "source",
+            "observed_at_utc",
+            "observed_ref",
+            "related_refs",
+            "incident_type",
+            "symbol",
+            "evidence"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "incident_id": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "info",
+                "warning",
+                "error",
+                "critical"
+              ]
+            },
+            "quality_rule_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observed_at_utc": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            "observed_ref": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              ]
+            },
+            "related_refs": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  }
+                ]
+              }
+            },
+            "incident_type": {
+              "type": "string",
+              "const": "duplicate_exact"
+            },
+            "symbol": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence": {
+              "type": "object",
+              "properties": {
+                "tick_fingerprint_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "tick_fingerprint_sha256"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema_version",
+            "incident_id",
+            "severity",
+            "quality_rule_version",
+            "source",
+            "observed_at_utc",
+            "observed_ref",
+            "related_refs",
+            "incident_type",
+            "symbol",
+            "evidence"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "incident_id": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "info",
+                "warning",
+                "error",
+                "critical"
+              ]
+            },
+            "quality_rule_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observed_at_utc": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            "observed_ref": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              ]
+            },
+            "related_refs": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  }
+                ]
+              }
+            },
+            "incident_type": {
+              "type": "string",
+              "const": "source_time_conflict"
+            },
+            "symbol": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence": {
+              "type": "object",
+              "properties": {
+                "event_time_utc": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+                },
+                "tick_fingerprints": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    }
+                  ],
+                  "items": false,
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              },
+              "required": [
+                "event_time_utc",
+                "tick_fingerprints"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema_version",
+            "incident_id",
+            "severity",
+            "quality_rule_version",
+            "source",
+            "observed_at_utc",
+            "observed_ref",
+            "related_refs",
+            "incident_type",
+            "symbol",
+            "evidence"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "incident_id": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "info",
+                "warning",
+                "error",
+                "critical"
+              ]
+            },
+            "quality_rule_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observed_at_utc": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            "observed_ref": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              ]
+            },
+            "related_refs": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  }
+                ]
+              }
+            },
+            "incident_type": {
+              "type": "string",
+              "const": "out_of_order"
+            },
+            "symbol": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence": {
+              "type": "object",
+              "properties": {
+                "event_time_utc": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+                },
+                "high_watermark_utc": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+                }
+              },
+              "required": [
+                "event_time_utc",
+                "high_watermark_utc"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema_version",
+            "incident_id",
+            "severity",
+            "quality_rule_version",
+            "source",
+            "observed_at_utc",
+            "observed_ref",
+            "related_refs",
+            "incident_type",
+            "symbol",
+            "evidence"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "incident_id": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "info",
+                "warning",
+                "error",
+                "critical"
+              ]
+            },
+            "quality_rule_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observed_at_utc": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            "observed_ref": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              ]
+            },
+            "related_refs": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  }
+                ]
+              }
+            },
+            "incident_type": {
+              "type": "string",
+              "const": "delivery_delayed"
+            },
+            "symbol": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence": {
+              "type": "object",
+              "properties": {
+                "delay_ms": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "maximum_delivery_delay_ms": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "delay_ms",
+                "maximum_delivery_delay_ms"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema_version",
+            "incident_id",
+            "severity",
+            "quality_rule_version",
+            "source",
+            "observed_at_utc",
+            "observed_ref",
+            "related_refs",
+            "incident_type",
+            "symbol",
+            "evidence"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "incident_id": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "info",
+                "warning",
+                "error",
+                "critical"
+              ]
+            },
+            "quality_rule_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observed_at_utc": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            "observed_ref": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              ]
+            },
+            "related_refs": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  }
+                ]
+              }
+            },
+            "incident_type": {
+              "type": "string",
+              "const": "connection_lost"
+            },
+            "symbol": {
+              "type": "null"
+            },
+            "evidence": {
+              "type": "object",
+              "properties": {
+                "affected_symbols": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "closure_type": {
+                  "type": "string",
+                  "enum": [
+                    "remote",
+                    "transport_error",
+                    "timeout"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "affected_symbols",
+                "closure_type",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema_version",
+            "incident_id",
+            "severity",
+            "quality_rule_version",
+            "source",
+            "observed_at_utc",
+            "observed_ref",
+            "related_refs",
+            "incident_type",
+            "symbol",
+            "evidence"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "incident_id": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "info",
+                "warning",
+                "error",
+                "critical"
+              ]
+            },
+            "quality_rule_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observed_at_utc": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            "observed_ref": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              ]
+            },
+            "related_refs": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  }
+                ]
+              }
+            },
+            "incident_type": {
+              "type": "string",
+              "const": "event_gap_unresolved"
+            },
+            "symbol": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence": {
+              "type": "object",
+              "properties": {
+                "from_event_time_utc": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+                },
+                "to_event_time_utc": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "from_event_time_utc",
+                "to_event_time_utc",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema_version",
+            "incident_id",
+            "severity",
+            "quality_rule_version",
+            "source",
+            "observed_at_utc",
+            "observed_ref",
+            "related_refs",
+            "incident_type",
+            "symbol",
+            "evidence"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "incident_id": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "info",
+                "warning",
+                "error",
+                "critical"
+              ]
+            },
+            "quality_rule_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observed_at_utc": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            "observed_ref": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              ]
+            },
+            "related_refs": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  }
+                ]
+              }
+            },
+            "incident_type": {
+              "type": "string",
+              "const": "persistence_unavailable"
+            },
+            "symbol": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "evidence": {
+              "type": "object",
+              "properties": {
+                "stage": {
+                  "type": "string",
+                  "enum": [
+                    "raw_object_write",
+                    "source_event_index",
+                    "normalized_object_write",
+                    "incident_write",
+                    "manifest_write",
+                    "manifest_commit"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "stage",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema_version",
+            "incident_id",
+            "severity",
+            "quality_rule_version",
+            "source",
+            "observed_at_utc",
+            "observed_ref",
+            "related_refs",
+            "incident_type",
+            "symbol",
+            "evidence"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "incident_id": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "info",
+                "warning",
+                "error",
+                "critical"
+              ]
+            },
+            "quality_rule_version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observed_at_utc": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            "observed_ref": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              ]
+            },
+            "related_refs": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  }
+                ]
+              }
+            },
+            "incident_type": {
+              "type": "string",
+              "const": "source_limit_exceeded"
+            },
+            "symbol": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "evidence": {
+              "type": "object",
+              "properties": {
+                "resource": {
+                  "type": "string",
+                  "enum": [
+                    "websocket_frame",
+                    "in_memory_queue_events",
+                    "in_memory_queue_bytes",
+                    "schema_archive",
+                    "schema_entry",
+                    "schema_entries",
+                    "schema_expanded"
+                  ]
+                },
+                "unit": {
+                  "type": "string",
+                  "enum": [
+                    "bytes",
+                    "events",
+                    "entries"
+                  ]
+                },
+                "observed_value": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "maximum_value": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "resource",
+                "unit",
+                "observed_value",
+                "maximum_value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema_version",
+            "incident_id",
+            "severity",
+            "quality_rule_version",
+            "source",
+            "observed_at_utc",
+            "observed_ref",
+            "related_refs",
+            "incident_type",
+            "symbol",
+            "evidence"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "title": "DataQualityIncident"
+    }
+  }
+}

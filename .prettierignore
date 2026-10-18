@@ -1,0 +1,10 @@
+.git/
+node_modules/
+dist/
+coverage/
+.pnpm-store/
+.turbo/
+pnpm-lock.yaml
+packages/contracts/generated/**
+**/*.md
+test-vectors/**

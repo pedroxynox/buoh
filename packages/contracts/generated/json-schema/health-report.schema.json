@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/HealthReport",
+  "$defs": {
+    "HealthReport": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "execution_mode": {
+          "type": "string",
+          "const": "disabled"
+        },
+        "service_health": {
+          "type": "string",
+          "enum": [
+            "starting",
+            "healthy",
+            "degraded",
+            "recovering",
+            "paused",
+            "failed"
+          ]
+        },
+        "connection_state": {
+          "type": "string",
+          "enum": [
+            "disconnected",
+            "connecting",
+            "connected"
+          ]
+        },
+        "backlog_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "backlog_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "last_observation_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_received_at_utc": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_event_time_utc": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_published_dataset_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "open_condition_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "connection_lost",
+              "event_gap_unresolved",
+              "persistence_unavailable",
+              "source_limit_exceeded"
+            ]
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "source",
+        "execution_mode",
+        "service_health",
+        "connection_state",
+        "backlog_count",
+        "backlog_bytes",
+        "last_observation_id",
+        "last_received_at_utc",
+        "last_event_time_utc",
+        "last_published_dataset_id",
+        "open_condition_types"
+      ],
+      "additionalProperties": false,
+      "title": "HealthReport"
+    }
+  }
+}

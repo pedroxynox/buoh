@@ -62,7 +62,15 @@ El primer PR de código debe implementar la interfaz de comandos definida en el 
 
 Revisa impacto documental en todo PR. Actualiza `PROJECT_STATUS.md` cuando cambien fase, objetivo, siguiente tarea, bloqueos, decisiones pendientes, componentes autorizados o evidencia de salida. No lo conviertas en un changelog.
 
-La guardia documental de `F1-GOV-001` automatizará el mapa de impacto, pero ADR, seguridad y riesgo siempre requieren revisión humana.
+La guardia documental de `F1-GOV-001` usa [`docs/impact-map.json`](docs/impact-map.json):
+
+```text
+pnpm run docs:check
+DOCS_BASE_REF=origin/main pnpm run verify:pr
+pnpm run docs:check -- --acknowledge=contracts:Razón explícita para incluir en el PR
+```
+
+Sin base, revisa cambios staged, unstaged y no rastreados. `verify:pr` exige `DOCS_BASE_REF` y revisa todo el rango comprometido contra la rama objetivo. Si una ruta activa una regla, debe cambiar una fuente indicada o recibir una justificación de al menos 20 caracteres; la salida exige copiar esa razón al PR. La guardia nunca modifica documentación. ADR, seguridad y riesgo conservan revisión humana.
 
 ## Pull requests
 

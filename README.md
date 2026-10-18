@@ -15,6 +15,18 @@ Cualquier persona o motor de IA debe leer, en orden:
 3. [Plan ejecutable de Fase 1](docs/plan/fase-1-fundacion-de-datos.md).
 4. Contratos, ADR y runbooks afectados por la tarea.
 
+## Desarrollo actual
+
+F1.1 proporciona un monorepo mínimo y contratos runtime; todavía no conecta con Deriv ni ejecuta operaciones.
+
+```text
+pnpm install
+pnpm run verify
+pnpm run test:vectors
+```
+
+pnpm usa el runtime Node fijado por el proyecto. Consulta [`packages/contracts`](packages/contracts/) para los esquemas ejecutables.
+
 ## Propósito
 
 Convertir hipótesis de trading en un ciclo controlado: datos verificables, estrategias versionadas, *backtests* reproducibles, señales auditables, simulación, ejecución autorizada y reconciliación. buoh perseguirá evidencia de rentabilidad neta y sostenibilidad, no promesas de ganancia.
