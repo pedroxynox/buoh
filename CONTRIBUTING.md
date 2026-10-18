@@ -70,6 +70,8 @@ DOCS_BASE_REF=origin/main pnpm run verify:pr
 pnpm run docs:check -- --acknowledge=contracts:Razón explícita para incluir en el PR
 ```
 
+GitHub Actions (`.github/workflows/verify.yml`) ejecuta `DOCS_BASE_REF=origin/main pnpm run verify:pr` en cada PR hacia `main` y en cada push a `main`, con el Node y pnpm fijados.
+
 Sin base, revisa cambios staged, unstaged y no rastreados. `verify:pr` exige `DOCS_BASE_REF` y revisa todo el rango comprometido contra la rama objetivo. Si una ruta activa una regla, debe cambiar una fuente indicada o recibir una justificación de al menos 20 caracteres; la salida exige copiar esa razón al PR. La guardia nunca modifica documentación. ADR, seguridad y riesgo conservan revisión humana.
 
 ## Pull requests

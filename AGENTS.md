@@ -80,6 +80,12 @@ El PR es el paquete de relevo. Debe permitir que otro modelo revise el cambio si
 
 El modelo revisor contrasta el diff con fuentes canónicas y vectores independientes; no acepta como prueba la explicación del modelo autor.
 
+### Revisión semántica
+
+- Cada PR recibe una sola revisión semántica.
+- Solo se repite si encontró hallazgos bloqueantes, y únicamente tras corregirlos.
+- Los hallazgos menores no reabren la revisión: quedan anotados en el PR como pendientes.
+
 ## Desarrollo por fases
 
 Solo crea directorios y dependencias requeridos por el plan activo. La arquitectura objetivo describe el destino, no autoriza implementar todo el destino en una fase temprana.
