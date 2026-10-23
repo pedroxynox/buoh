@@ -4,6 +4,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 
 import { validateConditionCausality } from './conditions.js';
+import { validateDatasetConsistency } from './dataset-consistency.js';
 import { closureTypeSchema } from './enums.js';
 import {
   datasetManifestSchema,
@@ -348,13 +349,6 @@ async function verifyDatasetScenario(input: {
       throw new TypeError(`Hash raw inválido: ${raw.observation_id}`);
     }
   }
-  for (const tick of parsedTicks) {
-    const raw = rawByObservation.get(tick.observation_id);
-    if (raw?.raw_payload_sha256 !== tick.raw_payload_sha256) {
-      throw new TypeError(`Tick sin raw correspondiente: ${tick.observation_id}`);
-    }
-  }
-
   const dataset = datasetManifestSchema.parse(
     await readJson(resolve(datasetDirectory, 'expected-dataset.json'), vectorRoot),
   );
@@ -382,15 +376,14 @@ async function verifyDatasetScenario(input: {
   }
   await verifyStorageObjects(vectorRoot, dataset);
 
-  if (
-    dataset.manifest_core.source_event_count !== parsedSourceEvents.length ||
-    dataset.manifest_core.raw_frame_count !== rawByObservation.size ||
-    dataset.manifest_core.normalized_tick_count !== parsedTicks.length ||
-    dataset.manifest_core.incident_count !== parsedIncidents.length ||
-    dataset.manifest_core.condition_event_count !== parsedConditions.length
-  ) {
-    throw new TypeError('Los conteos del manifiesto no corresponden a sus artefactos.');
-  }
+  // Conteos, orden canónico, unión tick→raw, referencias, procedencia y extremos temporales.
+  validateDatasetConsistency({
+    conditions: parsedConditions,
+    core: dataset.manifest_core,
+    incidents: parsedIncidents,
+    sourceEvents: parsedSourceEvents,
+    ticks: parsedTicks,
+  });
 
   const logicalById = new Map(
     dataset.manifest_core.logical_artifacts.map((artifact) => [artifact.artifact_id, artifact]),
@@ -407,63 +400,6 @@ async function verifyDatasetScenario(input: {
     logicalById.get('operational_conditions:000000')?.record_count !== parsedConditions.length
   ) {
     throw new TypeError('record_count no coincide con los artifacts derivados.');
-  }
-
-  const orderedTicks = parsedTicks.toSorted((left, right) =>
-    left.event_time_utc === right.event_time_utc
-      ? left.tick_fingerprint_sha256 === right.tick_fingerprint_sha256
-        ? left.observation_id.localeCompare(right.observation_id)
-        : left.tick_fingerprint_sha256.localeCompare(right.tick_fingerprint_sha256)
-      : left.event_time_utc.localeCompare(right.event_time_utc),
-  );
-  const orderedIncidents = parsedIncidents.toSorted((left, right) =>
-    left.observed_at_utc === right.observed_at_utc
-      ? left.incident_type === right.incident_type
-        ? left.incident_id.localeCompare(right.incident_id)
-        : left.incident_type.localeCompare(right.incident_type)
-      : left.observed_at_utc.localeCompare(right.observed_at_utc),
-  );
-  if (
-    JSON.stringify(orderedTicks) !== JSON.stringify(parsedTicks) ||
-    JSON.stringify(orderedIncidents) !== JSON.stringify(parsedIncidents)
-  ) {
-    throw new TypeError('Los artifacts derivados no están en orden canónico.');
-  }
-
-  const knownSourceRefs = new Set(
-    parsedSourceEvents.map((event) =>
-      event.kind === 'raw_source_frame' ? event.observation_id : event.event_id,
-    ),
-  );
-  for (const incident of parsedIncidents) {
-    if (
-      !knownSourceRefs.has(incident.observed_ref) ||
-      incident.related_refs.some((reference) => !knownSourceRefs.has(reference))
-    ) {
-      throw new TypeError(`Incidencia con referencia desconocida: ${incident.incident_id}.`);
-    }
-  }
-
-  if (
-    parsedSourceEvents.some((event) => event.source !== dataset.manifest_core.source) ||
-    parsedTicks.some(
-      (tick) =>
-        tick.source !== dataset.manifest_core.source ||
-        tick.connector_version !== dataset.manifest_core.connector_version ||
-        !dataset.manifest_core.symbols.includes(tick.symbol),
-    ) ||
-    parsedIncidents.some((incident) => incident.source !== dataset.manifest_core.source)
-  ) {
-    throw new TypeError('La procedencia de artifacts no coincide con manifest_core.');
-  }
-
-  const firstTick = parsedTicks[0];
-  const lastTick = parsedTicks.at(-1);
-  if (
-    (firstTick?.event_time_utc ?? null) !== dataset.manifest_core.event_time_from_utc ||
-    (lastTick?.event_time_utc ?? null) !== dataset.manifest_core.event_time_to_utc
-  ) {
-    throw new TypeError('Los extremos temporales no coinciden con los ticks canónicos.');
   }
 
   let serviceHealth: string | null = null;

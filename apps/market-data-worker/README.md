@@ -10,7 +10,8 @@ Todavía no conecta con Deriv ni tiene log raw-first durable (F1.3b).
 segmentos de source events ─ publishDataset ─▶ objetos sha256/<hash> verificados (S3)
                                               ▶ manifests/<dataset_id>/<publication_id>/<digest>.json
                                               ▶ commit PostgreSQL: dataset, incidencias, record activo
-dataset_id ─ replayDataset ─▶ verify-only: record, documento, hashes físicos/lógicos, contratos, core
+dataset_id ─ replayDataset ─▶ verify-only: record, documento, hashes físicos/lógicos, contratos,
+                             │              invariantes entre artefactos, versiones de contrato, core
                              ▶ recompute: además regenera con packages/domain y compara core e ID
 ```
 

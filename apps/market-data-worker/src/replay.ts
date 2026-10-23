@@ -1,11 +1,13 @@
 import {
   canonicalJson,
+  ContractContextError,
   dataQualityIncidentSchema,
   datasetManifestSchema,
   marketTickSchema,
   sha256Hex,
   sourceEventSchema,
   validateConditionCausality,
+  validateDatasetConsistency,
   validatePublicationRecord,
   type DatasetManifest,
   type DatasetManifestCore,
@@ -24,6 +26,7 @@ import {
   QUALITY_RULE_VERSION,
   SEGMENT_POLICY_VERSION,
 } from '@buoh/domain';
+import { z } from 'zod';
 
 import { decodeObject } from './encoding.js';
 import { ObjectReadError, ReplayError, type ReplayErrorCode } from './errors.js';
@@ -62,6 +65,8 @@ export interface ReplayReport {
 
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const JSON_ROLES = new Set<StorageObjectRef['role']>(['quality_profile', 'source_schema']);
+/** Identidad mínima del perfil que `--verify-only` contrasta con `manifest_core`. */
+const profileIdentitySchema = z.object({ profile_id: z.string(), source: z.string() });
 
 function fail(
   code: ReplayErrorCode,
@@ -298,39 +303,94 @@ function validateLogicalArtifacts(
     );
 
   const segments = parseAll('source_events', (value) => sourceEventSchema.safeParse(value));
-  parseAll('normalized_ticks', (value) => marketTickSchema.safeParse(value));
+  const ticks = parseAll('normalized_ticks', (value) => marketTickSchema.safeParse(value)).flat();
   const incidents = parseAll('quality_incidents', (value) =>
     dataQualityIncidentSchema.safeParse(value),
   ).flat();
-  const conditions = (recordsByRole.get('operational_conditions') ?? []).flat();
   const sourceEvents = segments.flat();
+  let conditions;
   try {
-    validateConditionCausality({ conditions, incidents, sourceEvents });
+    conditions = validateConditionCausality({
+      conditions: (recordsByRole.get('operational_conditions') ?? []).flat(),
+      incidents,
+      sourceEvents,
+    }).conditions;
   } catch (error) {
     fail('CONTRACT_INVALID', 'Las condiciones no son causales respecto del dataset.', {}, error);
   }
 
-  const rawFrames = sourceEvents.filter((event) => event.kind === 'raw_source_frame').length;
-  if (rawFrames !== core.raw_frame_count) {
-    fail('CONTRACT_INVALID', 'raw_frame_count no corresponde a los source events.');
+  // Invariantes entre artefactos: conteos, orden, tick→raw, referencias, procedencia y extremos.
+  try {
+    validateDatasetConsistency({ conditions, core, incidents, sourceEvents, ticks });
+  } catch (error) {
+    if (error instanceof ContractContextError) {
+      fail(
+        'CONTRACT_INVALID',
+        error.message,
+        { contract_code: error.code, path: error.path },
+        error,
+      );
+    }
+    throw error;
+  }
+
+  const profile = logicalById.get('quality_profile:000000');
+  let profileDocument: unknown;
+  try {
+    profileDocument = JSON.parse(
+      decodeText(profile ?? new Uint8Array(), 'OBJECT_INTEGRITY', 'quality_profile:000000'),
+    );
+  } catch (error) {
+    if (error instanceof ReplayError) {
+      throw error;
+    }
+    fail('OBJECT_INTEGRITY', 'Perfil de calidad ilegible.', {}, error);
+  }
+  const identity = profileIdentitySchema.safeParse(profileDocument);
+  if (
+    !identity.success ||
+    identity.data.profile_id !== core.quality_profile_id ||
+    identity.data.source !== core.source
+  ) {
+    fail('CONTRACT_INVALID', 'El perfil de calidad no corresponde a manifest_core.');
   }
   return { segments };
 }
 
-function versionMismatches(core: DatasetManifestCore): string[] {
-  const expected: Partial<Record<keyof DatasetManifestCore, string>> = {
-    canonicalization_version: CANONICALIZATION_VERSION,
-    condition_event_schema_version: CONTRACT_SCHEMA_VERSION,
-    incident_schema_version: CONTRACT_SCHEMA_VERSION,
-    market_tick_schema_version: CONTRACT_SCHEMA_VERSION,
-    normalizer_version: NORMALIZER_VERSION,
-    quality_rule_version: QUALITY_RULE_VERSION,
-    schema_version: CONTRACT_SCHEMA_VERSION,
-    segment_policy_version: SEGMENT_POLICY_VERSION,
-    source_event_schema_version: CONTRACT_SCHEMA_VERSION,
-  };
-  return Object.entries(expected)
-    .filter(([field, version]) => core[field as keyof DatasetManifestCore] !== version)
+/** Versiones de los lectores que usa el propio replay; se exigen en ambos modos. */
+function contractVersionMismatches(
+  manifest: DatasetManifest,
+  record: PublishedManifestRecord,
+): string[] {
+  const core = manifest.manifest_core;
+  const fields: [string, string, string][] = [
+    ['canonicalization_version', core.canonicalization_version, CANONICALIZATION_VERSION],
+    [
+      'condition_event_schema_version',
+      core.condition_event_schema_version,
+      CONTRACT_SCHEMA_VERSION,
+    ],
+    ['incident_schema_version', core.incident_schema_version, CONTRACT_SCHEMA_VERSION],
+    ['manifest.schema_version', manifest.schema_version, CONTRACT_SCHEMA_VERSION],
+    ['market_tick_schema_version', core.market_tick_schema_version, CONTRACT_SCHEMA_VERSION],
+    ['record.schema_version', record.schema_version, CONTRACT_SCHEMA_VERSION],
+    ['schema_version', core.schema_version, CONTRACT_SCHEMA_VERSION],
+    ['source_event_schema_version', core.source_event_schema_version, CONTRACT_SCHEMA_VERSION],
+  ];
+  return fields
+    .filter(([, declared, implemented]) => declared !== implemented)
+    .map(([field]) => field);
+}
+
+/** Versiones del normalizador, reglas y segmentación; solo la recomputación las necesita. */
+function implementationVersionMismatches(core: DatasetManifestCore): string[] {
+  const fields: [string, string, string][] = [
+    ['normalizer_version', core.normalizer_version, NORMALIZER_VERSION],
+    ['quality_rule_version', core.quality_rule_version, QUALITY_RULE_VERSION],
+    ['segment_policy_version', core.segment_policy_version, SEGMENT_POLICY_VERSION],
+  ];
+  return fields
+    .filter(([, declared, implemented]) => declared !== implemented)
     .map(([field]) => field);
 }
 
@@ -341,7 +401,7 @@ function recompute(
   segments: readonly SourceEvent[][],
 ): void {
   const core = manifest.manifest_core;
-  const unsupported = versionMismatches(core);
+  const unsupported = implementationVersionMismatches(core);
   if (unsupported.length > 0) {
     fail('VERSION_UNSUPPORTED', 'El dataset declara versiones no implementadas; no se migra.', {
       fields: unsupported,
@@ -411,6 +471,12 @@ function recompute(
 export async function replayDataset(input: ReplayInput): Promise<ReplayReport> {
   const record = await resolveActiveRecord(input);
   const manifest = await loadManifest(input, record);
+  const unsupported = contractVersionMismatches(manifest, record);
+  if (unsupported.length > 0) {
+    fail('VERSION_UNSUPPORTED', 'El dataset declara versiones de contrato no implementadas.', {
+      fields: unsupported,
+    });
+  }
   const logicalById = await loadLogicalObjects(input, manifest);
   const { segments } = validateLogicalArtifacts(manifest.manifest_core, logicalById);
 

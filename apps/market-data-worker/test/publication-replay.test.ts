@@ -6,11 +6,13 @@ import {
   datasetManifestCoreSchema,
   datasetManifestSchema,
   deriveDatasetId,
+  deriveTickFingerprint,
   EMPTY_SEQUENCE_SHA256,
   sha256Hex,
   uuidV7Schema,
   validatePublicationRecord,
   type DatasetManifestCore,
+  type MarketTick,
 } from '@buoh/contracts';
 import { canonicalJsonBytes, ndjsonBytes, type DatasetPublication } from '@buoh/domain';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -337,23 +339,30 @@ describe('F1-DATASET-001: publicación atómica (ADR-0004 §8)', () => {
   });
 });
 
-/** Construye una publicación autoconsistente con un cambio respecto a la recomputación legítima. */
+/**
+ * Construye una publicación cuyos hashes, core, `dataset_id`, documento y record son coherentes
+ * entre sí, pero con un cambio respecto a la recomputación legítima. Simula un writer defectuoso.
+ */
 function forge(
   target: ReturnType<typeof stores>,
   base: DatasetPublication,
-  change: { dropLastTick?: true; normalizer_version?: string },
+  change: {
+    core?: (core: DatasetManifestCore) => DatasetManifestCore;
+    ticks?: (ticks: MarketTick[]) => MarketTick[];
+  },
 ): string {
   const bucket = target.objects.bucket;
   let core: DatasetManifestCore = structuredClone(base.core);
   const storage = base.manifest.storage_objects.map((object) => ({ ...object }));
   const bytesById = new Map(base.objects);
 
-  if (change.dropLastTick === true) {
-    const ticks = base.derived.ticks.slice(0, -1);
+  if (change.ticks !== undefined) {
+    const ticks = change.ticks([...base.derived.ticks]);
     const bytes = ndjsonBytes(ticks);
     const digest = sha256Hex(bytes);
     core = {
       ...core,
+      event_time_from_utc: ticks[0]?.event_time_utc ?? null,
       event_time_to_utc: ticks.at(-1)?.event_time_utc ?? null,
       logical_artifacts: core.logical_artifacts.map((artifact) =>
         artifact.artifact_id === 'normalized_ticks:000000'
@@ -376,8 +385,8 @@ function forge(
     };
     bytesById.set('normalized_ticks:000000', bytes);
   }
-  if (change.normalizer_version !== undefined) {
-    core = { ...core, normalizer_version: change.normalizer_version };
+  if (change.core !== undefined) {
+    core = change.core(core);
   }
 
   const parsedCore = datasetManifestCoreSchema.parse(core);
@@ -494,7 +503,8 @@ describe('F1-DATASET-001: data:replay (ADR-0004 §9)', () => {
   it('--verify-only demuestra integridad, no el normalizador', async () => {
     const target = stores();
     const base = await publish(target, 'principal');
-    const forged = forge(target, base, { dropLastTick: true });
+    // Un tick menos, con conteos y extremos coherentes: íntegro, pero no reproducible.
+    const forged = forge(target, base, { ticks: (ticks) => ticks.slice(0, -1) });
 
     expect((await replay(target, forged, 'verify-only')).status).toBe('verified');
     const error = await expectReplayError(
@@ -510,8 +520,11 @@ describe('F1-DATASET-001: data:replay (ADR-0004 §9)', () => {
   it('aborta ante una versión no implementada en lugar de migrar', async () => {
     const target = stores();
     const base = await publish(target, 'principal');
-    const forged = forge(target, base, { normalizer_version: '2.0.0' });
+    const forged = forge(target, base, {
+      core: (core) => ({ ...core, normalizer_version: '2.0.0' }),
+    });
 
+    // La versión del normalizador solo afecta a la recomputación.
     expect((await replay(target, forged, 'verify-only')).status).toBe('verified');
     const error = await expectReplayError(
       replay(target, forged, 'recompute'),
@@ -519,6 +532,82 @@ describe('F1-DATASET-001: data:replay (ADR-0004 §9)', () => {
     );
     expect(error.details).toEqual({ fields: ['normalizer_version'] });
   });
+
+  it('--verify-only aborta ante una versión de contrato no implementada', async () => {
+    const target = stores();
+    const base = await publish(target, 'principal');
+    const forged = forge(target, base, {
+      core: (core) => ({ ...core, market_tick_schema_version: '2.0.0' }),
+    });
+    for (const mode of ['verify-only', 'recompute'] as const) {
+      const error = await expectReplayError(replay(target, forged, mode), 'VERSION_UNSUPPORTED');
+      expect(error.details).toEqual({ fields: ['market_tick_schema_version'] });
+    }
+  });
+
+  const inconsistencies: [string, Parameters<typeof forge>[2], string | undefined][] = [
+    [
+      'ticks fuera de orden canónico',
+      {
+        ticks: (ticks) => {
+          const [first, second, ...rest] = ticks;
+          return first === undefined || second === undefined ? ticks : [second, first, ...rest];
+        },
+      },
+      'DATASET_ORDER_INVALID',
+    ],
+    [
+      'extremo temporal que no es el primer tick',
+      { core: (core) => ({ ...core, event_time_from_utc: '2000-01-01T00:00:00.000Z' }) },
+      'DATASET_RANGE_MISMATCH',
+    ],
+    [
+      'tick sin raw correspondiente',
+      {
+        ticks: (ticks) =>
+          ticks.map((tick, index) =>
+            index === 0
+              ? { ...tick, observation_id: '019b76da-cb28-7003-8000-00000000dead' }
+              : tick,
+          ),
+      },
+      'DATASET_REFERENCE_UNKNOWN',
+    ],
+    [
+      'tick de otra fuente',
+      {
+        ticks: (ticks) =>
+          ticks.map((tick, index) => {
+            if (index !== 0) {
+              return tick;
+            }
+            const moved = { ...tick, source: 'otra-fuente' };
+            return { ...moved, tick_fingerprint_sha256: deriveTickFingerprint(moved) };
+          }),
+      },
+      'DATASET_PROVENANCE_MISMATCH',
+    ],
+    [
+      'perfil de calidad distinto del declarado',
+      { core: (core) => ({ ...core, quality_profile_id: 'otro-perfil' }) },
+      undefined,
+    ],
+  ];
+
+  it.each(inconsistencies)(
+    '--verify-only rechaza un dataset íntegro pero inconsistente: %s',
+    async (_label, change, contractCode) => {
+      const target = stores();
+      const base = await publish(target, 'principal');
+      const forged = forge(target, base, change);
+      for (const mode of ['verify-only', 'recompute'] as const) {
+        const error = await expectReplayError(replay(target, forged, mode), 'CONTRACT_INVALID');
+        if (contractCode !== undefined) {
+          expect(error.details).toMatchObject({ contract_code: contractCode });
+        }
+      }
+    },
+  );
 
   it('no descomprime por encima del límite', () => {
     const encode = createStorageEncoder(ZLIB_VERSION);
