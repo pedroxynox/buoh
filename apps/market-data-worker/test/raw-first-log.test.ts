@@ -432,7 +432,8 @@ describe('F1-STREAM-001: captura raw-first contra market-data v1', () => {
         unit: 'bytes',
       },
       incident_type: 'source_limit_exceeded',
-      observed_ref: id(9001),
+      // observation_id ya asignado al frame rechazado, como exige el contrato.
+      observed_ref: id(1),
       severity: 'error',
       symbol: null,
     });

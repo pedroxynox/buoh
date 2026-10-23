@@ -150,7 +150,8 @@ export class RawFirstIngestor {
       this.#paused = true;
       await this.#input.registry.recordSourceLimitExceeded({
         observed_at_utc: this.#input.now(),
-        observed_ref: this.#input.nextId(),
+        // El transporte ya asignó el observation_id del frame rechazado (contratos de dominio).
+        observed_ref: frame.observation_id,
         related_refs: this.#relatedRefs(),
         violation,
       });
