@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 6
-updated_at_utc: "2026-10-23T15:27:00.000Z"
+status_version: 7
+updated_at_utc: "2026-10-23T16:55:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -45,6 +45,16 @@ Decisiones del propietario para F1.4b:
 - mientras tanto, los datos live no se publican como dataset (ADR-0004 §13).
 
 El perfil 2.0.0 exige umbrales enteros de retraso y hueco. El smoke solo normaliza y mide, sin derivar ni publicar, así que esos umbrales no se aplican; F1.4b debe marcar ese perfil de medición para que nunca sirva para publicar, y declarar en `non_tick_msg_types` las respuestas de Deriv que pide.
+
+Puntos de partida ya comprobados para F1.4b:
+
+- **Esquemas de Deriv.** En la release fijada (ADR-0004 §2), los esquemas de las operaciones que usa buoh (`active_symbols`, `ticks`, `ticks_history`, `ping`, `time`, `forget` y `forget_all`) son JSON Schema draft-04, en archivos `<operación>_request.schema.json` y `<operación>_response.schema.json`. Otras operaciones de la release, que buoh no usa, están en draft-07. Hace falta un validador compatible con draft-04; es una dependencia nueva que se justifica en el PR. Esas siete respuestas exigen `msg_type` y `echo_req`, y en `ticks_response` el objeto `tick` solo exige `pip_size`.
+- **Descarga de `schemas.zip`.** Se rechaza si el SHA-256 no coincide (ADR-0004 §2). Aplica los límites de descarga y de contenido expandido de ADR-0004 §7; superar cualquiera aborta la carga con salud `failed`.
+- **Perfil Deriv.** Declara en `non_tick_msg_types` solo las respuestas que el adaptador pide, nunca `tick`. En la release, las respuestas de `active_symbols`, `ticks_history`, `ping`, `time`, `forget` y `forget_all` usan los `msg_type` `active_symbols`, `history`, `candles`, `ohlc`, `ping`, `time`, `forget` y `forget_all`.
+- **Errores en respuestas pedidas.** Las reglas 2.0.0 no registran un `error` dentro de una respuesta declarada ([contratos de dominio](docs/arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-200)). Lo debe revisar el correlador de solicitudes y respuestas leyendo el raw (pendiente 3 de F1.4a).
+- **Transporte.** Espera cada llamada al `RawFirstIngestor` antes de entregar el siguiente frame y garantiza una sola instancia por fuente (pendiente 6 de F1.3). Conexión 10 000 ms, solicitud 15 000 ms y ping cada 45 s, con reloj inyectable (ADR-0004 §2 y §7).
+- **Límite de frame.** Un frame de más de 1 MiB se rechaza sin cargarlo y cierra la entrada. `source_limit_exceeded` exige `observed_value`, pero la opción `maxPayload` de la librería `ws` corta el frame sin informar su tamaño; F1.4b debe resolver cómo medirlo.
+- **Red solo en el smoke.** Las pruebas del adaptador usan fixtures, transporte y reloj falsos, sin red ni aleatoriedad. `pnpm run data:smoke` es opt-in y nunca es el único criterio de merge. Sus datos live son efímeros y se eliminan en 24 horas (ADR-0004 §13); su evidencia es fecha, release de esquemas y resultado sanitizado (plan §7).
 
 No crea todavía web, móvil, señales ni ejecución.
 
@@ -110,9 +120,17 @@ Reglas de calidad versionadas (`F1-QUALITY-001`) y preparación del adaptador de
   - la recomputación aborta ante un conjunto de reglas no implementado.
 - Los vectores v1 siguen reproduciéndose byte a byte con reglas 1.0.0.
 
+## Pendientes registrados de F1.4a
+
+Detectados en la revisión semántica del PR #8; ninguno bloquea F1.4b:
+
+1. `data-quality-incident.schema.json` todavía acepta `symbol = null` con el esquema de incidencias 1.0.0. El runtime sí lo rechaza; falta un `if`/`then` en el JSON Schema generado.
+2. Las pruebas que ligan versiones al manifiesto no fijan qué campo del manifiesto lee cada comprobación, porque en el vector v1 todas las versiones son 1.0.0. Falta un caso que mueva un campo y sus registros juntos a una versión sin usar.
+3. El sink `nonTickFrame` del ingestor solo recibe `msg_type` y `observation_id`, así que quien necesite ver un `error` debe leer el raw.
+
 ## Pendientes registrados de F1.3
 
-Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b; la lista completa está en cada PR. Los más relevantes para F1.4 y el despliegue:
+Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la lista completa está en cada PR. Los más relevantes para F1.4 y el despliegue:
 
 1. Si la conexión cae durante el `COMMIT` de una publicación, se informa "no se confirmó" aunque pudo confirmarse.
 2. Publicar no aplica los límites de lectura del replay. `normalized_ticks` y `quality_incidents` son un único artefacto que crece con el dataset. Resolver antes de publicar datasets live largos.
