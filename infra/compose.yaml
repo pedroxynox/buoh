@@ -1,0 +1,52 @@
+# Servicios locales de Fase 1 (ADR-0004 §1 y §6): PostgreSQL estándar y almacenamiento
+# S3-compatible. Solo para desarrollo, pruebas e integración continua; no es un despliegue.
+#
+# Las credenciales llegan por variables de entorno (por ejemplo, infra/.env, ignorado por Git);
+# compose se niega a arrancar si faltan. Ver docs/operacion/runbook-ingesta-de-datos.md.
+#
+#   docker compose -f infra/compose.yaml up -d --wait
+#
+# Puertos publicados solo en 127.0.0.1. Imágenes fijadas por versión y digest.
+name: buoh
+
+services:
+  postgres:
+    image: postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
+    environment:
+      POSTGRES_DB: ${BUOH_POSTGRES_DB:-buoh}
+      POSTGRES_USER: ${BUOH_POSTGRES_USER:-buoh}
+      POSTGRES_PASSWORD: ${BUOH_POSTGRES_PASSWORD:?Define BUOH_POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
+    ports:
+      - '127.0.0.1:${BUOH_POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # SeaweedFS en modo `mini` (un nodo): S3 en el puerto 8333 con una identidad estática y el
+  # bucket creado al arrancar. Sin telemetría, WebDAV ni interfaz web de administración; los demás
+  # componentes internos solo son accesibles dentro de esta red (ver ADR-0005 §1).
+  object-storage:
+    image: chrislusf/seaweedfs:4.48@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d
+    command: ['mini', '-dir=/data', '-master.telemetry=false', '-webdav=false', '-admin.ui=false']
+    environment:
+      AWS_ACCESS_KEY_ID: ${BUOH_S3_ACCESS_KEY_ID:?Define BUOH_S3_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${BUOH_S3_SECRET_ACCESS_KEY:?Define BUOH_S3_SECRET_ACCESS_KEY}
+      S3_BUCKET: ${BUOH_S3_BUCKET:-buoh-local}
+    ports:
+      - '127.0.0.1:${BUOH_S3_PORT:-8333}:8333'
+    volumes:
+      - object-data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', '-o', '/dev/null', 'http://127.0.0.1:8333/healthz']
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  postgres-data:
+  object-data:

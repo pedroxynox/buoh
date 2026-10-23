@@ -26,7 +26,10 @@ export {
 } from './profile.js';
 export {
   buildDatasetPublication,
+  MEDIA_TYPES,
   type DatasetPublication,
+  type EncodedObject,
+  type ObjectEncoder,
   type PublicationInput,
 } from './publication.js';
 export {

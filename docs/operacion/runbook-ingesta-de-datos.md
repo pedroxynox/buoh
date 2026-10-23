@@ -100,6 +100,8 @@ Los umbrales live pertenecen a un perfil versionado por fuente/símbolo. El perf
 4. Si object storage deja de estar disponible después del commit, cambiar salud a `degraded`/`paused`; nunca afirmar replay exitoso hasta recuperar y verificar.
 5. Limpiar huérfanos solo después del período de seguridad y sin referencias publicadas.
 
+En F1.3 el fallo se informa como `PublicationError` con el paso (`precondition`, `object_write`, `manifest_write`, `commit`). Reanudar es repetir la publicación con un `publication_id` nuevo: los objetos ya verificados se reutilizan porque sus claves son content-addressed. Publicar un dataset que ya tiene record activo se rechaza (`PublicationConflictError`); no se reubica ni se recodifica todavía.
+
 ### Despliegue o reinicio programado
 
 1. Cambiar a drenaje y no aceptar una nueva partición de símbolos.
@@ -108,9 +110,33 @@ Los umbrales live pertenecen a un perfil versionado por fuente/símbolo. El perf
 4. Reiniciar; validar versiones y dependencias.
 5. Ejecutar recuperación de inicio y confirmar continuidad antes de `healthy`.
 
+## Entorno local y replay (F1.3)
+
+Servicios de [`infra/compose.yaml`](../../infra/compose.yaml): PostgreSQL 18 y SeaweedFS (S3-compatible), según [ADR-0005](../arquitectura/adr/0005-persistencia-local-y-formato-fisico-f1-3.md). Solo escuchan en `127.0.0.1`.
+
+1. Copiar `infra/.env.example` a `infra/.env` (ignorado por Git) y completar `BUOH_POSTGRES_PASSWORD`, `BUOH_S3_ACCESS_KEY_ID` y `BUOH_S3_SECRET_ACCESS_KEY` con valores locales.
+2. Levantar servicios: `docker compose -f infra/compose.yaml --env-file infra/.env up -d --wait`.
+3. Exportar las mismas variables al shell (`set -a; . infra/.env; set +a`) y compilar: `pnpm run build`.
+4. Aplicar migraciones: `pnpm --filter @buoh/market-data-worker run db:migrate`.
+5. Opcional, para ensayar: `pnpm --filter @buoh/market-data-worker run fixture:publish` publica los dos escenarios sintéticos de `test-vectors/market-data/v1`. Es idempotente: un escenario ya activo se informa como `already_published`.
+6. Reproducir: `pnpm run data:replay -- --dataset <dataset_id>` (recomputación) o añadir `--verify-only` (solo integridad).
+
+`data:replay` no contacta a Deriv, no escribe nada y emite una línea JSON en stdout:
+
+| Salida | `status` | Significado |
+|---:|---|---|
+| 0 | `reproduced` | recomputación idéntica: core, hashes lógicos, conteos y `dataset_id` |
+| 0 | `verified` | `--verify-only`: record activo, documento, hashes físicos y lógicos, contratos, invariantes entre artefactos, versiones de contrato y core |
+| 1 | `failed` | `code`: `DATASET_NOT_PUBLISHED`, `MANIFEST_INTEGRITY`, `OBJECT_INTEGRITY`, `OBJECT_LOCATION_UNSUPPORTED`, `FORMAT_UNSUPPORTED`, `CONTRACT_INVALID`, `VERSION_UNSUPPORTED`, `RECOMPUTATION_FAILED`, `RECOMPUTATION_MISMATCH`, `STORAGE_UNAVAILABLE` o `UNEXPECTED` |
+| 2 | `failed` | argumentos o variables de entorno inválidos; se nombran las variables, nunca sus valores |
+
+Límites de lectura del replay: documento de manifiesto 16 MiB, objeto 256 MiB y descompresión gzip hasta el tamaño máximo de segmento raw (64 MiB, ADR-0004 §7). Un objeto por encima del límite se rechaza sin cargarlo.
+
+`pnpm run test:integration` ejecuta las pruebas de integración contra estos servicios con las mismas variables; usa su propio esquema PostgreSQL (`buoh_integration`) y lo recrea en cada ejecución.
+
 ## Reporte y evidencia
 
-`pnpm run data:health -- --json` emitirá el `HealthReport` canónico. Todo incidente conserva:
+`pnpm run data:health -- --json` emitirá el `HealthReport` canónico (F1.5). Todo incidente conserva:
 
 - IDs y rango UTC;
 - fuente, símbolos y conexión;

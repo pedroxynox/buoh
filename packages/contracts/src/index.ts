@@ -17,6 +17,7 @@ export {
   qualityIncidentTypeSchema,
   type DataQualityIncident,
 } from './data-quality.js';
+export { validateDatasetConsistency, type DatasetConsistencyInput } from './dataset-consistency.js';
 export {
   EMPTY_SEQUENCE_SHA256,
   canonicalManifestBytes,
