@@ -1,11 +1,11 @@
 ---
 schema_version: "1.0.0"
-status_version: 5
-updated_at_utc: "2026-10-23T14:18:00.000Z"
+status_version: 6
+updated_at_utc: "2026-10-23T15:07:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
-next_delivery: "F1.4"
+next_delivery: "F1.4b"
 next_requirements:
   - "F1-CATALOG-001"
   - "F1-SOURCE-001"
@@ -28,14 +28,21 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
 - F1.3 se entregó en dos partes ([ADR-0005](docs/arquitectura/adr/0005-persistencia-local-y-formato-fisico-f1-3.md)):
   - F1.3a: `infra/compose.yaml` (PostgreSQL 18 y SeaweedFS S3-compatible), `apps/market-data-worker` con publicación atómica y `pnpm run data:replay` en modos recomputación y `--verify-only` (`F1-DATASET-001`);
   - F1.3b: log raw-first durable con rotación `segment_policy_version = 1.0.0`, registro operativo de `persistence_unavailable`/`source_limit_exceeded` y publicación desde segmentos cerrados del log (`F1-STREAM-001`).
+- F1.4 se entrega en dos partes. F1.4a añade las reglas de calidad 1.1.0 para fuentes que mezclan varios tipos de mensaje, como Deriv: mensajes que no son ticks, errores de la fuente, atribución por `echo_req` e incidencia sin símbolo con el esquema de incidencias 2.0.0 ([contratos de dominio](docs/arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-110)).
 - No existe todavía integración con Deriv, persistencia del `IngestionCursor`, cola en memoria del transporte ni despliegue.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
 
 ## Siguiente tarea autorizada
 
-**`F1.4` — Catálogo y streaming público de Deriv.**
+**`F1.4b` — Catálogo y streaming público de Deriv.**
 
-Implementar el catálogo versionado de `active_symbols` (`F1-CATALOG-001`) y el adaptador público de Deriv con esquemas fijados, límites, keepalive y correlación (`F1-SOURCE-001`), entregando sus frames al `RawFirstIngestor`, más el smoke opt-in `pnpm run data:smoke`.
+Implementar el catálogo versionado de `active_symbols` (`F1-CATALOG-001`) y el adaptador público de Deriv con esquemas fijados, límites, keepalive y correlación (`F1-SOURCE-001`), entregando sus frames al `RawFirstIngestor` con un perfil de reglas 1.1.0, más el smoke opt-in `pnpm run data:smoke`.
+
+Decisiones del propietario para F1.4b:
+
+- el primer smoke usa un solo índice sintético de Deriv (por ejemplo Volatility 100), con el nombre exacto tomado del catálogo oficial;
+- los umbrales live de retraso y hueco no se inventan: el smoke mide primero los retrasos reales y los umbrales se fijan después con esos números;
+- mientras tanto, los datos live no se publican como dataset (ADR-0004 §13).
 
 No crea todavía web, móvil, señales ni ejecución.
 
@@ -80,6 +87,20 @@ No crea todavía web, móvil, señales ni ejecución.
   - el log rota por frames y por ventana, continúa el segmento no finalizado tras reiniciar y detecta objetos alterados.
 - 9 pruebas de integración más (20 en total) contra PostgreSQL 18.4 y SeaweedFS 4.48 locales: vectores a través del log real y publicación con sus `dataset_id`, reinicio desde el estado durable, registro operativo persistido y resuelto, y contigüidad, segmentos cerrados, conteos y append-only impuestos por la base de datos.
 
+## Evidencia de F1.4a
+
+- Resuelve el antiguo pendiente 1 de F1.2 con la decisión del propietario: reglas 1.1.0 y esquema de incidencias 2.0.0.
+- 9 pruebas de dominio de las reglas 1.1.0:
+  - un ping no da tick ni incidencia;
+  - un frame de error se atribuye por `echo_req`;
+  - un frame inválido sin atribución queda sin símbolo y la derivación continúa;
+  - las reglas 1.0.0 conservan su semántica;
+  - la publicación declara normalizador 1.1.0 e incidencias 2.0.0, y un dataset sin símbolos atribuibles no se publica;
+  - aplicadas al vector v1 dan los mismos ticks, incidencias y condiciones salvo versiones e IDs.
+- 1 prueba de contratos: `symbol = null` en `invalid_source_frame` se rechaza con esquema 1.0.0 y se acepta con 2.0.0.
+- 1 prueba del worker: con reglas 1.1.0, un ping queda durable en el log, no da tick ni alarma, y el dataset se publica y se reproduce en ambos modos.
+- Los vectores v1 siguen reproduciéndose byte a byte con reglas 1.0.0.
+
 ## Pendientes registrados de F1.3
 
 Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b; la lista completa está en cada PR. Los más relevantes para F1.4 y el despliegue:
@@ -89,14 +110,15 @@ Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b; la lista comp
 3. Los nombres de `PublicationStep` no coinciden con `PersistenceStage`; los fallos de publicación todavía no entran en el registro operativo.
 4. El worker usa un único rol PostgreSQL dueño de las tablas. Antes de desplegar (ADR-0006) hace falta un rol de ejecución que solo pueda insertar y leer.
 5. SeaweedFS `mini` arranca componentes internos que no se usan (Iceberg, Lance, servidor de administración).
-6. El log asume un único escritor por fuente y llamadas al ingestor de una en una: los triggers de `0002` no bloquean escritores concurrentes. El transporte de F1.4 debe esperar cada llamada y garantizar una sola instancia por fuente, o añadir un bloqueo por fuente.
+6. El log asume un único escritor por fuente y llamadas al ingestor de una en una: los triggers de `0002` no bloquean escritores concurrentes. El transporte de F1.4b debe esperar cada llamada y garantizar una sola instancia por fuente, o añadir un bloqueo por fuente.
 7. Tras un fallo de persistencia, el `ConnectionClosed` del cierre no se guarda en el log, así que un dataset que abarque la caída no lleva marca de la interrupción. Un índice que confirma pero informa error se trata como no durable y se adopta al reabrir sin reconciliar el tick.
 
 ## Pendientes registrados de F1.2
 
 Detectados en la revisión semántica del PR #5:
 
-1. Con un perfil de varios símbolos, un frame inválido sin símbolo atribuible detiene la derivación, y los mensajes de Deriv que no son ticks (ping, ack, respuestas) se registrarían como `invalid_source_frame`. **Decidir antes de F1.4.**
+El antiguo pendiente 1 (atribución de símbolo y mensajes que no son ticks) quedó resuelto en F1.4a.
+
 2. Cuando la salud está en `recovering` por continuidad pendiente, el `HealthReport` no muestra la causa: `open_condition_types` queda vacío.
 3. `docs/impact-map.json` no tiene regla para `packages/domain/**`.
 4. `qualityProfileSchema` está duplicado entre `packages/domain` y `packages/contracts/src/vector-integrity.ts`.
@@ -116,7 +138,7 @@ Detectados en la revisión semántica del PR #5:
 
 ## Bloqueos
 
-Antes de implementar el adaptador de Deriv en F1.4 hay que decidir el pendiente 1 de F1.2: atribución de símbolo con varios símbolos y tratamiento de los mensajes que no son ticks.
+Ninguno para iniciar `F1.4b`.
 
 ## Decisiones pendientes que no bloquean Fase 1
 
