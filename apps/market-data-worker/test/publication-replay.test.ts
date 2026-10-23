@@ -3,15 +3,19 @@ import { resolve } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
 import {
+  dataQualityIncidentSchema,
   datasetManifestCoreSchema,
   datasetManifestSchema,
   deriveDatasetId,
+  deriveEventId,
   deriveTickFingerprint,
   EMPTY_SEQUENCE_SHA256,
   sha256Hex,
   uuidV7Schema,
   validatePublicationRecord,
+  type DataQualityIncident,
   type DatasetManifestCore,
+  type JsonValue,
   type MarketTick,
 } from '@buoh/contracts';
 import { canonicalJsonBytes, ndjsonBytes, type DatasetPublication } from '@buoh/domain';
@@ -348,6 +352,7 @@ function forge(
   base: DatasetPublication,
   change: {
     core?: (core: DatasetManifestCore) => DatasetManifestCore;
+    incidents?: (incidents: DataQualityIncident[]) => DataQualityIncident[];
     ticks?: (ticks: MarketTick[]) => MarketTick[];
   },
 ): string {
@@ -384,6 +389,33 @@ function forge(
       uri: objectUri(bucket, contentKey(digest)),
     };
     bytesById.set('normalized_ticks:000000', bytes);
+  }
+  if (change.incidents !== undefined) {
+    const incidents = change.incidents([...base.derived.incidents]);
+    const bytes = ndjsonBytes(incidents);
+    const digest = sha256Hex(bytes);
+    core = {
+      ...core,
+      incident_count: incidents.length,
+      logical_artifacts: core.logical_artifacts.map((artifact) =>
+        artifact.artifact_id === 'quality_incidents:000000'
+          ? { ...artifact, logical_content_sha256: digest, record_count: incidents.length }
+          : artifact,
+      ),
+    };
+    const index = storage.findIndex((object) => object.artifact_id === 'quality_incidents:000000');
+    const previous = storage[index];
+    if (previous === undefined) {
+      throw new TypeError('Falta quality_incidents:000000.');
+    }
+    storage[index] = {
+      ...previous,
+      logical_content_sha256: digest,
+      object_bytes_sha256: digest,
+      size_bytes: bytes.byteLength,
+      uri: objectUri(bucket, contentKey(digest)),
+    };
+    bytesById.set('quality_incidents:000000', bytes);
   }
   if (change.core !== undefined) {
     core = change.core(core);
@@ -531,6 +563,81 @@ describe('F1-DATASET-001: data:replay (ADR-0004 §9)', () => {
       'VERSION_UNSUPPORTED',
     );
     expect(error.details).toEqual({ fields: ['normalizer_version'] });
+  });
+
+  it('--verify-only rechaza una incidencia con otra versión que la del manifiesto', async () => {
+    const target = stores();
+    const base = await publish(target, 'principal');
+    // El manifiesto declara incidencias 1.0.0; una pasa a 2.0.0 sin símbolo, con su ID recalculado.
+    const forged = forge(target, base, {
+      incidents: (incidents) =>
+        incidents.map((incident) => {
+          if (incident.incident_type !== 'invalid_source_frame') {
+            return incident;
+          }
+          const body: Record<string, unknown> = {
+            ...incident,
+            schema_version: '2.0.0',
+            symbol: null,
+          };
+          delete body['incident_id'];
+          return dataQualityIncidentSchema.parse({
+            ...body,
+            incident_id: deriveEventId(body as JsonValue),
+          });
+        }),
+    });
+    for (const mode of ['verify-only', 'recompute'] as const) {
+      const error = await expectReplayError(replay(target, forged, mode), 'CONTRACT_INVALID');
+      expect(error.details).toMatchObject({ contract_code: 'DATASET_VERSION_MISMATCH' });
+    }
+  });
+
+  it.each([
+    ['un esquema de incidencias sin lector', { incident_schema_version: '3.0.0' }],
+    ['reglas 1.0.0 con incidencias 2.0.0', { incident_schema_version: '2.0.0' }],
+  ])('--verify-only aborta ante %s', async (_label, edit) => {
+    const target = stores();
+    const zero = await publishDataset({
+      environment: 'test',
+      metadata: target.metadata,
+      objects: target.objects,
+      profile: fixture.profile,
+      publication_id: PUBLICATION_A,
+      published_at_utc: PUBLISHED_AT,
+      segments: [[...(scenario('principal').segments[0] ?? []).slice(0, 1)]],
+      zlibVersion: ZLIB_VERSION,
+    });
+    const forged = forge(target, zero, { core: (core) => ({ ...core, ...edit }) });
+    const error = await expectReplayError(
+      replay(target, forged, 'verify-only'),
+      'VERSION_UNSUPPORTED',
+    );
+    expect(error.details).toEqual({ fields: ['incident_schema_version'] });
+  });
+
+  it('la recomputación aborta ante un conjunto de reglas no implementado', async () => {
+    const target = stores();
+    // Un solo tick válido: sin incidencias que ligar a las reglas, verify-only no las necesita.
+    const single = await publishDataset({
+      environment: 'test',
+      metadata: target.metadata,
+      objects: target.objects,
+      profile: fixture.profile,
+      publication_id: PUBLICATION_A,
+      published_at_utc: PUBLISHED_AT,
+      segments: [[...(scenario('principal').segments[0] ?? []).slice(0, 1)]],
+      zlibVersion: ZLIB_VERSION,
+    });
+    const forged = forge(target, single, {
+      core: (core) => ({ ...core, quality_rule_version: '9.9.9' }),
+    });
+    expect((await replay(target, forged, 'verify-only')).status).toBe('verified');
+    const error = await expectReplayError(
+      replay(target, forged, 'recompute'),
+      'VERSION_UNSUPPORTED',
+    );
+    expect(error.details).toEqual({ fields: ['quality_rule_version'] });
   });
 
   it('--verify-only aborta ante una versión de contrato no implementada', async () => {

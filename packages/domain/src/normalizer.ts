@@ -9,20 +9,27 @@ import {
 } from './json-lexeme.js';
 import { CONTRACT_SCHEMA_VERSION, type PipelineProfile } from './profile.js';
 
-/** Motivos estables de `invalid_source_frame.evidence.reason` del normalizador 1.0.0. */
+/**
+ * Motivos estables de `invalid_source_frame.evidence.reason`. `source_error_response` solo existe
+ * desde el normalizador 2.0.0.
+ */
 export type InvalidFrameReason =
   | 'event_time_out_of_range'
   | 'payload_not_json'
   | 'quote_exponent_not_supported'
   | 'quote_precision_exceeds_pip_size'
   | 'schema_validation_failed'
+  | 'source_error_response'
   | 'symbol_not_allowed';
 
 export type UnflaggedTick = Omit<MarketTick, 'quality_flags'>;
 
 export type NormalizationResult =
   | { readonly ok: true; readonly tick: UnflaggedTick }
-  | { readonly ok: false; readonly reason: InvalidFrameReason; readonly symbol: string };
+  /** `symbol = null` solo con reglas 2.0.0, cuando ningún dato del frame permite atribuirlo. */
+  | { readonly ok: false; readonly reason: InvalidFrameReason; readonly symbol: string | null }
+  /** Reglas 2.0.0: mensaje de otro tipo (ping, catálogo, historia…); se conserva raw, sin incidencia. */
+  | { readonly ok: false; readonly msg_type: string; readonly reason: 'non_tick' };
 
 export class SymbolAttributionError extends Error {
   constructor(observationId: string) {
@@ -34,22 +41,32 @@ export class SymbolAttributionError extends Error {
 }
 
 /**
- * Atribuye símbolo a un frame inválido: `tick.symbol` del payload si es un símbolo permitido;
- * si no, el único símbolo del perfil. Con varios símbolos y sin atribución posible, aborta.
+ * Atribuye símbolo a un frame inválido, en este orden: `tick.symbol` del payload si es un símbolo
+ * permitido; con reglas 2.0.0, `echo_req.ticks` (la copia de la petición que devuelve la fuente) si
+ * es permitido; el único símbolo del perfil. Sin atribución posible, las reglas 1.0.0 abortan y las
+ * 2.0.0 devuelven `null`.
  */
 function attributeSymbol(
   root: JsonNode | undefined,
   frame: RawSourceFrame,
   profile: PipelineProfile,
-) {
+): string | null {
   const allowed = profile.quality_profile.allowed_symbols;
-  const declared = getMember(getMember(root, 'tick'), 'symbol');
-  if (declared?.type === 'string' && allowed.includes(declared.value)) {
-    return declared.value;
+  const candidates = [getMember(getMember(root, 'tick'), 'symbol')];
+  if (profile.rules.classifies_msg_type) {
+    candidates.push(getMember(getMember(root, 'echo_req'), 'ticks'));
+  }
+  for (const candidate of candidates) {
+    if (candidate?.type === 'string' && allowed.includes(candidate.value)) {
+      return candidate.value;
+    }
   }
   const [only] = allowed;
   if (allowed.length === 1 && only !== undefined) {
     return only;
+  }
+  if (profile.rules.classifies_msg_type) {
+    return null;
   }
   throw new SymbolAttributionError(frame.observation_id);
 }
@@ -84,8 +101,8 @@ function epochSecondsToUtc(seconds: number): string | null {
 }
 
 /**
- * Normalizador 1.0.0: valida el payload exacto contra el esquema de fuente fijado y proyecta un
- * `MarketTick` sin flags. Nunca modifica el raw.
+ * Normalizador 1.0.0/2.0.0 (según `profile.rules`): valida el payload exacto contra el esquema de
+ * fuente fijado y proyecta un `MarketTick` sin flags. Nunca modifica el raw.
  */
 export function normalizeRawFrame(
   frame: RawSourceFrame,
@@ -110,6 +127,19 @@ export function normalizeRawFrame(
     reason,
     symbol: attributeSymbol(root, frame, profile),
   });
+
+  if (profile.rules.classifies_msg_type) {
+    // Reglas 2.0.0: los tipos de respuesta declarados por el perfil (ping, catálogo, historia…) se
+    // conservan raw sin tick ni incidencia; cualquier otro mensaje sigue siendo candidato a tick.
+    const msgType = getMember(root, 'msg_type');
+    if (msgType?.type === 'string' && profile.nonTickMsgTypes.has(msgType.value)) {
+      return { msg_type: msgType.value, ok: false, reason: 'non_tick' };
+    }
+    // Un objeto `error` de la fuente en un mensaje no declarado como respuesta es inválido.
+    if (getMember(root, 'error')?.type === 'object') {
+      return invalid('source_error_response');
+    }
+  }
 
   if (!profile.validateSourcePayload(toPlainJson(root))) {
     return invalid('schema_validation_failed');

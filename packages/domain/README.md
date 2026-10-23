@@ -1,6 +1,6 @@
 # @buoh/domain
 
-Normalización y reglas de calidad puras de datos de mercado (F1.2). Semántica canónica en [contratos de dominio](../../docs/arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-100) y [ADR-0004](../../docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md).
+Normalización y reglas de calidad puras de datos de mercado (F1.2, reglas 2.0.0 en F1.4a). Semántica canónica en contratos de dominio, [reglas 1.0.0](../../docs/arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-100) y [reglas 2.0.0](../../docs/arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-200), y en [ADR-0004](../../docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md).
 
 No lee reloj, red, aleatoriedad ni almacenamiento: IDs, tiempos de publicación y ubicaciones se inyectan.
 
@@ -14,9 +14,9 @@ segmentos ─ buildDatasetPublication ─▶ ticks, incidencias, condiciones (de
 estado durable ─ deriveHealthReport ─▶ HealthReport
 ```
 
-- `createPipelineProfile`: esquema de fuente (JSON Schema 2020-12 vía Ajv) y perfil de calidad firmados, con sus digests JCS.
-- `normalizeRawFrame`: valida el payload exacto y conserva el lexema numérico de la cotización.
-- `deriveMarketData`: reglas 1.0.0 en orden de observación; recomputar desde source events persistidos da el mismo resultado.
+- `createPipelineProfile`: esquema de fuente (JSON Schema 2020-12 vía Ajv) y perfil de calidad firmados, con sus digests JCS. El perfil elige el conjunto de reglas (`RULE_SETS`): 1.0.0 para los vectores v1 y 2.0.0 para fuentes como Deriv, que mezclan varios tipos de mensaje.
+- `normalizeRawFrame`: valida el payload exacto y conserva el lexema numérico de la cotización. Con reglas 2.0.0, además separa los mensajes declarados en `non_tick_msg_types`, reconoce errores de la fuente y atribuye el símbolo por `echo_req`.
+- `deriveMarketData`: reglas del perfil (1.0.0 o 2.0.0) en orden de observación; recomputar desde source events persistidos da el mismo resultado.
 - `evaluateSourceLimit`: matriz de límites de ADR-0004 §7.
 - `evaluateSegmentRotation`: política `segment_policy_version = 1.0.0` (bytes, frames y ventana; ADR-0005 §5), evaluada antes de añadir cada source event.
 - `buildDatasetPublication` acepta `encodeObject` para la codificación física (por defecto `none`, como los vectores); la usa `apps/market-data-worker` para gzip. Cambiarla no altera `dataset_id`.

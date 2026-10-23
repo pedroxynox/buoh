@@ -15,8 +15,6 @@ import {
 import {
   CANONICALIZATION_VERSION,
   CONTRACT_SCHEMA_VERSION,
-  NORMALIZER_VERSION,
-  QUALITY_RULE_VERSION,
   SEGMENT_POLICY_VERSION,
   type PipelineProfile,
 } from './profile.js';
@@ -166,6 +164,11 @@ export function buildDatasetPublication(input: PublicationInput): DatasetPublica
 
   const firstTick = derived.ticks[0];
   const lastTick = derived.ticks.at(-1);
+  const symbols = collectSymbols(events, derived);
+  if (symbols.length === 0) {
+    // Reglas 2.0.0: un dataset cuyos frames no permiten atribuir ningún símbolo no es publicable.
+    throw new TypeError('El dataset no tiene símbolos atribuibles; no es publicable.');
+  }
 
   const core = datasetManifestCoreSchema.parse({
     canonicalization_version: CANONICALIZATION_VERSION,
@@ -175,7 +178,7 @@ export function buildDatasetPublication(input: PublicationInput): DatasetPublica
     event_time_from_utc: firstTick?.event_time_utc ?? null,
     event_time_to_utc: lastTick?.event_time_utc ?? null,
     incident_count: derived.incidents.length,
-    incident_schema_version: CONTRACT_SCHEMA_VERSION,
+    incident_schema_version: profile.rules.incident_schema_version,
     logical_artifacts: sequences.map((sequence) => ({
       artifact_id: sequence.id,
       logical_content_sha256: sha256Hex(sequence.bytes),
@@ -185,10 +188,10 @@ export function buildDatasetPublication(input: PublicationInput): DatasetPublica
     })),
     market_tick_schema_version: CONTRACT_SCHEMA_VERSION,
     normalized_tick_count: derived.ticks.length,
-    normalizer_version: NORMALIZER_VERSION,
+    normalizer_version: profile.rules.normalizer_version,
     quality_profile_id: profile.quality_profile.profile_id,
     quality_profile_sha256: profile.quality_profile_sha256,
-    quality_rule_version: QUALITY_RULE_VERSION,
+    quality_rule_version: profile.rules.quality_rule_version,
     raw_frame_count: events.filter((event) => event.kind === 'raw_source_frame').length,
     schema_version: CONTRACT_SCHEMA_VERSION,
     segment_policy_version: SEGMENT_POLICY_VERSION,
@@ -197,7 +200,7 @@ export function buildDatasetPublication(input: PublicationInput): DatasetPublica
     source_event_schema_version: CONTRACT_SCHEMA_VERSION,
     source_schema_release: profile.source_schema_release,
     source_schema_sha256: profile.source_schema_sha256,
-    symbols: collectSymbols(events, derived),
+    symbols,
   });
   const datasetId = deriveDatasetId(core);
 

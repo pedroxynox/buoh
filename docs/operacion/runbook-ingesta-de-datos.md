@@ -69,6 +69,8 @@ Desde F1.3b, `SourceEventLog.open` cubre la parte de los pasos 3–4 que toca al
 3. No emitir `MarketTick` para ese frame.
 4. Evaluar `degraded` o `failed` según frecuencia y compatibilidad del esquema fijado.
 
+Con reglas 2.0.0 (Deriv), los mensajes cuyo `msg_type` declara el perfil en `non_tick_msg_types` (ping, catálogo, historia) también se persisten raw, pero no son frames inválidos: el ingestor los entrega a quien los correlaciona (`nonTickFrame`). Cualquier otro mensaje sigue siendo candidato a tick; si trae un objeto `error` de la fuente es inválido con motivo `source_error_response`. Si no se puede atribuir el símbolo, la incidencia queda sin símbolo y la ingesta continúa ([contratos de dominio, reglas 2.0.0](../arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-200)).
+
 ### Duplicado, conflicto, retraso o fuera de orden
 
 1. Conservar cada observación con ID propio.

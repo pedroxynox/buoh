@@ -14,6 +14,7 @@ export {
 } from './conditions.js';
 export {
   dataQualityIncidentSchema,
+  INCIDENT_SCHEMA_VERSIONS,
   qualityIncidentTypeSchema,
   type DataQualityIncident,
 } from './data-quality.js';

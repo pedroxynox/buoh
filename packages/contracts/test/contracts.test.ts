@@ -136,6 +136,32 @@ describe('DataQualityIncident', () => {
     };
     expect(dataQualityIncidentSchema.safeParse(invalid).success).toBe(false);
   });
+
+  it('admite invalid_source_frame sin símbolo solo con el esquema de incidencias 2.0.0', () => {
+    const withVersion = (schemaVersion: string) => {
+      const body = {
+        evidence: { raw_payload_sha256: 'a'.repeat(64), reason: 'payload_not_json' },
+        incident_type: 'invalid_source_frame',
+        observed_at_utc: '2026-01-01T00:00:00.100Z',
+        observed_ref: '019b76da-a800-7000-8000-000000000001',
+        quality_rule_version: '2.0.0',
+        related_refs: [],
+        schema_version: schemaVersion,
+        severity: 'error',
+        source: 'deriv',
+        symbol: null,
+      };
+      return { ...body, incident_id: deriveEventId(body) };
+    };
+    expect(dataQualityIncidentSchema.safeParse(withVersion('1.0.0')).success).toBe(false);
+    expect(dataQualityIncidentSchema.safeParse(withVersion('2.0.0')).success).toBe(true);
+    // Una versión sin lector se rechaza, en vez de heredar la regla de 2.0.0.
+    for (const unknown of ['2.1.0', '3.0.0', '99.0.0']) {
+      expect(dataQualityIncidentSchema.safeParse(withVersion(unknown)).success, unknown).toBe(
+        false,
+      );
+    }
+  });
 });
 
 describe('OperationalConditionEvent', () => {

@@ -122,7 +122,8 @@ export type ContractContextErrorCode =
   | 'DATASET_ORDER_INVALID'
   | 'DATASET_PROVENANCE_MISMATCH'
   | 'DATASET_RANGE_MISMATCH'
-  | 'DATASET_REFERENCE_UNKNOWN';
+  | 'DATASET_REFERENCE_UNKNOWN'
+  | 'DATASET_VERSION_MISMATCH';
 
 export class ContractContextError extends Error {
   readonly code: ContractContextErrorCode;

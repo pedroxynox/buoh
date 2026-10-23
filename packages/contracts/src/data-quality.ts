@@ -20,8 +20,14 @@ import {
   utcTimestampMsSchema,
 } from './scalars.js';
 
+/**
+ * Versiones de `DataQualityIncident` con lector. 2.0.0 solo difiere de 1.0.0 en que admite
+ * `symbol = null` en `invalid_source_frame` (reglas de calidad 2.0.0). Otra versión se rechaza.
+ */
+export const INCIDENT_SCHEMA_VERSIONS = ['1.0.0', '2.0.0'] as const;
+
 const incidentBase = {
-  schema_version: schemaVersionSchema,
+  schema_version: z.enum(INCIDENT_SCHEMA_VERSIONS),
   incident_id: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
   severity: severitySchema,
   quality_rule_version: schemaVersionSchema,
@@ -34,7 +40,8 @@ const incidentBase = {
 const invalidSourceFrameSchema = z.strictObject({
   ...incidentBase,
   incident_type: z.literal('invalid_source_frame'),
-  symbol: symbolSchema,
+  // Nulo solo con esquema de incidencias 2.0.0 (validado abajo): frame sin símbolo atribuible.
+  symbol: symbolSchema.nullable(),
   evidence: z.strictObject({
     raw_payload_sha256: sha256HexSchema,
     reason: nonEmptyStringSchema,
@@ -222,8 +229,16 @@ export const dataQualityIncidentSchema = dataQualityIncidentStructuralSchema.sup
           });
         }
         break;
-      case 'duplicate_exact':
       case 'invalid_source_frame':
+        if (value.symbol === null && value.schema_version !== '2.0.0') {
+          context.addIssue({
+            code: 'custom',
+            message: 'invalid_source_frame sin símbolo requiere el esquema de incidencias 2.0.0.',
+            path: ['symbol'],
+          });
+        }
+        break;
+      case 'duplicate_exact':
       case 'persistence_unavailable':
         break;
     }
