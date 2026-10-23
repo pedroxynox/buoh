@@ -229,7 +229,7 @@ describe('reglas de calidad 2.0.0', () => {
     ['msg_type numérico', '{"msg_type":5}', 'schema_validation_failed'],
     ['sin msg_type', '{"tick":{"quote":1}}', 'schema_validation_failed'],
     ['payload que no es JSON', '{"msg_type":"tick",', 'payload_not_json'],
-  ] as [string, string, string, string?][])(
+  ] as [string, string, string, (string | null)?][])(
     'lo desconocido o roto sigue siendo inválido: %s',
     (_label, payload, reason, symbol = null) => {
       // `tick.symbol` permitido atribuye; sin él, con dos símbolos y sin echo_req, queda sin símbolo.

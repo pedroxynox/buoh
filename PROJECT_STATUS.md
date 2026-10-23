@@ -101,7 +101,9 @@ Reglas de calidad versionadas (`F1-QUALITY-001`) y preparación del adaptador de
   - el perfil 2.0.0 exige declarar sus respuestas y el 1.0.0 lo prohíbe;
   - la publicación declara normalizador e incidencias 2.0.0, y un dataset sin símbolos atribuibles no se publica;
   - aplicadas al vector v1 dan los mismos registros completos salvo versiones e IDs.
-- Contratos: `symbol = null` en `invalid_source_frame` se acepta solo con el esquema de incidencias 2.0.0; 1.0.0 y versiones sin lector (2.1.0, 3.0.0, 99.0.0) se rechazan.
+- 7 pruebas de contratos más (29 en total):
+  - `symbol = null` en `invalid_source_frame` se acepta solo con el esquema de incidencias 2.0.0; 1.0.0 y versiones sin lector (2.1.0, 3.0.0, 99.0.0) se rechazan;
+  - `validateDatasetConsistency` acepta el vector v1 y rechaza con `DATASET_VERSION_MISMATCH` un source event, tick, incidencia o condición con otra versión que la del manifiesto, y una incidencia con otras reglas.
 - 5 pruebas del worker:
   - con reglas 2.0.0, un ping queda durable en el log sin tick, alarma ni incidencia, y el dataset se publica y se reproduce en ambos modos;
   - `--verify-only` rechaza una incidencia con otra versión que la del manifiesto, un esquema de incidencias sin lector o incoherente con las reglas;
