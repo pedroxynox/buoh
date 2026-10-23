@@ -1,6 +1,6 @@
 # ADR-0004: Pipeline y reproducción de datos de Fase 1
 
-- **Estado:** Aceptada
+- **Estado:** Aceptada; §6–§9 complementadas por [ADR-0005](0005-persistencia-local-y-formato-fisico-f1-3.md) (servicios locales, formato físico transitorio y log raw-first de F1.3)
 - **Fecha:** 2026-10-17
 - **Ámbito:** Fase 1
 - **Decisores:** Dirección técnica de buoh
@@ -90,6 +90,8 @@ Cada `StorageObjectRef` declara URI, media type, compresión, tamaño, hash fís
 - Esquema de fuente y perfil de calidad: objetos JSON referenciados y firmados lógicamente.
 
 Claves finales son content-addressed (`sha256/<object_bytes_sha256>`). Bucket, región y URI no participan en `dataset_id`.
+
+Hasta incorporar un writer Parquet, F1.3 escribe ticks e incidencias como NDJSON sin compresión; servicios locales y formato físico vigente están en [ADR-0005](0005-persistencia-local-y-formato-fisico-f1-3.md).
 
 ### 7. Límites de recursos
 
