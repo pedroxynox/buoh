@@ -69,8 +69,15 @@
               "const": "invalid_source_frame"
             },
             "symbol": {
-              "type": "string",
-              "minLength": 1
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "evidence": {
               "type": "object",

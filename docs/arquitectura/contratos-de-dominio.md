@@ -194,7 +194,7 @@ related_refs: EventRef[]
 evidence: QualityEvidence
 ```
 
-`symbol = null` solo se permite para incidencias de conexión o recursos sin símbolo conocido. `related_refs` es único y ordenado. `evidence` rechaza campos desconocidos y se discrimina por `incident_type`:
+`symbol = null` solo se permite para incidencias de conexión o recursos sin símbolo conocido y, desde el esquema de incidencias 2.0.0, para `invalid_source_frame` sin símbolo atribuible (reglas 1.1.0). `related_refs` es único y ordenado. `evidence` rechaza campos desconocidos y se discrimina por `incident_type`:
 
 | `incident_type` | `evidence` exacta |
 |---|---|
@@ -437,6 +437,25 @@ Desde F1.2, [`packages/domain`](../../packages/domain/) implementa estas reglas 
 - Source events con `schema_version` distinta de la implementada abortan la derivación; no se migran.
 - `persistence_unavailable` y `source_limit_exceeded` no se derivan de un dataset: F1.2 fija su resultado fail-closed y su evidencia; su registro operativo se define en la sección siguiente.
 
+### Semántica ejecutable de reglas 1.1.0
+
+Decididas por el propietario antes de F1.4 para fuentes que mezclan varios tipos de mensaje en la misma conexión, como Deriv. El perfil de calidad elige el conjunto de reglas con `quality_rule_version`. Cada conjunto fija su normalizador y el esquema de incidencias que emite:
+
+| `quality_rule_version` | `normalizer_version` | `incident_schema_version` | Uso |
+|---|---|---|---|
+| `1.0.0` | `1.0.0` | `1.0.0` | vectores sintéticos v1 |
+| `1.1.0` | `1.1.0` | `2.0.0` | Deriv y fuentes con varios tipos de mensaje |
+
+Las reglas 1.1.0 son las 1.0.0 con estas diferencias:
+
+- **Mensajes que no son ticks.** Un frame JSON cuyo `msg_type` es un texto distinto de `tick` (respuestas a ping, catálogo, historia…) se conserva raw en el log como cualquier frame. No produce tick ni incidencia; su significado lo procesa quien lo pidió.
+- **Errores de la fuente.** Un frame con `msg_type = tick` y un objeto `error` es `invalid_source_frame` con motivo `source_error_response`.
+- **Atribución.** El símbolo de un frame inválido se toma, en este orden, de `tick.symbol` si está permitido, de `echo_req.ticks` (la copia de la petición que devuelve la fuente) si está permitido, o del único símbolo del perfil. Sin atribución posible, la incidencia lleva `symbol = null` y la derivación continúa, en lugar de abortar como en 1.0.0.
+- **Esquema de incidencias 2.0.0.** La única diferencia con 1.0.0 es que admite `symbol = null` en `invalid_source_frame`. Las incidencias 1.0.0 siguen exigiendo símbolo.
+- **Publicación.** Un dataset cuyos frames no permiten atribuir ningún símbolo no es publicable, porque `symbols` del manifiesto no puede quedar vacío.
+
+Aplicadas a los source events del vector v1, las reglas 1.1.0 dan los mismos ticks y las mismas incidencias y condiciones, salvo sus campos de versión e IDs derivados. El vector v1 sigue fijado a 1.0.0, y el replay conserva lector y recomputación para ambos conjuntos.
+
 ### Registro operativo de persistencia y límites
 
 Implementado en F1.3b ([ADR-0005](adr/0005-persistencia-local-y-formato-fisico-f1-3.md), `apps/market-data-worker/src/operational`). Vive en tablas PostgreSQL append-only (`operational_incidents`, `operational_conditions`) separadas de los datasets y nunca entra en sus artifacts. Cada escritura se valida con `validateConditionCausality` antes de persistirse.
@@ -464,7 +483,7 @@ Implementado en F1.3b ([ADR-0005](adr/0005-persistencia-local-y-formato-fisico-f
 - Cambio aditivo compatible incrementa minor; cambio de semántica, tipo, requiredness, orden o canonicalización incrementa major.
 - Contratos internos son estrictos y productores/consumidores se actualizan coordinadamente.
 - Payload externo se preserva completo como raw; el adaptador extrae campos validados y tolera extras solo si el esquema fijado lo permite.
-- Toda versión mayor conserva lector/replay mientras exista un dataset que la referencie, o documenta migración explícita sin sobrescribir originales.
+- Toda versión mayor conserva lector/replay mientras exista un dataset que la referencie, o documenta migración explícita sin sobrescribir originales. Así conviven hoy las incidencias 1.0.0 y 2.0.0 y los conjuntos de reglas 1.0.0 y 1.1.0.
 - TypeScript y futuro Python comparten JSON Schema generado y vectores.
 
 ## Oráculo inicial

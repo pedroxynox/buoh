@@ -31,10 +31,14 @@ const incidentBase = {
   related_refs: z.array(eventRefSchema),
 };
 
+/** Versión de esquema de incidencias desde la que `invalid_source_frame` admite `symbol = null`. */
+export const NULLABLE_INVALID_FRAME_SYMBOL_SINCE = 2;
+
 const invalidSourceFrameSchema = z.strictObject({
   ...incidentBase,
   incident_type: z.literal('invalid_source_frame'),
-  symbol: symbolSchema,
+  // Nulo solo con esquema de incidencias >= 2.0.0 (validado abajo): frame sin símbolo atribuible.
+  symbol: symbolSchema.nullable(),
   evidence: z.strictObject({
     raw_payload_sha256: sha256HexSchema,
     reason: nonEmptyStringSchema,
@@ -222,8 +226,19 @@ export const dataQualityIncidentSchema = dataQualityIncidentStructuralSchema.sup
           });
         }
         break;
+      case 'invalid_source_frame': {
+        const major = Number(value.schema_version.split('.')[0]);
+        if (value.symbol === null && major < NULLABLE_INVALID_FRAME_SYMBOL_SINCE) {
+          context.addIssue({
+            code: 'custom',
+            message:
+              'invalid_source_frame sin símbolo requiere esquema de incidencias 2.0.0 o posterior.',
+            path: ['symbol'],
+          });
+        }
+        break;
+      }
       case 'duplicate_exact':
-      case 'invalid_source_frame':
       case 'persistence_unavailable':
         break;
     }
