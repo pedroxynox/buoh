@@ -205,7 +205,7 @@ export function deriveMarketData(
   const onRawFrame = (event: Extract<SourceEvent, { kind: 'raw_source_frame' }>, order: number) => {
     const result = normalizeRawFrame(event, profile);
     if (!result.ok && result.reason === 'non_tick') {
-      // Reglas 1.1.0: mensaje que no es tick; queda en el log raw sin tick ni incidencia.
+      // Reglas 2.0.0: mensaje que no es tick; queda en el log raw sin tick ni incidencia.
       return;
     }
     if (!result.ok) {

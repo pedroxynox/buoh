@@ -11,7 +11,7 @@ import { CONTRACT_SCHEMA_VERSION, type PipelineProfile } from './profile.js';
 
 /**
  * Motivos estables de `invalid_source_frame.evidence.reason`. `source_error_response` solo existe
- * desde el normalizador 1.1.0.
+ * desde el normalizador 2.0.0.
  */
 export type InvalidFrameReason =
   | 'event_time_out_of_range'
@@ -26,9 +26,9 @@ export type UnflaggedTick = Omit<MarketTick, 'quality_flags'>;
 
 export type NormalizationResult =
   | { readonly ok: true; readonly tick: UnflaggedTick }
-  /** `symbol = null` solo con reglas 1.1.0, cuando ningún dato del frame permite atribuirlo. */
+  /** `symbol = null` solo con reglas 2.0.0, cuando ningún dato del frame permite atribuirlo. */
   | { readonly ok: false; readonly reason: InvalidFrameReason; readonly symbol: string | null }
-  /** Reglas 1.1.0: mensaje de otro tipo (ping, catálogo, historia…); se conserva raw, sin incidencia. */
+  /** Reglas 2.0.0: mensaje de otro tipo (ping, catálogo, historia…); se conserva raw, sin incidencia. */
   | { readonly ok: false; readonly msg_type: string; readonly reason: 'non_tick' };
 
 export class SymbolAttributionError extends Error {
@@ -42,9 +42,9 @@ export class SymbolAttributionError extends Error {
 
 /**
  * Atribuye símbolo a un frame inválido, en este orden: `tick.symbol` del payload si es un símbolo
- * permitido; con reglas 1.1.0, `echo_req.ticks` (la copia de la petición que devuelve la fuente) si
+ * permitido; con reglas 2.0.0, `echo_req.ticks` (la copia de la petición que devuelve la fuente) si
  * es permitido; el único símbolo del perfil. Sin atribución posible, las reglas 1.0.0 abortan y las
- * 1.1.0 devuelven `null`.
+ * 2.0.0 devuelven `null`.
  */
 function attributeSymbol(
   root: JsonNode | undefined,
@@ -101,7 +101,7 @@ function epochSecondsToUtc(seconds: number): string | null {
 }
 
 /**
- * Normalizador 1.0.0/1.1.0 (según `profile.rules`): valida el payload exacto contra el esquema de
+ * Normalizador 1.0.0/2.0.0 (según `profile.rules`): valida el payload exacto contra el esquema de
  * fuente fijado y proyecta un `MarketTick` sin flags. Nunca modifica el raw.
  */
 export function normalizeRawFrame(
@@ -129,12 +129,13 @@ export function normalizeRawFrame(
   });
 
   if (profile.rules.classifies_msg_type) {
-    // Reglas 1.1.0: solo `msg_type = tick` es candidato a tick; los demás mensajes de la fuente
-    // (respuestas a ping, catálogo, historia…) se conservan raw sin producir tick ni incidencia.
+    // Reglas 2.0.0: los tipos de respuesta declarados por el perfil (ping, catálogo, historia…) se
+    // conservan raw sin tick ni incidencia; cualquier otro mensaje sigue siendo candidato a tick.
     const msgType = getMember(root, 'msg_type');
-    if (msgType?.type === 'string' && msgType.value.length > 0 && msgType.value !== 'tick') {
+    if (msgType?.type === 'string' && profile.nonTickMsgTypes.has(msgType.value)) {
       return { msg_type: msgType.value, ok: false, reason: 'non_tick' };
     }
+    // Un objeto `error` de la fuente en un mensaje no declarado como respuesta es inválido.
     if (getMember(root, 'error')?.type === 'object') {
       return invalid('source_error_response');
     }

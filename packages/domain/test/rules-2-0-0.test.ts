@@ -14,7 +14,7 @@ import {
   type PipelineProfile,
 } from '../src/index.js';
 
-// Reglas de calidad 1.1.0 (contratos de dominio, «Semántica ejecutable de reglas 1.1.0»): mensajes
+// Reglas de calidad 2.0.0 (contratos de dominio, «Semántica ejecutable de reglas 2.0.0»): mensajes
 // que no son ticks, frames de error de la fuente, atribución por `echo_req` e incidencia sin
 // símbolo. Decididas por el propietario antes de F1.4; los vectores v1 siguen en reglas 1.0.0.
 const vectorRoot = resolve(import.meta.dirname, '../../../test-vectors/market-data/v1');
@@ -29,7 +29,14 @@ function twoSymbolSchema(): Buffer {
   return Buffer.from(JSON.stringify(schema));
 }
 
-function profileFor(ruleVersion: '1.0.0' | '1.1.0', symbols: string[]): PipelineProfile {
+/** Tipos de respuesta que un perfil 2.0.0 declara como no ticks. */
+const NON_TICK = ['active_symbols', 'history', 'ping', 'time'];
+
+function profileFor(
+  ruleVersion: '1.0.0' | '2.0.0',
+  symbols: string[],
+  extra: Record<string, unknown> = ruleVersion === '2.0.0' ? { non_tick_msg_types: NON_TICK } : {},
+): PipelineProfile {
   return createPipelineProfile({
     connector_version: 'fixture-v1',
     quality_profile_bytes: Buffer.from(
@@ -41,6 +48,7 @@ function profileFor(ruleVersion: '1.0.0' | '1.1.0', symbols: string[]): Pipeline
         profile_id: `test-rules-${ruleVersion}`,
         quality_rule_version: ruleVersion,
         source: 'synthetic',
+        ...extra,
       }),
     ),
     source_schema_bytes: twoSymbolSchema(),
@@ -69,14 +77,14 @@ const TICK_ERROR =
   '{"echo_req":{"subscribe":1,"ticks":"SYNTH_200"},"error":{"code":"MarketIsClosed","message":"closed"},"msg_type":"tick"}';
 const UNATTRIBUTABLE = '{"msg_type":"tick","tick":{"quote":"x"}}';
 
-describe('reglas de calidad 1.1.0', () => {
-  const multi = profileFor('1.1.0', ['SYNTH_100', 'SYNTH_200']);
+describe('reglas de calidad 2.0.0', () => {
+  const multi = profileFor('2.0.0', ['SYNTH_100', 'SYNTH_200']);
 
-  it('fija normalizador 1.1.0 y esquema de incidencias 2.0.0', () => {
-    expect(multi.rules).toEqual(RULE_SETS['1.1.0']);
+  it('fija normalizador 2.0.0 y esquema de incidencias 2.0.0', () => {
+    expect(multi.rules).toEqual(RULE_SETS['2.0.0']);
     expect(multi.rules).toMatchObject({
       incident_schema_version: '2.0.0',
-      normalizer_version: '1.1.0',
+      normalizer_version: '2.0.0',
     });
   });
 
@@ -109,7 +117,7 @@ describe('reglas de calidad 1.1.0', () => {
     expect(derived.incidents[0]).toMatchObject({
       evidence: { reason: 'schema_validation_failed' },
       incident_type: 'invalid_source_frame',
-      quality_rule_version: '1.1.0',
+      quality_rule_version: '2.0.0',
       schema_version: '2.0.0',
       symbol: null,
     });
@@ -125,7 +133,7 @@ describe('reglas de calidad 1.1.0', () => {
     });
   });
 
-  it('la publicación declara las versiones de las reglas 1.1.0', () => {
+  it('la publicación declara las versiones de las reglas 2.0.0', () => {
     const publication = buildDatasetPublication({
       locateManifest: () => 's3://buoh-test/manifest',
       locateObject: () => 's3://buoh-test/object',
@@ -138,8 +146,8 @@ describe('reglas de calidad 1.1.0', () => {
       incident_count: 1,
       incident_schema_version: '2.0.0',
       normalized_tick_count: 1,
-      normalizer_version: '1.1.0',
-      quality_rule_version: '1.1.0',
+      normalizer_version: '2.0.0',
+      quality_rule_version: '2.0.0',
       raw_frame_count: 3,
       symbols: ['SYNTH_100'],
     });
@@ -158,7 +166,7 @@ describe('reglas de calidad 1.1.0', () => {
     ).toThrow(/símbolos atribuibles/u);
   });
 
-  it('aplicadas a los source events del vector v1 dan los mismos ticks e incidencias', () => {
+  it('aplicadas a los source events del vector v1 dan los mismos registros salvo versiones e IDs', () => {
     const readNdjson = (file: string) =>
       readFileSync(resolve(vectorRoot, file), 'utf8')
         .slice(0, -1)
@@ -177,32 +185,84 @@ describe('reglas de calidad 1.1.0', () => {
     const quality = JSON.parse(
       readFileSync(resolve(vectorRoot, 'quality-profile.json'), 'utf8'),
     ) as Record<string, unknown>;
-    const v11 = createPipelineProfile({
+    const v2 = createPipelineProfile({
       connector_version: 'fixture-v1',
       quality_profile_bytes: Buffer.from(
-        JSON.stringify({ ...quality, quality_rule_version: '1.1.0' }),
+        JSON.stringify({ ...quality, non_tick_msg_types: NON_TICK, quality_rule_version: '2.0.0' }),
       ),
       source_schema_bytes: readFileSync(resolve(vectorRoot, 'source-schema.json')),
       source_schema_release: 'synthetic-v1',
     });
     const before = deriveMarketData(segments, v1);
-    const after = deriveMarketData(segments, v11);
+    const after = deriveMarketData(segments, v2);
     expect(after.ticks).toEqual(before.ticks);
-    const summary = (items: typeof before.incidents) =>
-      items.map((item) => [item.incident_type, item.observed_ref, item.symbol, item.evidence]);
-    expect(summary(after.incidents)).toEqual(summary(before.incidents));
-    const conditions = (items: typeof before.conditions) =>
-      items.map((item) => [
-        item.condition_type,
-        item.action,
-        item.condition_key,
-        item.occurred_at_utc,
-      ]);
-    expect(conditions(after.conditions)).toEqual(conditions(before.conditions));
+    // Registros completos, quitando solo los campos de versión y los IDs derivados de ellos.
+    const strip = (items: readonly object[], fields: string[]) =>
+      items.map((item) =>
+        Object.fromEntries(Object.entries(item).filter(([key]) => !fields.includes(key))),
+      );
+    const incidentFields = ['incident_id', 'quality_rule_version', 'schema_version'];
+    const conditionFields = ['cause_refs', 'condition_event_id'];
+    expect(strip(after.incidents, incidentFields)).toEqual(strip(before.incidents, incidentFields));
+    expect(strip(after.conditions, conditionFields)).toEqual(
+      strip(before.conditions, conditionFields),
+    );
     expect(after.openConditionTypes).toEqual(before.openConditionTypes);
   });
 
+  it.each([
+    ['msg_type no declarado como respuesta', '{"msg_type":"foo"}', 'schema_validation_failed'],
+    [
+      'msg_type parecido a tick con cuerpo válido',
+      '{"msg_type":"ticks","tick":{"epoch":1767225600,"pip_size":3,"quote":100.125,"symbol":"SYNTH_100"}}',
+      'schema_validation_failed',
+      'SYNTH_100',
+    ],
+    [
+      'error de petición no reconocida',
+      '{"echo_req":{"x":1},"error":{"code":"UnrecognisedRequest","message":"x"},"msg_type":"error"}',
+      'source_error_response',
+    ],
+    ['error sin msg_type', '{"error":{"code":"X","message":"x"}}', 'source_error_response'],
+    ['error que no es objeto', '{"error":"x","msg_type":"tick"}', 'schema_validation_failed'],
+    ['msg_type vacío', '{"msg_type":""}', 'schema_validation_failed'],
+    ['msg_type numérico', '{"msg_type":5}', 'schema_validation_failed'],
+    ['sin msg_type', '{"tick":{"quote":1}}', 'schema_validation_failed'],
+    ['payload que no es JSON', '{"msg_type":"tick",', 'payload_not_json'],
+  ] as [string, string, string, string?][])(
+    'lo desconocido o roto sigue siendo inválido: %s',
+    (_label, payload, reason, symbol = null) => {
+      // `tick.symbol` permitido atribuye; sin él, con dos símbolos y sin echo_req, queda sin símbolo.
+      expect(normalizeRawFrame(raw(1, payload), multi)).toEqual({ ok: false, reason, symbol });
+    },
+  );
+
+  it('atribuye primero por tick.symbol, luego por echo_req.ticks, y solo con símbolos permitidos', () => {
+    const both =
+      '{"echo_req":{"ticks":"SYNTH_200"},"msg_type":"tick","tick":{"quote":"x","symbol":"SYNTH_100"}}';
+    expect(normalizeRawFrame(raw(1, both), multi)).toMatchObject({ symbol: 'SYNTH_100' });
+    const notAllowed = '{"echo_req":{"ticks":"OTRO"},"msg_type":"tick","tick":{"quote":"x"}}';
+    expect(normalizeRawFrame(raw(1, notAllowed), multi)).toMatchObject({ symbol: null });
+    // Con un solo símbolo permitido, la atribución cae en él.
+    expect(normalizeRawFrame(raw(1, notAllowed), profileFor('2.0.0', ['SYNTH_100']))).toMatchObject(
+      { symbol: 'SYNTH_100' },
+    );
+  });
+
+  it('el perfil 2.0.0 exige declarar sus respuestas y 1.0.0 lo prohíbe', () => {
+    expect(() => profileFor('2.0.0', ['SYNTH_100'], {})).toThrow(/non_tick_msg_types/u);
+    expect(() => profileFor('1.0.0', ['SYNTH_100'], { non_tick_msg_types: ['ping'] })).toThrow(
+      /non_tick_msg_types/u,
+    );
+    expect(() =>
+      profileFor('2.0.0', ['SYNTH_100'], { non_tick_msg_types: ['ping', 'tick'] }),
+    ).toThrow(/tick/u);
+    expect(() =>
+      profileFor('2.0.0', ['SYNTH_100'], { non_tick_msg_types: ['time', 'ping'] }),
+    ).toThrow(/ordenado/u);
+  });
+
   it('rechaza un perfil con un conjunto de reglas no implementado', () => {
-    expect(() => profileFor('9.9.9' as '1.1.0', ['SYNTH_100'])).toThrow(/no está implementada/u);
+    expect(() => profileFor('9.9.9' as '2.0.0', ['SYNTH_100'])).toThrow(/no está implementada/u);
   });
 });

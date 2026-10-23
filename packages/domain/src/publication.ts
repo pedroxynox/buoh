@@ -166,7 +166,7 @@ export function buildDatasetPublication(input: PublicationInput): DatasetPublica
   const lastTick = derived.ticks.at(-1);
   const symbols = collectSymbols(events, derived);
   if (symbols.length === 0) {
-    // Reglas 1.1.0: un dataset cuyos frames no permiten atribuir ningún símbolo no es publicable.
+    // Reglas 2.0.0: un dataset cuyos frames no permiten atribuir ningún símbolo no es publicable.
     throw new TypeError('El dataset no tiene símbolos atribuibles; no es publicable.');
   }
 
