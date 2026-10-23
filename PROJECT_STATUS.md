@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
 status_version: 6
-updated_at_utc: "2026-10-23T15:07:00.000Z"
+updated_at_utc: "2026-10-23T15:27:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -28,7 +28,7 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
 - F1.3 se entregó en dos partes ([ADR-0005](docs/arquitectura/adr/0005-persistencia-local-y-formato-fisico-f1-3.md)):
   - F1.3a: `infra/compose.yaml` (PostgreSQL 18 y SeaweedFS S3-compatible), `apps/market-data-worker` con publicación atómica y `pnpm run data:replay` en modos recomputación y `--verify-only` (`F1-DATASET-001`);
   - F1.3b: log raw-first durable con rotación `segment_policy_version = 1.0.0`, registro operativo de `persistence_unavailable`/`source_limit_exceeded` y publicación desde segmentos cerrados del log (`F1-STREAM-001`).
-- F1.4 se entrega en dos partes. F1.4a añade las reglas de calidad 1.1.0 para fuentes que mezclan varios tipos de mensaje, como Deriv: mensajes que no son ticks, errores de la fuente, atribución por `echo_req` e incidencia sin símbolo con el esquema de incidencias 2.0.0 ([contratos de dominio](docs/arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-110)).
+- F1.4 se entrega en dos partes. F1.4a añade las reglas de calidad 2.0.0 para fuentes que mezclan varios tipos de mensaje, como Deriv: mensajes que no son ticks, errores de la fuente, atribución por `echo_req` e incidencia sin símbolo con el esquema de incidencias 2.0.0 ([contratos de dominio](docs/arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-200)).
 - No existe todavía integración con Deriv, persistencia del `IngestionCursor`, cola en memoria del transporte ni despliegue.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
 
@@ -36,13 +36,15 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
 
 **`F1.4b` — Catálogo y streaming público de Deriv.**
 
-Implementar el catálogo versionado de `active_symbols` (`F1-CATALOG-001`) y el adaptador público de Deriv con esquemas fijados, límites, keepalive y correlación (`F1-SOURCE-001`), entregando sus frames al `RawFirstIngestor` con un perfil de reglas 1.1.0, más el smoke opt-in `pnpm run data:smoke`.
+Implementar el catálogo versionado de `active_symbols` (`F1-CATALOG-001`) y el adaptador público de Deriv con esquemas fijados, límites, keepalive y correlación (`F1-SOURCE-001`), entregando sus frames al `RawFirstIngestor` con un perfil de reglas 2.0.0, más el smoke opt-in `pnpm run data:smoke`.
 
 Decisiones del propietario para F1.4b:
 
 - el primer smoke usa un solo índice sintético de Deriv (por ejemplo Volatility 100), con el nombre exacto tomado del catálogo oficial;
 - los umbrales live de retraso y hueco no se inventan: el smoke mide primero los retrasos reales y los umbrales se fijan después con esos números;
 - mientras tanto, los datos live no se publican como dataset (ADR-0004 §13).
+
+El perfil 2.0.0 exige umbrales enteros de retraso y hueco. El smoke solo normaliza y mide, sin derivar ni publicar, así que esos umbrales no se aplican; F1.4b debe marcar ese perfil de medición para que nunca sirva para publicar, y declarar en `non_tick_msg_types` las respuestas de Deriv que pide.
 
 No crea todavía web, móvil, señales ni ejecución.
 
@@ -89,16 +91,21 @@ No crea todavía web, móvil, señales ni ejecución.
 
 ## Evidencia de F1.4a
 
-- Resuelve el antiguo pendiente 1 de F1.2 con la decisión del propietario: reglas 1.1.0 y esquema de incidencias 2.0.0.
-- 9 pruebas de dominio de las reglas 1.1.0:
-  - un ping no da tick ni incidencia;
-  - un frame de error se atribuye por `echo_req`;
-  - un frame inválido sin atribución queda sin símbolo y la derivación continúa;
-  - las reglas 1.0.0 conservan su semántica;
-  - la publicación declara normalizador 1.1.0 e incidencias 2.0.0, y un dataset sin símbolos atribuibles no se publica;
-  - aplicadas al vector v1 dan los mismos ticks, incidencias y condiciones salvo versiones e IDs.
-- 1 prueba de contratos: `symbol = null` en `invalid_source_frame` se rechaza con esquema 1.0.0 y se acepta con 2.0.0.
-- 1 prueba del worker: con reglas 1.1.0, un ping queda durable en el log, no da tick ni alarma, y el dataset se publica y se reproduce en ambos modos.
+Reglas de calidad versionadas (`F1-QUALITY-001`) y preparación del adaptador de Deriv (`F1-SOURCE-001`). Resuelve el antiguo pendiente 1 de F1.2 con la decisión del propietario: reglas 2.0.0 y esquema de incidencias 2.0.0.
+
+- 20 pruebas de dominio de las reglas 2.0.0:
+  - un mensaje declarado en `non_tick_msg_types` no da tick ni incidencia;
+  - lo no declarado o roto (`msg_type` desconocido, parecido, vacío, numérico o ausente; JSON inválido) sigue siendo `invalid_source_frame`;
+  - un error de la fuente da `source_error_response` y se atribuye por `echo_req`; el orden de atribución solo usa símbolos permitidos;
+  - un frame inválido sin atribución queda sin símbolo y la derivación continúa; las reglas 1.0.0 conservan su semántica;
+  - el perfil 2.0.0 exige declarar sus respuestas y el 1.0.0 lo prohíbe;
+  - la publicación declara normalizador e incidencias 2.0.0, y un dataset sin símbolos atribuibles no se publica;
+  - aplicadas al vector v1 dan los mismos registros completos salvo versiones e IDs.
+- Contratos: `symbol = null` en `invalid_source_frame` se acepta solo con el esquema de incidencias 2.0.0; 1.0.0 y versiones sin lector (2.1.0, 3.0.0, 99.0.0) se rechazan.
+- 5 pruebas del worker:
+  - con reglas 2.0.0, un ping queda durable en el log sin tick, alarma ni incidencia, y el dataset se publica y se reproduce en ambos modos;
+  - `--verify-only` rechaza una incidencia con otra versión que la del manifiesto, un esquema de incidencias sin lector o incoherente con las reglas;
+  - la recomputación aborta ante un conjunto de reglas no implementado.
 - Los vectores v1 siguen reproduciéndose byte a byte con reglas 1.0.0.
 
 ## Pendientes registrados de F1.3
