@@ -14,7 +14,7 @@ segmentos ─ buildDatasetPublication ─▶ ticks, incidencias, condiciones (de
 estado durable ─ deriveHealthReport ─▶ HealthReport
 ```
 
-- `createPipelineProfile`: esquema de fuente (JSON Schema 2020-12 vía Ajv) y perfil de calidad firmados, con sus digests JCS.
+- `createPipelineProfile`: esquema de fuente (JSON Schema 2020-12 vía Ajv) y perfil de calidad firmados, con sus digests JCS. El perfil elige el conjunto de reglas (`RULE_SETS`): 1.0.0 para los vectores v1 y 1.1.0 para fuentes como Deriv, que mezclan varios tipos de mensaje.
 - `normalizeRawFrame`: valida el payload exacto y conserva el lexema numérico de la cotización.
 - `deriveMarketData`: reglas 1.0.0 en orden de observación; recomputar desde source events persistidos da el mismo resultado.
 - `evaluateSourceLimit`: matriz de límites de ADR-0004 §7.

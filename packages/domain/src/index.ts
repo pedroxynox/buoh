@@ -19,10 +19,13 @@ export {
   NORMALIZER_VERSION,
   QUALITY_RULE_VERSION,
   qualityProfileSchema,
+  RULE_SETS,
+  ruleSetFor,
   SEGMENT_POLICY_VERSION,
   type PipelineProfile,
   type PipelineProfileInput,
   type QualityProfile,
+  type RuleSet,
 } from './profile.js';
 export {
   buildDatasetPublication,

@@ -17,7 +17,7 @@ import {
 } from '@buoh/contracts';
 
 import { normalizeRawFrame, type UnflaggedTick } from './normalizer.js';
-import { CONTRACT_SCHEMA_VERSION, QUALITY_RULE_VERSION, type PipelineProfile } from './profile.js';
+import { CONTRACT_SCHEMA_VERSION, type PipelineProfile } from './profile.js';
 
 type IncidentType = DataQualityIncident['incident_type'];
 type Severity = DataQualityIncident['severity'];
@@ -161,9 +161,9 @@ export function deriveMarketData(
     const incident = dataQualityIncidentSchema.parse(
       withDerivedId('incident_id', {
         ...body,
-        quality_rule_version: QUALITY_RULE_VERSION,
+        quality_rule_version: profile.rules.quality_rule_version,
         related_refs: sortedUnique(body.related_refs),
-        schema_version: CONTRACT_SCHEMA_VERSION,
+        schema_version: profile.rules.incident_schema_version,
         severity: DERIVABLE_INCIDENT_SEVERITY[body.incident_type],
         source,
       }),
@@ -204,6 +204,10 @@ export function deriveMarketData(
 
   const onRawFrame = (event: Extract<SourceEvent, { kind: 'raw_source_frame' }>, order: number) => {
     const result = normalizeRawFrame(event, profile);
+    if (!result.ok && result.reason === 'non_tick') {
+      // Reglas 1.1.0: mensaje que no es tick; queda en el log raw sin tick ni incidencia.
+      return;
+    }
     if (!result.ok) {
       emitIncident({
         evidence: { raw_payload_sha256: event.raw_payload_sha256, reason: result.reason },
