@@ -10,9 +10,11 @@ import {
   type SourceEvent,
 } from '@buoh/contracts';
 import {
+  createPipelineProfile,
   ndjsonBytes,
   prettyCanonicalJson,
   type InvalidFrameReason,
+  type PipelineProfile,
   type UnflaggedTick,
 } from '@buoh/domain';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -94,7 +96,10 @@ function tickPayload(epoch: number): string {
 }
 
 /** Almacenes en memoria, log, registro e ingestor conectados como en runtime. */
-async function harness(options: { operational?: MemoryOperationalStore } = {}) {
+async function harness(
+  options: { operational?: MemoryOperationalStore; profile?: PipelineProfile } = {},
+) {
+  const profile = options.profile ?? fixture.profile;
   const objects = new MemoryObjectStore();
   const sourceLog = new MemorySourceLogStore();
   const operational = options.operational ?? new MemoryOperationalStore();
@@ -102,6 +107,7 @@ async function harness(options: { operational?: MemoryOperationalStore } = {}) {
   const alerts: Parameters<OperationalAlert>[0][] = [];
   const ticks: UnflaggedTick[] = [];
   const invalid: { observation_id: string; reason: InvalidFrameReason }[] = [];
+  const nonTick: { msg_type: string; observation_id: string }[] = [];
   let counter = 9000;
   const openLog = () =>
     SourceEventLog.open({
@@ -119,11 +125,12 @@ async function harness(options: { operational?: MemoryOperationalStore } = {}) {
     log: await openLog(),
     nextId: () => id((counter += 1)),
     now: () => DETECTED_AT,
-    profile: fixture.profile,
+    profile,
     registry,
     reopenLog: openLog,
     sink: {
       invalidFrame: (item) => invalid.push(item),
+      nonTickFrame: (item) => nonTick.push(item),
       tick: (tick) => ticks.push(tick),
     },
   });
@@ -132,6 +139,7 @@ async function harness(options: { operational?: MemoryOperationalStore } = {}) {
     ingestor,
     invalid,
     metadata,
+    nonTick,
     objects,
     openLog,
     operational,
@@ -472,6 +480,72 @@ describe('F1-STREAM-001: captura raw-first contra market-data v1', () => {
       condition_type: 'source_limit_exceeded',
       resolution_reason: 'input_reopened',
     });
+  });
+
+  it('con reglas 1.1.0 un mensaje que no es tick se guarda raw, no da tick ni alarma y se reproduce', async () => {
+    const quality = JSON.parse(readVector('quality-profile.json').toString('utf8')) as Record<
+      string,
+      unknown
+    >;
+    const profile = createPipelineProfile({
+      connector_version: 'fixture-v1',
+      quality_profile_bytes: Buffer.from(
+        JSON.stringify({ ...quality, quality_rule_version: '1.1.0' }),
+      ),
+      source_schema_bytes: readVector('source-schema.json'),
+      source_schema_release: 'synthetic-v1',
+    });
+    const run = await harness({ profile });
+    forbidAmbientEffects();
+    const ping = '{"echo_req":{"ping":1,"req_id":1},"msg_type":"ping","ping":"pong","req_id":1}';
+    await run.ingestor.receiveFrame({
+      connection_id: CONNECTION_A,
+      observation_id: id(1),
+      payload_utf8: ping,
+      received_at_utc: '2026-01-01T00:00:00.100Z',
+    });
+    await run.ingestor.receiveFrame({
+      connection_id: CONNECTION_A,
+      observation_id: id(2),
+      payload_utf8: tickPayload(1767225600),
+      received_at_utc: '2026-01-01T00:00:00.200Z',
+    });
+    await run.ingestor.rotate('requested');
+
+    expect(run.nonTick).toEqual([{ msg_type: 'ping', observation_id: id(1) }]);
+    expect(run.invalid).toEqual([]);
+    expect(run.ticks.map((tick) => tick.observation_id)).toEqual([id(2)]);
+    expect(run.sourceLog.rows.map((row) => row.event_id)).toEqual([id(1), id(2)]);
+
+    const publication = await publishFromLog({
+      environment: 'test',
+      fromSegment: 0,
+      log: run.ingestor.log,
+      metadata: run.metadata,
+      objects: run.objects,
+      profile,
+      publication_id: '019b76da-cb28-7003-8000-0000000000c1',
+      published_at_utc: '2026-01-01T00:00:09.000Z',
+      toSegment: 0,
+      zlibVersion: 'test-zlib',
+    });
+    expect(publication.core).toMatchObject({
+      incident_count: 0,
+      incident_schema_version: '2.0.0',
+      normalizer_version: '1.1.0',
+      quality_rule_version: '1.1.0',
+      raw_frame_count: 2,
+    });
+    for (const mode of ['verify-only', 'recompute'] as const) {
+      const report = await replayDataset({
+        datasetId: publication.dataset_id,
+        environment: 'test',
+        metadata: run.metadata,
+        mode,
+        objects: run.objects,
+      });
+      expect(report.status).toBe(mode === 'recompute' ? 'reproduced' : 'verified');
+    }
   });
 
   it('una condición abierta de una ejecución anterior mantiene la entrada cerrada', async () => {
