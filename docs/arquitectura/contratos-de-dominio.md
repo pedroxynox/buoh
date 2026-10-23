@@ -394,7 +394,7 @@ open_condition_types: ("connection_lost" | "event_gap_unresolved" |
 5. regenerar ticks, incidencias derivables y `OperationalConditionEvent` derivables;
 6. ordenar/canonicalizar resultados y comparar hashes, conteos, core y `dataset_id`.
 
-`--verify-only` termina después del paso 3 y demuestra integridad, no corrección del normalizador. Incidencias operativas `persistence_unavailable` y `source_limit_exceeded` fuera de un dataset no se recomputan; se validan en pruebas fail-closed mediante sus causas inyectadas. Un replay nunca contacta a Deriv ni usa reloj/IDs nuevos.
+`--verify-only` termina después del paso 3 y demuestra integridad, no corrección del normalizador. Desde F1.3a lo implementa [`apps/market-data-worker`](../../apps/market-data-worker/); informe JSON y códigos de salida en el [runbook](../operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13). Incidencias operativas `persistence_unavailable` y `source_limit_exceeded` fuera de un dataset no se recomputan; se validan en pruebas fail-closed mediante sus causas inyectadas. Un replay nunca contacta a Deriv ni usa reloj/IDs nuevos.
 
 ## Reglas de calidad v1
 
@@ -435,7 +435,23 @@ Desde F1.2, [`packages/domain`](../../packages/domain/) implementa estas reglas 
 - Continuidad tras `ConnectionClosed` no solicitado (`gap_detection = after_reconnection`): cada símbolo afectado con high-watermark queda pendiente desde ese high-watermark (inicio del hueco). Decide solo el primer tick estrictamente posterior al high-watermark vigente en el último cierre; uno igual o anterior no informa sobre el intervalo. Si su separación respecto del inicio no supera `maximum_event_gap_ms` y el hueco no se había declarado excedido, demuestra continuidad; si no, el hueco queda excedido y ese tick fija su fin. Un nuevo cierre de un símbolo pendiente conserva inicio y estado excedido y espera un nuevo fin, de modo que una sola recuperación debe cubrirlos todos. Solo decide un `HistoryRecoveryResult` del símbolo registrado después de fijado el fin y cuyo rango cubra desde el inicio + 1 ms hasta el fin − 1 ms (`complete` la demuestra; `partial`/`unavailable` crean `event_gap_unresolved`); uno anterior o que no cubre no decide y la salud permanece `recovering`. Pendiente no crea incidencia: la recuperación la solicita el worker (F1.5).
 - Salud derivada: cada causa impone un mínimo y gana el más severo: `connection_lost` → `recovering`, continuidad pendiente → `recovering`, `event_gap_unresolved` → `degraded`, `persistence_unavailable`, `source_limit_exceeded` o cola sobre su límite → `paused`. Sin causas: `starting` sin raw durable, `paused` si la última conexión se cerró a petición, `healthy` en otro caso. `last_event_time_utc` es el extremo final de los ticks canónicos. F1.2 solo recibe condiciones derivables del dataset; las operativas se incorporan con su registro.
 - Source events con `schema_version` distinta de la implementada abortan la derivación; no se migran.
-- `persistence_unavailable` y `source_limit_exceeded` no se derivan de un dataset: F1.2 fija su resultado fail-closed y su evidencia; el registro operativo con severidad y referencias se define junto a la persistencia (F1.3/F1.5).
+- `persistence_unavailable` y `source_limit_exceeded` no se derivan de un dataset: F1.2 fija su resultado fail-closed y su evidencia; su registro operativo se define en la sección siguiente.
+
+### Registro operativo de persistencia y límites
+
+Aprobado para F1.3b ([ADR-0005](adr/0005-persistencia-local-y-formato-fisico-f1-3.md)); todavía sin implementar. Vive en tablas PostgreSQL append-only separadas de los datasets y nunca entra en sus artifacts.
+
+| Campo | `persistence_unavailable` | `source_limit_exceeded` |
+|---|---|---|
+| `severity` | `critical` | `error` si impone `paused` (`websocket_frame`, `in_memory_queue_*`); `critical` si impone `failed` (`schema_*`) |
+| `observed_ref` | `observation_id` del frame afectado si ya se asignó; si no, un UUIDv7 nuevo del generador inyectado que identifica el intento | igual |
+| `related_refs` | último source event durable, o `[]` si no existe | igual |
+| `symbol` | `null` salvo atribución cierta | `null` salvo atribución cierta sin parsear contenido fuera del límite |
+| `observed_at_utc` | reloj UTC inyectado al detectar | igual |
+
+- La condición se abre en el mismo instante con `cause_refs = [incident_id]` y solo si su clave (`source + stage` o `source + resource`) no está abierta; una repetición registra incidencia sin reabrir.
+- Se resuelve con el primer source event durable que demuestra la capacidad restaurada: para persistencia, el primer evento confirmado tras recuperar; para límites, el `ConnectionOpened` que reabre la entrada. `cause_refs = [apertura, ese evento]` y `resolution_reason` es `persistence_restored` o `input_reopened`.
+- Si PostgreSQL no está disponible no se puede registrar: se emite una alerta estructurada y sanitizada en stderr, sin afirmar persistencia y sin inserción retroactiva posterior.
 
 ## Contratos futuros
 

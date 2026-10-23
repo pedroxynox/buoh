@@ -17,15 +17,17 @@ Cualquier persona o motor de IA debe leer, en orden:
 
 ## Desarrollo actual
 
-F1.1 proporciona un monorepo mínimo y contratos runtime; todavía no conecta con Deriv ni ejecuta operaciones.
+Fase 1 tiene contratos runtime (F1.1), normalización y calidad puras (F1.2) y publicación y replay sobre PostgreSQL y almacenamiento S3-compatible locales (F1.3a). Todavía no conecta con Deriv ni ejecuta operaciones.
 
 ```text
 pnpm install
 pnpm run verify
 pnpm run test:vectors
+pnpm run test:integration                       # requiere infra/compose.yaml
+pnpm run data:replay -- --dataset <dataset_id>  # añade --verify-only para solo integridad
 ```
 
-pnpm usa el runtime Node fijado por el proyecto. Consulta [`packages/contracts`](packages/contracts/) para los esquemas ejecutables y [`packages/domain`](packages/domain/) para la normalización y las reglas de calidad puras (F1.2).
+pnpm usa el runtime Node fijado por el proyecto. Consulta [`packages/contracts`](packages/contracts/) para los esquemas ejecutables, [`packages/domain`](packages/domain/) para la normalización y las reglas de calidad puras y [`apps/market-data-worker`](apps/market-data-worker/) para publicación y replay. El entorno local está en el [runbook](docs/operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13).
 
 ## Propósito
 
@@ -83,6 +85,7 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 - [ADR-0002: señales y ejecución controlada](docs/arquitectura/adr/0002-senales-y-ejecucion-controlada.md)
 - [ADR-0003: lenguajes y límites](docs/arquitectura/adr/0003-lenguajes-y-limites.md)
 - [ADR-0004: pipeline y reproducción de datos de Fase 1](docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md)
+- [ADR-0005: persistencia local, formato físico y log raw-first de F1.3](docs/arquitectura/adr/0005-persistencia-local-y-formato-fisico-f1-3.md)
 - [Contratos de dominio y eventos](docs/arquitectura/contratos-de-dominio.md)
 - [Seguridad y rigor cuantitativo](docs/gobierno/seguridad-y-rigor-cuantitativo.md)
 - [Protocolo de validación de estrategias](docs/gobierno/protocolo-de-validacion-de-estrategias.md)
