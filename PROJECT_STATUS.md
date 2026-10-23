@@ -82,13 +82,15 @@ No crea todavía web, móvil, señales ni ejecución.
 
 ## Pendientes registrados de F1.3
 
-Detectados en la revisión semántica del PR #6; la lista completa está en ese PR. Los más relevantes para F1.4 y el despliegue:
+Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b; la lista completa está en cada PR. Los más relevantes para F1.4 y el despliegue:
 
 1. Si la conexión cae durante el `COMMIT` de una publicación, se informa "no se confirmó" aunque pudo confirmarse.
 2. Publicar no aplica los límites de lectura del replay. `normalized_ticks` y `quality_incidents` son un único artefacto que crece con el dataset. Resolver antes de publicar datasets live largos.
 3. Los nombres de `PublicationStep` no coinciden con `PersistenceStage`; los fallos de publicación todavía no entran en el registro operativo.
 4. El worker usa un único rol PostgreSQL dueño de las tablas. Antes de desplegar (ADR-0006) hace falta un rol de ejecución que solo pueda insertar y leer.
 5. SeaweedFS `mini` arranca componentes internos que no se usan (Iceberg, Lance, servidor de administración).
+6. El log asume un único escritor por fuente y llamadas al ingestor de una en una: los triggers de `0002` no bloquean escritores concurrentes. El transporte de F1.4 debe esperar cada llamada y garantizar una sola instancia por fuente, o añadir un bloqueo por fuente.
+7. Tras un fallo de persistencia, el `ConnectionClosed` del cierre no se guarda en el log, así que un dataset que abarque la caída no lleva marca de la interrupción. Un índice que confirma pero informa error se trata como no durable y se adopta al reabrir sin reconciliar el tick.
 
 ## Pendientes registrados de F1.2
 
@@ -110,7 +112,7 @@ Detectados en la revisión semántica del PR #5:
 - JSON Schema representa estructura interoperable; las invariantes criptográficas y relacionales requieren validación runtime.
 - Las pruebas offline sintéticas son bloqueantes. El smoke público de Deriv aparece en F1.4 y nunca constituye el único criterio de merge.
 - Hasta incorporar un writer Parquet, ticks e incidencias se publican como NDJSON sin compresión; `dataset_id` no depende del formato físico.
-- Alojamiento productivo en Render para PostgreSQL, API, web y `market-data-worker`; el despliegue sigue diferido ([ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)).
+- Alojamiento productivo en Render para PostgreSQL, API y web; el despliegue sigue diferido ([ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)).
 
 ## Bloqueos
 
@@ -121,6 +123,7 @@ Antes de implementar el adaptador de Deriv en F1.4 hay que decidir el pendiente 
 - Jurisdicción inicial del producto comercial.
 - Universo definitivo de índices y tipos de contrato.
 - Proveedor de almacenamiento de objetos en producción; Render no lo ofrece (ADR-0006).
+- Alojamiento de `market-data-worker` en producción.
 - Compilación y distribución de la app móvil.
 - Límites monetarios y política de riesgo para fases `demo` y `real`.
 - Proveedor de pagos y modelo de suscripción.

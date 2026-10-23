@@ -37,12 +37,12 @@ ADR-0004 fija PostgreSQL estándar y almacenamiento S3-compatible, pero no qué 
 - Cada source event se escribe como objeto content-addressed con su línea JCS (`raw_object_write`) y después se indexa en PostgreSQL con segmento y posición (`source_event_index`). Solo es durable cuando ambos confirman; antes no se normaliza ni se emite tick.
 - Al cerrar un segmento se escribe su objeto NDJSON en gzip (el mismo writer de §2), content-addressed y verificado, y se inserta su fila de cierre. Los objetos por evento quedan como huérfanos limpiables tras el período de seguridad.
 - Tras la durabilidad, `normalizeRawFrame` entrega el tick a un sink inyectado. Las incidencias derivables se calculan con `deriveMarketData` al publicar; la calidad incremental en vivo queda diferida.
-- Publicar es una acción explícita sobre un rango contiguo de segmentos cerrados de una fuente; el objeto de cada segmento del log es el mismo que referencia el dataset.
+- Publicar es una acción explícita sobre un rango contiguo de segmentos cerrados de una fuente. Con el mismo writer gzip (misma versión de zlib), el objeto de cada segmento del log es el mismo que referencia el dataset; con otro writer se escribe un objeto nuevo con el mismo hash lógico.
 - Detalles de implementación:
   - un resultado ambiguo del índice cuenta como no durable;
   - tras cualquier fallo de persistencia, el log se reabre desde PostgreSQL y el almacenamiento antes de aceptar más eventos;
   - al arrancar, el log continúa el segmento no finalizado y verifica el objeto de cada uno de sus eventos;
-  - la base de datos impone posiciones contiguas, que no se escriba en segmentos cerrados ni se salten segmentos, y que los conteos del cierre coincidan con el índice.
+  - con un único escritor por fuente, la base de datos impone posiciones contiguas, que no se escriba en segmentos cerrados ni se salten segmentos, y que los conteos del cierre coincidan con el índice. Los triggers no bloquean escritores concurrentes de la misma fuente.
 - Quedan para incrementos posteriores: persistir el `IngestionCursor`, que llega con la reconexión (F1.5) y nunca avanzará antes de la durabilidad, y la cola en memoria con sus límites, que llega con el transporte real (F1.4/F1.5).
 
 ### 5. Rotación `segment_policy_version = 1.0.0` (F1.3b)

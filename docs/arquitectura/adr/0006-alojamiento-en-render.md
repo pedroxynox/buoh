@@ -7,7 +7,7 @@
 
 ## Contexto
 
-El plan de Fase 1 difiere el despliegue productivo y exige que el diseño sea portable a Render y a almacenamiento S3-compatible (§4 y §10). El propietario confirmó el destino de la base de datos, la API y la web; la aplicación móvil queda sin decidir.
+El plan de Fase 1 difiere el despliegue productivo y exige que el diseño sea portable a Render y a almacenamiento S3-compatible (§4 y §10). El propietario confirmó que la base de datos, la API y la web se alojarán en Render. No decidió dónde se aloja `market-data-worker` ni cómo se distribuye la app móvil.
 
 Render ofrece PostgreSQL gestionado, servicios web y background workers. Sus servicios tienen sistema de archivos efímero salvo que se les monte un disco persistente, y no ofrece almacenamiento de objetos S3-compatible propio; su documentación remite a un proveedor S3 externo para archivos compartidos.
 
@@ -15,17 +15,20 @@ Render ofrece PostgreSQL gestionado, servicios web y background workers. Sus ser
 
 - **PostgreSQL:** Render Postgres.
 - **API** (`apps/api`, Fastify) y **web** (`apps/web`, Next.js): servicios web de Render.
-- **`market-data-worker`:** background worker de Render, cuando se despliegue.
-- **Almacenamiento de objetos:** proveedor S3-compatible externo, todavía por elegir. Render no lo cubre.
-- **App móvil:** se distribuye por las tiendas de Android e iOS y habla con la API alojada en Render. El servicio de compilación y distribución está por decidir.
+
+Siguen pendientes, sin decidir en esta ADR:
+
+- dónde se aloja `market-data-worker` (Render ofrece background workers, pero el propietario no lo ha confirmado);
+- el proveedor S3-compatible productivo, que Render no cubre, y su región;
+- la compilación y distribución de la app móvil.
 
 Esta ADR no autoriza a desplegar ni a crear `apps/api`, `apps/web`, `apps/mobile` o `render.yaml` en Fase 1: siguen diferidos por el plan.
 
 ## Consecuencias
 
-- El worker no puede confiar su durabilidad al disco local. El log raw-first de [ADR-0005](0005-persistencia-local-y-formato-fisico-f1-3.md) ya escribe solo en PostgreSQL y en almacenamiento S3-compatible.
+- Donde se aloje, el worker no confía su durabilidad al disco local: el log raw-first de [ADR-0005](0005-persistencia-local-y-formato-fisico-f1-3.md) escribe solo en PostgreSQL y en almacenamiento S3-compatible, así que también funcionaría en Render.
 - La configuración y los secretos llegan por variables de entorno `BUOH_*`, que Render gestiona por servicio.
-- Antes de desplegar hay que decidir el proveedor S3 productivo y la región, y separar en PostgreSQL un rol dueño de las tablas de un rol de ejecución que solo pueda insertar y leer.
+- Antes de desplegar hay que separar en PostgreSQL un rol dueño de las tablas de un rol de ejecución que solo pueda insertar y leer.
 
 ## Referencias verificadas
 

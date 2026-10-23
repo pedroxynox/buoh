@@ -48,7 +48,7 @@ Los umbrales live pertenecen a un perfil versionado por fuente/símbolo. El perf
 4. Verificar hashes de objetos pendientes.
 5. Abrir el WebSocket y pasar de `starting` a `healthy` solo después de persistir/confirmar el primer evento esperado.
 
-Desde F1.3b el paso 3–4 lo hace `SourceEventLog.open`: continúa el segmento no finalizado y relee y verifica el objeto de cada uno de sus eventos; si alguno falta o no coincide con su hash, el arranque aborta. Si el registro operativo tiene una condición abierta de la ejecución anterior, la entrada sigue cerrada hasta el `ConnectionOpened` que la resuelve.
+Desde F1.3b, `SourceEventLog.open` cubre la parte de los pasos 3–4 que toca al segmento no finalizado: lo continúa y relee y verifica el objeto de cada uno de sus eventos; si alguno falta o no coincide con su hash, el arranque aborta. El cursor y el high-watermark del paso 3 llegan con la reconexión (F1.5). Si el registro operativo tiene una condición abierta de la ejecución anterior, la entrada sigue cerrada hasta el `ConnectionOpened` que la resuelve.
 
 ### Desconexión de WebSocket
 
@@ -85,7 +85,7 @@ Desde F1.3b el paso 3–4 lo hace `SourceEventLog.open`: continúa el segmento n
 4. No truncar ni interpretar parcialmente un frame o archivo como válido.
 5. Reabrir solo con configuración versionada y continuidad verificada.
 
-Desde F1.3b, un frame de más de 1 048 576 bytes se rechaza antes de crear el `RawSourceFrame`. Queda una incidencia `source_limit_exceeded` con severidad `error` y una condición abierta en el registro operativo, y la entrada se cierra; solo se admite después el `ConnectionClosed` del cierre. Un `ConnectionOpened` durable resuelve la condición (`input_reopened`) y reabre la entrada. Los límites de la cola en memoria llegan con el transporte real (F1.4/F1.5).
+Desde F1.3b, un frame de más de 1 048 576 bytes se rechaza antes de crear el `RawSourceFrame`. Queda una incidencia `source_limit_exceeded` con severidad `error` y una condición abierta en el registro operativo, y la entrada se cierra; solo se admite después el `ConnectionClosed` del cierre. Un `ConnectionOpened` durable resuelve la condición (`input_reopened`) y reabre la entrada. En F1.3b esa reapertura no verifica todavía la continuidad del paso 5: la verificación llega con la reconexión (F1.5). Los límites de la cola en memoria llegan con el transporte real (F1.4/F1.5).
 
 ### Almacenamiento no disponible o backlog lleno por conteo/bytes
 
@@ -101,7 +101,7 @@ Desde F1.3b, si la escritura del objeto (`raw_object_write`) o la fila del índi
 - se registra `persistence_unavailable` con severidad `critical`; el motivo es el código del error, nunca su mensaje;
 - la entrada se pausa y el informe fail-closed indica `close_connection_then_recover`;
 - si PostgreSQL tampoco responde, solo queda una alerta JSON en stderr (`operational_registry_unavailable`);
-- para recuperar, el siguiente `ConnectionOpened` reabre el log desde el estado durable y, si queda durable, resuelve la condición (`persistence_restored`).
+- para recuperar, el siguiente `ConnectionOpened` reabre el log desde el estado durable y, si queda durable, resuelve la condición (`persistence_restored`). En F1.3b no se verifican antes la continuidad ni los segmentos pendientes (pasos 5–6); eso llega con la reconexión (F1.5).
 
 ### Publicación interrumpida
 
