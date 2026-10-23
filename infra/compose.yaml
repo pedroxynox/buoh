@@ -28,7 +28,8 @@ services:
       retries: 30
 
   # SeaweedFS en modo `mini` (un nodo): S3 en el puerto 8333 con una identidad estática y el
-  # bucket creado al arrancar. Sin telemetría, WebDAV ni interfaz de administración.
+  # bucket creado al arrancar. Sin telemetría, WebDAV ni interfaz web de administración; los demás
+  # componentes internos solo son accesibles dentro de esta red (ver ADR-0005 §1).
   object-storage:
     image: chrislusf/seaweedfs:4.48@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d
     command: ['mini', '-dir=/data', '-master.telemetry=false', '-webdav=false', '-admin.ui=false']

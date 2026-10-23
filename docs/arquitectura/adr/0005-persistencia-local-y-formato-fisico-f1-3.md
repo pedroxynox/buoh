@@ -14,7 +14,7 @@ ADR-0004 fija PostgreSQL estándar y almacenamiento S3-compatible, pero no qué 
 
 ### 1. Servicios locales (F1.3a)
 
-- `infra/compose.yaml` fija **PostgreSQL 18.6** (imagen oficial) y **SeaweedFS 4.48** en modo `mini` (Apache-2.0) como almacenamiento S3-compatible: S3 en el puerto 8333, una identidad estática por variables de entorno y el bucket creado al arrancar. Telemetría, WebDAV e interfaz de administración desactivadas.
+- `infra/compose.yaml` fija **PostgreSQL 18.6** (imagen oficial) y **SeaweedFS 4.48** en modo `mini` (Apache-2.0) como almacenamiento S3-compatible: S3 en el puerto 8333, una identidad estática por variables de entorno y el bucket creado al arrancar. Telemetría, WebDAV y la interfaz web de administración están desactivadas. Los demás componentes internos de `mini` (master, volume, filer, servidor de administración, Iceberg y Lance) siguen activos sin autenticación propia, pero solo son accesibles dentro de la red de compose: únicamente se publica el puerto S3, y solo en loopback.
 - Imágenes por versión y digest; puertos publicados solo en `127.0.0.1`; credenciales solo por entorno (compose no arranca sin ellas). CI genera credenciales efímeras por ejecución.
 - El worker usa `pg` y el SDK oficial `@aws-sdk/client-s3`. Solo depende de operaciones S3 estándar (`PutObject` con `If-None-Match: *`, `GetObject`, `HeadObject`), así que el proveedor productivo sigue siendo una decisión abierta.
 
@@ -60,7 +60,7 @@ La semántica de `persistence_unavailable` y `source_limit_exceeded` (severidad,
 
 ## Consecuencias
 
-- Un clon limpio puede levantar PostgreSQL y S3 locales, publicar los vectores sintéticos y reproducirlos con el mismo `dataset_id`.
+- Un clon limpio debe poder levantar PostgreSQL y S3 locales, publicar los vectores sintéticos y reproducirlos con el mismo `dataset_id`; el job `test:integration` de CI lo comprueba con las imágenes fijadas.
 - Dos escrituras por source event en F1.3b: aceptado por el volumen de Fase 1 y porque coincide con ADR-0001 §4 (raw en S3, metadatos en PostgreSQL) y con las etapas `PersistenceStage`.
 - Mientras no haya Parquet, los derivados ocupan más espacio.
 - El SDK de AWS añade dependencias transitivas; se fija versión exacta y se revisa en cada actualización.

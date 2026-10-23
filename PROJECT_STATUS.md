@@ -56,8 +56,13 @@ No crea todavía conexión Deriv, web, móvil, señales ni ejecución.
 
 ## Evidencia de F1.3a
 
-- 21 pruebas offline del worker (adaptadores en memoria, reloj congelado, sin aleatoriedad ni red): ambos escenarios se publican con los `dataset_id` firmados; los source events gzip descomprimen byte a byte a los segmentos del vector; cero ticks guarda objetos de cero bytes; un fallo en escritura, verificación, documento o commit no deja publicación visible y reanudar la completa; `--verify-only` acepta un dataset autoconsistente que la recomputación rechaza con `RECOMPUTATION_MISMATCH`; una versión no implementada aborta con `VERSION_UNSUPPORTED`.
-- 11 pruebas de integración contra PostgreSQL 18 y SeaweedFS 4.48 reales (`pnpm run test:integration`; job de CI en cada PR): publicación y replay de ambos escenarios, CLI con salidas 0/1/2, rollback completo de un commit fallido, índice de un único record activo, rechazo de `UPDATE`/`DELETE`/`TRUNCATE` y comprobación en base de datos de que `dataset_id` es el hash de `manifest_core`.
+- 27 pruebas offline del worker con adaptadores en memoria y sin red; publicación y replay de ambos escenarios corren además con reloj congelado y sin aleatoriedad:
+  - ambos escenarios se publican con los `dataset_id` firmados y los source events gzip descomprimen byte a byte a los segmentos del vector;
+  - cero ticks guarda objetos de cero bytes;
+  - un fallo en escritura, verificación, documento o commit no deja publicación visible, y reanudar la completa;
+  - `--verify-only` rechaza datasets íntegros pero inconsistentes (orden, extremos, tick sin raw, procedencia, perfil, versión de contrato) y acepta uno coherente que la recomputación rechaza con `RECOMPUTATION_MISMATCH`;
+  - una versión del normalizador no implementada aborta la recomputación con `VERSION_UNSUPPORTED`.
+- 11 pruebas de integración (`pnpm run test:integration`) contra PostgreSQL 18.4 y SeaweedFS 4.48 locales: publicación y replay de ambos escenarios, CLI con salidas 0/1/2, rollback completo de un commit fallido, índice de un único record activo, rechazo de `UPDATE`/`DELETE`/`TRUNCATE` y comprobación en base de datos de que `dataset_id` es el hash de `manifest_core`. El job de CI las ejecuta con las imágenes fijadas en `infra/compose.yaml`.
 
 ## Pendientes registrados de F1.2
 
