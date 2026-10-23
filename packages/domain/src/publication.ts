@@ -25,7 +25,8 @@ import { canonicalJsonBytes, ndjsonBytes } from './serialization.js';
 
 type ArtifactRole = StorageObjectRef['role'];
 
-const MEDIA_TYPES = {
+/** Media type lógico por rol; la compresión se declara aparte en `StorageObjectRef.compression`. */
+export const MEDIA_TYPES = {
   normalized_ticks: 'application/x-ndjson',
   operational_conditions: 'application/x-ndjson',
   quality_incidents: 'application/x-ndjson',
@@ -33,6 +34,27 @@ const MEDIA_TYPES = {
   source_events: 'application/x-ndjson',
   source_schema: 'application/schema+json',
 } as const satisfies Record<ArtifactRole, string>;
+
+/** Codificación física de un objeto. Cambiarla altera hashes físicos, nunca `dataset_id`. */
+export interface EncodedObject {
+  readonly bytes: Uint8Array;
+  readonly compression: 'gzip' | 'none';
+  /** Obligatorios para gzip (contratos de dominio, `StorageObjectRef`). */
+  readonly writer_name?: string;
+  readonly writer_version?: string;
+}
+
+export type ObjectEncoder = (input: {
+  readonly artifact_id: string;
+  readonly logical_bytes: Uint8Array;
+  readonly role: ArtifactRole;
+}) => EncodedObject;
+
+/** Codificación de los vectores: bytes lógicos sin compresión. */
+const identityEncoder: ObjectEncoder = ({ logical_bytes }) => ({
+  bytes: logical_bytes,
+  compression: 'none',
+});
 
 export interface PublicationInput {
   /** UUIDv7 inyectado para esta publicación física. */
@@ -42,8 +64,16 @@ export interface PublicationInput {
   readonly profile: PipelineProfile;
   /** Segmentos `source_events` en orden de observación; sus límites forman parte del input. */
   readonly segments: readonly (readonly unknown[])[];
+  /**
+   * Codificación física opcional por artefacto; por defecto `none`. Debe ser determinista y pura:
+   * el hash lógico se calcula siempre sobre los bytes lógicos.
+   */
+  readonly encodeObject?: ObjectEncoder;
   /** Ubicación física del objeto de un artefacto; no participa en `dataset_id`. */
-  readonly locateObject: (artifactId: string) => string;
+  readonly locateObject: (
+    artifactId: string,
+    object: { readonly object_bytes_sha256: string; readonly role: ArtifactRole },
+  ) => string;
   /** Ubicación del documento canónico del manifiesto. */
   readonly locateManifest: (input: {
     dataset_id: string;
@@ -60,7 +90,7 @@ export interface DatasetPublication {
   readonly manifest: DatasetManifest;
   /** Documento almacenable: JCS sin newline. */
   readonly manifest_bytes: Uint8Array;
-  /** Bytes físicos por `artifact_id` (compresión `none`). */
+  /** Bytes físicos por `artifact_id`, ya codificados por `encodeObject`. */
   readonly objects: ReadonlyMap<string, Uint8Array>;
   readonly record: PublishedManifestRecord;
 }
@@ -192,6 +222,12 @@ export function buildDatasetPublication(input: PublicationInput): DatasetPublica
     },
   ].sort((left, right) => (left.id < right.id ? -1 : 1));
 
+  const encode = input.encodeObject ?? identityEncoder;
+  const encoded = physical.map((object) => ({
+    ...object,
+    encoding: encode({ artifact_id: object.id, logical_bytes: object.bytes, role: object.role }),
+  }));
+
   const manifest = datasetManifestSchema.parse({
     dataset_id: datasetId,
     manifest_core: core,
@@ -199,16 +235,28 @@ export function buildDatasetPublication(input: PublicationInput): DatasetPublica
     published_at_utc: input.published_at_utc,
     schema_version: CONTRACT_SCHEMA_VERSION,
     state: 'published',
-    storage_objects: physical.map((object) => ({
-      artifact_id: object.id,
-      compression: 'none',
-      logical_content_sha256: object.logical,
-      media_type: MEDIA_TYPES[object.role],
-      object_bytes_sha256: sha256Hex(object.bytes),
-      role: object.role,
-      size_bytes: object.bytes.byteLength,
-      uri: input.locateObject(object.id),
-    })),
+    storage_objects: encoded.map((object) => {
+      const objectBytesSha256 = sha256Hex(object.encoding.bytes);
+      return {
+        artifact_id: object.id,
+        compression: object.encoding.compression,
+        logical_content_sha256: object.logical,
+        media_type: MEDIA_TYPES[object.role],
+        object_bytes_sha256: objectBytesSha256,
+        role: object.role,
+        size_bytes: object.encoding.bytes.byteLength,
+        uri: input.locateObject(object.id, {
+          object_bytes_sha256: objectBytesSha256,
+          role: object.role,
+        }),
+        ...(object.encoding.writer_name === undefined
+          ? {}
+          : { writer_name: object.encoding.writer_name }),
+        ...(object.encoding.writer_version === undefined
+          ? {}
+          : { writer_version: object.encoding.writer_version }),
+      };
+    }),
   });
 
   const manifestBytes = canonicalJsonBytes(manifest);
@@ -237,7 +285,7 @@ export function buildDatasetPublication(input: PublicationInput): DatasetPublica
     derived,
     manifest,
     manifest_bytes: manifestBytes,
-    objects: new Map(physical.map((object) => [object.id, object.bytes])),
+    objects: new Map(encoded.map((object) => [object.id, object.encoding.bytes])),
     record,
   };
 }
