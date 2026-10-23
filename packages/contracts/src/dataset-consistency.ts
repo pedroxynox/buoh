@@ -43,7 +43,8 @@ function fail(
     | 'DATASET_ORDER_INVALID'
     | 'DATASET_PROVENANCE_MISMATCH'
     | 'DATASET_RANGE_MISMATCH'
-    | 'DATASET_REFERENCE_UNKNOWN',
+    | 'DATASET_REFERENCE_UNKNOWN'
+    | 'DATASET_VERSION_MISMATCH',
   message: string,
   path: readonly (number | string)[],
   context: Readonly<Record<string, unknown>> = {},
@@ -76,6 +77,33 @@ export function validateDatasetConsistency(input: DatasetConsistencyInput): void
         declared,
       });
     }
+  }
+
+  // Cada registro declara la misma versión que el manifiesto para su contrato (y las incidencias,
+  // las mismas reglas): un lector nunca valida un registro con las reglas de otra versión.
+  const versioned: [string, readonly { schema_version: string }[], string][] = [
+    ['source_events', sourceEvents, core.source_event_schema_version],
+    ['ticks', ticks, core.market_tick_schema_version],
+    ['incidents', incidents, core.incident_schema_version],
+    ['conditions', conditions, core.condition_event_schema_version],
+  ];
+  for (const [role, records, declared] of versioned) {
+    const index = records.findIndex((record) => record.schema_version !== declared);
+    if (index !== -1) {
+      fail('DATASET_VERSION_MISMATCH', `schema_version distinta del manifiesto en ${role}.`, [
+        role,
+        index,
+      ]);
+    }
+  }
+  const ruleMismatch = incidents.findIndex(
+    (incident) => incident.quality_rule_version !== core.quality_rule_version,
+  );
+  if (ruleMismatch !== -1) {
+    fail('DATASET_VERSION_MISMATCH', 'quality_rule_version distinta del manifiesto.', [
+      'incidents',
+      ruleMismatch,
+    ]);
   }
 
   const symbols = new Set(core.symbols);

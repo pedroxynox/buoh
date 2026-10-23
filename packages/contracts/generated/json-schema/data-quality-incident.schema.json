@@ -9,7 +9,10 @@
           "properties": {
             "schema_version": {
               "type": "string",
-              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+              "enum": [
+                "1.0.0",
+                "2.0.0"
+              ]
             },
             "incident_id": {
               "type": "string",
@@ -118,7 +121,10 @@
           "properties": {
             "schema_version": {
               "type": "string",
-              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+              "enum": [
+                "1.0.0",
+                "2.0.0"
+              ]
             },
             "incident_id": {
               "type": "string",
@@ -215,7 +221,10 @@
           "properties": {
             "schema_version": {
               "type": "string",
-              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+              "enum": [
+                "1.0.0",
+                "2.0.0"
+              ]
             },
             "incident_id": {
               "type": "string",
@@ -330,7 +339,10 @@
           "properties": {
             "schema_version": {
               "type": "string",
-              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+              "enum": [
+                "1.0.0",
+                "2.0.0"
+              ]
             },
             "incident_id": {
               "type": "string",
@@ -434,7 +446,10 @@
           "properties": {
             "schema_version": {
               "type": "string",
-              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+              "enum": [
+                "1.0.0",
+                "2.0.0"
+              ]
             },
             "incident_id": {
               "type": "string",
@@ -538,7 +553,10 @@
           "properties": {
             "schema_version": {
               "type": "string",
-              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+              "enum": [
+                "1.0.0",
+                "2.0.0"
+              ]
             },
             "incident_id": {
               "type": "string",
@@ -651,7 +669,10 @@
           "properties": {
             "schema_version": {
               "type": "string",
-              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+              "enum": [
+                "1.0.0",
+                "2.0.0"
+              ]
             },
             "incident_id": {
               "type": "string",
@@ -760,7 +781,10 @@
           "properties": {
             "schema_version": {
               "type": "string",
-              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+              "enum": [
+                "1.0.0",
+                "2.0.0"
+              ]
             },
             "incident_id": {
               "type": "string",
@@ -876,7 +900,10 @@
           "properties": {
             "schema_version": {
               "type": "string",
-              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+              "enum": [
+                "1.0.0",
+                "2.0.0"
+              ]
             },
             "incident_id": {
               "type": "string",

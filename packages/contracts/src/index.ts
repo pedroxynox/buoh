@@ -14,7 +14,7 @@ export {
 } from './conditions.js';
 export {
   dataQualityIncidentSchema,
-  NULLABLE_INVALID_FRAME_SYMBOL_SINCE,
+  INCIDENT_SCHEMA_VERSIONS,
   qualityIncidentTypeSchema,
   type DataQualityIncident,
 } from './data-quality.js';
