@@ -101,7 +101,7 @@ Desde F1.3b, si la escritura del objeto (`raw_object_write`) o la fila del índi
 - se registra `persistence_unavailable` con severidad `critical`; el motivo es el código del error, nunca su mensaje;
 - la entrada se pausa y el informe fail-closed indica `close_connection_then_recover`;
 - si PostgreSQL tampoco responde, solo queda una alerta JSON en stderr (`operational_registry_unavailable`);
-- para recuperar, el siguiente `ConnectionOpened` reabre el log desde el estado durable y, si queda durable, resuelve la condición (`persistence_restored`). En F1.3b no se verifican antes la continuidad ni los segmentos pendientes (pasos 5–6); eso llega con la reconexión (F1.5).
+- para recuperar, el siguiente `ConnectionOpened` reabre el log desde el estado durable y, si queda durable, resuelve la condición (`persistence_restored`). En F1.3b no se verifica antes la continuidad ni se publican o reconcilian los segmentos pendientes (paso 6); eso llega con la reconexión (F1.5).
 
 ### Publicación interrumpida
 
