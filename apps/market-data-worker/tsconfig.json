@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    "rootDir": "../..",
+    "types": ["node", "vitest/globals"],
+    "paths": {
+      "@buoh/contracts": ["../../packages/contracts/src/index.ts"],
+      "@buoh/domain": ["../../packages/domain/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "integration/**/*.ts", "*.config.ts"]
+}

@@ -17,6 +17,7 @@
   },
   "scripts": {
     "build": "turbo run build",
+    "data:replay": "turbo run build --filter=@buoh/market-data-worker --output-logs=errors-only 1>&2 && node apps/market-data-worker/dist/cli/replay.js",
     "docs:check": "node scripts/check-doc-impact.mjs",
     "docs:check:pr": "node scripts/check-doc-impact.mjs --require-base",
     "format": "prettier --write .",
@@ -27,6 +28,7 @@
     "schemas:generate": "pnpm --filter @buoh/contracts run schemas:generate",
     "test": "pnpm run test:docs && turbo run test",
     "test:docs": "node --test scripts/check-doc-impact.test.mjs",
+    "test:integration": "turbo run build --filter=@buoh/market-data-worker --output-logs=errors-only && pnpm --filter @buoh/market-data-worker run test:integration",
     "test:vectors": "turbo run test:vectors",
     "typecheck": "turbo run typecheck",
     "verify": "pnpm run verify:core && pnpm run docs:check",

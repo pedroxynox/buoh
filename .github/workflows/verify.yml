@@ -39,3 +39,46 @@ jobs:
       - run: pnpm run verify:pr
         env:
           DOCS_BASE_REF: origin/main
+
+  # Integración local bloqueante (plan F1 §7): PostgreSQL + S3-compatible de infra/compose.yaml.
+  integration:
+    name: test:integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      BUOH_DEPLOYMENT_ENVIRONMENT: test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Credenciales efímeras por ejecución: nunca se guardan en el repositorio.
+      - name: Generar credenciales locales
+        run: |
+          for name in BUOH_POSTGRES_PASSWORD BUOH_S3_ACCESS_KEY_ID BUOH_S3_SECRET_ACCESS_KEY; do
+            value="$(openssl rand -hex 24)"
+            echo "::add-mask::${value}"
+            echo "${name}=${value}" >> "$GITHUB_ENV"
+          done
+
+      - name: Levantar PostgreSQL y S3-compatible
+        run: docker compose -f infra/compose.yaml up -d --wait --wait-timeout 120
+
+      - run: pnpm run test:integration
+
+      - name: Registros de servicios
+        if: failure()
+        run: docker compose -f infra/compose.yaml logs --no-color
+
+      - name: Detener servicios
+        if: always()
+        run: docker compose -f infra/compose.yaml down --volumes
