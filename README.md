@@ -17,7 +17,7 @@ Cualquier persona o motor de IA debe leer, en orden:
 
 ## Desarrollo actual
 
-Fase 1 tiene contratos runtime (F1.1), normalización y calidad puras (F1.2) y publicación y replay sobre PostgreSQL y almacenamiento S3-compatible locales (F1.3a). Todavía no conecta con Deriv ni ejecuta operaciones.
+Fase 1 tiene contratos runtime (F1.1), normalización y calidad puras (F1.2) y, sobre PostgreSQL y almacenamiento S3-compatible locales, log raw-first, publicación y replay (F1.3). Todavía no conecta con Deriv ni ejecuta operaciones.
 
 ```text
 pnpm install
@@ -86,6 +86,7 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 - [ADR-0003: lenguajes y límites](docs/arquitectura/adr/0003-lenguajes-y-limites.md)
 - [ADR-0004: pipeline y reproducción de datos de Fase 1](docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md)
 - [ADR-0005: persistencia local, formato físico y log raw-first de F1.3](docs/arquitectura/adr/0005-persistencia-local-y-formato-fisico-f1-3.md)
+- [ADR-0006: alojamiento productivo en Render](docs/arquitectura/adr/0006-alojamiento-en-render.md)
 - [Contratos de dominio y eventos](docs/arquitectura/contratos-de-dominio.md)
 - [Seguridad y rigor cuantitativo](docs/gobierno/seguridad-y-rigor-cuantitativo.md)
 - [Protocolo de validación de estrategias](docs/gobierno/protocolo-de-validacion-de-estrategias.md)

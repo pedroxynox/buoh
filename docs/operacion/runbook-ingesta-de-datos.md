@@ -48,6 +48,8 @@ Los umbrales live pertenecen a un perfil versionado por fuente/símbolo. El perf
 4. Verificar hashes de objetos pendientes.
 5. Abrir el WebSocket y pasar de `starting` a `healthy` solo después de persistir/confirmar el primer evento esperado.
 
+Desde F1.3b el paso 3–4 lo hace `SourceEventLog.open`: continúa el segmento no finalizado y relee y verifica el objeto de cada uno de sus eventos; si alguno falta o no coincide con su hash, el arranque aborta. Si el registro operativo tiene una condición abierta de la ejecución anterior, la entrada sigue cerrada hasta el `ConnectionOpened` que la resuelve.
+
 ### Desconexión de WebSocket
 
 1. Persistir `ConnectionClosed` con `closure_type`, símbolos afectados y motivo.
@@ -83,6 +85,8 @@ Los umbrales live pertenecen a un perfil versionado por fuente/símbolo. El perf
 4. No truncar ni interpretar parcialmente un frame o archivo como válido.
 5. Reabrir solo con configuración versionada y continuidad verificada.
 
+Desde F1.3b, un frame de más de 1 048 576 bytes se rechaza antes de crear el `RawSourceFrame`. Queda una incidencia `source_limit_exceeded` con severidad `error` y una condición abierta en el registro operativo, y la entrada se cierra; solo se admite después el `ConnectionClosed` del cierre. Un `ConnectionOpened` durable resuelve la condición (`input_reopened`) y reabre la entrada. Los límites de la cola en memoria llegan con el transporte real (F1.4/F1.5).
+
 ### Almacenamiento no disponible o backlog lleno por conteo/bytes
 
 1. Cambiar inmediatamente a `paused`.
@@ -91,6 +95,13 @@ Los umbrales live pertenecen a un perfil versionado por fuente/símbolo. El perf
 4. Registrar `persistence_unavailable` donde exista durabilidad disponible; si no, emitir alerta operativa sin afirmar persistencia.
 5. Recuperar desde el último frame confirmado.
 6. Verificar continuidad y publicar/reconciliar segmentos pendientes antes de reabrir.
+
+Desde F1.3b, si la escritura del objeto (`raw_object_write`) o la fila del índice (`source_event_index`) no se confirma, el evento no cuenta como durable y no se emite su tick. Además:
+
+- se registra `persistence_unavailable` con severidad `critical`; el motivo es el código del error, nunca su mensaje;
+- la entrada se pausa y el informe fail-closed indica `close_connection_then_recover`;
+- si PostgreSQL tampoco responde, solo queda una alerta JSON en stderr (`operational_registry_unavailable`);
+- para recuperar, el siguiente `ConnectionOpened` reabre el log desde el estado durable y, si queda durable, resuelve la condición (`persistence_restored`).
 
 ### Publicación interrumpida
 
@@ -118,7 +129,7 @@ Servicios de [`infra/compose.yaml`](../../infra/compose.yaml): PostgreSQL 18 y S
 2. Levantar servicios: `docker compose -f infra/compose.yaml --env-file infra/.env up -d --wait`.
 3. Exportar las mismas variables al shell (`set -a; . infra/.env; set +a`) y compilar: `pnpm run build`.
 4. Aplicar migraciones: `pnpm --filter @buoh/market-data-worker run db:migrate`.
-5. Opcional, para ensayar: `pnpm --filter @buoh/market-data-worker run fixture:publish` publica los dos escenarios sintéticos de `test-vectors/market-data/v1`. Es idempotente: un escenario ya activo se informa como `already_published`.
+5. Opcional, para ensayar: `pnpm --filter @buoh/market-data-worker run fixture:publish` pasa los dos escenarios sintéticos de `test-vectors/market-data/v1` por el log raw-first (fuente `synthetic`) y publica cada uno desde sus segmentos cerrados. Es idempotente: un escenario ya activo se informa como `already_published`. Requiere que el log de `synthetic` esté vacío o tenga exactamente la forma del fixture.
 6. Reproducir: `pnpm run data:replay -- --dataset <dataset_id>` (recomputación) o añadir `--verify-only` (solo integridad).
 
 `data:replay` no contacta a Deriv, no escribe nada y emite una línea JSON en stdout:
@@ -132,7 +143,13 @@ Servicios de [`infra/compose.yaml`](../../infra/compose.yaml): PostgreSQL 18 y S
 
 Límites de lectura del replay: documento de manifiesto 16 MiB, objeto 256 MiB y descompresión gzip hasta el tamaño máximo de segmento raw (64 MiB, ADR-0004 §7). Un objeto por encima del límite se rechaza sin cargarlo.
 
-`pnpm run test:integration` ejecuta las pruebas de integración contra estos servicios con las mismas variables; usa su propio esquema PostgreSQL (`buoh_integration`) y lo recrea en cada ejecución.
+`pnpm run test:integration` ejecuta las pruebas de integración contra estos servicios con las mismas variables. Usa sus propios esquemas PostgreSQL (`buoh_integration` y `buoh_integration_log`) y los recrea en cada ejecución.
+
+Tablas append-only del log y del registro (migración `0002_log_raw_first`):
+
+- `source_event_index`: una fila por source event durable, con la clave de su objeto;
+- `closed_source_segments`: el segmento cerrado, su objeto gzip y el motivo de cierre (`bytes`, `raw_frames`, `window` o `requested`);
+- `operational_incidents` y `operational_conditions`: el registro operativo.
 
 ## Reporte y evidencia
 

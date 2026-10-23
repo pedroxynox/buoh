@@ -145,6 +145,7 @@ Tauri encapsulará un cliente React que reutiliza `packages/domain`, `packages/c
 ## Despliegue y fiabilidad
 
 - **Desarrollo de Fase 1:** Docker Compose para PostgreSQL estándar y almacenamiento S3-compatible local; datos sintéticos y públicos.
+- **Alojamiento productivo:** Render para PostgreSQL, API, web y `market-data-worker`, con almacenamiento de objetos S3-compatible externo; la app móvil se distribuye por tiendas ([ADR-0006](adr/0006-alojamiento-en-render.md)). El despliegue sigue diferido por el plan de Fase 1.
 - **Fases posteriores:** TimescaleDB o Redis se incorporan solo si una ADR documenta la necesidad medida.
 - **Preproducción:** estrategia *shadow*, pruebas de resiliencia, telemetría, migraciones y prueba demo sin secretos productivos.
 - **Producción de señales:** observabilidad de datos, eventos y latencia; interrupción automática si la calidad se degrada.
