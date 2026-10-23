@@ -18,6 +18,7 @@ estado durable ─ deriveHealthReport ─▶ HealthReport
 - `normalizeRawFrame`: valida el payload exacto y conserva el lexema numérico de la cotización.
 - `deriveMarketData`: reglas 1.0.0 en orden de observación; recomputar desde source events persistidos da el mismo resultado.
 - `evaluateSourceLimit`: matriz de límites de ADR-0004 §7.
+- `evaluateSegmentRotation`: política `segment_policy_version = 1.0.0` (bytes, frames y ventana; ADR-0005 §5), evaluada antes de añadir cada source event.
 - `buildDatasetPublication` acepta `encodeObject` para la codificación física (por defecto `none`, como los vectores); la usa `apps/market-data-worker` para gzip. Cambiarla no altera `dataset_id`.
 
 ## Comandos

@@ -38,6 +38,16 @@ export {
   RESOLUTION_REASONS,
   type DerivedMarketData,
 } from './quality.js';
+export {
+  appendSegmentStats,
+  EMPTY_SEGMENT_STATS,
+  evaluateSegmentRotation,
+  SEGMENT_POLICY,
+  sourceEventLine,
+  sourceEventTime,
+  type SegmentCloseReason,
+  type SegmentStats,
+} from './segment-policy.js';
 export { canonicalJsonBytes, ndjsonBytes, prettyCanonicalJson, utf8 } from './serialization.js';
 export {
   evaluateSourceLimit,
