@@ -1,13 +1,14 @@
 ---
 schema_version: "1.0.0"
-status_version: 4
-updated_at_utc: "2026-10-23T13:30:00.000Z"
+status_version: 5
+updated_at_utc: "2026-10-23T14:18:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
-next_delivery: "F1.3b"
+next_delivery: "F1.4"
 next_requirements:
-  - "F1-STREAM-001"
+  - "F1-CATALOG-001"
+  - "F1-SOURCE-001"
 plan: "docs/plan/fase-1-fundacion-de-datos.md"
 ---
 
@@ -24,17 +25,19 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
 - La fundación de producto, arquitectura, seguridad y operación está aprobada.
 - F1.1 proporciona monorepo reproducible, contratos runtime, JSON Schema generado, vectores verificables y guardia documental.
 - F1.2 proporciona `packages/domain`: adaptador sintético, normalización, reglas de calidad 1.0.0, construcción de publicación y salud, todo puro y determinista.
-- F1.3 se entrega en dos partes ([ADR-0005](docs/arquitectura/adr/0005-persistencia-local-y-formato-fisico-f1-3.md)). F1.3a proporciona `infra/compose.yaml` (PostgreSQL 18 y SeaweedFS S3-compatible), `apps/market-data-worker` con publicación atómica y `pnpm run data:replay` en modos recomputación y `--verify-only` (`F1-DATASET-001`).
-- No existe todavía log raw-first durable, integración con Deriv ni despliegue.
+- F1.3 se entregó en dos partes ([ADR-0005](docs/arquitectura/adr/0005-persistencia-local-y-formato-fisico-f1-3.md)):
+  - F1.3a: `infra/compose.yaml` (PostgreSQL 18 y SeaweedFS S3-compatible), `apps/market-data-worker` con publicación atómica y `pnpm run data:replay` en modos recomputación y `--verify-only` (`F1-DATASET-001`);
+  - F1.3b: log raw-first durable con rotación `segment_policy_version = 1.0.0`, registro operativo de `persistence_unavailable`/`source_limit_exceeded` y publicación desde segmentos cerrados del log (`F1-STREAM-001`).
+- No existe todavía integración con Deriv, persistencia del `IngestionCursor`, cola en memoria del transporte ni despliegue.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
 
 ## Siguiente tarea autorizada
 
-**`F1.3b` — Log raw-first, rotación y registro operativo.**
+**`F1.4` — Catálogo y streaming público de Deriv.**
 
-Implementar el log durable de source events con escritura raw antes de normalizar (`F1-STREAM-001`), la rotación de segmentos por bytes, frames y ventana de `segment_policy_version = 1.0.0` y el registro operativo de `persistence_unavailable`/`source_limit_exceeded`, según las decisiones ya aprobadas en ADR-0005 §4–§6 y en [contratos de dominio](docs/arquitectura/contratos-de-dominio.md#registro-operativo-de-persistencia-y-límites). La publicación pasa a leer segmentos cerrados del log.
+Implementar el catálogo versionado de `active_symbols` (`F1-CATALOG-001`) y el adaptador público de Deriv con esquemas fijados, límites, keepalive y correlación (`F1-SOURCE-001`), entregando sus frames al `RawFirstIngestor`, más el smoke opt-in `pnpm run data:smoke`.
 
-No crea todavía conexión Deriv, web, móvil, señales ni ejecución.
+No crea todavía web, móvil, señales ni ejecución.
 
 ## Evidencia de F1.1
 
@@ -64,9 +67,34 @@ No crea todavía conexión Deriv, web, móvil, señales ni ejecución.
   - una versión del normalizador no implementada aborta la recomputación con `VERSION_UNSUPPORTED`.
 - 11 pruebas de integración (`pnpm run test:integration`) contra PostgreSQL 18.4 y SeaweedFS 4.48 locales: publicación y replay de ambos escenarios, CLI con salidas 0/1/2, rollback completo de un commit fallido, índice de un único record activo, rechazo de `UPDATE`/`DELETE`/`TRUNCATE` y comprobación en base de datos de que `dataset_id` es el hash de `manifest_core`. El job de CI las ejecuta con las imágenes fijadas en `infra/compose.yaml`.
 
+## Evidencia de F1.3b
+
+- 8 pruebas de dominio de la política de rotación: umbrales de ADR-0004 §7, medición de bytes, rotación antes del frame 10 001 y a los 300 000 ms, orden de motivos y evento que no cabe en un segmento.
+- 15 pruebas offline del log y el ingestor con adaptadores en memoria; las de vectores corren además con reloj congelado y sin aleatoriedad ni red:
+  - el escenario principal pasa por el log y sus dos segmentos cerrados son byte a byte `expected-source-events-*.ndjson`; publicar desde el log da el mismo `dataset_id` y el replay lo reproduce;
+  - un frame inválido queda durable sin tick y la publicación produce `invalid_source_frame`; cero ticks da su `dataset_id`;
+  - el fallo de escritura raw del vector produce exactamente `expected-persistence-failure.json`, sin ticks ni eventos durables;
+  - un fallo del índice no emite el tick; sin PostgreSQL solo queda una alerta sanitizada;
+  - un frame de más de 1 MiB se rechaza sin persistirlo y registra `source_limit_exceeded`;
+  - un `ConnectionOpened` durable resuelve la condición y reabre la entrada;
+  - el log rota por frames y por ventana, continúa el segmento no finalizado tras reiniciar y detecta objetos alterados.
+- 9 pruebas de integración más (20 en total) contra PostgreSQL 18.4 y SeaweedFS 4.48 locales: vectores a través del log real y publicación con sus `dataset_id`, reinicio desde el estado durable, registro operativo persistido y resuelto, y contigüidad, segmentos cerrados, conteos y append-only impuestos por la base de datos.
+
+## Pendientes registrados de F1.3
+
+Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b; la lista completa está en cada PR. Los más relevantes para F1.4 y el despliegue:
+
+1. Si la conexión cae durante el `COMMIT` de una publicación, se informa "no se confirmó" aunque pudo confirmarse.
+2. Publicar no aplica los límites de lectura del replay. `normalized_ticks` y `quality_incidents` son un único artefacto que crece con el dataset. Resolver antes de publicar datasets live largos.
+3. Los nombres de `PublicationStep` no coinciden con `PersistenceStage`; los fallos de publicación todavía no entran en el registro operativo.
+4. El worker usa un único rol PostgreSQL dueño de las tablas. Antes de desplegar (ADR-0006) hace falta un rol de ejecución que solo pueda insertar y leer.
+5. SeaweedFS `mini` arranca componentes internos que no se usan (Iceberg, Lance, servidor de administración).
+6. El log asume un único escritor por fuente y llamadas al ingestor de una en una: los triggers de `0002` no bloquean escritores concurrentes. El transporte de F1.4 debe esperar cada llamada y garantizar una sola instancia por fuente, o añadir un bloqueo por fuente.
+7. Tras un fallo de persistencia, el `ConnectionClosed` del cierre no se guarda en el log, así que un dataset que abarque la caída no lleva marca de la interrupción. Un índice que confirma pero informa error se trata como no durable y se adopta al reabrir sin reconciliar el tick.
+
 ## Pendientes registrados de F1.2
 
-Detectados en la revisión semántica del PR #5; no bloquean F1.3:
+Detectados en la revisión semántica del PR #5:
 
 1. Con un perfil de varios símbolos, un frame inválido sin símbolo atribuible detiene la derivación, y los mensajes de Deriv que no son ticks (ping, ack, respuestas) se registrarían como `invalid_source_frame`. **Decidir antes de F1.4.**
 2. Cuando la salud está en `recovering` por continuidad pendiente, el `HealthReport` no muestra la causa: `open_condition_types` queda vacío.
@@ -84,16 +112,19 @@ Detectados en la revisión semántica del PR #5; no bloquean F1.3:
 - JSON Schema representa estructura interoperable; las invariantes criptográficas y relacionales requieren validación runtime.
 - Las pruebas offline sintéticas son bloqueantes. El smoke público de Deriv aparece en F1.4 y nunca constituye el único criterio de merge.
 - Hasta incorporar un writer Parquet, ticks e incidencias se publican como NDJSON sin compresión; `dataset_id` no depende del formato físico.
+- Alojamiento productivo en Render para PostgreSQL, API y web; el despliegue sigue diferido ([ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)).
 
 ## Bloqueos
 
-Ninguno para iniciar `F1.3b`.
+Antes de implementar el adaptador de Deriv en F1.4 hay que decidir el pendiente 1 de F1.2: atribución de símbolo con varios símbolos y tratamiento de los mensajes que no son ticks.
 
 ## Decisiones pendientes que no bloquean Fase 1
 
 - Jurisdicción inicial del producto comercial.
 - Universo definitivo de índices y tipos de contrato.
-- Proveedor de almacenamiento de objetos en producción.
+- Proveedor de almacenamiento de objetos en producción; Render no lo ofrece (ADR-0006).
+- Alojamiento de `market-data-worker` en producción.
+- Compilación y distribución de la app móvil.
 - Límites monetarios y política de riesgo para fases `demo` y `real`.
 - Proveedor de pagos y modelo de suscripción.
 

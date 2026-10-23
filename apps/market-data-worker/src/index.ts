@@ -15,6 +15,40 @@ export {
 } from './errors.js';
 export { loadSyntheticFixture, type FixtureScenario, type SyntheticFixture } from './fixture.js';
 export { createUuidV7Generator } from './ids.js';
+export {
+  RawFirstIngestor,
+  type FrameInput,
+  type PersistenceFailureReport,
+  type RawFirstIngestorInput,
+  type ReceiveOutcome,
+  type TickSink,
+} from './ingestion/raw-first-ingestor.js';
+export {
+  OPERATIONAL_RESOLUTION_REASONS,
+  OperationalRegistry,
+  stderrAlert,
+  type OperationalAlert,
+  type OperationalStore,
+  type PersistenceStage,
+  type RecordResult,
+} from './operational/registry.js';
+export { PostgresOperationalStore } from './postgres/operational-store.js';
+export { PostgresSourceLogStore } from './postgres/source-log-store.js';
+export {
+  type ClosedSourceSegment,
+  type SourceEventIndexRow,
+  type SourceLogState,
+  type SourceLogStore,
+} from './source-log/ports.js';
+export { publishFromLog, type PublishFromLogInput } from './source-log/publish-from-log.js';
+export {
+  failureReason,
+  LogPersistenceError,
+  SourceEventLog,
+  type LogStage,
+  type OpenSourceEventLogInput,
+} from './source-log/source-event-log.js';
+export { driveSyntheticStimuli, type SyntheticDriverHooks } from './synthetic-driver.js';
 export { contentKey, keyFromUri, manifestKey, objectUri } from './object-keys.js';
 export { type CommitPublicationInput, type MetadataStore, type ObjectStore } from './ports.js';
 export { migrate } from './postgres/migrate.js';

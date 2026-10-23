@@ -32,14 +32,20 @@ ADR-0004 fija PostgreSQL estándar y almacenamiento S3-compatible, pero no qué 
 - Las tablas son append-only: triggers rechazan `UPDATE`, `DELETE` y `TRUNCATE`. Por eso F1.3 **rechaza** publicar un dataset que ya tiene record activo; reubicar o recodificar (nuevo record y el anterior `superseded`) llega con una migración posterior que permita solo esa transición.
 - `data:replay` es de solo lectura y emite un informe JSON. Salida 0: reproducido o verificado; 1: integridad, contrato, versión o recomputación; 2: uso o configuración.
 
-### 4. Log raw-first (F1.3b, aprobado sin implementar)
+### 4. Log raw-first (F1.3b)
 
-- Cada source event se escribe como objeto content-addressed con su línea JCS (`raw_object_write`) y después se indexa en PostgreSQL con segmento y posición (`source_event_index`). Solo es durable cuando ambos confirman; antes no se normaliza ni se emite tick, y el `IngestionCursor` avanza después.
-- Al cerrar un segmento se escribe su objeto NDJSON content-addressed, se verifica y se marca cerrado. Los objetos por evento quedan como huérfanos limpiables tras el período de seguridad.
+- Cada source event se escribe como objeto content-addressed con su línea JCS (`raw_object_write`) y después se indexa en PostgreSQL con segmento y posición (`source_event_index`). Solo es durable cuando ambos confirman; antes no se normaliza ni se emite tick.
+- Al cerrar un segmento se escribe su objeto NDJSON en gzip (el mismo writer de §2), content-addressed y verificado, y se inserta su fila de cierre. Los objetos por evento quedan como huérfanos limpiables tras el período de seguridad.
 - Tras la durabilidad, `normalizeRawFrame` entrega el tick a un sink inyectado. Las incidencias derivables se calculan con `deriveMarketData` al publicar; la calidad incremental en vivo queda diferida.
-- Publicar es una acción explícita sobre un rango contiguo de segmentos cerrados de una fuente.
+- Publicar es una acción explícita sobre un rango contiguo de segmentos cerrados de una fuente. Con el mismo writer gzip (misma versión de zlib), el objeto de cada segmento del log es el mismo que referencia el dataset; con otro writer puede escribirse un objeto nuevo, si sus bytes difieren, con el mismo hash lógico.
+- Detalles de implementación:
+  - un resultado ambiguo del índice cuenta como no durable;
+  - tras cualquier fallo de persistencia, el log se reabre desde PostgreSQL y el almacenamiento antes de aceptar más eventos;
+  - al arrancar, el log continúa el segmento no finalizado y verifica el objeto de cada uno de sus eventos;
+  - con un único escritor por fuente que llama de una en una, la base de datos impone posiciones contiguas, que no se escriba en segmentos cerrados ni se salten segmentos, y que los conteos del cierre coincidan con el índice. Los triggers no bloquean escritores concurrentes de la misma fuente.
+- Quedan para incrementos posteriores: persistir el `IngestionCursor`, que llega con la reconexión (F1.5) y nunca avanzará antes de la durabilidad, y la cola en memoria con sus límites, que llega con el transporte real (F1.4/F1.5).
 
-### 5. Rotación `segment_policy_version = 1.0.0` (F1.3b, aprobado sin implementar)
+### 5. Rotación `segment_policy_version = 1.0.0` (F1.3b)
 
 Se evalúa antes de añadir cada source event a un segmento no vacío; rota si se cumple cualquiera:
 
@@ -49,7 +55,7 @@ Se evalúa antes de añadir cada source event a un segmento no vacío; rota si s
 
 No hay temporizador: un segmento inactivo sigue abierto hasta el siguiente evento o un cierre explícito (drenaje o apagado). La política es una función pura en `packages/domain`. Rotar no crea incidencia ni cambia salud.
 
-### 6. Registro operativo (F1.3b, aprobado sin implementar)
+### 6. Registro operativo (F1.3b)
 
 La semántica de `persistence_unavailable` y `source_limit_exceeded` (severidad, referencias, apertura y resolución) está en [contratos de dominio](../contratos-de-dominio.md#registro-operativo-de-persistencia-y-límites).
 

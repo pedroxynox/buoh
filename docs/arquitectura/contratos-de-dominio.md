@@ -439,7 +439,7 @@ Desde F1.2, [`packages/domain`](../../packages/domain/) implementa estas reglas 
 
 ### Registro operativo de persistencia y límites
 
-Aprobado para F1.3b ([ADR-0005](adr/0005-persistencia-local-y-formato-fisico-f1-3.md)); todavía sin implementar. Vive en tablas PostgreSQL append-only separadas de los datasets y nunca entra en sus artifacts.
+Implementado en F1.3b ([ADR-0005](adr/0005-persistencia-local-y-formato-fisico-f1-3.md), `apps/market-data-worker/src/operational`). Vive en tablas PostgreSQL append-only (`operational_incidents`, `operational_conditions`) separadas de los datasets y nunca entra en sus artifacts. Cada escritura se valida con `validateConditionCausality` antes de persistirse.
 
 | Campo | `persistence_unavailable` | `source_limit_exceeded` |
 |---|---|---|
@@ -452,6 +452,8 @@ Aprobado para F1.3b ([ADR-0005](adr/0005-persistencia-local-y-formato-fisico-f1-
 - La condición se abre en el mismo instante con `cause_refs = [incident_id]` y solo si su clave (`source + stage` o `source + resource`) no está abierta; una repetición registra incidencia sin reabrir.
 - Se resuelve con el primer source event durable que demuestra la capacidad restaurada: para persistencia, el primer evento confirmado tras recuperar; para límites, el `ConnectionOpened` que reabre la entrada. `cause_refs = [apertura, ese evento]` y `resolution_reason` es `persistence_restored` o `input_reopened`.
 - Si PostgreSQL no está disponible no se puede registrar: se emite una alerta estructurada y sanitizada en stderr, sin afirmar persistencia y sin inserción retroactiva posterior.
+- El motivo (`evidence.reason`) es el código o nombre del error de almacenamiento, nunca su mensaje.
+- Mientras quede una condición abierta, incluida una de una ejecución anterior, la entrada sigue cerrada hasta el `ConnectionOpened` que la resuelve.
 
 ## Contratos futuros
 

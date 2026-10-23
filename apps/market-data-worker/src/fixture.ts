@@ -13,7 +13,10 @@ export const DEFAULT_VECTOR_ROOT = new URL(
 
 export interface FixtureScenario {
   readonly name: 'principal' | 'zero-valid-ticks';
+  /** Segmentos que produce el harness puro de `packages/domain`. */
   readonly segments: SourceEvent[][];
+  /** Estímulos del driver, para recorrer el pipeline raw-first real. */
+  readonly stimuli: readonly unknown[];
 }
 
 export interface SyntheticFixture {
@@ -54,11 +57,12 @@ export async function loadSyntheticFixture(vectorRoot: string): Promise<Syntheti
   });
 
   const ingest = async (name: FixtureScenario['name'], input: string): Promise<FixtureScenario> => {
-    const result = ingestSyntheticStimuli(await readNdjson(resolve(vectorRoot, input)), profile);
+    const stimuli = await readNdjson(resolve(vectorRoot, input));
+    const result = ingestSyntheticStimuli(stimuli, profile);
     if (result.status !== 'persisted') {
       throw new TypeError(`El escenario ${name} debe persistir todos sus source events.`);
     }
-    return { name, segments: result.segments };
+    return { name, segments: result.segments, stimuli };
   };
 
   return {
