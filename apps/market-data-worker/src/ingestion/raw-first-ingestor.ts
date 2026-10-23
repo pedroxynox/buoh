@@ -23,7 +23,7 @@ export interface TickSink {
     readonly observation_id: string;
     readonly reason: InvalidFrameReason;
   }): void;
-  /** Reglas 1.1.0: mensaje durable de otro tipo, para quien lo correlaciona (ping, catálogo…). */
+  /** Reglas 2.0.0: mensaje durable de otro tipo, para quien lo correlaciona (ping, catálogo…). */
   nonTickFrame?(input: { readonly msg_type: string; readonly observation_id: string }): void;
   tick(tick: UnflaggedTick): void;
 }
@@ -183,7 +183,7 @@ export class RawFirstIngestor {
       this.#input.sink.tick(normalized.tick);
       this.#emittedTicks += 1;
     } else if (normalized.reason === 'non_tick') {
-      // Reglas 1.1.0: respuesta de la fuente (ping, catálogo…), ya durable; no es un tick.
+      // Reglas 2.0.0: respuesta de la fuente (ping, catálogo…), ya durable; no es un tick.
       this.#input.sink.nonTickFrame?.({
         msg_type: normalized.msg_type,
         observation_id: raw.observation_id,

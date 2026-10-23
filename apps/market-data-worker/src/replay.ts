@@ -1,6 +1,7 @@
 import {
   canonicalJson,
   ContractContextError,
+  INCIDENT_SCHEMA_VERSIONS as INCIDENT_SCHEMA_VERSION_LIST,
   dataQualityIncidentSchema,
   datasetManifestSchema,
   marketTickSchema,
@@ -22,7 +23,6 @@ import {
   CANONICALIZATION_VERSION,
   CONTRACT_SCHEMA_VERSION,
   createPipelineProfile,
-  RULE_SETS,
   ruleSetFor,
   SEGMENT_POLICY_VERSION,
 } from '@buoh/domain';
@@ -65,10 +65,8 @@ export interface ReplayReport {
 
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const JSON_ROLES = new Set<StorageObjectRef['role']>(['quality_profile', 'source_schema']);
-/** Esquemas de incidencias con lector: los que emite algún conjunto de reglas implementado. */
-const INCIDENT_SCHEMA_VERSIONS: ReadonlySet<string> = new Set(
-  Object.values(RULE_SETS).map((rules) => rules.incident_schema_version),
-);
+/** Esquemas de incidencias con lector en `@buoh/contracts`. */
+const INCIDENT_SCHEMA_VERSIONS: ReadonlySet<string> = new Set(INCIDENT_SCHEMA_VERSION_LIST);
 /** Identidad mínima del perfil que `--verify-only` contrasta con `manifest_core`. */
 const profileIdentitySchema = z.object({ profile_id: z.string(), source: z.string() });
 
@@ -383,8 +381,13 @@ function contractVersionMismatches(
   const mismatches = fields
     .filter(([, declared, implemented]) => declared !== implemented)
     .map(([field]) => field);
-  // El esquema de incidencias depende del conjunto de reglas; basta con que tenga lector.
-  if (!INCIDENT_SCHEMA_VERSIONS.has(core.incident_schema_version)) {
+  // El esquema de incidencias depende del conjunto de reglas: debe tener lector y, si las reglas
+  // están implementadas, ser el que esas reglas emiten (la tabla de contratos de dominio).
+  const rules = ruleSetFor(core.quality_rule_version);
+  if (
+    !INCIDENT_SCHEMA_VERSIONS.has(core.incident_schema_version) ||
+    (rules !== null && rules.incident_schema_version !== core.incident_schema_version)
+  ) {
     mismatches.push('incident_schema_version');
   }
   return mismatches.sort();

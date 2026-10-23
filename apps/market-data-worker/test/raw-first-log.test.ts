@@ -482,7 +482,7 @@ describe('F1-STREAM-001: captura raw-first contra market-data v1', () => {
     });
   });
 
-  it('con reglas 1.1.0 un mensaje que no es tick se guarda raw, no da tick ni alarma y se reproduce', async () => {
+  it('con reglas 2.0.0 un mensaje que no es tick se guarda raw, no da tick ni alarma y se reproduce', async () => {
     const quality = JSON.parse(readVector('quality-profile.json').toString('utf8')) as Record<
       string,
       unknown
@@ -490,7 +490,7 @@ describe('F1-STREAM-001: captura raw-first contra market-data v1', () => {
     const profile = createPipelineProfile({
       connector_version: 'fixture-v1',
       quality_profile_bytes: Buffer.from(
-        JSON.stringify({ ...quality, quality_rule_version: '1.1.0' }),
+        JSON.stringify({ ...quality, non_tick_msg_types: ['ping'], quality_rule_version: '2.0.0' }),
       ),
       source_schema_bytes: readVector('source-schema.json'),
       source_schema_release: 'synthetic-v1',
@@ -514,6 +514,8 @@ describe('F1-STREAM-001: captura raw-first contra market-data v1', () => {
 
     expect(run.nonTick).toEqual([{ msg_type: 'ping', observation_id: id(1) }]);
     expect(run.invalid).toEqual([]);
+    expect(run.alerts).toEqual([]);
+    expect(run.operational.incidents).toEqual([]);
     expect(run.ticks.map((tick) => tick.observation_id)).toEqual([id(2)]);
     expect(run.sourceLog.rows.map((row) => row.event_id)).toEqual([id(1), id(2)]);
 
@@ -532,8 +534,8 @@ describe('F1-STREAM-001: captura raw-first contra market-data v1', () => {
     expect(publication.core).toMatchObject({
       incident_count: 0,
       incident_schema_version: '2.0.0',
-      normalizer_version: '1.1.0',
-      quality_rule_version: '1.1.0',
+      normalizer_version: '2.0.0',
+      quality_rule_version: '2.0.0',
       raw_frame_count: 2,
     });
     for (const mode of ['verify-only', 'recompute'] as const) {
