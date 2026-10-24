@@ -37,6 +37,8 @@ Deriv: datos públicos ──► ingesta/validación ──► almacenamiento re
                             estado de orden y posición ◄── reconciliación
 ```
 
+Deriv es la primera fuente. Después de Fase 1, MetaTrader 5 (Deriv MT5 y Vantage) entra como fuentes adicionales mediante un puente MQL5 dentro de la terminal MT5. Cada fuente tiene su propio adaptador, normalizador, perfil y log, y comparte el almacenamiento, la publicación y el replay ([ADR-0007](adr/0007-varias-fuentes-y-metatrader-5.md)).
+
 Deriv ofrece datos, operaciones en tiempo real y sesiones demo/real mediante APIs separadas. Su canal público es útil para ingesta inicial; los canales autenticados requieren una sesión válida para acciones de trading. [Resumen de API](https://developers.deriv.com/docs/intro/api-overview/) · [Compra de contrato](https://developers.deriv.com/docs/trading/buy/) · [Canal demo](https://developers.deriv.com/docs/options/ws-demo/)
 
 ## Monorepo propuesto
@@ -56,7 +58,7 @@ buoh/
 │   ├── domain/                  # tipos, unidades, cálculos puros y reglas compartidas
 │   ├── strategy-sdk/            # interfaz restringida de estrategia; sin red ni secretos
 │   ├── risk-policy/             # evaluador puro de límites y elegibilidad
-│   ├── broker-adapters/         # interfaces y adaptador Deriv aislado
+│   ├── broker-adapters/         # interfaces y adaptadores aislados: Deriv y, después, MT5
 │   ├── design-system/           # tokens y componentes visuales de buoh
 │   └── config/                  # configuración común de calidad y compilación
 ├── research/
@@ -118,6 +120,8 @@ Cada intento se persiste antes de enviarse. Los eventos de solicitud, respuesta,
 
 El MVP trabaja con datos públicos y *shadow trading*. La integración demo y real utilizará OAuth 2.0 Authorization Code + PKCE, `state` anti-CSRF, intercambio de código en el backend, tokens de duración limitada, cifrado en reposo, rotación, revocación y privilegios mínimos. Nunca se aceptan contraseñas de Deriv ni se exponen secretos en web/móvil.
 
+MetaTrader 5 no ofrece OAuth. Sus contraseñas, solo de cuentas propias, quedan dentro de la terminal MT5 y buoh nunca las recibe ([ADR-0007](adr/0007-varias-fuentes-y-metatrader-5.md)).
+
 Deriv documenta OAuth para autorización delegada y distingue sus canales públicos de los autenticados. La documentación también indica que una compra de contrato requiere una sesión válida. [Autenticación](https://developers.deriv.com/docs/intro/authentication/) · [OAuth con PKCE](https://developers.deriv.com/docs/intro/oauth/) · [Buy](https://developers.deriv.com/docs/trading/buy/)
 
 La aplicación no gestionará depósitos, retiros ni custodia. Antes de solicitar permisos de trading o conectar cuentas reales, se revisarán las condiciones de Deriv, las jurisdicciones habilitadas y el modelo de cumplimiento con asesoría legal cualificada.
@@ -141,6 +145,10 @@ Una futura capa `TYPE_APPLICATION_OVERLAY` será de consulta, apagable y no tác
 ### Windows (futuro)
 
 Tauri encapsulará un cliente React que reutiliza `packages/domain`, `packages/contracts`, `packages/risk-policy` y `packages/design-system`. No empaquetará la pasarela de ejecución ni el entorno Python; toda acción sigue pasando por APIs autenticadas de buoh.
+
+### Terminal MetaTrader 5 (futuro)
+
+La terminal MT5 con el puente corre en un PC del propietario o en un servidor Windows; la elección está pendiente. Ese equipo es infraestructura de servidor de buoh, no un cliente, y el cliente Tauri no lo incluye ([ADR-0007](adr/0007-varias-fuentes-y-metatrader-5.md)).
 
 ## Despliegue y fiabilidad
 

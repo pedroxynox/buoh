@@ -44,7 +44,7 @@ La habilitación real será específica por estrategia, instrumento, cuenta, tip
 
 - No se garantizan beneficios ni se presenta la rentabilidad como certeza.
 - No se gestionan fondos, depósitos, retiros ni custodia de suscriptores.
-- No se reciben contraseñas de Deriv ni se entregan secretos de ejecución a un cliente.
+- No se reciben contraseñas de Deriv ni de terceros, ni se entregan secretos de ejecución a un cliente. Las cuentas MT5 propias siguen [ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md).
 - No se ofrecen señales o ejecución fuera de los territorios, usuarios y condiciones aprobadas.
 
 Estos límites protegen el producto y no contradicen su camino comercial.

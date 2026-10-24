@@ -25,7 +25,7 @@ buoh es un bot multiplataforma de investigación cuantitativa, señales trazable
 ## Límites obligatorios
 
 - Nunca prometer, presentar ni diseñar garantías de rentabilidad. Mostrar modo, período, muestra, costes, pérdidas, *drawdown*, limitaciones y versión de toda métrica de desempeño.
-- No aceptar ni almacenar contraseñas de Deriv. Toda futura vinculación usa OAuth con PKCE, privilegios mínimos, intercambio de código en backend, tokens cifrados y revocables.
+- No aceptar ni almacenar contraseñas de Deriv. Toda futura vinculación usa OAuth con PKCE, privilegios mínimos, intercambio de código en backend, tokens cifrados y revocables. Las cuentas MT5 propias siguen la excepción acotada de [ADR-0007](../../docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md).
 - No gestionar depósitos, retiros, custodia ni fondos de usuarios.
 - Ningún navegador, móvil, overlay o estrategia se conecta directamente al bróker para ejecutar. Solo `execution-gateway`, aislado en servidor, puede hacerlo después de política de riesgo, autorización, idempotencia y auditoría.
 - No usar captura de pantalla, OCR de otras aplicaciones, servicios de accesibilidad, *screen scraping* ni controles que imiten/interfieran con otra app.
@@ -53,7 +53,7 @@ buoh es un bot multiplataforma de investigación cuantitativa, señales trazable
 - TypeScript estricto es el lenguaje principal: Next.js/React (web), Expo/React Native (móvil), Fastify (API), `market-data-worker`, `signal-engine`, futuro `execution-gateway`, y paquetes compartidos de contratos/dominio/estrategia/riesgo/diseño.
 - Python se limita a investigación cuantitativa por lotes, con contratos versionados con el resto del sistema; no es la ruta directa de órdenes.
 - SQL/PostgreSQL protege invariantes, metadatos, auditoría y series; Parquet en almacenamiento S3-compatible guarda normalizados. Fase 1 usa PostgreSQL estándar y difiere TimescaleDB/Redis hasta demostrar su necesidad.
-- Rust se limita al futuro contenedor Tauri 2 para Windows y a extensiones de rendimiento demostradas. Kotlin/Swift solo pueden aparecer en puentes nativos mínimos de Android/iOS.
+- Rust se limita al futuro contenedor Tauri 2 para Windows y a extensiones de rendimiento demostradas. Kotlin/Swift solo pueden aparecer en puentes nativos mínimos de Android/iOS. MQL5 se limita al puente de MetaTrader 5 (ADR-0007).
 - Mantener un contrato versionado entre TypeScript y Python; no duplicar fórmulas de producción sin vectores de prueba compartidos.
 
 ## Forma de trabajar

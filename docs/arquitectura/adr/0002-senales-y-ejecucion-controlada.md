@@ -4,6 +4,7 @@
 - **Fecha:** 2026-10-17
 - **Decisores:** Dirección técnica de buoh
 - **Sustituye parcialmente:** ADR-0001, decisión 5 (alcance solo de observación)
+- **Complementada por:** [ADR-0007](0007-varias-fuentes-y-metatrader-5.md) (MetaTrader 5 como segundo bróker y excepción acotada a la decisión 6 para cuentas MT5 propias)
 
 ## Contexto
 

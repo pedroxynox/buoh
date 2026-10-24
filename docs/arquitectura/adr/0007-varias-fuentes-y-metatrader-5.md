@@ -1,0 +1,150 @@
+# ADR-0007: Varias fuentes y MetaTrader 5
+
+- **Estado:** Aceptada
+- **Fecha:** 2026-10-24
+- **Ámbito:** reglas de diseño desde F1.4b; integración MT5 después de Fase 1
+- **Decisores:** Propietario de buoh, a propuesta de la dirección técnica
+- **Complementa:** [ADR-0002](0002-senales-y-ejecucion-controlada.md) (añade un bróker y una excepción a la decisión 6) y [ADR-0003](0003-lenguajes-y-limites.md) (añade MQL5 con un límite estricto). No cambia el alcance de Fase 1 ni [ADR-0004](0004-pipeline-y-reproduccion-de-datos-fase-1.md).
+
+## Contexto
+
+Hasta ahora Deriv es la única integración prevista. El propietario decidió el 2026-10-24 que buoh también trabajará con MetaTrader 5 (MT5):
+
+- para estudiar precios y, más adelante, para que el bot opere en MT5;
+- con dos brókeres: Deriv MT5 y Vantage;
+- con la posibilidad de que funcione desde un PC;
+- aceptando que se guarde una contraseña de cuenta MT5.
+
+ADR-0002 pide revisarse cuando se añade otro bróker, y su decisión 6 prohíbe aceptar contraseñas. ADR-0003 no prevé MQL5, el lenguaje de los programas de MT5.
+
+Hechos verificados el 2026-10-24:
+
+- La terminal MT5 se conecta al servidor de un bróker con número de cuenta, contraseña y nombre de servidor. La contraseña maestra da todos los permisos. La de inversor permite ver la cuenta, analizar precios y usar programas propios, pero no operar ([MetaTrader 5](https://www.metatrader5.com/en/terminal/help/startworking/authorization)).
+- La contraseña de Deriv MT5 es distinta de la contraseña principal de la cuenta Deriv ([Deriv](https://deriv.com/help-centre-question/how-do-i-activate-a-deriv-mt5-trading-account)).
+- Deriv ofrece CFD en Deriv MT5 y deja las opciones en Deriv Trader, Deriv Bot y Deriv GO ([Deriv](https://traders-academy.deriv.com/trading-guides/cfds-vs-options-trading)).
+- Vantage ofrece MT5 en escritorio, web y móvil, y cuentas demo ([Vantage](https://www.vantagemarkets.com/en-au/academy/mt4-mt5-cfd-trading-platforms-insights/), [plataformas](https://latam.vantagemarkets.com/pt/trading-platform/)).
+- El paquete oficial de Python `MetaTrader5` 5.0.6231 (publicado el 2026-09-27) solo trae instaladores para Windows de 64 bits y habla con una terminal abierta ([PyPI](https://pypi.org/project/MetaTrader5/)).
+- MT5 funciona en Linux mediante Wine, con un instalador oficial ([MetaTrader 5](https://www.metatrader5.com/en/terminal/help/start_advanced/install_linux)).
+- Los programas MQL5 pueden abrir conexiones TCP y TLS o hacer peticiones HTTP, pero solo hacia direcciones que el usuario autoriza en la terminal ([MQL5](https://www.mql5.com/en/docs/network/webrequest)).
+- Un tick de MT5 (`MqlTick`) trae `time` en segundos, `time_msc` en milisegundos, `bid`, `ask`, `last`, `volume`, `volume_real` y `flags`. Los precios son números de punto flotante ([MQL5](https://www.mql5.com/en/docs/constants/structures/mqltick)).
+- La hora que muestra MT5 es la del servidor del bróker; cada bróker elige su desfase respecto de UTC y puede cambiarlo con el horario de verano (fuente secundaria: [PineConnector](https://www.pineconnector.com/blogs/pico-blog/broker-server-time-vs-utc-vs-tradingview)).
+
+## Decisión
+
+### 1. Varias fuentes, cada una por separado
+
+buoh admite varias fuentes de datos. Cada fuente tiene su propio valor de `source`, adaptador, normalizador, perfil de calidad, catálogo y log raw-first. Los contratos actuales ya lo permiten: `source` es texto libre y el log, el registro operativo y sus tablas están separados por fuente.
+
+- Cada servidor MT5 de cada bróker es una fuente distinta. Deriv MT5 y Vantage no se mezclan, y tampoco sus servidores demo y real. Los identificadores exactos se fijan en el incremento que los implementa.
+- Un dataset sigue teniendo una sola fuente. Combinar fuentes sería un derivado posterior con su propia decisión.
+- Un mismo nombre no prueba que sea el mismo instrumento. Por ejemplo, el Volatility 100 de las opciones de Deriv y el de Deriv MT5 se tratan como instrumentos distintos mientras una medición no demuestre lo contrario. Los nombres oficiales se conservan por fuente sin reinterpretarlos (`F1-CATALOG-001`).
+
+### 2. Deriv sigue primero; F1.4b deja la puerta preparada
+
+Fase 1 sigue siendo solo Deriv. Desde F1.4b, el código propio de una fuente se elige por fuente en lugar de quedar fijo:
+
+- la conexión y su transporte, incluidos sus límites;
+- la lectura del mensaje (normalizador);
+- el vocabulario del perfil, como `non_tick_msg_types`;
+- el validador de esquemas de la fuente.
+
+El log raw-first, la publicación, el replay y el registro operativo no dependen de la fuente y no se tocan para añadir MT5. Fase 1 no crea código, directorios ni dependencias de MT5.
+
+### 3. Puente MT5 escrito en MQL5
+
+MT5 se integra mediante un programa MQL5 propio (el puente) que corre dentro de una terminal MT5 conectada a la cuenta.
+
+- El puente abre una conexión saliente y cifrada hacia buoh y envía mensajes JSON con un contrato versionado en `packages/contracts`. El worker en TypeScript los guarda como frames raw, igual que los de Deriv.
+- Los precios viajan como texto decimal con los `digits` del símbolo, para que buoh nunca los procese como punto flotante. Cada tick lleva `time_msc` y el desfase del servidor, para convertirlo a UTC de forma comprobable.
+- MQL5 se limita al puente. Puede leer y enviar ticks, catálogo y estado, y, desde la fase demo, ejecutar intenciones ya aprobadas por `execution-gateway`. No contiene estrategia, política de riesgo ni decisiones de operar.
+- Mientras el puente solo capture datos, no incluye código de operaciones.
+
+### 4. Dónde corre la terminal MT5
+
+La terminal necesita Windows, o Linux con Wine, y debe estar encendida mientras se capturan datos u opera el bot. Render no la aloja.
+
+- Puede correr en un PC del propietario o en un servidor Windows. La elección queda pendiente y se decide antes del incremento de datos MT5.
+- Esté donde esté, ese equipo forma parte de la infraestructura de servidor de buoh y no es un cliente. Se usa solo para la terminal y el puente, y el puente solo acepta órdenes de `execution-gateway`.
+- El futuro cliente Windows de buoh (Tauri 2) no incluye la terminal, el puente ni permisos de ejecución.
+- Operar con dinero real desde un PC exige aprobación explícita en la evaluación de Fase 5.
+
+### 5. Contraseñas de MT5: excepción acotada a ADR-0002, decisión 6
+
+MT5 no ofrece OAuth; solo número de cuenta y contraseña. El propietario acepta guardar una contraseña con estas reglas:
+
+- Solo cuentas MT5 del propietario, en la etapa de uso propio. Las contraseñas de terceros siguen prohibidas hasta una nueva ADR.
+- La contraseña principal de la cuenta Deriv nunca se usa. Deriv MT5 tiene la suya.
+- Para capturar datos se usa la contraseña de inversor, que no permite operar.
+- La contraseña maestra, que sí permite operar, solo se usa desde la fase demo y solo en cuentas demo, hasta que Fase 5 apruebe una cuenta real concreta.
+- La contraseña vive solo en la terminal MT5 de su equipo, que la guarda ella misma. buoh nunca la recibe: no pasa por Git, PostgreSQL, almacenamiento de objetos, API, web, móvil, registros ni variables de entorno de otros servicios.
+- El puente se identifica ante buoh con una credencial propia de buoh, revocable y distinta de la contraseña MT5.
+- Para revocar el acceso, el propietario cambia la contraseña en el bróker y buoh revoca la credencial del puente.
+
+### 6. Operar en MT5
+
+Que el bot opere en MT5 es un objetivo aceptado y sigue ADR-0002 sin atajos: `shadow` → `demo` → `real`, y solo `execution-gateway` decide.
+
+- El puente ejecuta únicamente intenciones aprobadas, con clave de idempotencia y reconciliación contra las posiciones y el historial de MT5.
+- MT5 opera CFD con apalancamiento, y su pérdida no queda fijada al abrir como en una opción. Antes de operar en demo, `risk-policy` debe modelar posiciones CFD: tamaño, stop, margen, apalancamiento, spread y swap.
+- Operar en demo con MT5 requiere su propia ADR al empezar Fase 4.
+
+### 7. Contratos
+
+Los contratos no cambian ahora. Al integrar MT5 harán falta:
+
+- precio de compra y de venta, último precio, volumen y `flags`;
+- tiempo en milisegundos y su conversión a UTC;
+- precisión por `digits`;
+- catálogo por servidor.
+
+Eso será una nueva versión de contrato o un tipo nuevo, decidido con datos reales en el incremento MT5. `MarketTick` 1.0.0 y los vectores de `test-vectors/` no se modifican.
+
+### 8. Términos y cumplimiento
+
+Antes de capturar datos u operar se revisan las condiciones de Deriv MT5, Vantage y MetaQuotes sobre programas automáticos y uso de datos. La redistribución de datos sigue deshabilitada, como en ADR-0004 §13. La evaluación legal y de cumplimiento previa al dinero real también cubre MT5 y la entidad de Vantage que corresponda.
+
+## Consecuencias
+
+- MT5 entra como fuente adicional sin rehacer el log, la publicación ni el replay.
+- F1.4b cuesta algo más de diseño, porque separa lo que es de Deriv de lo común.
+- Se añade un lenguaje (MQL5) y un equipo que hay que mantener encendido, actualizado y vigilado.
+- Las contraseñas de MT5 quedan fuera de buoh, pero el equipo de la terminal pasa a ser un activo sensible.
+- La política de riesgo debe cubrir dos tipos de producto: opciones de Deriv y CFD de MT5.
+
+## Alternativas descartadas
+
+| Alternativa | Motivo de descarte |
+|---|---|
+| Paquete Python `MetaTrader5` en la ruta de ingesta | Pone Python en la ruta crítica, contra ADR-0003, y solo funciona en Windows junto a la terminal. |
+| Servicios en la nube de terceros que hacen de puente | Entregan la contraseña de la cuenta a un tercero y añaden un proveedor sin revisión. |
+| API de servidor o Manager de MT5 | MetaQuotes la ofrece a brókeres y exige acceso de administración al servidor ([MetaQuotes](https://www.metaquotes.net/en/metatrader5/brokers)). |
+| Guardar la contraseña en buoh (base de datos o variables) | Amplía la exposición sin necesidad: la terminal ya la guarda. |
+| Integrar MT5 dentro de Fase 1 | Duplica el trabajo antes de cerrar la puerta de calidad de Deriv. |
+| Mezclar Deriv MT5 y Vantage en una misma fuente | Son servidores, horarios y precios distintos; mezclarlos rompe la procedencia. |
+
+## Pendientes
+
+- Equipo de la terminal MT5: PC del propietario o servidor Windows.
+- Identificadores de fuente por bróker y servidor.
+- Contrato de los mensajes del puente y su protocolo de conexión.
+- Medición del desfase horario de cada servidor.
+- Entidad y jurisdicción de Vantage que aplican al propietario.
+
+## Condiciones de revisión
+
+Revisar esta ADR si MT5 o un bróker ofrece autorización delegada, si se añaden brókeres o cuentas de terceros, si cambia el equipo de la terminal o si la evidencia muestra que el puente no puede cumplir la conversión a UTC o la reconciliación.
+
+## Referencias verificadas
+
+- [MetaTrader 5: conexión a una cuenta (maestra e inversor)](https://www.metatrader5.com/en/terminal/help/startworking/authorization)
+- [MetaTrader 5: instalación en Linux](https://www.metatrader5.com/en/terminal/help/start_advanced/install_linux)
+- [MQL5: funciones de red](https://www.mql5.com/en/docs/network/webrequest)
+- [MQL5: estructura `MqlTick`](https://www.mql5.com/en/docs/constants/structures/mqltick)
+- [MQL5: `initialize` del paquete Python](https://www.mql5.com/en/docs/python_metatrader5/mt5initialize_py)
+- [PyPI: MetaTrader5](https://pypi.org/project/MetaTrader5/)
+- [Deriv: contraseña de Deriv MT5](https://deriv.com/help-centre-question/how-do-i-activate-a-deriv-mt5-trading-account)
+- [Deriv: CFD y opciones por plataforma](https://traders-academy.deriv.com/trading-guides/cfds-vs-options-trading)
+- [Vantage: MT4 y MT5](https://www.vantagemarkets.com/en-au/academy/mt4-mt5-cfd-trading-platforms-insights/)
+- [MetaQuotes: MetaTrader 5 para brókeres](https://www.metaquotes.net/en/metatrader5/brokers)
+
+El contenido de fuentes externas fue reformulado para cumplir restricciones de licencia.

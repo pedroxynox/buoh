@@ -28,6 +28,19 @@ El estado vigente se consulta únicamente en [`PROJECT_STATUS.md`](../../PROJECT
 
 **Criterio de salida:** un lote se reconstruye desde `dataset_id`, y el sistema expone continuidad, retraso, duplicados y datos fuera de orden sin ocultarlos.
 
+## Fase 1B — Datos de MetaTrader 5
+
+**Objetivo:** capturar precios de Deriv MT5 y Vantage con las mismas garantías que Deriv, sin operar ([ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)). Empieza cuando Fase 1 cumpla su criterio de salida.
+
+**Incrementos:**
+
+1. equipo de la terminal MT5 decidido y revisión de términos de Deriv MT5, Vantage y MetaQuotes;
+2. contrato de los mensajes del puente, cotización con compra y venta, y catálogo por servidor;
+3. puente MQL5 de solo datos con contraseña de inversor;
+4. adaptador y normalizador MT5, con conversión a UTC comprobada, pruebas offline con fixtures y smoke opt-in.
+
+**Criterio de salida:** un dataset de cada servidor MT5 se reproduce desde su `dataset_id`, sus incidencias siguen visibles tras reiniciar y ninguna contraseña MT5 sale de la terminal.
+
 ## Fase 2 — Laboratorio y bot shadow para uso propio
 
 **Objetivo:** transformar una hipótesis en una estrategia viva, explicable y no ejecutora.
@@ -85,7 +98,8 @@ El estado vigente se consulta únicamente en [`PROJECT_STATUS.md`](../../PROJECT
 3. `ExecutionIntent`, idempotencia, auditoría y correlación con señales;
 4. políticas de riesgo por estrategia, usuario, instrumento y entorno;
 5. reconciliación de órdenes/posiciones y pruebas de desconexión, retraso y respuestas ambiguas;
-6. *kill switch* global, por estrategia y por usuario, probado de forma periódica.
+6. *kill switch* global, por estrategia y por usuario, probado de forma periódica;
+7. ejecución demo en MT5 por el puente, con su propia ADR y una política de riesgo para CFD.
 
 **Criterio de salida:** toda orden demo puede explicarse, encontrarse en la auditoría y reconciliarse; un fallo de red no genera una duplicación silenciosa.
 
@@ -117,6 +131,6 @@ El estado vigente se consulta únicamente en [`PROJECT_STATUS.md`](../../PROJECT
 
 - Garantías de rentabilidad, manipulación de usuarios o marketing engañoso.
 - Custodia, depósitos, retiros o administración de fondos de clientes.
-- Contraseñas de Deriv, secretos en clientes u órdenes directas desde UI.
+- Contraseñas de Deriv o de terceros, secretos en clientes u órdenes directas desde UI. Las cuentas MT5 propias siguen la excepción acotada de ADR-0007.
 - Lectura/captura de pantalla, OCR, automatización de otras aplicaciones o uso abusivo de accesibilidad.
 - Ejecución en países, instrumentos, cuentas o tipos de contrato no aprobados.
