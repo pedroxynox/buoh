@@ -37,6 +37,17 @@ Ante un conflicto, no elijas una interpretación silenciosa: aplica el protocolo
 
 No crees componentes futuros o directorios vacíos fuera del [corte de Fase 1](docs/plan/fase-1-fundacion-de-datos.md).
 
+## Organización autorizada para la línea visual V1
+
+En paralelo a Fase 1, el [plan de la línea visual](docs/plan/linea-visual-v1.md) y [ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md) autorizan:
+
+- `packages/design-system/`: tokens, CSS base y componentes React web; la guía es [`docs/diseno/marca-buoh.md`](docs/diseno/marca-buoh.md).
+- `apps/web/`: prototipo navegable del producto con datos ficticios, sin API, cuentas ni brókeres.
+- `apps/site/`: sitio oficial estático, sin formularios ni recursos de terceros.
+- `docs/diseno/`: marca y concepto de interfaz.
+
+La guardia documental pide revisar la guía de marca al tocar `packages/design-system/**`, y el concepto de interfaz o ADR-0008 al tocar `apps/web/**` o `apps/site/**`.
+
 ## Reglas de implementación
 
 - TypeScript estricto es el lenguaje principal; Python queda fuera de la ruta inicial de ingesta.

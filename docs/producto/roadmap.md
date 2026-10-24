@@ -12,6 +12,18 @@ Este roadmap ordena el trabajo por evidencia y reducción de riesgo, no por fech
 
 **Salida:** las interfaces no pueden eludir la pasarela de riesgo, y cada persona sabe diferenciar `shadow`, `demo` y `real`.
 
+## Línea visual V1 (en paralelo a Fase 1)
+
+**Objetivo:** dar a buoh su marca y una interfaz que se pueda ver y validar antes de tener datos reales ([ADR-0008](../arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md), [plan](../plan/linea-visual-v1.md)).
+
+**Incrementos:**
+
+1. guía de marca, catálogo de funciones, concepto de interfaz y sistema de diseño;
+2. prototipo navegable del producto con datos ficticios;
+3. sitio oficial estático.
+
+**Criterio de salida:** el propietario revisó capturas del prototipo y del sitio, y las pruebas de contraste y de estados pasan. Móvil y escritorio necesitan su propio incremento antes de empezar.
+
 ## Fase 1 — Fundación de datos
 
 El estado vigente se consulta únicamente en [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md). El alcance y aceptación autoritativos están en el [plan ejecutable de Fase 1](../plan/fase-1-fundacion-de-datos.md).

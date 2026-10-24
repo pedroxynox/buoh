@@ -69,8 +69,8 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 ## Identidad de diseño
 
 - **Carácter:** sereno, preciso, nocturno; no lúdico ni estimulante de sobreoperación.
-- **Paleta inicial:** Night Ink `#090E1A`, Owl Navy `#101A2C`, Iris Cyan `#4FC3F7`, Moon Gold `#F4C95D`, Feather Slate `#8C9AAD`, Risk Rose `#ED6A5A`.
-- **Accesibilidad:** contraste WCAG AA como mínimo; el color nunca será la única señal de ganancia, pérdida, riesgo o estado.
+- **Paleta:** noche `#0A101C` como fondo, niebla `#F4F6FB` para el texto, luna `#F0E5C6` para la acción principal y ámbar `#F2B544` solo para los ojos del búho y el acento de marca. La [guía de marca](docs/diseno/marca-buoh.md) es la fuente canónica y sustituye la paleta inicial.
+- **Accesibilidad:** contraste WCAG AA como mínimo, comprobado por pruebas; el color nunca será la única señal de ganancia, pérdida, riesgo o estado.
 - **Datos vivos:** toda vista muestra símbolo, fuente, zona horaria, intervalo, frescura, modo de ejecución y calidad de datos.
 
 ## Documentos de decisión
@@ -88,6 +88,11 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 - [ADR-0005: persistencia local, formato físico y log raw-first de F1.3](docs/arquitectura/adr/0005-persistencia-local-y-formato-fisico-f1-3.md)
 - [ADR-0006: alojamiento productivo en Render](docs/arquitectura/adr/0006-alojamiento-en-render.md)
 - [ADR-0007: varias fuentes y MetaTrader 5](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)
+- [ADR-0008: línea visual, marca y clientes web](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)
+- [Plan de la línea visual V1](docs/plan/linea-visual-v1.md)
+- [Guía de marca](docs/diseno/marca-buoh.md)
+- [Concepto de interfaz](docs/diseno/concepto-de-interfaz.md)
+- [Funciones y disponibilidad](docs/producto/funciones-y-disponibilidad.md)
 - [Contratos de dominio y eventos](docs/arquitectura/contratos-de-dominio.md)
 - [Seguridad y rigor cuantitativo](docs/gobierno/seguridad-y-rigor-cuantitativo.md)
 - [Protocolo de validación de estrategias](docs/gobierno/protocolo-de-validacion-de-estrategias.md)
