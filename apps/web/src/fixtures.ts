@@ -66,7 +66,10 @@ export const SOURCES: readonly SourceStatus[] = [
   },
 ];
 
-/** Salud global: con una sola fuente fuera de `healthy`, es la de esa fuente (contratos, «Salud derivada»). */
+/**
+ * Salud global. Supuesto del prototipo: es la más severa de sus fuentes. El contrato («Salud derivada»)
+ * solo define la salud de cada fuente; la regla global se fijará cuando exista el reporte (F1.5).
+ */
 export const GLOBAL_STATUS: { readonly mode: ExecutionMode; readonly health: ServiceHealth } = {
   mode: 'shadow',
   health: 'degraded',
@@ -89,7 +92,7 @@ export const PRICE_GAPS: readonly {
   readonly start: number;
   readonly end: number;
   readonly label: string;
-}[] = [{ start: 27, end: 33, label: `Hueco: 6 ticks (12${NB}s) sin recuperar` }];
+}[] = [{ start: 27, end: 33, label: `Hueco: 6 ticks (12${NB}s) · conexión perdida` }];
 
 /** Serie de precios calculada con una fórmula fija (sin aleatoriedad). `null` marca un tick que falta. */
 export function priceSeries(): readonly (number | null)[] {
@@ -110,7 +113,7 @@ export const PRICE_TIME_LABELS = [0, 30, 60, R100_TICKS - 1].map((index) => ({
 const R100_LAST = priceSeries().at(-1) ?? 0;
 
 export interface QualityBadge {
-  readonly tone: 'aurora' | 'naranja' | 'cielo';
+  readonly tone: 'aurora' | 'naranja';
   readonly label: string;
   readonly icon: IconName;
 }
@@ -147,7 +150,7 @@ export const INSTRUMENTS: readonly Instrument[] = [
     lastPrice: '38214.5531',
     freshness: `hace 1${NB}s`,
     schedule: '24/7',
-    quality: { tone: 'cielo', label: 'Recuperado con la historia', icon: 'rotate' },
+    quality: { tone: 'aurora', label: 'Recuperado con la historia', icon: 'check' },
   },
   {
     symbol: '1HZ100V',
@@ -157,7 +160,7 @@ export const INSTRUMENTS: readonly Instrument[] = [
     lastPrice: '1689.04',
     freshness: `hace 1${NB}s`,
     schedule: '24/7',
-    quality: { tone: 'cielo', label: 'Recuperado con la historia', icon: 'rotate' },
+    quality: { tone: 'aurora', label: 'Recuperado con la historia', icon: 'check' },
   },
   {
     symbol: 'Volatility 100 Index',
@@ -216,7 +219,7 @@ export const INCIDENT_STATUS: Readonly<
 > = {
   abierta: { tone: 'naranja', label: 'Abierta', icon: 'alertTriangle' },
   resuelta: { tone: 'niebla', label: 'Resuelta', icon: 'check' },
-  registrada: { tone: 'niebla', label: 'Registrada', icon: 'document' },
+  registrada: { tone: 'niebla', label: 'Registrada', icon: 'book' },
 };
 
 export const INCIDENTS: readonly IncidentRow[] = [
@@ -240,7 +243,7 @@ export const INCIDENTS: readonly IncidentRow[] = [
   },
   {
     type: 'delivery_delayed',
-    severity: 'info',
+    severity: 'warning',
     symbol: '1HZ100V',
     source: 'Deriv',
     whenUtc: '2026-10-20T13:02:40.000Z',
@@ -249,7 +252,7 @@ export const INCIDENTS: readonly IncidentRow[] = [
   },
   {
     type: 'invalid_source_frame',
-    severity: 'warning',
+    severity: 'error',
     symbol: 'sin símbolo',
     source: 'Deriv',
     whenUtc: '2026-10-20T11:47:03.000Z',
@@ -306,8 +309,12 @@ export interface StrategyRow {
   readonly lifecycle: StrategyLifecycle;
   readonly symbol: string;
   readonly hypothesis: string;
+  /** Registro de la hipótesis, antes de ver cualquier tramo de prueba. */
+  readonly registeredUtc: string;
   /** Aprobación para shadow; `null` si nunca pasó la validación. */
   readonly approvedForShadowUtc: string | null;
+  /** Pausa automática, si la hubo. */
+  readonly pausedUtc?: string;
   readonly note: string;
 }
 
@@ -319,6 +326,7 @@ export const STRATEGIES: readonly StrategyRow[] = [
     lifecycle: 'active',
     symbol: 'R_75',
     hypothesis: `Una salida del rango de 60${NB}s continúa durante los siguientes 10 ticks.`,
+    registeredUtc: '2026-06-28T10:00:00.000Z',
     approvedForShadowUtc: '2026-10-16T09:00:00.000Z',
     note: 'En shadow desde su aprobación.',
   },
@@ -329,7 +337,9 @@ export const STRATEGIES: readonly StrategyRow[] = [
     lifecycle: 'paused',
     symbol: 'R_100',
     hypothesis: 'Tras tres ticks en la misma dirección, el cuarto sigue esa dirección.',
+    registeredUtc: '2026-06-28T10:00:00.000Z',
     approvedForShadowUtc: '2026-10-16T09:00:00.000Z',
+    pausedUtc: '2026-10-20T14:30:12.000Z',
     note: 'En pausa automática desde las 14:30:12 por datos degradados en R_100.',
   },
   {
@@ -340,6 +350,7 @@ export const STRATEGIES: readonly StrategyRow[] = [
     symbol: 'R_100',
     hypothesis:
       'Tras tres ticks en la misma dirección, el siguiente revierte más de la mitad de las veces.',
+    registeredUtc: '2026-06-28T10:00:00.000Z',
     approvedForShadowUtc: null,
     note: 'Retirada: perdió en la prueba fuera de muestra.',
   },
@@ -348,7 +359,7 @@ export const STRATEGIES: readonly StrategyRow[] = [
 export const LIFECYCLE_PRESENTATION: Readonly<
   Record<StrategyLifecycle, { label: string; tone: 'niebla' | 'cielo' | 'aurora'; icon: IconName }>
 > = {
-  draft: { label: 'Borrador', tone: 'niebla', icon: 'document' },
+  draft: { label: 'Borrador', tone: 'niebla', icon: 'layers' },
   reviewed: { label: 'Revisada', tone: 'cielo', icon: 'eye' },
   active: { label: 'Activa', tone: 'aurora', icon: 'radar' },
   paused: { label: 'En pausa', tone: 'niebla', icon: 'pauseCircle' },
@@ -415,6 +426,42 @@ export const BACKTEST_CONTEXT: PerformanceContext = {
   limitations: BACKTEST_LIMITS,
 };
 
+export interface ValidationSummary {
+  readonly strategyId: string;
+  readonly version: string;
+  readonly window: string;
+  /** Fin del tramo fuera de muestra: la aprobación nunca es anterior. */
+  readonly windowEndUtc: string;
+  readonly sample: string;
+  readonly result: string;
+  readonly losses: string;
+  readonly drawdown: string;
+}
+
+/** Resumen fuera de muestra de las estrategias aprobadas (mismos tramos y costes que el ejemplo). */
+export const APPROVED_VALIDATION: readonly ValidationSummary[] = [
+  {
+    strategyId: 'ruptura-v2',
+    version: 'Ruptura de rango v2',
+    window: '1 – 15 oct 2026',
+    windowEndUtc: '2026-10-15T23:59:59.000Z',
+    sample: '412 operaciones',
+    result: `+0,9${NB}%`,
+    losses: `194 (47,1${NB}%)`,
+    drawdown: `−1,6${NB}%`,
+  },
+  {
+    strategyId: 'impulso-v1',
+    version: 'Impulso de tres ticks v1',
+    window: '1 – 15 oct 2026',
+    windowEndUtc: '2026-10-15T23:59:59.000Z',
+    sample: '980 operaciones',
+    result: `+0,5${NB}%`,
+    losses: `468 (47,8${NB}%)`,
+    drawdown: `−2,2${NB}%`,
+  },
+];
+
 /** El período shadow empieza con la aprobación de la estrategia. */
 export const SHADOW_PERIOD_START_UTC = '2026-10-16T09:00:00.000Z';
 
@@ -480,7 +527,7 @@ export const SIGNALS: readonly SignalRow[] = [
     mode: 'shadow',
     quality: 'completa',
     status: 'vigente',
-    evidenceHref: '/laboratorio/',
+    evidenceHref: '/laboratorio/#evidencia-ruptura-v2',
   },
   {
     id: 'sig-0200',
@@ -493,7 +540,7 @@ export const SIGNALS: readonly SignalRow[] = [
     issuedUtc: '2026-10-20T14:29:58.000Z',
     expiresUtc: '2026-10-20T14:30:00.000Z',
     mode: 'shadow',
-    quality: 'degradada',
+    quality: 'completa',
     status: 'descartada',
     evidenceHref: '/datos/',
   },
@@ -510,7 +557,7 @@ export const SIGNALS: readonly SignalRow[] = [
     mode: 'shadow',
     quality: 'completa',
     status: 'vencida',
-    evidenceHref: '/laboratorio/',
+    evidenceHref: '/laboratorio/#evidencia-ruptura-v2',
   },
 ];
 

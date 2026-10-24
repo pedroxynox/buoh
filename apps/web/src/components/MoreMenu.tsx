@@ -8,7 +8,7 @@ import { NavLink } from './NavLink';
 
 /**
  * Menú «Más» de la barra inferior (móvil y tablet). Usa `<details>`, que funciona con teclado y sin
- * JavaScript; al cambiar de página se cierra.
+ * JavaScript. Se cierra al cambiar de página, con Escape y al tocar fuera.
  */
 export function MoreMenu({ items }: { readonly items: readonly NavItem[] }) {
   const pathname = usePathname();
@@ -16,6 +16,29 @@ export function MoreMenu({ items }: { readonly items: readonly NavItem[] }) {
   useEffect(() => {
     ref.current?.removeAttribute('open');
   }, [pathname]);
+  useEffect(() => {
+    const details = ref.current;
+    if (details === null) {
+      return undefined;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && details.open) {
+        details.open = false;
+        details.querySelector('summary')?.focus();
+      }
+    };
+    const onPointer = (event: PointerEvent) => {
+      if (details.open && event.target instanceof Node && !details.contains(event.target)) {
+        details.open = false;
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onPointer);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onPointer);
+    };
+  }, []);
   const normalized = pathname.endsWith('/') ? pathname : `${pathname}/`;
   const current = items.some((item) => item.href !== '/' && normalized.startsWith(item.href));
   return (

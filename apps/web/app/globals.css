@@ -271,15 +271,10 @@
   line-height: 1.25;
 }
 .w-chart__note--loss {
+  max-width: none;
+  white-space: nowrap;
   color: var(--b-tone-rojo-fg);
-  transform: translate(0.5rem, 0.35rem);
-}
-.w-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--b-space-2) var(--b-space-4);
-  color: var(--b-text-2);
-  font-size: var(--b-size-sm);
+  transform: translate(calc(-100% - 0.5rem), -50%);
 }
 
 .w-stat {

@@ -4,6 +4,7 @@ import { PageHeader } from '../../src/components/AppShell';
 import { EquityChart } from '../../src/components/Charts';
 import { DataMeta } from '../../src/components/Pieces';
 import {
+  APPROVED_VALIDATION,
   BACKTEST_CONTEXT,
   BACKTEST_SPLITS,
   EQUITY_TIME_LABELS,
@@ -22,7 +23,7 @@ export default function LaboratorioPage() {
       <PageHeader
         eyebrow="Laboratorio"
         title="¿Esta estrategia tiene evidencia?"
-        summary="Cada estrategia es una versión inmutable. Se prueba con datos pasados separados en entrenamiento, validación y prueba fuera de muestra, con costes declarados. Solo una versión que pasa las tres llega a shadow."
+        summary="Cada estrategia es una versión inmutable. Se prueba con datos pasados separados en entrenamiento, validación y prueba fuera de muestra, con costes declarados. Solo una versión que supera esos tramos y una réplica independiente llega a shadow."
       />
 
       <Card title="Estrategias" subtitle="Un cambio crea una versión nueva" headingLevel={2}>
@@ -69,6 +70,51 @@ export default function LaboratorioPage() {
             </tbody>
           </table>
         </div>
+      </Card>
+
+      <Card
+        title="Estrategias aprobadas · prueba fuera de muestra"
+        subtitle="La evidencia que permitió su paso a shadow"
+        headingLevel={2}
+      >
+        <DataMeta
+          items={[
+            ['Origen', <EvidenceSourceBadge key="o" source={SPLITS_CONTEXT.source} />],
+            ['Costes', SPLITS_CONTEXT.costs],
+          ]}
+        />
+        <div className="w-table-wrap">
+          <table className="b-table">
+            <thead>
+              <tr>
+                <th scope="col">Versión</th>
+                <th scope="col">Período</th>
+                <th scope="col">Muestra</th>
+                <th scope="col">Resultado neto</th>
+                <th scope="col">Pérdidas</th>
+                <th scope="col">Drawdown máximo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {APPROVED_VALIDATION.map((row) => (
+                <tr key={row.strategyId} id={`evidencia-${row.strategyId}`}>
+                  <td>
+                    <strong>{row.version}</strong>
+                  </td>
+                  <td>{row.window}</td>
+                  <td>{row.sample}</td>
+                  <td className="b-num">{row.result}</td>
+                  <td>{row.losses}</td>
+                  <td className="b-num">{row.drawdown}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="b-metric__limits" style={{ marginTop: 'var(--b-space-4)' }}>
+          <strong>Limitaciones:</strong> {SPLITS_CONTEXT.limitations} Las tres hipótesis se
+          registraron el 28 jun 2026, antes de ver cualquier tramo de prueba.
+        </p>
       </Card>
 
       <div className="w-grid w-grid--wide">

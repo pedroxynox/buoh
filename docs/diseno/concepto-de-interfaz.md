@@ -77,6 +77,7 @@ Diseño de la información del cliente web (`V1-UI-001`). El prototipo de `apps/
 
 - Los datos viven en `apps/web/src/fixtures.ts`, fijados a mano o calculados con fórmulas fijas; el instante de referencia es el 20 oct 2026, 14:32:05 UTC.
 - Cuentan una historia coherente, comprobada por pruebas: Deriv perdió la conexión, R_100 quedó con un hueco sin resolver, Deriv y la salud global están degradadas y la estrategia que usa R_100 se pausó sola. Solo emite señales vigentes una estrategia aprobada para shadow, y solo después de su aprobación.
+- Supuestos del prototipo, que el contrato todavía no fija: la salud global es la más severa de sus fuentes, y una pausa automática afecta solo a las estrategias del símbolo con datos degradados.
 - Los gráficos son SVG propios: el de precios corta la línea en los huecos y los rotula; el de resultados marca el cero y la peor caída. Sus textos van en HTML para leerse igual en móvil, con eje de tiempo.
 - El ejemplo del laboratorio es deliberadamente honesto: la estrategia gana en entrenamiento y pierde fuera de muestra, así que no pasa la validación y se retira sin llegar a shadow.
 - Las únicas acciones son enlaces de navegación. Los botones de las secciones de Fase 4 están desactivados, y los de la guía visual son muestras sin efecto.

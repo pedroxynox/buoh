@@ -151,6 +151,9 @@ describe('prototipo exportado (V1-UI-001)', () => {
       }
     }
     const lab = textOf(mainOf(read(pageOf('/laboratorio/'))));
-    expect(lab.match(/Limitaciones:/g)?.length).toBe(2);
+    expect(lab.match(/Limitaciones:/g)?.length).toBe(3);
+    expect(lab.match(/Origen: Backtest/g)?.length).toBe(3);
+    expect(lab.match(/Pérdidas/g)?.length).toBe(3);
+    expect(read(pageOf('/laboratorio/'))).toContain('id="evidencia-ruptura-v2"');
   });
 });

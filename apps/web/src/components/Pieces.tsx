@@ -26,8 +26,8 @@ const SIGNAL_STATUS: Readonly<
   >
 > = {
   vigente: { tone: 'aurora', label: 'Vigente', icon: 'clock' },
-  vencida: { tone: 'niebla', label: 'Vencida', icon: 'clock' },
-  descartada: { tone: 'naranja', label: 'Descartada por calidad', icon: 'alertTriangle' },
+  vencida: { tone: 'niebla', label: 'Vencida', icon: 'circleSlash' },
+  descartada: { tone: 'naranja', label: 'Descartada: falta su tick de resultado', icon: 'gap' },
 };
 
 /** Tarjeta de señal: estrategia, versión, condición, tiempos, modo, calidad y evidencia (concepto §4). */

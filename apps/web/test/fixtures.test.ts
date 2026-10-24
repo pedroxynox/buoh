@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { worstDrawdown } from '../src/components/Charts';
 import {
+  APPROVED_VALIDATION,
   AUDIT,
   BACKTEST_CONTEXT,
   BACKTEST_SPLITS,
@@ -97,11 +98,53 @@ describe('datos ficticios coherentes (V1-UI-001)', () => {
     ).toBe('retired');
   });
 
-  it('el período shadow empieza con la aprobación, después de la prueba fuera de muestra', () => {
+  it('el período shadow empieza con la aprobación, después de su propia prueba fuera de muestra', () => {
     const approved = STRATEGIES.find((s) => `${s.name} ${s.version}` === SHADOW_CONTEXT.version);
     expect(approved?.approvedForShadowUtc).toBe(SHADOW_PERIOD_START_UTC);
-    expect(Date.parse(SHADOW_PERIOD_START_UTC)).toBeGreaterThan(Date.parse('2026-10-15T23:59:59Z'));
     expect(AUDIT.some((row) => row.whenUtc === SHADOW_PERIOD_START_UTC)).toBe(true);
+    for (const strategy of STRATEGIES.filter((s) => s.approvedForShadowUtc !== null)) {
+      const evidence = APPROVED_VALIDATION.find((v) => v.strategyId === strategy.id);
+      expect(evidence, strategy.id).toBeDefined();
+      expect(evidence?.version).toBe(`${strategy.name} ${strategy.version}`);
+      expect(Date.parse(strategy.approvedForShadowUtc ?? '')).toBeGreaterThan(
+        Date.parse(evidence?.windowEndUtc ?? ''),
+      );
+      expect(Date.parse(strategy.registeredUtc)).toBeLessThan(Date.parse('2026-07-01T00:00:00Z'));
+    }
+  });
+
+  it('cada señal coincide con su estrategia y enlaza a evidencia existente', () => {
+    for (const signal of SIGNALS) {
+      const strategy = STRATEGIES.find((s) => s.id === signal.strategyId);
+      expect(signal.strategy).toBe(strategy?.name);
+      expect(signal.version).toBe(strategy?.version);
+      expect(signal.symbol).toBe(strategy?.symbol);
+      expect(signal.evidenceHref).toMatch(/^\/[a-z]+\/(#[a-z0-9-]+)?$/);
+      const anchor = signal.evidenceHref.split('#')[1];
+      if (anchor !== undefined) {
+        expect(APPROVED_VALIDATION.map((v) => `evidencia-${v.strategyId}`)).toContain(anchor);
+      }
+    }
+  });
+
+  it('una estrategia en pausa no emite señales después de su pausa', () => {
+    for (const strategy of STRATEGIES.filter((s) => s.lifecycle === 'paused')) {
+      expect(strategy.pausedUtc, strategy.id).toBeDefined();
+      for (const signal of SIGNALS.filter((s) => s.strategyId === strategy.id)) {
+        expect(Date.parse(signal.issuedUtc)).toBeLessThan(Date.parse(strategy.pausedUtc ?? ''));
+      }
+    }
+  });
+
+  it('una señal solo se marca con datos degradados si se emitió con una condición abierta', () => {
+    const opened = Math.min(
+      ...INCIDENTS.filter((i) => i.status !== 'registrada').map((i) => Date.parse(i.whenUtc)),
+    );
+    for (const signal of SIGNALS) {
+      if (Date.parse(signal.issuedUtc) < opened) {
+        expect(signal.quality, signal.id).toBe('completa');
+      }
+    }
   });
 
   it('las métricas y los tramos traen todo su contexto, sin campos vacíos', () => {
