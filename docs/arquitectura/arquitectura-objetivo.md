@@ -120,7 +120,7 @@ Cada intento se persiste antes de enviarse. Los eventos de solicitud, respuesta,
 
 El MVP trabaja con datos públicos y *shadow trading*. La integración demo y real utilizará OAuth 2.0 Authorization Code + PKCE, `state` anti-CSRF, intercambio de código en el backend, tokens de duración limitada, cifrado en reposo, rotación, revocación y privilegios mínimos. Nunca se aceptan contraseñas de Deriv ni se exponen secretos en web/móvil.
 
-MetaTrader 5 no ofrece OAuth. Sus contraseñas, solo de cuentas propias, quedan dentro de la terminal MT5 y buoh nunca las recibe ([ADR-0007](adr/0007-varias-fuentes-y-metatrader-5.md)).
+MetaTrader 5 no ofrece autorización delegada como OAuth. Sus contraseñas, solo de cuentas propias, las guarda la terminal MT5 en el equipo de la terminal y los servicios de buoh nunca las reciben ([ADR-0007](adr/0007-varias-fuentes-y-metatrader-5.md)).
 
 Deriv documenta OAuth para autorización delegada y distingue sus canales públicos de los autenticados. La documentación también indica que una compra de contrato requiere una sesión válida. [Autenticación](https://developers.deriv.com/docs/intro/authentication/) · [OAuth con PKCE](https://developers.deriv.com/docs/intro/oauth/) · [Buy](https://developers.deriv.com/docs/trading/buy/)
 
@@ -148,7 +148,7 @@ Tauri encapsulará un cliente React que reutiliza `packages/domain`, `packages/c
 
 ### Terminal MetaTrader 5 (futuro)
 
-La terminal MT5 con el puente corre en un PC del propietario o en un servidor Windows; la elección está pendiente. Ese equipo es infraestructura de servidor de buoh, no un cliente, y el cliente Tauri no lo incluye ([ADR-0007](adr/0007-varias-fuentes-y-metatrader-5.md)).
+La terminal MT5 con el puente corre en un PC dedicado del propietario o en un servidor Windows o Linux con Wine; la elección está pendiente. Ese equipo es infraestructura de servidor de buoh, no un cliente, y el cliente Tauri no lo incluye ([ADR-0007](adr/0007-varias-fuentes-y-metatrader-5.md)).
 
 ## Despliegue y fiabilidad
 

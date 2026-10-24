@@ -1,6 +1,6 @@
 # buoh
 
-**buoh** será un bot algorítmico multiplataforma para investigar patrones, publicar señales trazables y, cuando supere sus puertas de seguridad y cumplimiento, ejecutar operaciones autorizadas sobre índices de Deriv. Su nombre, lenguaje visual y comportamiento se inspiran en un búho: observación paciente, visión nocturna y decisiones explicables.
+**buoh** será un bot algorítmico multiplataforma para investigar patrones, publicar señales trazables y, cuando supere sus puertas de seguridad y cumplimiento, ejecutar operaciones autorizadas sobre índices de Deriv y, después, sobre instrumentos de MetaTrader 5 en Deriv MT5 y Vantage. Su nombre, lenguaje visual y comportamiento se inspiran en un búho: observación paciente, visión nocturna y decisiones explicables.
 
 > **Estado vigente:** consulta [`PROJECT_STATUS.md`](PROJECT_STATUS.md). Aún no se presume estrategia validada, rentabilidad demostrada ni integración de dinero real.
 
@@ -51,7 +51,7 @@ buoh se valida primero para **uso propio** y después evoluciona hacia **suscrip
 
 - No se promete, publicita ni presupone rentabilidad. El rendimiento siempre se presenta neto de supuestos, con período, muestra, *drawdown* y limitaciones.
 - No se ejecuta una estrategia real por un único *backtest* favorable. Debe superar investigación, observación *shadow*, pruebas demo, controles operativos y revisión de cumplimiento.
-- No se piden ni almacenan contraseñas de Deriv. Una futura vinculación usará OAuth con privilegios mínimos, intercambio de código en backend y cifrado de tokens. MetaTrader 5, previsto después de Fase 1, deja la contraseña de las cuentas propias dentro de su terminal ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
+- No se piden ni almacenan contraseñas de Deriv. Una futura vinculación usará OAuth con privilegios mínimos, intercambio de código en backend y cifrado de tokens. MetaTrader 5, previsto después de Fase 1, no ofrece OAuth: la contraseña de las cuentas propias la guarda solo su terminal y los servicios de buoh nunca la reciben ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
 - No se gestionan fondos, depósitos o retiros de usuarios. buoh automatiza únicamente acciones explícitamente autorizadas en una cuenta conectada, si la jurisdicción y el proveedor lo permiten.
 - No se usa lectura de pantalla, *screen scraping*, servicios de accesibilidad ni superposiciones que capturen o interfieran con otras aplicaciones.
 - Toda orden debe ser idempotente, auditable, limitada por una política de riesgo y reversible mediante un interruptor de emergencia cuando el instrumento lo permita.

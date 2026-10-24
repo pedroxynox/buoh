@@ -46,7 +46,7 @@ test-vectors/market-data/v1/
 
 ### Contrato o interfaz mínima, sin producto futuro
 
-- Adaptador de fuente pública desacoplado del normalizador. Desde F1.4b, el transporte, el normalizador, el vocabulario del perfil y el validador de esquemas propios de una fuente se eligen por fuente, para que otras fuentes entren sin tocar log, publicación ni replay ([ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
+- Adaptador de fuente pública desacoplado del normalizador. Desde F1.4b, el transporte, el normalizador, el vocabulario del perfil y el validador de esquemas propios de una fuente se eligen por fuente a partir del perfil y las versiones que el dataset publica, para que el replay reproduzca la elección y otras fuentes entren sin tocar el log ni la publicación ([ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
 - Puerto de almacenamiento de objetos y repositorio de metadatos.
 - Reporte de salud estructurado para CLI/observabilidad; no una interfaz gráfica.
 - Punto de extensión para reglas de calidad versionadas.

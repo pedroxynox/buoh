@@ -34,10 +34,12 @@ El estado vigente se consulta únicamente en [`PROJECT_STATUS.md`](../../PROJECT
 
 **Incrementos:**
 
-1. equipo de la terminal MT5 decidido y revisión de términos de Deriv MT5, Vantage y MetaQuotes;
+1. equipo de la terminal MT5 y su protección decididos, y revisión de términos de Deriv MT5, Vantage y MetaQuotes, antes de escribir el puente;
 2. contrato de los mensajes del puente, cotización con compra y venta, y catálogo por servidor;
 3. puente MQL5 de solo datos con contraseña de inversor;
-4. adaptador y normalizador MT5, con conversión a UTC comprobada, pruebas offline con fixtures y smoke opt-in.
+4. adaptador y normalizador MT5, con conversión a UTC comprobada, recuperación de historia de ticks, pruebas offline con fixtures y smoke opt-in.
+
+El orden entre Fase 1B y Fase 2 se decide al cerrar Fase 1.
 
 **Criterio de salida:** un dataset de cada servidor MT5 se reproduce desde su `dataset_id`, sus incidencias siguen visibles tras reiniciar y ninguna contraseña MT5 sale de la terminal.
 

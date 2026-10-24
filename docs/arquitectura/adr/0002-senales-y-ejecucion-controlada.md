@@ -4,7 +4,7 @@
 - **Fecha:** 2026-10-17
 - **Decisores:** Dirección técnica de buoh
 - **Sustituye parcialmente:** ADR-0001, decisión 5 (alcance solo de observación)
-- **Complementada por:** [ADR-0007](0007-varias-fuentes-y-metatrader-5.md) (MetaTrader 5 como segundo bróker y excepción acotada a la decisión 6 para cuentas MT5 propias)
+- **Complementada por:** [ADR-0007](0007-varias-fuentes-y-metatrader-5.md) (MetaTrader 5 como segundo bróker: las decisiones 3 y 5 se aplican también al puente MT5 y a su reconciliación, y la decisión 6 tiene una excepción acotada para cuentas MT5 propias)
 
 ## Contexto
 
@@ -19,7 +19,7 @@ La ejecución directa desde interfaz, una estrategia no validada o un servicio s
 3. Solo un `execution-gateway` desplegado en servidor puede comunicarse con las operaciones autenticadas de Deriv. Web, móvil, overlay y motor de estrategias no pueden hacerlo directamente.
 4. La pasarela exige autorización vigente, versión apta de estrategia, política de riesgo, datos saludables, clave de idempotencia, libro de auditoría y *kill switch* inactivo antes de enviar una intención.
 5. Cada resultado se reconcilia con el estado de Deriv. Una respuesta ambigua bloquea el reintento automático hasta consultar el estado externo.
-6. Las credenciales se manejan mediante OAuth 2.0 Authorization Code + PKCE, intercambio de código en backend, cifrado, rotación y revocación. No se aceptan contraseñas.
+6. Las credenciales se manejan mediante OAuth 2.0 Authorization Code + PKCE, intercambio de código en backend, cifrado, rotación y revocación. No se aceptan contraseñas. *Excepción acotada para cuentas MT5 propias del propietario en [ADR-0007](0007-varias-fuentes-y-metatrader-5.md) §5.*
 7. La rentabilidad se tratará como una hipótesis medida en contexto, jamás como garantía. Toda métrica debe identificar modo, período, costes, muestra, *drawdown*, versión y limitaciones.
 8. Android e iOS son clientes de observación, control y autorización segura. iOS no depende de una superposición global; una capa Android opcional no tiene facultad de ejecución.
 9. El producto no gestionará fondos, depósitos, retiros ni custodia. El lanzamiento comercial y de dinero real queda condicionado a evaluación legal/de cumplimiento según jurisdicción, público y condiciones de Deriv.

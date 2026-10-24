@@ -55,7 +55,7 @@ Kotlin (Android) y Swift (iOS) solo se usan si React Native necesita un puente n
 
 ### MQL5 — solo el puente de MetaTrader 5
 
-MQL5 se usa únicamente para el puente que corre dentro de la terminal MT5 ([ADR-0007](0007-varias-fuentes-y-metatrader-5.md)). Envía ticks, catálogo y estado a buoh y, desde la fase demo, ejecuta intenciones ya aprobadas por `execution-gateway`. No contiene estrategia, política de riesgo ni decisiones de operar.
+MQL5 se usa únicamente para el puente que corre dentro de la terminal MT5 ([ADR-0007](0007-varias-fuentes-y-metatrader-5.md)). Envía ticks, catálogo y el estado de conexión del puente a buoh y, desde Fase 4 (demo), ejecuta intenciones ya aprobadas por `execution-gateway`. Su conversión de precios a decimal se prueba con vectores compartidos. No contiene estrategia, política de riesgo ni decisiones de operar.
 
 ## Contrato entre lenguajes
 

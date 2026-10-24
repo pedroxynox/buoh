@@ -6,7 +6,7 @@ inclusion: always
 
 ## Propósito
 
-buoh es un bot multiplataforma de investigación cuantitativa, señales trazables y ejecución algorítmica controlada para índices de Deriv. Favorece evidencia reproducible, seguridad, control de riesgo y claridad antes que velocidad, apariencia o promesas de rendimiento.
+buoh es un bot multiplataforma de investigación cuantitativa, señales trazables y ejecución algorítmica controlada para índices de Deriv y, después, instrumentos de MetaTrader 5 en Deriv MT5 y Vantage (ADR-0007). Favorece evidencia reproducible, seguridad, control de riesgo y claridad antes que velocidad, apariencia o promesas de rendimiento.
 
 ## Protocolo obligatorio para agentes
 
