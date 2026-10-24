@@ -68,6 +68,16 @@ La integración de ejecución comienza en demo. La autorización se realizará c
 
 Deriv documenta OAuth para delegar autorización y exige sesión válida para su operación de compra. [Autenticación](https://developers.deriv.com/docs/intro/authentication/) · [OAuth con PKCE](https://developers.deriv.com/docs/intro/oauth/) · [Buy](https://developers.deriv.com/docs/trading/buy/)
 
+**Excepción acotada para MetaTrader 5** ([ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)). MT5 no ofrece autorización delegada como OAuth. Solo para cuentas MT5 del propietario:
+
+- para datos se usa la contraseña de inversor, que no permite operar;
+- la contraseña maestra solo se usa en cuentas demo hasta que Fase 5 apruebe una cuenta real concreta;
+- la contraseña la guarda solo la terminal MT5 en el equipo de la terminal, y los servicios de buoh nunca la reciben;
+- el puente se identifica ante buoh con una credencial propia, revocable y distinta;
+- el equipo de la terminal es infraestructura de buoh; su protección se decide junto con su elección.
+
+La contraseña principal de la cuenta Deriv y las contraseñas de terceros siguen prohibidas.
+
 El producto no administra depósitos, retiros ni fondos. Antes de ofrecer señales comerciales o ejecución real, se necesita evaluación legal y de cumplimiento específica para las jurisdicciones, el público y las condiciones de Deriv. Esa evaluación no se sustituye por una decisión técnica.
 
 ## 7. Señales y ejecución
@@ -104,6 +114,6 @@ Una capa Android es opcional y solo informativa:
 | Nueva estrategia | conjuntos temporales separados, costes declarados, línea base y revisión |
 | Señal `shadow` | explicación verificable, caducidad, límites de frecuencia y prueba de falsos positivos |
 | Señal comercial | desempeño contextualizado, trazabilidad, revisión de cumplimiento y contenido no engañoso |
-| Ejecución demo | OAuth seguro, idempotencia, reconciliación, fallos simulados y *kill switch* probado |
+| Ejecución demo | OAuth seguro (en MT5, el sustituto que fije su ADR de ejecución, ADR-0007), idempotencia, reconciliación, fallos simulados y *kill switch* probado |
 | Ejecución real | todas las puertas anteriores, revisión legal/comercial aplicable, controles operativos y aprobación explícita |
 | Overlay Android | revisión de permisos, amenaza, no interferencia y validación de distribución |

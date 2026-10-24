@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 7
-updated_at_utc: "2026-10-23T16:55:00.000Z"
+status_version: 8
+updated_at_utc: "2026-10-24T03:10:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -30,6 +30,7 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
   - F1.3b: log raw-first durable con rotación `segment_policy_version = 1.0.0`, registro operativo de `persistence_unavailable`/`source_limit_exceeded` y publicación desde segmentos cerrados del log (`F1-STREAM-001`).
 - F1.4 se entrega en dos partes. F1.4a añade las reglas de calidad 2.0.0 para fuentes que mezclan varios tipos de mensaje, como Deriv: mensajes que no son ticks, errores de la fuente, atribución por `echo_req` e incidencia sin símbolo con el esquema de incidencias 2.0.0 ([contratos de dominio](docs/arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-200)).
 - No existe todavía integración con Deriv, persistencia del `IngestionCursor`, cola en memoria del transporte ni despliegue.
+- MetaTrader 5 (Deriv MT5 y Vantage) queda decidido como segunda integración ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)): sus datos llegan en una Fase 1B posterior a Fase 1, y operar en MT5 empieza en Fase 4 (demo). No existe código de MT5.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
 
 ## Siguiente tarea autorizada
@@ -48,6 +49,7 @@ El perfil 2.0.0 exige umbrales enteros de retraso y hueco. El smoke solo normali
 
 Puntos de partida ya comprobados para F1.4b:
 
+- **Preparación para varias fuentes** ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md) §2). El transporte con sus límites, el normalizador, el vocabulario del perfil (`non_tick_msg_types`) y el validador de esquemas propios de Deriv se eligen por fuente; hoy `normalizeRawFrame` y el validador Ajv 2020 están fijos. La elección se deriva del perfil y las versiones que el dataset ya publica, para que el replay la reproduzca sin configuración externa. El log y la publicación no cambian. Los vectores v1 siguen con su normalizador, y no se crea código, directorio ni dependencia de MT5.
 - **Esquemas de Deriv.** En la release fijada (ADR-0004 §2), los esquemas de las operaciones que usa buoh (`active_symbols`, `ticks`, `ticks_history`, `ping`, `time`, `forget` y `forget_all`) son JSON Schema draft-04, en archivos `<operación>_request.schema.json` y `<operación>_response.schema.json`. Otras operaciones de la release, que buoh no usa, están en draft-07. Hace falta un validador compatible con draft-04; Ajv 8, que ya usa `@buoh/domain`, no lo admite, así que es una dependencia nueva que el PR de F1.4b debe justificar. Esas siete respuestas exigen `msg_type` y `echo_req`, y en `ticks_response` el objeto `tick` solo exige `pip_size`.
 - **Descarga de `schemas.zip`.** El adaptador la rechaza si el SHA-256 no coincide (ADR-0004 §2) y aplica los límites de descarga y de contenido expandido de ADR-0004 §7; superar cualquiera aborta la carga con salud `failed`.
 - **Perfil Deriv.** Declara en `non_tick_msg_types` solo las respuestas que el adaptador pide, nunca `tick`. En la release, `active_symbols`, `ping`, `time`, `forget` y `forget_all` responden con un `msg_type` del mismo nombre. `ticks_history` responde `history` (o `candles` si se pide `style: candles`), y con suscripción sigue con `tick`, que pasa por las reglas de ticks (u `ohlc` con `style: candles`).
@@ -162,6 +164,7 @@ El antiguo pendiente 1 (atribución de símbolo y mensajes que no son ticks) que
 - Las pruebas offline sintéticas son bloqueantes. El smoke público de Deriv aparece en F1.4 y nunca constituye el único criterio de merge.
 - Hasta incorporar un writer Parquet, ticks e incidencias se publican como NDJSON sin compresión; `dataset_id` no depende del formato físico.
 - Alojamiento productivo en Render para PostgreSQL, API y web; el despliegue sigue diferido ([ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)).
+- MetaTrader 5 entra por un puente MQL5 dentro de la terminal; cada servidor MT5 es una fuente propia; las contraseñas MT5, solo de cuentas propias, las guarda la terminal y los servicios de buoh nunca las reciben ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
 
 ## Bloqueos
 
@@ -173,6 +176,9 @@ Ninguno para iniciar `F1.4b`.
 - Universo definitivo de índices y tipos de contrato.
 - Proveedor de almacenamiento de objetos en producción; Render no lo ofrece (ADR-0006).
 - Alojamiento de `market-data-worker` en producción.
+- Equipo de la terminal MT5 (PC dedicado del propietario o servidor Windows o Linux con Wine) y su protección. Se decide en el primer incremento de Fase 1B (ADR-0007).
+- Revisión de términos de Deriv MT5, Vantage y MetaQuotes, y entidad de Vantage aplicable. Se completa en el primer incremento de Fase 1B.
+- Orden entre Fase 1B (datos MT5) y Fase 2 (bot shadow). Se decide al cerrar Fase 1.
 - Compilación y distribución de la app móvil.
 - Límites monetarios y política de riesgo para fases `demo` y `real`.
 - Proveedor de pagos y modelo de suscripción.

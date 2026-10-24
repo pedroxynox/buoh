@@ -89,7 +89,7 @@ El sistema se pausa por defecto ante datos degradados, reloj inconsistente, erro
 
 ## 7. Seguridad de cuenta y autorizaciones
 
-- OAuth con PKCE y permisos mínimos; no se reciben contraseñas.
+- OAuth con PKCE y permisos mínimos; no se reciben contraseñas. Las cuentas MT5 propias siguen la excepción acotada de [ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md); su sustituto de estos controles se decide en la ADR de ejecución MT5.
 - Intercambio de código exclusivamente desde el backend.
 - Tokens cifrados en reposo, con acceso limitado al servicio que los necesita.
 - Revocación de cuenta, cambio de política y activación real requieren reautenticación y auditoría.

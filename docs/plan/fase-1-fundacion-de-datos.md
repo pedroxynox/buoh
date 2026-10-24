@@ -4,7 +4,7 @@ schema_version: "1.0.0"
 status: "ready"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-10-17T22:32:08.000Z"
+last_reviewed_utc: "2026-10-24T03:10:00.000Z"
 ---
 
 # Plan ejecutable: Fase 1 — Fundación de datos
@@ -46,14 +46,14 @@ test-vectors/market-data/v1/
 
 ### Contrato o interfaz mínima, sin producto futuro
 
-- Adaptador de fuente pública desacoplado del normalizador.
+- Adaptador de fuente pública desacoplado del normalizador. Desde F1.4b, el transporte, el normalizador, el vocabulario del perfil y el validador de esquemas propios de una fuente se eligen por fuente a partir del perfil y las versiones que el dataset publica, para que el replay reproduzca la elección y otras fuentes entren sin tocar el log ni la publicación ([ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
 - Puerto de almacenamiento de objetos y repositorio de metadatos.
 - Reporte de salud estructurado para CLI/observabilidad; no una interfaz gráfica.
 - Punto de extensión para reglas de calidad versionadas.
 
 ### Diferido explícitamente
 
-`apps/api`, `apps/web`, `apps/mobile`, `signal-engine`, `execution-gateway`, escritorio, Python, backtests, estrategias, señales, OAuth, cuentas, pagos, suscripciones, Redis, TimescaleDB y despliegue productivo de Render.
+`apps/api`, `apps/web`, `apps/mobile`, `signal-engine`, `execution-gateway`, escritorio, Python, backtests, estrategias, señales, OAuth, cuentas, pagos, suscripciones, Redis, TimescaleDB, despliegue productivo de Render y fuentes MetaTrader 5 (Fase 1B, ADR-0007).
 
 No se crean directorios vacíos para estos componentes.
 

@@ -6,7 +6,7 @@ buoh será un bot de trading construido como un sistema de evidencia: investiga 
 
 La precisión significa datos íntegros, cálculos deterministas, control de sesgos, órdenes reconciliadas y comunicación honesta de incertidumbre. No significa certeza de ganancias ni permiso para omitir controles.
 
-La primera integración será Deriv, con un universo inicial de índices que se fijará después de inventariar los símbolos y condiciones disponibles. Antes de presentar un instrumento, buoh conservará símbolo, denominación oficial, horario, granularidad, condiciones y versión de la fuente.
+La primera integración será Deriv, con un universo inicial de índices que se fijará después de inventariar los símbolos y condiciones disponibles. La segunda será MetaTrader 5, con Deriv MT5 y Vantage: primero para estudiar precios y después para operar CFD bajo las mismas puertas ([ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)). Antes de presentar un instrumento, buoh conservará símbolo, denominación oficial, horario, granularidad, condiciones y versión de la fuente.
 
 ## 2. Problema que resolvemos
 
@@ -80,7 +80,7 @@ La ejecución real es una meta del producto y no una restricción permanente. So
 ### Fuera de alcance
 
 - Garantías de rentabilidad o marketing que presente hipótesis como certezas.
-- Gestión de fondos, depósitos, retiros, custodia o acceso a contraseñas de usuarios.
+- Gestión de fondos, depósitos, retiros, custodia o acceso a contraseñas de usuarios. Las cuentas MT5 propias del propietario son la única excepción acotada ([ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
 - Operaciones enviadas desde navegador, móvil o una capa flotante directamente a Deriv.
 - Copia de pantalla de terceros, OCR, automatización por accesibilidad o superposición que imite otra aplicación.
 - Cualquier mercado, país, instrumento o tipo de usuario no aprobado explícitamente para el producto.

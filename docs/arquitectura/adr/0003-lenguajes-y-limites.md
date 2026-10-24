@@ -1,6 +1,6 @@
 # ADR-0003: Lenguajes y límites de responsabilidad técnica
 
-- **Estado:** Aceptada
+- **Estado:** Aceptada; complementada por [ADR-0007](0007-varias-fuentes-y-metatrader-5.md) (MQL5 limitado al puente de MetaTrader 5)
 - **Fecha:** 2026-10-17
 - **Decisores:** Dirección técnica de buoh
 
@@ -53,11 +53,16 @@ Rust entra solo con Tauri 2 para el futuro cliente Windows y, si perfiles reales
 
 Kotlin (Android) y Swift (iOS) solo se usan si React Native necesita un puente nativo: notificaciones, biometría, widgets/Live Activities o la futura capa Android pasiva. No duplican las reglas de estrategia, riesgo o ejecución.
 
+### MQL5 — solo el puente de MetaTrader 5
+
+MQL5 se usa únicamente para el puente que corre dentro de la terminal MT5 ([ADR-0007](0007-varias-fuentes-y-metatrader-5.md)). Envía ticks, catálogo y el estado de conexión del puente a buoh y, desde Fase 4 (demo), ejecuta intenciones ya aprobadas por `execution-gateway`. Su conversión de precios a decimal se prueba con vectores compartidos. No contiene estrategia, política de riesgo ni decisiones de operar.
+
 ## Contrato entre lenguajes
 
 - `packages/contracts` es la fuente de verdad de eventos y APIs en TypeScript.
 - Los esquemas se publican como JSON Schema/OpenAPI versionados; Python los valida/consume, no inventa formatos paralelos.
 - Las fórmulas de producción se prueban con vectores de referencia compartidos para evitar divergencia entre Python y TypeScript.
+- Los mensajes del puente MT5 siguen un contrato versionado de `packages/contracts`; MQL5 no define formatos propios.
 - Toda lógica que cambie una señal, política u orden tiene propietario, versión, pruebas deterministas y auditoría.
 
 ## Alternativas descartadas
