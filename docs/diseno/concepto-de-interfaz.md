@@ -9,7 +9,7 @@ Diseño de la información del cliente web (`V1-UI-001`). El prototipo de `apps/
 3. **La evidencia a un clic.** Toda cifra de desempeño lleva su contexto completo al lado (modo, período, muestra, costes, pérdidas, *drawdown*, versión y limitaciones); toda señal enlaza a su evidencia.
 4. **Nada se oculta.** Huecos, retrasos, pausas y pérdidas aparecen en el mismo nivel que lo bueno.
 5. **Detener siempre está a mano; operar nunca.** El *kill switch* es visible; ningún botón del cliente envía órdenes.
-6. **Lo futuro se ve como futuro.** Lo que llega en una fase posterior aparece con la etiqueta «Disponible en Fase N» y sin controles activos.
+6. **Lo futuro se ve como futuro.** Lo de la Fase 3B en adelante aparece con la etiqueta «Disponible en Fase N» y sin controles activos (corte del prototipo en §2).
 
 ## 2. Estructura
 

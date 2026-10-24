@@ -13,7 +13,7 @@ Catálogo de todo lo que buoh hará, en qué fase se habilita y en qué platafor
 
 Ninguna plataforma envía órdenes al bróker. Las órdenes solo salen de `execution-gateway` en el servidor ([ADR-0002](../arquitectura/adr/0002-senales-y-ejecucion-controlada.md)). Los clientes pueden **ver**, **pedir** y **detener**; nunca **operar** por su cuenta. **Pedir** significa enviar al servidor una solicitud que este valida y registra, como aprobar una versión de estrategia, cambiar una política o autorizar un modo; nunca es una orden.
 
-Una función está disponible cuando se cumplen a la vez su fase y la de su plataforma: móvil desde Fase 3 y escritorio desde Fase 7.
+Una función está disponible cuando se cumplen a la vez su fase y la de su plataforma: web desde Fase 2, móvil desde Fase 3 y escritorio desde Fase 7.
 
 ## 2. Funciones
 

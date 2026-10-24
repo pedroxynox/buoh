@@ -19,7 +19,7 @@ El tema noche es el predeterminado. Para el tema día, se añade `data-theme="di
 - Cada valor de `execution_mode`, `service_health` y `severity` de `@buoh/contracts` tiene etiqueta, descripción, icono y tono.
 - Modo y salud no comparten tonos, salvo el neutro de pausa y desactivado; el ámbar de marca no es un estado.
 - El CSS contiene exactamente los valores de los tokens.
-- `MetricWithContext` exige modo, período, muestra, costes, pérdidas, *drawdown*, versión y limitaciones.
+- `MetricWithContext` exige origen (`backtest`, `shadow`, `demo` o `real`), período, muestra, costes, pérdidas, *drawdown*, versión y limitaciones, y las pruebas comprueban que muestra cada valor.
 
 ## Comandos
 

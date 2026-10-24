@@ -56,7 +56,7 @@ No se permite: deformar, rotar, añadir sombras o brillos, cambiar el color de l
 | | `noche.750` | `#1A2337` | fondo de insignias neutras |
 | | `noche.700` | `#1A273F` | bordes suaves y estados *hover* |
 | | `noche.600` | `#25344F` | bordes |
-| | `noche.500` | `#5A6C8F` | bordes fuertes de controles |
+| | `noche.500` | `#63769A` | bordes fuertes de controles |
 | Niebla | `niebla.50` | `#F4F6FB` | texto principal |
 | | `niebla.200` | `#C8D0E2` | texto secundario |
 | | `niebla.300` | `#A7B2CB` | estado en pausa o desactivado |
@@ -77,10 +77,10 @@ Para el tema día se usa la familia **papel**:
 | `papel.200` | `#E3E7F0` | bordes suaves |
 | `papel.300` | `#CBD2E0` | bordes |
 | `papel.500` | `#7D8AA3` | bordes fuertes de controles |
-| `papel.600` | `#55627D` | texto tenue y estado en pausa |
+| `papel.600` | `#55627D` | texto tenue y tono niebla (pausa, desactivado, backtest) |
 | `papel.700` | `#33415C` | texto secundario |
 
-En tema día, el texto principal, la cabeza del búho y la acción principal usan `noche.850` (`#0E1626`).
+En tema día, el texto principal, la cabeza del búho y la acción principal usan `noche.850` (`#0E1626`), y la acción principal en *hover* usa `noche.700` (`#1A273F`).
 
 Proporción orientativa en una pantalla: 70 % noche, 20 % niebla, 10 % luna y ámbar. El ámbar es el color de la marca: **no** se usa para estados, para que nunca se confunda con una alerta.
 
@@ -94,7 +94,7 @@ Un estado nunca se comunica solo con color: siempre lleva texto e icono.
 | Cielo | `#64B5F6` | `#1D67AD` | `starting`, `recovering`, severidad `info`, foco del teclado |
 | Naranja | `#F0904F` | `#A44C14` | `degraded`, severidad `warning` |
 | Rojo | `#F27474` | `#B83434` | `failed`, severidades `error` y `critical` |
-| Niebla | `#A7B2CB` | `#55627D` | `paused` y modo `disabled` |
+| Niebla | `#A7B2CB` | `#55627D` | `paused`, modo `disabled` y origen `backtest` |
 | Violeta | `#A99AF7` | `#5A47C8` | modo `shadow` (hipotético) |
 | Cian | `#4CCAE0` | `#0A6F82` | modo `demo` (dinero de práctica) |
 | Rosa | `#F283B3` | `#AA3166` | modo `real` (dinero real) |

@@ -41,7 +41,7 @@ Móvil (`apps/mobile`) y escritorio (`apps/desktop`) siguen diferidos. Cada uno 
 - Toda pantalla muestra, separados, el modo de ejecución (`disabled`, `shadow`, `demo`, `real`) y la salud del servicio, con texto e icono además del color.
 - Toda métrica de desempeño ficticia muestra modo, período, muestra, costes, pérdidas, *drawdown*, versión y limitaciones, como exigen los fundamentos. No se muestran métricas aisladas.
 - Ninguna pantalla envía órdenes, guarda credenciales ni simula una conexión real.
-- Las funciones que una fase posterior habilitará aparecen marcadas como «Disponible en Fase N», sin controles activos.
+- Las funciones de las fases 1, 1B, 2 y 3 se dibujan con datos ficticios. Las de la Fase 3B en adelante aparecen marcadas como «Disponible en Fase N», sin controles activos.
 
 ### 3. Reglas del sitio oficial
 

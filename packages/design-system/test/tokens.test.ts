@@ -61,10 +61,18 @@ describe('contraste WCAG 2.2 AA (V1-DS-001)', () => {
       expect(contrastRatio(theme.action.fg, theme.action.bgHover)).toBeGreaterThanOrEqual(
         WCAG_AA.text,
       );
-      for (const bg of [theme.bg.canvas, theme.bg.surface, theme.bg.raised]) {
-        expect(contrastRatio(theme.focus, bg)).toBeGreaterThanOrEqual(WCAG_AA.ui);
-        expect(contrastRatio(theme.border.strong, bg)).toBeGreaterThanOrEqual(WCAG_AA.ui);
-        expect(contrastRatio(theme.brand.accent, bg)).toBeGreaterThanOrEqual(WCAG_AA.text);
+      for (const [bgName, bg] of Object.entries(backgroundsOf(theme))) {
+        expect(contrastRatio(theme.focus, bg), `foco sobre ${bgName}`).toBeGreaterThanOrEqual(
+          WCAG_AA.ui,
+        );
+        expect(
+          contrastRatio(theme.border.strong, bg),
+          `borde fuerte sobre ${bgName}`,
+        ).toBeGreaterThanOrEqual(WCAG_AA.ui);
+        expect(
+          contrastRatio(theme.brand.accent, bg),
+          `acento sobre ${bgName}`,
+        ).toBeGreaterThanOrEqual(WCAG_AA.text);
       }
     });
 
