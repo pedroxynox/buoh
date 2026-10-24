@@ -71,7 +71,25 @@ Diseño de la información del cliente web (`V1-UI-001`). El prototipo de `apps/
 - **Error:** qué falló, desde cuándo y si los datos mostrados siguen siendo válidos.
 - **Degradado:** la insignia de salud cambia y las cifras afectadas muestran una marca de calidad.
 
-## 6. Hacia móvil y escritorio
+## 6. Prototipo implementado (V1.2)
+
+`apps/web` implementa las diez secciones de §3 y una página 404, todas con el marco de §2. Detalles:
+
+- Los datos viven en `apps/web/src/fixtures.ts`, fijados a mano o calculados con fórmulas fijas; el instante de referencia es el 20 oct 2026, 14:32:05 UTC.
+- Los gráficos son SVG propios: el de precios corta la línea en los huecos y los rotula; el de resultados marca el cero y la peor caída.
+- El ejemplo del laboratorio es deliberadamente honesto: la estrategia gana en entrenamiento y pierde fuera de muestra, y por eso no pasa la validación.
+- Las únicas acciones son enlaces de navegación. Los botones de las secciones de Fase 4 están desactivados.
+
+Construcción y revisión:
+
+```text
+pnpm --filter @buoh/web run build   # exporta a apps/web/out
+pnpm --filter @buoh/web run test    # comprueba fixtures y cada página exportada
+```
+
+`apps/web/out` es un sitio estático: se puede abrir con cualquier servidor de archivos local. No se publica en internet (ADR-0008 §3).
+
+## 7. Hacia móvil y escritorio
 
 - **Móvil:** Observatorio, Señales, Alertas, Evidencia y *kill switch*, con la barra inferior de §2. Sin edición de estrategias ni de políticas.
 - **Escritorio:** la misma estructura que la web, con ventanas que se pueden separar para seguir varios mercados.

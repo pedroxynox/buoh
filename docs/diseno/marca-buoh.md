@@ -150,6 +150,7 @@ Escala (rem sobre 16 px): 0,75 · 0,8125 · 0,875 · 1 · 1,125 · 1,25 · 1,5 �
 
 - Contraste WCAG 2.2 AA: 4,5:1 para texto y 3:1 para bordes de controles y texto grande, comprobado por pruebas en ambos temas sobre todos los fondos.
 - El texto nunca baja su contraste con opacidad; solo los controles desactivados se atenúan.
+- Una insignia nunca desborda su contenedor: si falta espacio, su descripción pasa a otra línea y la etiqueta se mantiene entera.
 - Foco del teclado siempre visible, en tono cielo.
 - Áreas táctiles de al menos 44 × 44 px en móvil.
 - Ninguna información depende solo del color.

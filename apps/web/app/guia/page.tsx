@@ -1,0 +1,182 @@
+import {
+  EXECUTION_MODE_PRESENTATION,
+  palette,
+  SERVICE_HEALTH_PRESENTATION,
+  SEVERITY_PRESENTATION,
+  TONES,
+  typography,
+  type Severity,
+} from '@buoh/design-system';
+import {
+  Badge,
+  BuohLogo,
+  BuohMark,
+  Card,
+  HealthBadge,
+  ModeBadge,
+  PhaseLock,
+  SeverityTag,
+} from '@buoh/design-system/react';
+import type { ExecutionMode, ServiceHealth } from '@buoh/contracts';
+import type { Metadata } from 'next';
+import { PageHeader } from '../../src/components/AppShell';
+import { SectionTitle } from '../../src/components/Pieces';
+
+export const metadata: Metadata = { title: 'Guía visual' };
+
+const MODES = Object.keys(EXECUTION_MODE_PRESENTATION) as ExecutionMode[];
+const HEALTH = Object.keys(SERVICE_HEALTH_PRESENTATION) as ServiceHealth[];
+const SEVERITIES = Object.keys(SEVERITY_PRESENTATION) as Severity[];
+
+const FAMILIES = ['noche', 'niebla', 'luna', 'ambar', 'papel'] as const;
+
+function Swatches({ family }: { readonly family: (typeof FAMILIES)[number] }) {
+  return (
+    <div className="w-swatches">
+      {Object.entries(palette[family]).map(([step, hex]) => (
+        <div key={step} className="w-swatch">
+          <div className="w-swatch__color" style={{ background: hex }} />
+          <div className="w-swatch__meta">
+            <strong>
+              {family}.{step}
+            </strong>
+            <span className="b-num b-muted">{hex}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ThemeSample({ theme }: { readonly theme: 'noche' | 'dia' }) {
+  return (
+    <div className="w-theme-sample" data-theme={theme}>
+      <div className="w-row" style={{ justifyContent: 'space-between' }}>
+        <BuohLogo size={26} />
+        <span className="b-eyebrow">Tema {theme === 'noche' ? 'noche' : 'día'}</span>
+      </div>
+      <div className="w-row">
+        <ModeBadge mode="shadow" />
+        <HealthBadge health="degraded" />
+        <SeverityTag severity="warning" />
+      </div>
+      <p className="b-secondary w-small">
+        Texto secundario sobre el fondo del tema. <span className="b-num">1042.87</span>
+      </p>
+      <div className="w-row">
+        <button type="button" className="b-button b-button--primary">
+          Acción principal
+        </button>
+        <button type="button" className="b-button b-button--secondary">
+          Secundaria
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function GuiaPage() {
+  return (
+    <>
+      <PageHeader
+        eyebrow="Guía visual"
+        title="La marca de buoh"
+        summary="Observa con calma. Decide con evidencia. Colores, tipografía, estados y componentes del sistema de diseño, tal como los usa el producto."
+      />
+
+      <div className="w-grid w-grid--3">
+        <Card title="Símbolo" subtitle="Cara de búho con ojos ámbar">
+          <div className="w-row" style={{ gap: 'var(--b-space-6)' }}>
+            <BuohMark size={72} />
+            <BuohMark size={40} />
+            <BuohMark size={24} />
+          </div>
+        </Card>
+        <Card title="Logotipo" subtitle="Símbolo y palabra en Manrope 700">
+          <BuohLogo size={44} />
+        </Card>
+        <Card title="Monocromo" subtitle="Cuando el ámbar no tiene contraste">
+          <div className="w-row b-secondary" style={{ gap: 'var(--b-space-6)' }}>
+            <BuohMark size={56} variant="mono" />
+            <BuohLogo size={32} variant="mono" />
+          </div>
+        </Card>
+      </div>
+
+      <SectionTitle>Paleta</SectionTitle>
+      {FAMILIES.map((family) => (
+        <Card key={family} title={family} headingLevel={3}>
+          <Swatches family={family} />
+        </Card>
+      ))}
+
+      <SectionTitle>Estados</SectionTitle>
+      <div className="w-grid w-grid--3">
+        <Card title="Modo de ejecución" subtitle="Qué puede hacer el bot">
+          <div className="w-stack">
+            {MODES.map((mode) => (
+              <ModeBadge key={mode} mode={mode} showDescription />
+            ))}
+          </div>
+        </Card>
+        <Card title="Salud del servicio" subtitle="Eje distinto del modo">
+          <div className="w-stack">
+            {HEALTH.map((health) => (
+              <HealthBadge key={health} health={health} showDescription />
+            ))}
+          </div>
+        </Card>
+        <Card title="Severidad" subtitle="Incidencias de calidad">
+          <div className="w-stack">
+            {SEVERITIES.map((severity) => (
+              <SeverityTag key={severity} severity={severity} />
+            ))}
+          </div>
+        </Card>
+      </div>
+      <Card title="Tonos" subtitle="Nunca solos: siempre con texto e icono">
+        <div className="w-row">
+          {TONES.map((tone) => (
+            <Badge key={tone} tone={tone}>
+              {tone}
+            </Badge>
+          ))}
+        </div>
+      </Card>
+
+      <SectionTitle>Tipografía</SectionTitle>
+      <Card title="Manrope y JetBrains Mono" subtitle="Interfaz y cifras">
+        {(['6xl', '4xl', '2xl', 'lg', 'base', 'sm'] as const).map((size) => (
+          <div key={size} className="w-type-row">
+            <span className="b-num b-muted w-small">{typography.size[size]}</span>
+            <span
+              style={{
+                fontSize: `var(--b-size-${size})`,
+                fontWeight: size === 'base' || size === 'sm' ? 400 : 700,
+              }}
+            >
+              Observa con calma
+            </span>
+          </div>
+        ))}
+        <div className="w-type-row">
+          <span className="b-num b-muted w-small">mono</span>
+          <span className="b-num" style={{ fontSize: 'var(--b-size-xl)' }}>
+            1042.87 · sha256:6f2c…a91d · 14:32:05 UTC
+          </span>
+        </div>
+      </Card>
+
+      <SectionTitle>Temas y componentes</SectionTitle>
+      <div className="w-themes">
+        <ThemeSample theme="noche" />
+        <ThemeSample theme="dia" />
+      </div>
+      <PhaseLock
+        phase="4"
+        title="Ejemplo de candado de fase"
+        description="Así se ve una función futura: se explica, pero no tiene controles."
+      />
+    </>
+  );
+}

@@ -61,4 +61,16 @@ export default defineConfig(
       globals: { ...globals.browser },
     },
   },
+  // Las apps Next.js leen `tsconfig.json` sin alias (Next resuelve los paquetes desde `dist`);
+  // ESLint usa `tsconfig.typecheck.json`, con alias a `src`, para no depender del build.
+  {
+    files: ['apps/web/**/*.{ts,tsx}'],
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+        project: ['./apps/web/tsconfig.typecheck.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
 );
