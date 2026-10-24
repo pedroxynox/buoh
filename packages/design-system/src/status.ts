@@ -16,7 +16,7 @@ export interface StatusPresentation {
 export const EXECUTION_MODE_PRESENTATION: Readonly<Record<ExecutionMode, StatusPresentation>> = {
   disabled: {
     label: 'Desactivado',
-    description: 'Ninguna señal se convierte en orden',
+    description: 'Ninguna señal se convierte en intención',
     icon: 'circleSlash',
     tone: 'niebla',
   },
@@ -67,7 +67,7 @@ export const SERVICE_HEALTH_PRESENTATION: Readonly<Record<ServiceHealth, StatusP
   },
   paused: {
     label: 'En pausa',
-    description: 'Detenido para proteger los datos',
+    description: 'Entrada detenida, por protección o a pedido',
     icon: 'pauseCircle',
     tone: 'niebla',
   },
@@ -87,10 +87,15 @@ export const SEVERITY_PRESENTATION: Readonly<Record<Severity, StatusPresentation
     icon: 'alertTriangle',
     tone: 'naranja',
   },
-  error: { label: 'Error', description: 'Afecta la calidad', icon: 'xOctagon', tone: 'rojo' },
+  error: {
+    label: 'Error',
+    description: 'Afecta datos u operación',
+    icon: 'xOctagon',
+    tone: 'rojo',
+  },
   critical: {
     label: 'Crítico',
-    description: 'Detiene la entrada de datos',
+    description: 'Problema grave que exige atención',
     icon: 'xOctagon',
     tone: 'rojo',
   },

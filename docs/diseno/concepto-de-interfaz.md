@@ -30,7 +30,8 @@ Diseño de la información del cliente web (`V1-UI-001`). El prototipo de `apps/
 └──────────────┴────────────────────────────────────────────────────┘
 ```
 
-- La navegación lateral marca con el número de fase las secciones que aún no existen.
+- La navegación lateral marca con el número de fase las secciones cuya función entera empieza en Fase 4 o después (Ejecución y Riesgo). Conexiones y Auditoría se dibujan, y dentro bloquean solo sus partes de Fase 4.
+- **Corte del prototipo:** las funciones de las fases 1, 1B, 2 y 3 se dibujan con datos ficticios; las de la Fase 3B en adelante aparecen con el candado de fase y, como mucho, una vista previa sin controles.
 - Por debajo de 960 px, la navegación pasa a una barra inferior con las cinco secciones principales. Esa forma anticipa la app móvil.
 - La marca «Datos ficticios» solo existe en el prototipo y no se puede ocultar.
 
@@ -54,9 +55,9 @@ Diseño de la información del cliente web (`V1-UI-001`). El prototipo de `apps/
 | Componente | Regla |
 |---|---|
 | Insignia de modo | `disabled`, `shadow`, `demo` o `real`, con icono y descripción corta («dinero de práctica», «dinero real») |
-| Insignia de salud | Los seis estados del contrato, con icono y texto; tonos distintos de los del modo |
+| Insignia de salud | Los seis estados del contrato, con icono y texto; tonos e iconos distintos de los del modo, salvo el neutro de pausa ([guía](marca-buoh.md) §5) |
 | Etiqueta de severidad | `info`, `warning`, `error`, `critical` |
-| Métrica con contexto | No se puede mostrar una cifra de desempeño sin su bloque de contexto |
+| Métrica con contexto | No se puede mostrar una cifra de desempeño sin su bloque de contexto; su origen es `backtest`, `shadow`, `demo` o `real` |
 | Tarjeta de señal | Estrategia y versión, símbolo, condición, emisión, vencimiento, modo, calidad y enlace a evidencia |
 | Candado de fase | «Disponible en Fase N» y una frase de qué hará; sin botones activos |
 | Gráfico de precios | Línea fina; los huecos se dibujan como cortes con una marca y su motivo |

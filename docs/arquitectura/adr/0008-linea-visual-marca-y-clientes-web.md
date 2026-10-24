@@ -52,8 +52,8 @@ Móvil (`apps/mobile`) y escritorio (`apps/desktop`) siguen diferidos. Cada uno 
 
 ### 4. Stack
 
-- **Next.js 16.4** con App Router y exportación estática (`output: 'export'`), en las dos apps. Se usa 16.4.2 o posterior porque 16.4.1 corrige dos fallos críticos de ejecución remota publicados el 2026-10-14 ([The Hacker News](https://thehackernews.com/2026/10/nextjs-ships-out-of-band-patch-for-two.html)). La exportación estática no ejecuta un servidor Next.js, así que no expone Server Actions ni la caché de componentes.
-- **React 19.3.1**, posterior al rango afectado de React Server Components (19.0.0 a 19.3.0) del mismo aviso.
+- **Next.js 16.4** con App Router y exportación estática (`output: 'export'`), en las dos apps. El mínimo es 16.4.1, que corrige dos fallos críticos de ejecución remota y uno de denegación de servicio publicados el 2026-10-14, incluido el de los paquetes `react-server-dom-*` que Next.js incluye dentro ([The Hacker News](https://thehackernews.com/2026/10/nextjs-ships-out-of-band-patch-for-two.html)). Se fija la versión más reciente que tenga al menos un día publicada, como exige la política de pnpm (`minimumReleaseAge`); el 2026-10-24 es 16.4.2, porque 16.4.3 salió el 2026-10-23. La exportación estática no ejecuta un servidor Next.js, así que no expone Server Actions ni la caché de componentes.
+- **React 19.3.1** para `react` y `react-dom`, la versión vigente.
 - **CSS Modules y variables CSS** generadas desde los tokens. Sin framework de utilidades.
 - **Tipografías** Manrope y JetBrains Mono, licencia SIL OFL 1.1, alojadas dentro del sitio mediante Fontsource. No se cargan desde servicios externos.
 - **Iconos y gráficos** propios en SVG, sin bibliotecas de iconos ni de gráficos.
@@ -87,7 +87,7 @@ Los tokens de `packages/design-system` no dependen de React ni del navegador, pa
 
 ## Referencias verificadas
 
-- [Next.js en npm](https://www.npmjs.com/package/next) (16.4.2, publicada el 2026-10-15)
+- [Next.js en npm](https://www.npmjs.com/package/next) (16.4.1 el 2026-10-14, 16.4.2 el 2026-10-15 y 16.4.3 el 2026-10-23)
 - [React en npm](https://www.npmjs.com/package/react) (19.3.1, publicada el 2026-10-14)
 - [Aviso de seguridad de Next.js de octubre de 2026](https://thehackernews.com/2026/10/nextjs-ships-out-of-band-patch-for-two.html)
 - [Fontsource: Manrope](https://fontsource.org/fonts/manrope) y [JetBrains Mono](https://fontsource.org/fonts/jetbrains-mono)

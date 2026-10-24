@@ -67,7 +67,7 @@ El [catálogo](../producto/funciones-y-disponibilidad.md) lista cada función de
 - toda pantalla muestra el modo de ejecución y la salud del servicio por separado, y la marca «Datos ficticios»;
 - toda métrica de desempeño muestra modo, período, muestra, costes, pérdidas, *drawdown*, versión y limitaciones;
 - toda señal muestra estrategia, versión, modo, vencimiento, calidad y evidencia;
-- las funciones de fases posteriores aparecen como «Disponible en Fase N» sin controles activos;
+- las funciones de las fases 1, 1B, 2 y 3 se dibujan con datos ficticios; las de la Fase 3B en adelante aparecen como «Disponible en Fase N», sin controles activos;
 - la exportación estática se construye sin red, sin reloj real y sin aleatoriedad.
 
 ### `V1-SITE-001` — Sitio oficial

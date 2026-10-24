@@ -10,6 +10,8 @@ next_requirements:
   - "F1-CATALOG-001"
   - "F1-SOURCE-001"
 plan: "docs/plan/fase-1-fundacion-de-datos.md"
+parallel_plans:
+  - "docs/plan/linea-visual-v1.md"
 ---
 
 # Estado actual de buoh

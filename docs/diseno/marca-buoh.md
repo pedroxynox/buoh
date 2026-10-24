@@ -53,6 +53,7 @@ No se permite: deformar, rotar, añadir sombras o brillos, cambiar el color de l
 | | `noche.900` | `#0A101C` | fondo general |
 | | `noche.850` | `#0E1626` | superficies |
 | | `noche.800` | `#131D31` | superficies elevadas |
+| | `noche.750` | `#1A2337` | fondo de insignias neutras |
 | | `noche.700` | `#1A273F` | bordes suaves y estados *hover* |
 | | `noche.600` | `#25344F` | bordes |
 | | `noche.500` | `#5A6C8F` | bordes fuertes de controles |
@@ -64,6 +65,22 @@ No se permite: deformar, rotar, añadir sombras o brillos, cambiar el color de l
 | | `luna.200` | `#F0E5C6` | acción principal |
 | Ámbar | `ambar.400` | `#F2B544` | ojos del búho y acento de marca |
 | | `ambar.700` | `#8A5A00` | acento de marca sobre fondo claro |
+
+Para el tema día se usa la familia **papel**:
+
+| Token | Valor | Uso en tema día |
+|---|---|---|
+| `papel.0` | `#FFFFFF` | superficies y ojos del búho |
+| `papel.50` | `#F5F6FA` | fondo general |
+| `papel.100` | `#EEF1F7` | estados *hover* |
+| `papel.150` | `#ECEFF5` | fondo hundido e insignias neutras |
+| `papel.200` | `#E3E7F0` | bordes suaves |
+| `papel.300` | `#CBD2E0` | bordes |
+| `papel.500` | `#7D8AA3` | bordes fuertes de controles |
+| `papel.600` | `#55627D` | texto tenue y estado en pausa |
+| `papel.700` | `#33415C` | texto secundario |
+
+En tema día, el texto principal, la cabeza del búho y la acción principal usan `noche.850` (`#0E1626`).
 
 Proporción orientativa en una pantalla: 70 % noche, 20 % niebla, 10 % luna y ámbar. El ámbar es el color de la marca: **no** se usa para estados, para que nunca se confunda con una alerta.
 
@@ -82,14 +99,25 @@ Un estado nunca se comunica solo con color: siempre lleva texto e icono.
 | Cian | `#4CCAE0` | `#0A6F82` | modo `demo` (dinero de práctica) |
 | Rosa | `#F283B3` | `#AA3166` | modo `real` (dinero real) |
 
-Cada tono tiene además un fondo suave para insignias (`950` en tema noche, `100` en tema día).
+Cada tono tiene además un fondo suave para insignias:
 
-El modo de ejecución y la salud del servicio son ejes distintos ([fundamentos](../../.kiro/steering/fundamentos-buoh.md)): usan familias de color distintas y se muestran en lugares distintos. Verde y rojo **no** significan «ganar» y «perder»: un resultado negativo se muestra con su signo y la palabra «pérdida», y el color solo acompaña.
+| Tono | Tema noche | Tema día |
+|---|---|---|
+| Aurora | `#0D2925` | `#E1F4EE` |
+| Cielo | `#0D2136` | `#E2EDF8` |
+| Naranja | `#2E1C10` | `#FAEADC` |
+| Rojo | `#2F1518` | `#FAE3E3` |
+| Niebla | `#1A2337` (`noche.750`) | `#ECEFF5` (`papel.150`) |
+| Violeta | `#1E1A3A` | `#ECE9FB` |
+| Cian | `#0B2731` | `#DEF2F5` |
+| Rosa | `#2F1526` | `#F9E3ED` |
+
+El modo de ejecución y la salud del servicio son ejes distintos ([fundamentos](../../.kiro/steering/fundamentos-buoh.md)): usan familias de color e iconos distintos y se muestran en lugares distintos. La única excepción es el tono neutro niebla, compartido por `paused` y `disabled`, que se distinguen por su icono, su texto y su lugar. `error` y `critical` comparten tono e icono; `critical` lleva además un borde más marcado. Verde y rojo **no** significan «ganar» y «perder»: un resultado negativo se muestra con su signo y la palabra «pérdida», y el color solo acompaña.
 
 ### Temas
 
 - **Noche** es el tema por defecto.
-- **Día** existe para leer con luz fuerte y por accesibilidad. Usa los mismos tokens con otros valores.
+- **Día** existe para leer con luz fuerte y por accesibilidad. Usa los mismos nombres de variable (fondo, texto, borde, acción, tonos) con los valores de la familia papel y los tonos de la columna «Tema día».
 
 ## 6. Tipografía
 
@@ -104,7 +132,7 @@ Escala (rem sobre 16 px): 0,75 · 0,8125 · 0,875 · 1 · 1,125 · 1,25 · 1,5 �
 
 - Propios, en SVG, sobre una retícula de 24 px.
 - Trazo de 1,75 px, extremos y uniones redondeados, sin rellenos.
-- Cada estado tiene un icono fijo (§5) que no se reutiliza para otra cosa.
+- Cada estado tiene un icono fijo. Un mismo icono solo se repite entre ejes cuando el significado es el mismo (por ejemplo, `degraded` y la severidad `warning`); modo y salud nunca comparten icono.
 
 ## 8. Gráficos
 
@@ -120,7 +148,8 @@ Escala (rem sobre 16 px): 0,75 · 0,8125 · 0,875 · 1 · 1,125 · 1,25 · 1,5 �
 
 ## 10. Accesibilidad
 
-- Contraste WCAG 2.2 AA: 4,5:1 para texto y 3:1 para bordes de controles y texto grande, comprobado por pruebas en ambos temas.
+- Contraste WCAG 2.2 AA: 4,5:1 para texto y 3:1 para bordes de controles y texto grande, comprobado por pruebas en ambos temas sobre todos los fondos.
+- El texto nunca baja su contraste con opacidad; solo los controles desactivados se atenúan.
 - Foco del teclado siempre visible, en tono cielo.
 - Áreas táctiles de al menos 44 × 44 px en móvil.
 - Ninguna información depende solo del color.

@@ -1,32 +1,36 @@
+import { readdirSync, readFileSync } from 'node:fs';
 import { executionModeSchema, serviceHealthSchema, severitySchema } from '@buoh/contracts';
 import { describe, expect, it } from 'vitest';
 import {
   contrastRatio,
   EXECUTION_MODE_PRESENTATION,
   ICONS,
+  palette,
   renderCss,
   SERVICE_HEALTH_PRESENTATION,
   SEVERITY_PRESENTATION,
+  sharedVariables,
+  space,
   themes,
-  themeVariables,
   TONES,
+  typography,
   WCAG_AA,
   type Theme,
 } from '../src/index.js';
 
 const THEMES: readonly Theme[] = [themes.noche, themes.dia];
+const PALETTE_VALUES = new Set(
+  Object.values(palette).flatMap((family) => Object.values(family).map((v) => v.toUpperCase())),
+);
+
+function backgroundsOf(theme: Theme): Readonly<Record<string, string>> {
+  return { ...theme.bg };
+}
 
 describe('contraste WCAG 2.2 AA (V1-DS-001)', () => {
   for (const theme of THEMES) {
-    const backgrounds = {
-      canvas: theme.bg.canvas,
-      surface: theme.bg.surface,
-      raised: theme.bg.raised,
-      sunken: theme.bg.sunken,
-    };
-
-    it(`tema ${theme.name}: textos legibles sobre todos los fondos`, () => {
-      for (const [bgName, bg] of Object.entries(backgrounds)) {
+    it(`tema ${theme.name}: textos legibles sobre todos los fondos, incluido hover`, () => {
+      for (const [bgName, bg] of Object.entries(backgroundsOf(theme))) {
         for (const [textName, fg] of Object.entries(theme.text)) {
           if (textName === 'inverse') {
             continue;
@@ -38,19 +42,21 @@ describe('contraste WCAG 2.2 AA (V1-DS-001)', () => {
       }
     });
 
-    it(`tema ${theme.name}: estados legibles sobre su insignia y sobre superficies`, () => {
+    it(`tema ${theme.name}: estados legibles sobre su insignia y sobre todos los fondos`, () => {
       for (const tone of TONES) {
         const { fg, bg } = theme.tones[tone];
         expect(contrastRatio(fg, bg), `${tone} sobre su fondo`).toBeGreaterThanOrEqual(
           WCAG_AA.text,
         );
-        expect(contrastRatio(fg, theme.bg.surface), `${tone} sobre surface`).toBeGreaterThanOrEqual(
-          WCAG_AA.text,
-        );
+        for (const [bgName, surface] of Object.entries(backgroundsOf(theme))) {
+          expect(contrastRatio(fg, surface), `${tone} sobre ${bgName}`).toBeGreaterThanOrEqual(
+            WCAG_AA.text,
+          );
+        }
       }
     });
 
-    it(`tema ${theme.name}: acción principal, foco y bordes de controles`, () => {
+    it(`tema ${theme.name}: acción principal, foco, bordes de controles y acento`, () => {
       expect(contrastRatio(theme.action.fg, theme.action.bg)).toBeGreaterThanOrEqual(WCAG_AA.text);
       expect(contrastRatio(theme.action.fg, theme.action.bgHover)).toBeGreaterThanOrEqual(
         WCAG_AA.text,
@@ -58,10 +64,15 @@ describe('contraste WCAG 2.2 AA (V1-DS-001)', () => {
       for (const bg of [theme.bg.canvas, theme.bg.surface, theme.bg.raised]) {
         expect(contrastRatio(theme.focus, bg)).toBeGreaterThanOrEqual(WCAG_AA.ui);
         expect(contrastRatio(theme.border.strong, bg)).toBeGreaterThanOrEqual(WCAG_AA.ui);
+        expect(contrastRatio(theme.brand.accent, bg)).toBeGreaterThanOrEqual(WCAG_AA.text);
       }
-      expect(contrastRatio(theme.brand.accent, theme.bg.canvas)).toBeGreaterThanOrEqual(
-        WCAG_AA.text,
-      );
+    });
+
+    it(`tema ${theme.name}: todos sus colores salen de la paleta`, () => {
+      const json = JSON.stringify(theme);
+      for (const hex of json.match(/#[0-9A-F]{6}/gi) ?? []) {
+        expect(PALETTE_VALUES.has(hex.toUpperCase()), hex).toBe(true);
+      }
     });
   }
 
@@ -101,31 +112,116 @@ describe('estados del contrato con texto, icono y tono (V1-DS-001)', () => {
     expect(shared).toEqual(['niebla']);
   });
 
-  it('el ámbar de marca no es un tono de estado', () => {
+  it('modo y salud no comparten iconos', () => {
+    const modeIcons = new Set(Object.values(EXECUTION_MODE_PRESENTATION).map((p) => p.icon));
+    for (const health of Object.values(SERVICE_HEALTH_PRESENTATION)) {
+      expect(modeIcons.has(health.icon), health.label).toBe(false);
+    }
+  });
+
+  it('el ámbar de marca no se usa en ningún estado', () => {
     for (const theme of THEMES) {
       const toneColors = TONES.flatMap((tone) => [theme.tones[tone].fg, theme.tones[tone].bg]);
-      expect(toneColors).not.toContain(theme.brand.accent);
+      for (const amber of [palette.ambar[400], palette.ambar[700], theme.brand.accent]) {
+        expect(toneColors).not.toContain(amber);
+      }
     }
   });
 });
 
+/** Extrae las variables declaradas en el bloque de un selector exacto. */
+function variablesIn(css: string, selector: string): Readonly<Record<string, string>> {
+  const start = css.indexOf(`${selector} {`);
+  expect(start, selector).toBeGreaterThanOrEqual(0);
+  const body = css.slice(start, css.indexOf('}', start));
+  return Object.fromEntries(
+    [...body.matchAll(/(--b-[\w-]+): ([^;]+);/g)].map((m) => [m[1] ?? '', m[2] ?? '']),
+  );
+}
+
 describe('CSS generado desde los tokens (V1-DS-001)', () => {
   const css = renderCss();
+  const night = variablesIn(css, ":root, [data-theme='noche']");
+  const day = variablesIn(css, "[data-theme='dia']");
+  const shared = variablesIn(css, ':root');
 
-  it('declara cada variable de ambos temas con su valor', () => {
-    for (const theme of THEMES) {
-      for (const [name, value] of Object.entries(themeVariables(theme))) {
-        expect(css).toContain(`${name}: ${value};`);
+  it('cada tema declara sus valores literales de la guía en su propio bloque', () => {
+    expect(night).toMatchObject({
+      '--b-bg-canvas': '#0A101C',
+      '--b-bg-surface': '#0E1626',
+      '--b-text': '#F4F6FB',
+      '--b-text-2': '#C8D0E2',
+      '--b-text-muted': '#8D9AB6',
+      '--b-action-bg': '#F0E5C6',
+      '--b-brand-iris': '#F2B544',
+      '--b-tone-rosa-fg': '#F283B3',
+      '--b-tone-niebla-bg': '#1A2337',
+    });
+    expect(day).toMatchObject({
+      '--b-bg-canvas': '#F5F6FA',
+      '--b-bg-surface': '#FFFFFF',
+      '--b-text': '#0E1626',
+      '--b-text-2': '#33415C',
+      '--b-text-muted': '#55627D',
+      '--b-action-bg': '#0E1626',
+      '--b-brand-iris': '#F2B544',
+      '--b-tone-rosa-fg': '#AA3166',
+      '--b-tone-niebla-bg': '#ECEFF5',
+    });
+    expect(Object.keys(day).sort()).toEqual(Object.keys(night).sort());
+  });
+
+  it('las variables comunes cubren tipografía, espacios, radios y movimiento', () => {
+    expect(shared).toEqual(sharedVariables());
+    for (const size of Object.keys(typography.size)) {
+      expect(shared).toHaveProperty(`--b-size-${size}`);
+    }
+    expect(Object.keys(shared).filter((k) => k.startsWith('--b-space-'))).toHaveLength(
+      Object.keys(space).length,
+    );
+    expect(shared['--b-space-0_5']).toBe('0.125rem');
+    expect(shared['--b-font-mono']).toContain('JetBrains Mono');
+  });
+
+  it('ningún texto usa opacidad: solo los controles desactivados', () => {
+    const rules = [...css.matchAll(/([^{}]+)\{[^}]*opacity:[^}]*\}/g)].map((m) => m[1]?.trim());
+    expect(rules).toEqual([".b-button:disabled, .b-button[aria-disabled='true']"]);
+  });
+
+  it('es estable y desactiva el movimiento cuando el sistema lo pide', () => {
+    expect(renderCss()).toBe(css);
+    expect(css).toContain('@media (prefers-reduced-motion: reduce)');
+  });
+});
+
+describe('guía de marca y recursos frente a los tokens (V1-BRAND-001)', () => {
+  const guide = readFileSync(
+    new URL('../../../docs/diseno/marca-buoh.md', import.meta.url),
+    'utf8',
+  );
+  const guideHex = new Set((guide.match(/#[0-9A-F]{6}/gi) ?? []).map((h) => h.toUpperCase()));
+
+  it('la guía documenta cada color de la paleta', () => {
+    for (const hex of PALETTE_VALUES) {
+      expect(guideHex.has(hex), hex).toBe(true);
+    }
+  });
+
+  it('la guía no menciona colores fuera de la paleta', () => {
+    for (const hex of guideHex) {
+      expect(PALETTE_VALUES.has(hex), hex).toBe(true);
+    }
+  });
+
+  it('los SVG del logotipo usan solo colores de la paleta', () => {
+    const dir = new URL('../assets/', import.meta.url);
+    const files = readdirSync(dir).filter((f) => f.endsWith('.svg'));
+    expect(files.length).toBeGreaterThanOrEqual(3);
+    for (const file of files) {
+      const svg = readFileSync(new URL(file, dir), 'utf8');
+      for (const hex of svg.match(/#[0-9A-F]{6}/gi) ?? []) {
+        expect(PALETTE_VALUES.has(hex.toUpperCase()), `${file} ${hex}`).toBe(true);
       }
     }
-    expect(css).toContain("[data-theme='dia'] {");
-  });
-
-  it('es estable: dos generaciones son idénticas', () => {
-    expect(renderCss()).toBe(css);
-  });
-
-  it('desactiva el movimiento cuando el sistema lo pide', () => {
-    expect(css).toContain('@media (prefers-reduced-motion: reduce)');
   });
 });

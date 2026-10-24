@@ -116,7 +116,7 @@ a { color: inherit; }
   font-size: var(--b-size-xs); font-weight: ${String(typography.weight.semibold)}; line-height: 1; white-space: nowrap;
 }
 .b-badge .b-icon { width: 14px; height: 14px; }
-.b-badge__detail { font-weight: ${String(typography.weight.medium)}; opacity: 0.85; }
+.b-badge__detail { font-weight: ${String(typography.weight.regular)}; }
 .b-badge--strong { border-width: 1.5px; border-color: var(--b-tone-fg, var(--b-text-2)); }
 
 .b-button {

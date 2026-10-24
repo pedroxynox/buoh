@@ -35,7 +35,7 @@ Ante un conflicto, no elijas una interpretación silenciosa: aplica el protocolo
 - `test-vectors/`: oráculos sintéticos compartidos.
 - `docs/`: planes, decisiones, semántica y operación.
 
-No crees componentes futuros o directorios vacíos fuera del [corte de Fase 1](docs/plan/fase-1-fundacion-de-datos.md).
+No crees componentes futuros o directorios vacíos fuera del [corte de Fase 1](docs/plan/fase-1-fundacion-de-datos.md) y del corte de la línea visual V1 (sección siguiente).
 
 ## Organización autorizada para la línea visual V1
 

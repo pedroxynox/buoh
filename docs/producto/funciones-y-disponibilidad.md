@@ -11,7 +11,9 @@ Catálogo de todo lo que buoh hará, en qué fase se habilita y en qué platafor
 | **Escritorio** (Windows, Tauri 2) | La misma estación de la web, como aplicación instalada | Fase 7 |
 | **Sitio oficial** | Explicar qué es buoh, cómo trabaja y en qué estado está | V1.3 |
 
-Ninguna plataforma envía órdenes al bróker. Las órdenes solo salen de `execution-gateway` en el servidor ([ADR-0002](../arquitectura/adr/0002-senales-y-ejecucion-controlada.md)). Los clientes pueden **ver**, **pedir** y **detener**; nunca **operar** por su cuenta.
+Ninguna plataforma envía órdenes al bróker. Las órdenes solo salen de `execution-gateway` en el servidor ([ADR-0002](../arquitectura/adr/0002-senales-y-ejecucion-controlada.md)). Los clientes pueden **ver**, **pedir** y **detener**; nunca **operar** por su cuenta. **Pedir** significa enviar al servidor una solicitud que este valida y registra, como aprobar una versión de estrategia, cambiar una política o autorizar un modo; nunca es una orden.
+
+Una función está disponible cuando se cumplen a la vez su fase y la de su plataforma: móvil desde Fase 3 y escritorio desde Fase 7.
 
 ## 2. Funciones
 
@@ -57,9 +59,10 @@ Leyenda: ● disponible · ◐ solo lectura o resumen · — no disponible.
 | Políticas de riesgo | Límites por estrategia, instrumento, cuenta y entorno | 4 | ● | ◐ | ● |
 | Intenciones y órdenes `demo` | Ver lo que la pasarela pidió, lo que respondió el bróker y la reconciliación | 4 | ◐ | ◐ | ◐ |
 | *Kill switch* | Detener todo, una estrategia o un usuario | 4 | ● | ● | ● |
-| Ejecución `real` | Solo universo, cuentas y estrategias aprobados en la Fase 5 | 6 | ◐ | ◐ | ◐ |
+| Ejecución `real` | Ver órdenes y posiciones del universo, cuentas y estrategias aprobados en la Fase 5 | 6 | ◐ | ◐ | ◐ |
+| Pedir el modo `real` | Solicitar que una estrategia aprobada pase a `real`; el servidor lo valida | 6 | ● | — | ● |
 
-Detener (*kill switch*) está disponible en todas las plataformas porque reduce el riesgo. Activar el modo `real` o cambiar una política exige reautenticación y queda en auditoría.
+Detener (*kill switch*) está disponible en todas las plataformas porque reduce el riesgo. Pedir el modo `real` o un cambio de política exige reautenticación y queda en auditoría; se hace desde web o escritorio, no desde el móvil.
 
 ### Operación y cuenta
 

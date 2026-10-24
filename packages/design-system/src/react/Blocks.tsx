@@ -1,27 +1,30 @@
-import type { ExecutionMode } from '@buoh/contracts';
 import type { ReactNode } from 'react';
-import { ModeBadge } from './Badges.js';
+import { Badge, ModeBadge } from './Badges.js';
 import { Icon } from './Icon.js';
 
 export function Card({
   title,
   subtitle,
   actions,
+  headingLevel = 3,
   raised = false,
   children,
 }: {
   readonly title?: ReactNode;
   readonly subtitle?: ReactNode;
   readonly actions?: ReactNode;
+  /** Nivel del título según su lugar en la página. */
+  readonly headingLevel?: 2 | 3 | 4;
   readonly raised?: boolean;
   readonly children: ReactNode;
 }) {
+  const Heading = `h${String(headingLevel)}` as 'h2' | 'h3' | 'h4';
   return (
     <section className={raised ? 'b-card b-card--raised' : 'b-card'}>
       {title === undefined && actions === undefined ? null : (
         <header className="b-card__header">
           <div>
-            {title === undefined ? null : <h3 className="b-card__title">{title}</h3>}
+            {title === undefined ? null : <Heading className="b-card__title">{title}</Heading>}
             {subtitle === undefined ? null : <p className="b-card__subtitle">{subtitle}</p>}
           </div>
           {actions}
@@ -32,25 +35,28 @@ export function Card({
   );
 }
 
-/** Aviso fijo del prototipo: todo lo que se ve es ficticio (ADR-0008 §2). */
+/**
+ * Aviso fijo del prototipo: todo lo que se ve es ficticio (ADR-0008 §2).
+ * Usa el estilo neutro, sin tono de estado, para no confundirse con la salud del servicio.
+ */
 export function FictitiousDataNotice() {
   return (
-    <span className="b-notice" data-tone="cielo" role="note">
-      <Icon name="info" />
+    <span className="b-notice" role="note">
+      <Icon name="document" />
       Datos ficticios
     </span>
   );
 }
 
-/** Función que llega en una fase posterior: se ve, pero no tiene controles activos. */
+/** Función que llega en una fase posterior: se ve, pero no tiene controles. Solo admite texto. */
 export function PhaseLock({
   phase,
   title,
-  children,
+  description,
 }: {
   readonly phase: string;
   readonly title: string;
-  readonly children?: ReactNode;
+  readonly description?: string;
 }) {
   return (
     <div className="b-phase-lock" role="note">
@@ -60,17 +66,20 @@ export function PhaseLock({
           {title} · Disponible en Fase {phase}
         </span>
       </div>
-      {children === undefined ? null : <div>{children}</div>}
+      {description === undefined ? null : <p>{description}</p>}
     </div>
   );
 }
 
+/** De dónde sale una cifra de desempeño: prueba histórica o uno de los modos con resultados. */
+export type EvidenceSource = 'backtest' | 'shadow' | 'demo' | 'real';
+
 /**
  * Contexto obligatorio de toda cifra de desempeño (fundamentos de buoh, guía §3).
- * Los tipos impiden mostrar una métrica sin estos campos.
+ * Los tipos impiden omitir campos al compilar; el contenido lo revisa quien lo escribe.
  */
 export interface PerformanceContext {
-  readonly mode: ExecutionMode | 'backtest';
+  readonly source: EvidenceSource;
   readonly period: string;
   readonly sample: string;
   readonly costs: string;
@@ -78,6 +87,17 @@ export interface PerformanceContext {
   readonly drawdown: string;
   readonly version: string;
   readonly limitations: string;
+}
+
+export function EvidenceSourceBadge({ source }: { readonly source: EvidenceSource }) {
+  return source === 'backtest' ? (
+    <Badge tone="niebla" icon="flask" title="Origen: backtest sobre datos pasados">
+      <span className="b-visually-hidden">Origen: </span>
+      Backtest
+    </Badge>
+  ) : (
+    <ModeBadge mode={source} />
+  );
 }
 
 export function MetricWithContext({
@@ -89,47 +109,31 @@ export function MetricWithContext({
   readonly value: string;
   readonly context: PerformanceContext;
 }) {
+  const rows: readonly (readonly [string, ReactNode])[] = [
+    ['Origen', <EvidenceSourceBadge key="source" source={context.source} />],
+    ['Período', context.period],
+    ['Muestra', context.sample],
+    ['Costes', context.costs],
+    ['Pérdidas', context.losses],
+    ['Drawdown máximo', context.drawdown],
+    [
+      'Versión',
+      <span key="version" className="b-num">
+        {context.version}
+      </span>,
+    ],
+  ];
   return (
     <div className="b-metric">
       <div className="b-metric__label">{label}</div>
       <div className="b-metric__value">{value}</div>
       <dl className="b-metric__context">
-        <div>
-          <dt>Modo</dt>
-          <dd>
-            {context.mode === 'backtest' ? (
-              <span className="b-badge" data-tone="niebla">
-                Backtest
-              </span>
-            ) : (
-              <ModeBadge mode={context.mode} />
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt>Período</dt>
-          <dd>{context.period}</dd>
-        </div>
-        <div>
-          <dt>Muestra</dt>
-          <dd>{context.sample}</dd>
-        </div>
-        <div>
-          <dt>Costes</dt>
-          <dd>{context.costs}</dd>
-        </div>
-        <div>
-          <dt>Pérdidas</dt>
-          <dd>{context.losses}</dd>
-        </div>
-        <div>
-          <dt>Drawdown máximo</dt>
-          <dd>{context.drawdown}</dd>
-        </div>
-        <div>
-          <dt>Versión</dt>
-          <dd className="b-num">{context.version}</dd>
-        </div>
+        {rows.map(([term, detail]) => (
+          <div key={term}>
+            <dt>{term}</dt>
+            <dd>{detail}</dd>
+          </div>
+        ))}
       </dl>
       <p className="b-metric__limits">
         <strong>Limitaciones:</strong> {context.limitations}
