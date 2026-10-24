@@ -12,7 +12,7 @@ export default function ConexionesPage() {
       <PageHeader
         eyebrow="Conexiones"
         title="¿Están conectadas mis fuentes?"
-        summary="Estado de cada fuente y de cada puente. buoh no guarda contraseñas: las de MetaTrader 5 se quedan dentro de su terminal."
+        summary="Estado de cada fuente y de cada puente. Los servicios de buoh nunca reciben contraseñas: las de MetaTrader 5, solo de cuentas propias, las guarda su terminal."
       />
 
       <div className="w-grid w-grid--3">

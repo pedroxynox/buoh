@@ -8,11 +8,11 @@ No tiene API, cuentas, credenciales, conexión a fuentes ni brókeres. Ninguna p
 
 ```text
 pnpm --filter @buoh/web run build      # Next.js 16 con exportación estática a out/
-pnpm --filter @buoh/web run test       # fixtures y páginas exportadas
+pnpm --filter @buoh/web run test       # fixtures y páginas exportadas (lee el último build)
 pnpm --filter @buoh/web run typecheck
 ```
 
-`build` desactiva la telemetría de Next.js. Las tipografías se sirven desde el propio sitio (Fontsource) y no hay recursos de terceros.
+`pnpm run test` y `pnpm run verify` construyen antes de probar. `build` desactiva la telemetría de Next.js y usa un identificador de build fijo, así que dos exportaciones del mismo commit tienen las mismas rutas. Las tipografías se sirven desde el propio sitio (Fontsource) y no hay recursos de terceros.
 
 ## Estructura
 

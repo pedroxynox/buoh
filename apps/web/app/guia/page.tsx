@@ -5,7 +5,9 @@ import {
   SEVERITY_PRESENTATION,
   TONES,
   typography,
+  type IconName,
   type Severity,
+  type Tone,
 } from '@buoh/design-system';
 import {
   Badge,
@@ -29,6 +31,18 @@ const HEALTH = Object.keys(SERVICE_HEALTH_PRESENTATION) as ServiceHealth[];
 const SEVERITIES = Object.keys(SEVERITY_PRESENTATION) as Severity[];
 
 const FAMILIES = ['noche', 'niebla', 'luna', 'ambar', 'papel'] as const;
+
+/** Un icono de ejemplo por tono, tomado del estado que lo usa. */
+const TONE_EXAMPLE_ICON: Readonly<Record<Tone, IconName>> = {
+  aurora: 'check',
+  cielo: 'info',
+  naranja: 'alertTriangle',
+  rojo: 'xOctagon',
+  niebla: 'pauseCircle',
+  violeta: 'moon',
+  cian: 'playCircle',
+  rosa: 'banknote',
+};
 
 function Swatches({ family }: { readonly family: (typeof FAMILIES)[number] }) {
   return (
@@ -84,6 +98,7 @@ export default function GuiaPage() {
         summary="Observa con calma. Decide con evidencia. Colores, tipografía, estados y componentes del sistema de diseño, tal como los usa el producto."
       />
 
+      <SectionTitle>Logotipo</SectionTitle>
       <div className="w-grid w-grid--3">
         <Card title="Símbolo" subtitle="Cara de búho con ojos ámbar">
           <div className="w-row" style={{ gap: 'var(--b-space-6)' }}>
@@ -137,12 +152,50 @@ export default function GuiaPage() {
       <Card title="Tonos" subtitle="Nunca solos: siempre con texto e icono">
         <div className="w-row">
           {TONES.map((tone) => (
-            <Badge key={tone} tone={tone}>
+            <Badge key={tone} tone={tone} icon={TONE_EXAMPLE_ICON[tone]}>
               {tone}
             </Badge>
           ))}
         </div>
       </Card>
+
+      <SectionTitle>Estados de pantalla</SectionTitle>
+      <div className="w-grid w-grid--4">
+        <Card title="Cargando" subtitle="Esqueleto quieto, sin animación">
+          <div className="w-skeleton" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
+          <p className="b-visually-hidden">Cargando datos</p>
+        </Card>
+        <Card title="Vacío" subtitle="Por qué está vacío y qué hacer">
+          <p className="b-secondary w-small">
+            Todavía no hay señales: ninguna estrategia está aprobada para shadow. Revisa el
+            laboratorio.
+          </p>
+        </Card>
+        <Card title="Error" subtitle="Qué falló, desde cuándo y qué sigue valiendo">
+          <div className="w-stack">
+            <SeverityTag severity="error" />
+            <p className="b-secondary w-small">
+              No se pudo leer el catálogo desde las 14:30:12 UTC. Los datos mostrados son del último
+              snapshot válido.
+            </p>
+          </div>
+        </Card>
+        <Card title="Degradado" subtitle="La salud cambia y la cifra se marca">
+          <div className="w-stack">
+            <HealthBadge health="degraded" />
+            <p className="b-secondary w-small">
+              <span className="b-num">1042.87</span>{' '}
+              <Badge tone="naranja" icon="gap">
+                con hueco
+              </Badge>
+            </p>
+          </div>
+        </Card>
+      </div>
 
       <SectionTitle>Tipografía</SectionTitle>
       <Card title="Manrope y JetBrains Mono" subtitle="Interfaz y cifras">
@@ -172,6 +225,7 @@ export default function GuiaPage() {
         <ThemeSample theme="noche" />
         <ThemeSample theme="dia" />
       </div>
+      <p className="b-muted w-small">Los botones de estas muestras no hacen nada.</p>
       <PhaseLock
         phase="4"
         title="Ejemplo de candado de fase"

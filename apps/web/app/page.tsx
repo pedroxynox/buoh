@@ -19,12 +19,14 @@ import {
   SHADOW_CONTEXT,
   SIGNALS,
   SOURCES,
+  STRATEGIES,
 } from '../src/fixtures';
 import { formatUtc, formatUtcTime } from '../src/format';
 
 export default function ObservatorioPage() {
   const openIncidents = INCIDENTS.filter((incident) => incident.status === 'abierta');
   const latest = DATASETS[0];
+  const paused = STRATEGIES.filter((strategy) => strategy.lifecycle === 'paused');
   return (
     <>
       <PageHeader
@@ -34,28 +36,30 @@ export default function ObservatorioPage() {
       />
 
       <div className="w-grid w-grid--4">
-        <Card title="Modo de ejecución" subtitle="Qué puede hacer el bot">
-          <div className="w-stat">
+        <Card title="Modo de ejecución" subtitle="Qué puede hacer el bot" headingLevel={2}>
+          <div className="w-stack">
             <ModeBadge mode={GLOBAL_STATUS.mode} showDescription />
             <p className="b-secondary w-small">Las señales son hipotéticas. Nada sale al bróker.</p>
           </div>
         </Card>
-        <Card title="Salud del servicio" subtitle="Datos y persistencia">
-          <div className="w-stat">
+        <Card title="Salud del servicio" subtitle="Datos y persistencia" headingLevel={2}>
+          <div className="w-stack">
             <HealthBadge health={GLOBAL_STATUS.health} showDescription />
-            <p className="b-secondary w-small">Es un eje distinto del modo.</p>
+            <p className="b-secondary w-small">
+              Un hueco sin resolver en R_100 la baja a degradada. Es un eje distinto del modo.
+            </p>
           </div>
         </Card>
-        <Card title="Alertas abiertas" subtitle="Calidad de datos">
-          <div className="w-stat">
+        <Card title="Alertas abiertas" subtitle="Calidad de datos" headingLevel={2}>
+          <div className="w-stack">
             <span className="w-stat__value b-num">{String(openIncidents.length)}</span>
             <Link className="w-link" href="/datos/">
               Ver incidencias
             </Link>
           </div>
         </Card>
-        <Card title="Último dataset" subtitle="Reproducible por su identificador">
-          <div className="w-stat">
+        <Card title="Último dataset" subtitle="Reproducible por su identificador" headingLevel={2}>
+          <div className="w-stack">
             <span className="b-num w-small">{latest?.id}</span>
             {latest?.verified === true ? (
               <Badge tone="aurora" icon="check">
@@ -82,7 +86,11 @@ export default function ObservatorioPage() {
                 <div>
                   <div className="w-row">
                     <strong>{source.name}</strong>
-                    {source.phase === '1' ? null : <Badge tone="niebla">Fase {source.phase}</Badge>}
+                    {source.phase === '1' ? null : (
+                      <Badge tone="niebla" icon="clock">
+                        Fase {source.phase}
+                      </Badge>
+                    )}
                   </div>
                   <p className="b-muted w-small">{source.note}</p>
                   <p className="b-muted w-small">
@@ -114,14 +122,34 @@ export default function ObservatorioPage() {
 
       <SectionTitle>Bot shadow</SectionTitle>
       <div className="w-grid w-grid--wide">
-        <Card title="Resultado hipotético de la semana" subtitle="Siempre con su contexto completo">
+        <Card
+          title="Ruptura de rango v2 · desde su aprobación"
+          subtitle="Siempre con su contexto completo"
+        >
           <MetricWithContext
-            label="Resultado neto hipotético"
-            value="−1,1 %"
+            label="Pérdida neta hipotética"
+            value="−0,3 %"
             context={SHADOW_CONTEXT}
           />
         </Card>
         <div className="w-stack">
+          <Card title="Pausas automáticas" subtitle="Estrategias detenidas por la calidad de datos">
+            <ul className="w-list">
+              {paused.map((strategy) => (
+                <li key={strategy.id}>
+                  <div>
+                    <strong className="w-small">
+                      {strategy.name} {strategy.version}
+                    </strong>
+                    <p className="b-muted w-small">{strategy.note}</p>
+                  </div>
+                  <Badge tone="niebla" icon="pauseCircle">
+                    En pausa
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          </Card>
           <Card title="Detener todo" subtitle="Kill switch global">
             <PhaseLock
               phase="4"

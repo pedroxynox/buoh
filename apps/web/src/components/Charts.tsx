@@ -1,3 +1,14 @@
+import type { ReactNode } from 'react';
+
+/**
+ * Gráficos propios (guía §8). El SVG dibuja solo líneas y áreas y se estira al contenedor;
+ * los textos van en HTML encima, para que se lean al mismo tamaño en móvil y en escritorio.
+ */
+
+/** Coordenadas internas del dibujo: 0–1000 en horizontal y 0–100 en vertical. */
+const W = 1000;
+const H = 100;
+
 interface Scale {
   readonly x: (i: number) => number;
   readonly y: (v: number) => number;
@@ -5,10 +16,7 @@ interface Scale {
   readonly max: number;
 }
 
-const W = 1000;
-const PAD = { top: 18, right: 64, bottom: 24, left: 12 } as const;
-
-function scaleFor(values: readonly (number | null)[], height: number, includeZero = false): Scale {
+function scaleFor(values: readonly (number | null)[], includeZero = false): Scale {
   const finite = values.filter((v): v is number => v !== null);
   let min = Math.min(...finite);
   let max = Math.max(...finite);
@@ -17,13 +25,11 @@ function scaleFor(values: readonly (number | null)[], height: number, includeZer
     max = Math.max(max, 0);
   }
   const span = max - min === 0 ? 1 : max - min;
-  min -= span * 0.08;
-  max += span * 0.08;
-  const innerW = W - PAD.left - PAD.right;
-  const innerH = height - PAD.top - PAD.bottom;
+  min -= span * 0.1;
+  max += span * 0.1;
   return {
-    x: (i) => PAD.left + (i / Math.max(values.length - 1, 1)) * innerW,
-    y: (v) => PAD.top + (1 - (v - min) / (max - min)) * innerH,
+    x: (i) => (i / Math.max(values.length - 1, 1)) * W,
+    y: (v) => (1 - (v - min) / (max - min)) * H,
     min,
     max,
   };
@@ -38,57 +44,76 @@ function segments(values: readonly (number | null)[], s: Scale): string {
       pen = false;
       return;
     }
-    d += `${pen ? 'L' : 'M'}${s.x(i).toFixed(1)} ${s.y(v).toFixed(1)}`;
+    d += `${pen ? 'L' : 'M'}${s.x(i).toFixed(2)} ${s.y(v).toFixed(2)}`;
     pen = true;
   });
   return d;
 }
 
-function GridLines({
+const pctX = (x: number) => `${((x / W) * 100).toFixed(2)}%`;
+const pctY = (y: number) => `${((y / H) * 100).toFixed(2)}%`;
+
+interface AxisLabel {
+  readonly index: number;
+  readonly label: string;
+}
+
+function Frame({
   s,
   height,
-  digits,
-  decimalComma = false,
+  format,
+  timeLabels,
+  children,
+  overlay,
 }: {
   readonly s: Scale;
   readonly height: number;
-  readonly digits: number;
-  /** Las cotizaciones conservan el punto de la fuente; los porcentajes usan coma. */
-  readonly decimalComma?: boolean;
+  readonly format: (v: number) => string;
+  readonly timeLabels: readonly AxisLabel[];
+  readonly children: ReactNode;
+  readonly overlay?: ReactNode;
 }) {
   const steps = 4;
-  const lines = Array.from({ length: steps + 1 }, (_, k) => s.min + ((s.max - s.min) * k) / steps);
+  const ticks = Array.from({ length: steps + 1 }, (_, k) => s.min + ((s.max - s.min) * k) / steps);
   return (
-    <g>
-      {lines.map((v) => (
-        <g key={v}>
+    <div className="w-chart__area" style={{ height: `${String(height)}px` }}>
+      <svg
+        className="w-chart__svg"
+        viewBox={`0 0 ${String(W)} ${String(H)}`}
+        preserveAspectRatio="none"
+        aria-hidden="true"
+        focusable="false"
+      >
+        {ticks.map((v) => (
           <line
-            x1={PAD.left}
-            x2={W - PAD.right}
+            key={v}
+            x1={0}
+            x2={W}
             y1={s.y(v)}
             y2={s.y(v)}
             stroke="var(--b-chart-grid)"
             strokeWidth="1"
+            vectorEffect="non-scaling-stroke"
           />
-          <text
-            x={W - PAD.right + 8}
-            y={s.y(v) + 4}
-            fill="var(--b-text-muted)"
-            fontSize="11"
-            fontFamily="var(--b-font-mono)"
-          >
-            {decimalComma ? v.toFixed(digits).replace('.', ',') : v.toFixed(digits)}
-          </text>
-        </g>
+        ))}
+        {children}
+      </svg>
+      {ticks.map((v) => (
+        <span key={v} className="w-chart__y b-num" style={{ top: pctY(s.y(v)) }}>
+          {format(v)}
+        </span>
       ))}
-      <line
-        x1={PAD.left}
-        x2={W - PAD.right}
-        y1={height - PAD.bottom}
-        y2={height - PAD.bottom}
-        stroke="var(--b-border)"
-      />
-    </g>
+      {timeLabels.map((t, k) => (
+        <span
+          key={t.index}
+          className={`w-chart__x b-num${k === 0 ? ' w-chart__x--start' : k === timeLabels.length - 1 ? ' w-chart__x--end' : ' w-chart__x--mid'}`}
+          style={{ left: pctX(s.x(t.index)) }}
+        >
+          {t.label}
+        </span>
+      ))}
+      {overlay}
+    </div>
   );
 }
 
@@ -98,110 +123,139 @@ export interface ChartGap {
   readonly label: string;
 }
 
-/** Gráfico de precios con los huecos marcados como cortes (guía §8). */
+/** Gráfico de precios con los huecos marcados como cortes. `start`–`end - 1` son los ticks que faltan. */
 export function PriceChart({
   values,
   gaps,
+  timeLabels,
   label,
-  height = 260,
+  height = 240,
 }: {
   readonly values: readonly (number | null)[];
   readonly gaps: readonly ChartGap[];
+  readonly timeLabels: readonly AxisLabel[];
   readonly label: string;
   readonly height?: number;
 }) {
-  const s = scaleFor(values, height);
+  const s = scaleFor(values);
   return (
-    <svg
-      className="w-chart"
-      viewBox={`0 0 ${String(W)} ${String(height)}`}
-      role="img"
-      aria-label={label}
-    >
-      <title>{label}</title>
-      <GridLines s={s} height={height} digits={2} />
-      {gaps.map((gap) => (
-        <g key={gap.start}>
+    <div className="w-chart" role="img" aria-label={label}>
+      <Frame
+        s={s}
+        height={height}
+        format={(v) => v.toFixed(2)}
+        timeLabels={timeLabels}
+        overlay={gaps.map((gap) => (
+          <span
+            key={gap.start}
+            className="w-chart__note"
+            style={{ left: pctX(s.x(gap.start - 1)) }}
+          >
+            {gap.label}
+          </span>
+        ))}
+      >
+        {gaps.map((gap) => (
           <rect
-            x={s.x(gap.start)}
-            y={PAD.top}
-            width={s.x(gap.end) - s.x(gap.start)}
-            height={height - PAD.top - PAD.bottom}
+            key={gap.start}
+            x={s.x(gap.start - 1)}
+            y={0}
+            width={s.x(gap.end) - s.x(gap.start - 1)}
+            height={H}
             fill="color-mix(in srgb, var(--b-chart-gap) 14%, transparent)"
             stroke="var(--b-chart-gap)"
             strokeDasharray="4 4"
+            vectorEffect="non-scaling-stroke"
           />
-          <text
-            x={s.x(gap.start)}
-            y={PAD.top - 6}
-            fill="var(--b-chart-gap)"
-            fontSize="11"
-            fontWeight="600"
-          >
-            {gap.label}
-          </text>
-        </g>
-      ))}
-      <path d={segments(values, s)} fill="none" stroke="var(--b-chart-line)" strokeWidth="1.6" />
-    </svg>
+        ))}
+        <path
+          d={segments(values, s)}
+          fill="none"
+          stroke="var(--b-chart-line)"
+          strokeWidth="1.75"
+          vectorEffect="non-scaling-stroke"
+        />
+      </Frame>
+    </div>
   );
 }
 
-/** Curva de resultado acumulado (%) con línea de cero y la peor caída marcada. */
+/** Mayor caída desde un máximo previo, en las mismas unidades que la serie. */
+export function worstDrawdown(values: readonly number[]): {
+  readonly drop: number;
+  readonly at: number;
+  readonly peak: number;
+} {
+  let peak = Number.NEGATIVE_INFINITY;
+  let worst = { drop: 0, at: 0, peak: 0 };
+  values.forEach((v, i) => {
+    peak = Math.max(peak, v);
+    if (peak - v > worst.drop) {
+      worst = { drop: peak - v, at: i, peak };
+    }
+  });
+  return worst;
+}
+
+const comma = (v: number, digits: number) => v.toFixed(digits).replace('.', ',').replace('-', '−');
+
+/** Curva de resultado acumulado (puntos porcentuales) con línea de cero y la peor caída marcada. */
 export function EquityChart({
   values,
+  timeLabels,
   label,
   height = 220,
 }: {
   readonly values: readonly number[];
+  readonly timeLabels: readonly AxisLabel[];
   readonly label: string;
   readonly height?: number;
 }) {
-  const s = scaleFor(values, height, true);
-  let peak = Number.NEGATIVE_INFINITY;
-  let worst = { drop: 0, at: 0, peakValue: 0 };
-  values.forEach((v, i) => {
-    peak = Math.max(peak, v);
-    if (peak - v > worst.drop) {
-      worst = { drop: peak - v, at: i, peakValue: peak };
-    }
-  });
-  const worstValue = values[worst.at] ?? 0;
+  const s = scaleFor(values, true);
+  const worst = worstDrawdown(values);
+  const bottom = values[worst.at] ?? 0;
   return (
-    <svg
-      className="w-chart"
-      viewBox={`0 0 ${String(W)} ${String(height)}`}
-      role="img"
-      aria-label={label}
-    >
-      <title>{label}</title>
-      <GridLines s={s} height={height} digits={1} decimalComma />
-      <line
-        x1={PAD.left}
-        x2={W - PAD.right}
-        y1={s.y(0)}
-        y2={s.y(0)}
-        stroke="var(--b-text-muted)"
-        strokeDasharray="2 4"
-      />
-      <path d={segments(values, s)} fill="none" stroke="var(--b-chart-line)" strokeWidth="1.6" />
-      <line
-        x1={s.x(worst.at)}
-        x2={s.x(worst.at)}
-        y1={s.y(worst.peakValue)}
-        y2={s.y(worstValue)}
-        stroke="var(--b-tone-rojo-fg)"
-        strokeWidth="2"
-      />
-      <text
-        x={s.x(worst.at) + 6}
-        y={s.y(worstValue) + 14}
-        fill="var(--b-tone-rojo-fg)"
-        fontSize="11"
-        fontWeight="600"
+    <div className="w-chart" role="img" aria-label={label}>
+      <Frame
+        s={s}
+        height={height}
+        format={(v) => comma(v, 1)}
+        timeLabels={timeLabels}
+        overlay={
+          <span
+            className="w-chart__note w-chart__note--loss"
+            style={{ left: pctX(s.x(worst.at)), top: pctY(s.y(bottom)) }}
+          >
+            Peor caída: −{comma(worst.drop, 1)}&nbsp;pts
+          </span>
+        }
       >
-        Peor caída: −{worst.drop.toFixed(1).replace('.', ',')} pts
-      </text>
-    </svg>
+        <line
+          x1={0}
+          x2={W}
+          y1={s.y(0)}
+          y2={s.y(0)}
+          stroke="var(--b-text-muted)"
+          strokeDasharray="2 4"
+          vectorEffect="non-scaling-stroke"
+        />
+        <path
+          d={segments(values, s)}
+          fill="none"
+          stroke="var(--b-chart-line)"
+          strokeWidth="1.75"
+          vectorEffect="non-scaling-stroke"
+        />
+        <line
+          x1={s.x(worst.at)}
+          x2={s.x(worst.at)}
+          y1={s.y(worst.peak)}
+          y2={s.y(bottom)}
+          stroke="var(--b-tone-rojo-fg)"
+          strokeWidth="2"
+          vectorEffect="non-scaling-stroke"
+        />
+      </Frame>
+    </div>
   );
 }

@@ -1,7 +1,7 @@
 import { Badge, Card, SeverityTag } from '@buoh/design-system/react';
 import type { Metadata } from 'next';
 import { PageHeader } from '../../src/components/AppShell';
-import { DATASETS, INCIDENT_LABELS, INCIDENTS } from '../../src/fixtures';
+import { DATASETS, INCIDENT_LABELS, INCIDENT_STATUS, INCIDENTS } from '../../src/fixtures';
 import { formatUtc } from '../../src/format';
 
 export const metadata: Metadata = { title: 'Datos' };
@@ -12,7 +12,7 @@ export default function DatosPage() {
       <PageHeader
         eyebrow="Datos"
         title="¿Puedo confiar en estos datos?"
-        summary="Cada lote publicado tiene un identificador que permite reconstruirlo igual. Las incidencias de calidad nunca se borran: se abren y se resuelven con eventos nuevos."
+        summary="Cada lote publicado tiene un identificador que permite reconstruirlo igual. Las incidencias de calidad nunca se borran; las condiciones, como un hueco o una conexión perdida, se abren y se resuelven con eventos nuevos."
       />
 
       <Card title="Datasets publicados" subtitle="Inmutables y reproducibles" headingLevel={2}>
@@ -85,8 +85,11 @@ export default function DatosPage() {
                   <td>{incident.source}</td>
                   <td className="b-num w-small">{formatUtc(incident.whenUtc)}</td>
                   <td>
-                    <Badge tone={incident.status === 'abierta' ? 'naranja' : 'niebla'}>
-                      {incident.status === 'abierta' ? 'Abierta' : 'Resuelta'}
+                    <Badge
+                      tone={INCIDENT_STATUS[incident.status].tone}
+                      icon={INCIDENT_STATUS[incident.status].icon}
+                    >
+                      {INCIDENT_STATUS[incident.status].label}
                     </Badge>
                   </td>
                   <td className="b-secondary w-small">{incident.detail}</td>

@@ -3,7 +3,14 @@ import type { Metadata } from 'next';
 import { PageHeader } from '../../src/components/AppShell';
 import { PriceChart } from '../../src/components/Charts';
 import { DataMeta } from '../../src/components/Pieces';
-import { INSTRUMENTS, PRICE_GAPS, priceSeries, SOURCES } from '../../src/fixtures';
+import {
+  INSTRUMENTS,
+  instrumentsOf,
+  PRICE_GAPS,
+  PRICE_TIME_LABELS,
+  priceSeries,
+  SOURCES,
+} from '../../src/fixtures';
 
 export const metadata: Metadata = { title: 'Mercados' };
 
@@ -36,8 +43,8 @@ export default function MercadosPage() {
             ],
             ['Fuente', 'Deriv · WebSocket público'],
             ['Zona horaria', 'UTC'],
-            ['Intervalo', '1 tick por segundo'],
-            ['Frescura', 'hace 1 s'],
+            ['Intervalo', '1 tick cada 2\u00a0s'],
+            ['Frescura', 'hace 1\u00a0s'],
             [
               'Calidad',
               <Badge key="q" tone="naranja" icon="alertTriangle">
@@ -49,10 +56,12 @@ export default function MercadosPage() {
         <PriceChart
           values={priceSeries()}
           gaps={PRICE_GAPS}
-          label="Precio ficticio de Volatility 100 durante 180 segundos, con un hueco de 13 segundos marcado"
+          timeLabels={PRICE_TIME_LABELS}
+          label="Precio ficticio de Volatility 100 entre las 14:29:06 y las 14:32:04 UTC, con un hueco de 6 ticks entre las 14:30:00 y las 14:30:10"
         />
         <p className="b-muted w-small">
-          El hueco no se rellena ni se suaviza: se dibuja como un corte y conserva su motivo.
+          El hueco no se rellena ni se suaviza: se dibuja como un corte y conserva su motivo. Lo
+          causó la conexión perdida de 14:29:59 a 14:30:11.
         </p>
       </Card>
 
@@ -82,7 +91,9 @@ export default function MercadosPage() {
                   <td>{instrument.freshness}</td>
                   <td>{instrument.schedule}</td>
                   <td>
-                    <Badge tone={instrument.quality.tone}>{instrument.quality.label}</Badge>
+                    <Badge tone={instrument.quality.tone} icon={instrument.quality.icon}>
+                      {instrument.quality.label}
+                    </Badge>
                   </td>
                 </tr>
               ))}
@@ -97,12 +108,15 @@ export default function MercadosPage() {
             <div className="w-stack">
               <HealthBadge health={source.health} showDescription />
               <p className="b-secondary w-small">
-                {String(source.instruments)} instrumentos en el catálogo.
+                {String(instrumentsOf(source.name))}{' '}
+                {instrumentsOf(source.name) === 1 ? 'instrumento' : 'instrumentos'} en el catálogo.
               </p>
               {source.phase === '1' ? null : (
                 <p className="w-row b-muted w-small">
-                  <Badge tone="niebla">Fase {source.phase}</Badge> La captura real de MetaTrader 5
-                  llega en esa fase.
+                  <Badge tone="niebla" icon="clock">
+                    Fase {source.phase}
+                  </Badge>
+                  La captura real de MetaTrader 5 llega en esa fase.
                 </p>
               )}
             </div>

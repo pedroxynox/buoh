@@ -12,9 +12,12 @@ const STEPS = [
   ],
   [
     'Pasarela',
-    'Solo execution-gateway, en el servidor, puede enviar al bróker. Se registra antes de enviar.',
+    'Solo execution-gateway, en el servidor, decide enviar una orden. Se registra antes de enviarla.',
   ],
-  ['Bróker', 'Deriv o el puente MT5 reciben la orden aprobada y responden.'],
+  [
+    'Envío al bróker',
+    'La pasarela envía a Deriv. En MetaTrader 5, el puente ejecuta la intención aprobada en el servidor del bróker (Deriv MT5 o Vantage).',
+  ],
   [
     'Reconciliación',
     'Se compara con el estado del bróker. Si la respuesta es ambigua, no se reintenta a ciegas.',

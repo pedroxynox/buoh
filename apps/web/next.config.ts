@@ -10,6 +10,8 @@ const config: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   images: { unoptimized: true },
+  // Identificador fijo: dos exportaciones del mismo commit producen las mismas rutas.
+  generateBuildId: () => Promise.resolve('buoh-prototipo'),
 };
 
 export default config;

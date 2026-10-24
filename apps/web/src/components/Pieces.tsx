@@ -1,3 +1,4 @@
+import type { IconName } from '@buoh/design-system';
 import { Badge, Icon, ModeBadge } from '@buoh/design-system/react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
@@ -19,11 +20,14 @@ export function DataMeta({ items }: { readonly items: readonly (readonly [string
 }
 
 const SIGNAL_STATUS: Readonly<
-  Record<SignalRow['status'], { tone: 'aurora' | 'niebla' | 'naranja'; label: string }>
+  Record<
+    SignalRow['status'],
+    { tone: 'aurora' | 'niebla' | 'naranja'; label: string; icon: IconName }
+  >
 > = {
-  vigente: { tone: 'aurora', label: 'Vigente' },
-  vencida: { tone: 'niebla', label: 'Vencida' },
-  descartada: { tone: 'naranja', label: 'Descartada por calidad' },
+  vigente: { tone: 'aurora', label: 'Vigente', icon: 'clock' },
+  vencida: { tone: 'niebla', label: 'Vencida', icon: 'clock' },
+  descartada: { tone: 'naranja', label: 'Descartada por calidad', icon: 'alertTriangle' },
 };
 
 /** Tarjeta de señal: estrategia, versión, condición, tiempos, modo, calidad y evidencia (concepto §4). */
@@ -69,7 +73,9 @@ export function SignalCard({ signal }: { readonly signal: SignalRow }) {
         <div>
           <dt>Estado</dt>
           <dd>
-            <Badge tone={status.tone}>{status.label}</Badge>
+            <Badge tone={status.tone} icon={status.icon}>
+              {status.label}
+            </Badge>
           </dd>
         </div>
       </dl>

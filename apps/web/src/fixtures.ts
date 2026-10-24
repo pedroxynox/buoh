@@ -1,6 +1,15 @@
 /**
  * Datos ficticios del prototipo (ADR-0008 §2). Están fijados aquí: no se generan al azar,
  * no se leen relojes reales y no representan resultados de ninguna estrategia real.
+ *
+ * La historia que cuentan, al 20 oct 2026, 14:32:05 UTC:
+ * - Deriv perdió la conexión a las 14:29:59 y volvió a las 14:30:11. La historia recuperó los
+ *   ticks de R_75 y 1HZ100V, pero no los de R_100: queda un hueco sin resolver y Deriv está
+ *   `degraded`, igual que la salud global (contratos de dominio, «Salud derivada»).
+ * - «Impulso de tres ticks v1» opera sobre R_100 y se pausó sola al abrirse el hueco.
+ * - «Ruptura de rango v2» opera sobre R_75, pasó su validación y está en shadow desde su aprobación.
+ * - «Retorno a la media corta v3» falló fuera de muestra y está retirada: es el ejemplo honesto
+ *   del laboratorio.
  */
 import type {
   ExecutionMode,
@@ -8,16 +17,14 @@ import type {
   ServiceHealth,
   StrategyLifecycle,
 } from '@buoh/contracts';
-import type { Severity } from '@buoh/design-system';
+import type { IconName, Severity } from '@buoh/design-system';
 import type { PerformanceContext } from '@buoh/design-system/react';
+
+/** Espacio que no se corta entre un número y su unidad. */
+const NB = '\u00a0';
 
 /** Instante de referencia de toda la demostración. */
 export const DEMO_NOW_UTC = '2026-10-20T14:32:05.000Z';
-
-export const GLOBAL_STATUS: { readonly mode: ExecutionMode; readonly health: ServiceHealth } = {
-  mode: 'shadow',
-  health: 'healthy',
-};
 
 export interface SourceStatus {
   readonly id: string;
@@ -25,7 +32,6 @@ export interface SourceStatus {
   readonly kind: string;
   readonly phase: string;
   readonly health: ServiceHealth;
-  readonly instruments: number;
   readonly lastDataUtc: string;
   readonly note: string;
 }
@@ -36,32 +42,78 @@ export const SOURCES: readonly SourceStatus[] = [
     name: 'Deriv',
     kind: 'WebSocket público, sin credenciales',
     phase: '1',
-    health: 'healthy',
-    instruments: 4,
+    health: 'degraded',
     lastDataUtc: '2026-10-20T14:32:04.000Z',
-    note: 'Catálogo versionado y ticks con frames crudos preservados.',
+    note: 'Hueco sin resolver en R_100 desde las 14:30:12. R_75 y 1HZ100V se recuperaron con la historia.',
   },
   {
     id: 'deriv-mt5',
     name: 'Deriv MT5',
     kind: 'Puente MQL5 en la terminal, contraseña de inversor',
     phase: '1B',
-    health: 'recovering',
-    instruments: 3,
-    lastDataUtc: '2026-10-20T14:31:22.000Z',
-    note: 'Reconectando: se comprueba la continuidad antes de volver a saludable.',
+    health: 'healthy',
+    lastDataUtc: '2026-10-20T14:32:04.000Z',
+    note: 'Puente conectado al servidor demo. Precios de compra y venta.',
   },
   {
     id: 'vantage',
     name: 'Vantage',
     kind: 'Puente MQL5 en la terminal, contraseña de inversor',
     phase: '1B',
-    health: 'paused',
-    instruments: 2,
-    lastDataUtc: '2026-10-18T21:00:00.000Z',
-    note: 'En pausa a pedido: mercado de forex cerrado el fin de semana.',
+    health: 'healthy',
+    lastDataUtc: '2026-10-20T14:32:04.000Z',
+    note: 'Puente conectado al servidor demo. Mercado de forex abierto.',
   },
 ];
+
+/** Salud global: con una sola fuente fuera de `healthy`, es la de esa fuente (contratos, «Salud derivada»). */
+export const GLOBAL_STATUS: { readonly mode: ExecutionMode; readonly health: ServiceHealth } = {
+  mode: 'shadow',
+  health: 'degraded',
+};
+
+/** R_100 avanza un tick cada 2 s; la serie cubre los últimos 3 minutos. */
+export const R100_TICK_SECONDS = 2;
+export const R100_SERIES_START_UTC = '2026-10-20T14:29:06.000Z';
+const R100_TICKS = 90;
+
+/** Hora UTC del tick `index` de la serie de R_100. */
+export function r100TickTimeUtc(index: number): string {
+  return new Date(
+    Date.parse(R100_SERIES_START_UTC) + index * R100_TICK_SECONDS * 1000,
+  ).toISOString();
+}
+
+/** Ticks que faltan: índices `start` a `end - 1` (14:30:00 a 14:30:10). */
+export const PRICE_GAPS: readonly {
+  readonly start: number;
+  readonly end: number;
+  readonly label: string;
+}[] = [{ start: 27, end: 33, label: `Hueco: 6 ticks (12${NB}s) sin recuperar` }];
+
+/** Serie de precios calculada con una fórmula fija (sin aleatoriedad). `null` marca un tick que falta. */
+export function priceSeries(): readonly (number | null)[] {
+  const values: (number | null)[] = [];
+  for (let i = 0; i < R100_TICKS; i += 1) {
+    const missing = PRICE_GAPS.some((gap) => i >= gap.start && i < gap.end);
+    const value = 1040 + 3.1 * Math.sin(i / 5.5) + 1.4 * Math.sin(i / 1.65) + 0.024 * i;
+    values.push(missing ? null : Math.round(value * 100) / 100);
+  }
+  return values;
+}
+
+export const PRICE_TIME_LABELS = [0, 30, 60, R100_TICKS - 1].map((index) => ({
+  index,
+  label: r100TickTimeUtc(index).slice(11, 19),
+}));
+
+const R100_LAST = priceSeries().at(-1) ?? 0;
+
+export interface QualityBadge {
+  readonly tone: 'aurora' | 'naranja' | 'cielo';
+  readonly label: string;
+  readonly icon: IconName;
+}
 
 export interface Instrument {
   readonly symbol: string;
@@ -71,81 +123,79 @@ export interface Instrument {
   readonly lastPrice: string;
   readonly freshness: string;
   readonly schedule: string;
-  readonly quality: { readonly tone: 'aurora' | 'naranja' | 'rojo'; readonly label: string };
+  readonly quality: QualityBadge;
 }
+
+const CLEAN: QualityBadge = { tone: 'aurora', label: 'Sin incidencias', icon: 'check' };
 
 export const INSTRUMENTS: readonly Instrument[] = [
   {
     symbol: 'R_100',
     name: 'Volatility 100 Index (ejemplo)',
     source: 'Deriv',
-    cadence: '1 tick/s',
-    lastPrice: '1042.87',
-    freshness: 'hace 1 s',
+    cadence: `1 tick cada 2${NB}s`,
+    lastPrice: R100_LAST.toFixed(2),
+    freshness: `hace 1${NB}s`,
     schedule: '24/7',
-    quality: { tone: 'naranja', label: '1 hueco' },
+    quality: { tone: 'naranja', label: '1 hueco sin resolver', icon: 'gap' },
   },
   {
     symbol: 'R_75',
     name: 'Volatility 75 Index (ejemplo)',
     source: 'Deriv',
-    cadence: '1 tick/s',
+    cadence: `1 tick cada 2${NB}s`,
     lastPrice: '38214.5531',
-    freshness: 'hace 1 s',
+    freshness: `hace 1${NB}s`,
     schedule: '24/7',
-    quality: { tone: 'aurora', label: 'Sin incidencias' },
+    quality: { tone: 'cielo', label: 'Recuperado con la historia', icon: 'rotate' },
   },
   {
     symbol: '1HZ100V',
     name: 'Volatility 100 (1s) Index (ejemplo)',
     source: 'Deriv',
-    cadence: '1 tick/s',
+    cadence: `1 tick por segundo`,
     lastPrice: '1689.04',
-    freshness: 'hace 2 s',
+    freshness: `hace 1${NB}s`,
     schedule: '24/7',
-    quality: { tone: 'aurora', label: 'Sin incidencias' },
+    quality: { tone: 'cielo', label: 'Recuperado con la historia', icon: 'rotate' },
   },
   {
     symbol: 'Volatility 100 Index',
     name: 'Volatility 100 en MT5 (ejemplo)',
     source: 'Deriv MT5',
     cadence: 'compra y venta',
-    lastPrice: '1042.91 / 1043.05',
-    freshness: 'hace 43 s',
+    lastPrice: `1042.91${NB}/ 1043.05`,
+    freshness: `hace 1${NB}s`,
     schedule: '24/7',
-    quality: { tone: 'naranja', label: 'Reconectando' },
+    quality: CLEAN,
   },
   {
     symbol: 'EURUSD',
     name: 'Euro / Dólar (ejemplo)',
     source: 'Vantage',
     cadence: 'compra y venta',
-    lastPrice: '1.08412 / 1.08419',
-    freshness: 'hace 1 d 17 h',
+    lastPrice: `1.08412${NB}/ 1.08419`,
+    freshness: `hace 1${NB}s`,
     schedule: 'lun–vie',
-    quality: { tone: 'rojo', label: 'Fuente en pausa' },
+    quality: CLEAN,
   },
 ];
 
-/** Serie de precios calculada con una fórmula fija (sin aleatoriedad). `null` marca un hueco. */
-export function priceSeries(): readonly (number | null)[] {
-  const values: (number | null)[] = [];
-  for (let i = 0; i < 180; i += 1) {
-    const value = 1040 + 3.1 * Math.sin(i / 11) + 1.4 * Math.sin(i / 3.3) + 0.012 * i;
-    values.push(i >= 118 && i < 131 ? null : Math.round(value * 100) / 100);
-  }
-  return values;
+export function instrumentsOf(sourceName: string): number {
+  return INSTRUMENTS.filter((instrument) => instrument.source === sourceName).length;
 }
 
-export const PRICE_GAPS = [{ start: 118, end: 131, label: 'Hueco de 13 s · conexión perdida' }];
-
+/**
+ * `abierta` y `resuelta` son condiciones (se abren y cierran con eventos);
+ * `registrada` es una incidencia puntual, que no tiene cierre (contratos de dominio).
+ */
 export interface IncidentRow {
   readonly type: QualityIncidentType;
   readonly severity: Severity;
   readonly symbol: string;
   readonly source: string;
   readonly whenUtc: string;
-  readonly status: 'abierta' | 'resuelta';
+  readonly status: 'abierta' | 'resuelta' | 'registrada';
   readonly detail: string;
 }
 
@@ -161,24 +211,32 @@ export const INCIDENT_LABELS: Readonly<Record<QualityIncidentType, string>> = {
   source_limit_exceeded: 'Límite de fuente superado',
 };
 
+export const INCIDENT_STATUS: Readonly<
+  Record<IncidentRow['status'], { tone: 'naranja' | 'niebla'; label: string; icon: IconName }>
+> = {
+  abierta: { tone: 'naranja', label: 'Abierta', icon: 'alertTriangle' },
+  resuelta: { tone: 'niebla', label: 'Resuelta', icon: 'check' },
+  registrada: { tone: 'niebla', label: 'Registrada', icon: 'document' },
+};
+
 export const INCIDENTS: readonly IncidentRow[] = [
-  {
-    type: 'connection_lost',
-    severity: 'warning',
-    symbol: 'R_100',
-    source: 'Deriv',
-    whenUtc: '2026-10-20T14:29:58.000Z',
-    status: 'resuelta',
-    detail: 'Cerrada por el servidor; reconexión en 4 s.',
-  },
   {
     type: 'event_gap_unresolved',
     severity: 'error',
     symbol: 'R_100',
     source: 'Deriv',
-    whenUtc: '2026-10-20T14:30:11.000Z',
+    whenUtc: '2026-10-20T14:30:12.000Z',
     status: 'abierta',
-    detail: '13 s sin ticks que la historia no pudo recuperar.',
+    detail: `Faltan 6 ticks (14:30:00 a 14:30:10) que la historia no pudo recuperar.`,
+  },
+  {
+    type: 'connection_lost',
+    severity: 'warning',
+    symbol: 'toda la conexión',
+    source: 'Deriv',
+    whenUtc: '2026-10-20T14:29:59.000Z',
+    status: 'resuelta',
+    detail: 'Cerrada por el servidor; reconexión a las 14:30:11 tras 3 intentos.',
   },
   {
     type: 'delivery_delayed',
@@ -186,8 +244,8 @@ export const INCIDENTS: readonly IncidentRow[] = [
     symbol: '1HZ100V',
     source: 'Deriv',
     whenUtc: '2026-10-20T13:02:40.000Z',
-    status: 'resuelta',
-    detail: 'Tick recibido 2,4 s después de su hora de fuente.',
+    status: 'registrada',
+    detail: `Tick recibido 2,4${NB}s después de su hora de fuente.`,
   },
   {
     type: 'invalid_source_frame',
@@ -195,7 +253,7 @@ export const INCIDENTS: readonly IncidentRow[] = [
     symbol: 'sin símbolo',
     source: 'Deriv',
     whenUtc: '2026-10-20T11:47:03.000Z',
-    status: 'resuelta',
+    status: 'registrada',
     detail: 'JSON incompleto; el frame crudo se conserva.',
   },
 ];
@@ -210,75 +268,91 @@ export interface DatasetRow {
   readonly verified: boolean;
 }
 
+/** Deriv: R_100 y R_75 dan 43 200 ticks al día y 1HZ100V 86 400 (172 800 en total). */
 export const DATASETS: readonly DatasetRow[] = [
   {
     id: 'sha256:6f2c…a91d',
     source: 'Deriv',
-    period: '19 oct 2026, 00:00 – 24:00 UTC',
-    ticks: '345 512',
-    incidents: 3,
+    period: `19 oct 2026, 00:00 – 24:00${NB}UTC`,
+    ticks: `172${NB}788`,
+    incidents: 2,
     rules: '2.0.0',
     verified: true,
   },
   {
     id: 'sha256:b07e…44c2',
     source: 'Deriv',
-    period: '18 oct 2026, 00:00 – 24:00 UTC',
-    ticks: '345 588',
-    incidents: 1,
+    period: `18 oct 2026, 00:00 – 24:00${NB}UTC`,
+    ticks: `172${NB}800`,
+    incidents: 0,
     rules: '2.0.0',
     verified: true,
   },
   {
     id: 'sha256:19aa…e310',
     source: 'Deriv',
-    period: '17 oct 2026, 00:00 – 24:00 UTC',
-    ticks: '344 901',
-    incidents: 6,
+    period: `17 oct 2026, 00:00 – 24:00${NB}UTC`,
+    ticks: `172${NB}731`,
+    incidents: 4,
     rules: '2.0.0',
     verified: false,
   },
 ];
 
 export interface StrategyRow {
+  readonly id: string;
   readonly name: string;
   readonly version: string;
   readonly lifecycle: StrategyLifecycle;
   readonly symbol: string;
   readonly hypothesis: string;
+  /** Aprobación para shadow; `null` si nunca pasó la validación. */
+  readonly approvedForShadowUtc: string | null;
+  readonly note: string;
 }
 
 export const STRATEGIES: readonly StrategyRow[] = [
   {
+    id: 'ruptura-v2',
+    name: 'Ruptura de rango',
+    version: 'v2',
+    lifecycle: 'active',
+    symbol: 'R_75',
+    hypothesis: `Una salida del rango de 60${NB}s continúa durante los siguientes 10 ticks.`,
+    approvedForShadowUtc: '2026-10-16T09:00:00.000Z',
+    note: 'En shadow desde su aprobación.',
+  },
+  {
+    id: 'impulso-v1',
+    name: 'Impulso de tres ticks',
+    version: 'v1',
+    lifecycle: 'paused',
+    symbol: 'R_100',
+    hypothesis: 'Tras tres ticks en la misma dirección, el cuarto sigue esa dirección.',
+    approvedForShadowUtc: '2026-10-16T09:00:00.000Z',
+    note: 'En pausa automática desde las 14:30:12 por datos degradados en R_100.',
+  },
+  {
+    id: 'retorno-v3',
     name: 'Retorno a la media corta',
     version: 'v3',
-    lifecycle: 'active',
+    lifecycle: 'retired',
     symbol: 'R_100',
     hypothesis:
       'Tras tres ticks en la misma dirección, el siguiente revierte más de la mitad de las veces.',
-  },
-  {
-    name: 'Ruptura de rango',
-    version: 'v1',
-    lifecycle: 'reviewed',
-    symbol: 'R_75',
-    hypothesis: 'Una salida del rango de 60 s continúa durante los siguientes 10 ticks.',
-  },
-  {
-    name: 'Cruce de medias 20/50',
-    version: 'v2',
-    lifecycle: 'retired',
-    symbol: '1HZ100V',
-    hypothesis: 'Descartada: la ventaja desapareció fuera de muestra.',
+    approvedForShadowUtc: null,
+    note: 'Retirada: perdió en la prueba fuera de muestra.',
   },
 ];
 
-export const LIFECYCLE_LABELS: Readonly<Record<StrategyLifecycle, string>> = {
-  draft: 'Borrador',
-  reviewed: 'Revisada',
-  active: 'Activa',
-  paused: 'En pausa',
-  retired: 'Retirada',
+export const LIFECYCLE_PRESENTATION: Readonly<
+  Record<StrategyLifecycle, { label: string; tone: 'niebla' | 'cielo' | 'aurora'; icon: IconName }>
+> = {
+  draft: { label: 'Borrador', tone: 'niebla', icon: 'document' },
+  reviewed: { label: 'Revisada', tone: 'cielo', icon: 'eye' },
+  active: { label: 'Activa', tone: 'aurora', icon: 'radar' },
+  paused: { label: 'En pausa', tone: 'niebla', icon: 'pauseCircle' },
+  retired: { label: 'Retirada', tone: 'niebla', icon: 'archive' },
 };
 
 export interface SampleSplit {
@@ -286,56 +360,73 @@ export interface SampleSplit {
   readonly period: string;
   readonly sample: string;
   readonly result: string;
+  readonly losses: string;
   readonly drawdown: string;
 }
 
-/** Ejemplo honesto: la ventaja de entrenamiento se reduce fuera de muestra. */
+/** Ejemplo honesto: la ventaja de entrenamiento se reduce y se pierde fuera de muestra. */
 export const BACKTEST_SPLITS: readonly SampleSplit[] = [
   {
     name: 'Entrenamiento',
     period: '1 jul – 31 ago 2026',
-    sample: '4 210 operaciones',
-    result: '+3,2 %',
-    drawdown: '−2,1 %',
+    sample: `4${NB}210 operaciones`,
+    result: `+3,2${NB}%`,
+    losses: `1${NB}978 (47,0${NB}%)`,
+    drawdown: `−2,1${NB}%`,
   },
   {
     name: 'Validación',
     period: '1 – 30 sep 2026',
-    sample: '1 980 operaciones',
-    result: '+0,9 %',
-    drawdown: '−2,8 %',
+    sample: `1${NB}980 operaciones`,
+    result: `+0,9${NB}%`,
+    losses: `951 (48,0${NB}%)`,
+    drawdown: `−2,8${NB}%`,
   },
   {
     name: 'Prueba fuera de muestra',
     period: '1 – 15 oct 2026',
-    sample: '1 015 operaciones',
-    result: '−0,4 %',
-    drawdown: '−3,6 %',
+    sample: `1${NB}015 operaciones`,
+    result: `−0,4${NB}% (pérdida)`,
+    losses: `493 (48,6${NB}%)`,
+    drawdown: `−3,6${NB}%`,
   },
 ];
+
+const BACKTEST_COSTS = `Pago de Deriv y 300${NB}ms de latencia supuestos`;
+const BACKTEST_LIMITS =
+  'Datos de un solo índice sintético; sin efecto de slippage; resultados pasados no anticipan resultados futuros.';
+
+/** Contexto común de la tabla de tramos: origen, costes, versión y limitaciones. */
+export const SPLITS_CONTEXT = {
+  source: 'backtest',
+  costs: BACKTEST_COSTS,
+  version: 'Retorno a la media corta v3',
+  limitations: BACKTEST_LIMITS,
+} as const;
 
 export const BACKTEST_CONTEXT: PerformanceContext = {
   source: 'backtest',
   period: '1 – 15 oct 2026 (fuera de muestra)',
-  sample: '1 015 operaciones hipotéticas',
-  costs: 'Pago de Deriv y 300 ms de latencia supuestos',
-  losses: '493 operaciones perdedoras (48,6 %)',
-  drawdown: '−3,6 %',
+  sample: `1${NB}015 operaciones hipotéticas`,
+  costs: BACKTEST_COSTS,
+  losses: `493 operaciones perdedoras (48,6${NB}%)`,
+  drawdown: `−3,6${NB}%`,
   version: 'Retorno a la media corta v3',
-  limitations:
-    'Datos de un solo índice sintético; sin efecto de slippage; resultados pasados no anticipan resultados futuros.',
+  limitations: BACKTEST_LIMITS,
 };
+
+/** El período shadow empieza con la aprobación de la estrategia. */
+export const SHADOW_PERIOD_START_UTC = '2026-10-16T09:00:00.000Z';
 
 export const SHADOW_CONTEXT: PerformanceContext = {
   source: 'shadow',
-  period: '14 – 20 oct 2026',
-  sample: '212 señales hipotéticas',
+  period: `16 oct, 09:00 – 20 oct, 14:32${NB}UTC`,
+  sample: '148 señales hipotéticas',
   costs: 'Pago de Deriv supuesto; sin comisiones extra',
-  losses: '109 señales perdedoras (51,4 %)',
-  drawdown: '−1,9 %',
-  version: 'Retorno a la media corta v3',
-  limitations:
-    'Ninguna orden se envió; 2 señales se descartaron por datos degradados y no cuentan.',
+  losses: `77 señales perdedoras (52,0${NB}%)`,
+  drawdown: `−1,2${NB}%`,
+  version: 'Ruptura de rango v2',
+  limitations: 'Ninguna orden se envió; cuatro días de muestra no bastan para sacar conclusiones.',
 };
 
 /**
@@ -352,8 +443,15 @@ export function equitySeries(): readonly number[] {
   return values;
 }
 
+export const EQUITY_TIME_LABELS = [
+  { index: 0, label: '1 oct' },
+  { index: 60, label: '8 oct' },
+  { index: 120, label: '15 oct' },
+];
+
 export interface SignalRow {
   readonly id: string;
+  readonly strategyId: string;
   readonly strategy: string;
   readonly version: string;
   readonly symbol: string;
@@ -367,48 +465,52 @@ export interface SignalRow {
   readonly evidenceHref: string;
 }
 
+/** De la más reciente a la más antigua. */
 export const SIGNALS: readonly SignalRow[] = [
   {
-    id: 'sig-0193',
-    strategy: 'Retorno a la media corta',
-    version: 'v3',
-    symbol: 'R_100',
-    condition: 'Tres ticks seguidos al alza',
-    direction: 'Hipótesis: baja en los próximos 5 ticks',
-    issuedUtc: '2026-10-20T14:31:48.000Z',
-    expiresUtc: '2026-10-20T14:31:53.000Z',
-    mode: 'shadow',
-    quality: 'completa',
-    status: 'vencida',
-    evidenceHref: '/laboratorio/',
-  },
-  {
-    id: 'sig-0194',
-    strategy: 'Retorno a la media corta',
-    version: 'v3',
-    symbol: 'R_100',
-    condition: 'Tres ticks seguidos a la baja',
-    direction: 'Hipótesis: sube en los próximos 5 ticks',
-    issuedUtc: '2026-10-20T14:32:02.000Z',
-    expiresUtc: '2026-10-20T14:32:07.000Z',
+    id: 'sig-0201',
+    strategyId: 'ruptura-v2',
+    strategy: 'Ruptura de rango',
+    version: 'v2',
+    symbol: 'R_75',
+    condition: `Salida del rango de 60${NB}s por arriba`,
+    direction: 'Hipótesis: sigue subiendo durante los próximos 10 ticks',
+    issuedUtc: '2026-10-20T14:31:58.000Z',
+    expiresUtc: '2026-10-20T14:32:18.000Z',
     mode: 'shadow',
     quality: 'completa',
     status: 'vigente',
     evidenceHref: '/laboratorio/',
   },
   {
-    id: 'sig-0192',
-    strategy: 'Retorno a la media corta',
-    version: 'v3',
+    id: 'sig-0200',
+    strategyId: 'impulso-v1',
+    strategy: 'Impulso de tres ticks',
+    version: 'v1',
     symbol: 'R_100',
     condition: 'Tres ticks seguidos al alza',
-    direction: 'Hipótesis: baja en los próximos 5 ticks',
-    issuedUtc: '2026-10-20T14:30:15.000Z',
-    expiresUtc: '2026-10-20T14:30:20.000Z',
+    direction: 'Hipótesis: el próximo tick también sube',
+    issuedUtc: '2026-10-20T14:29:58.000Z',
+    expiresUtc: '2026-10-20T14:30:00.000Z',
     mode: 'shadow',
     quality: 'degradada',
     status: 'descartada',
     evidenceHref: '/datos/',
+  },
+  {
+    id: 'sig-0199',
+    strategyId: 'ruptura-v2',
+    strategy: 'Ruptura de rango',
+    version: 'v2',
+    symbol: 'R_75',
+    condition: `Salida del rango de 60${NB}s por abajo`,
+    direction: 'Hipótesis: sigue bajando durante los próximos 10 ticks',
+    issuedUtc: '2026-10-20T14:27:30.000Z',
+    expiresUtc: '2026-10-20T14:27:50.000Z',
+    mode: 'shadow',
+    quality: 'completa',
+    status: 'vencida',
+    evidenceHref: '/laboratorio/',
   },
 ];
 
@@ -421,7 +523,13 @@ export interface AuditRow {
 
 export const AUDIT: readonly AuditRow[] = [
   {
-    whenUtc: '2026-10-20T14:30:11.000Z',
+    whenUtc: '2026-10-20T14:30:12.000Z',
+    actor: 'Sistema',
+    event: 'Pausa automática: Impulso de tres ticks v1 (datos degradados en R_100)',
+    reference: 'str-impulso-v1',
+  },
+  {
+    whenUtc: '2026-10-20T14:30:12.000Z',
     actor: 'Sistema',
     event: 'Incidencia abierta: hueco sin resolver en R_100',
     reference: 'inc-7f31',
@@ -433,15 +541,15 @@ export const AUDIT: readonly AuditRow[] = [
     reference: 'sha256:6f2c…a91d',
   },
   {
-    whenUtc: '2026-10-19T18:20:44.000Z',
+    whenUtc: '2026-10-16T09:00:00.000Z',
     actor: 'Propietario',
-    event: 'Versión aprobada para shadow: Retorno a la media corta v3',
-    reference: 'str-v3',
+    event: 'Aprobadas para shadow: Ruptura de rango v2 e Impulso de tres ticks v1',
+    reference: 'str-aprob-1016',
   },
   {
-    whenUtc: '2026-10-19T18:02:10.000Z',
+    whenUtc: '2026-10-16T08:40:00.000Z',
     actor: 'Propietario',
-    event: 'Estrategia retirada: Cruce de medias 20/50 v2',
-    reference: 'str-c2',
+    event: 'Retirada: Retorno a la media corta v3 (perdió fuera de muestra)',
+    reference: 'str-retorno-v3',
   },
 ];

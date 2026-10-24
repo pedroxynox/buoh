@@ -1,24 +1,20 @@
-import { Badge, Card, MetricWithContext } from '@buoh/design-system/react';
+import { Badge, Card, EvidenceSourceBadge, MetricWithContext } from '@buoh/design-system/react';
 import type { Metadata } from 'next';
 import { PageHeader } from '../../src/components/AppShell';
 import { EquityChart } from '../../src/components/Charts';
+import { DataMeta } from '../../src/components/Pieces';
 import {
   BACKTEST_CONTEXT,
   BACKTEST_SPLITS,
+  EQUITY_TIME_LABELS,
   equitySeries,
-  LIFECYCLE_LABELS,
+  LIFECYCLE_PRESENTATION,
+  SPLITS_CONTEXT,
   STRATEGIES,
 } from '../../src/fixtures';
+import { formatUtc } from '../../src/format';
 
 export const metadata: Metadata = { title: 'Laboratorio' };
-
-const LIFECYCLE_TONE = {
-  draft: 'niebla',
-  reviewed: 'cielo',
-  active: 'aurora',
-  paused: 'niebla',
-  retired: 'niebla',
-} as const;
 
 export default function LaboratorioPage() {
   return (
@@ -26,7 +22,7 @@ export default function LaboratorioPage() {
       <PageHeader
         eyebrow="Laboratorio"
         title="¿Esta estrategia tiene evidencia?"
-        summary="Cada estrategia es una versión inmutable. Se prueba con datos pasados separados en entrenamiento, validación y prueba fuera de muestra, con costes declarados."
+        summary="Cada estrategia es una versión inmutable. Se prueba con datos pasados separados en entrenamiento, validación y prueba fuera de muestra, con costes declarados. Solo una versión que pasa las tres llega a shadow."
       />
 
       <Card title="Estrategias" subtitle="Un cambio crea una versión nueva" headingLevel={2}>
@@ -39,24 +35,37 @@ export default function LaboratorioPage() {
                 <th scope="col">Ciclo de vida</th>
                 <th scope="col">Símbolo</th>
                 <th scope="col">Hipótesis</th>
+                <th scope="col">Aprobada para shadow</th>
               </tr>
             </thead>
             <tbody>
-              {STRATEGIES.map((strategy) => (
-                <tr key={`${strategy.name}-${strategy.version}`}>
-                  <td>
-                    <strong>{strategy.name}</strong>
-                  </td>
-                  <td className="b-num">{strategy.version}</td>
-                  <td>
-                    <Badge tone={LIFECYCLE_TONE[strategy.lifecycle]}>
-                      {LIFECYCLE_LABELS[strategy.lifecycle]}
-                    </Badge>
-                  </td>
-                  <td className="b-num">{strategy.symbol}</td>
-                  <td className="b-secondary w-small">{strategy.hypothesis}</td>
-                </tr>
-              ))}
+              {STRATEGIES.map((strategy) => {
+                const lifecycle = LIFECYCLE_PRESENTATION[strategy.lifecycle];
+                return (
+                  <tr key={strategy.id}>
+                    <td>
+                      <strong>{strategy.name}</strong>
+                    </td>
+                    <td className="b-num">{strategy.version}</td>
+                    <td>
+                      <Badge tone={lifecycle.tone} icon={lifecycle.icon}>
+                        {lifecycle.label}
+                      </Badge>
+                    </td>
+                    <td className="b-num">{strategy.symbol}</td>
+                    <td className="b-secondary w-small">
+                      {strategy.hypothesis}
+                      <br />
+                      <span className="b-muted">{strategy.note}</span>
+                    </td>
+                    <td className="b-num w-small">
+                      {strategy.approvedForShadowUtc === null
+                        ? 'No'
+                        : formatUtc(strategy.approvedForShadowUtc)}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -70,7 +79,8 @@ export default function LaboratorioPage() {
         >
           <EquityChart
             values={equitySeries()}
-            label="Curva ficticia de resultado acumulado fuera de muestra, que termina ligeramente por debajo de cero"
+            timeLabels={EQUITY_TIME_LABELS}
+            label="Curva ficticia de resultado acumulado del 1 al 15 de octubre, que termina en −0,4 puntos, con una peor caída de 3,6 puntos"
           />
           <p className="b-muted w-small">
             La línea punteada es el cero. La marca roja es la peor caída desde un máximo.
@@ -78,7 +88,7 @@ export default function LaboratorioPage() {
         </Card>
         <Card title="Evidencia" subtitle="La cifra nunca va sola">
           <MetricWithContext
-            label="Resultado neto después de costes"
+            label="Pérdida neta después de costes"
             value="−0,4 %"
             context={BACKTEST_CONTEXT}
           />
@@ -87,9 +97,16 @@ export default function LaboratorioPage() {
 
       <Card
         title="Validación por tramos"
-        subtitle="La ventaja de entrenamiento se reduce y desaparece fuera de muestra"
+        subtitle="La ventaja de entrenamiento se reduce y se convierte en pérdida fuera de muestra"
         headingLevel={2}
       >
+        <DataMeta
+          items={[
+            ['Origen', <EvidenceSourceBadge key="o" source={SPLITS_CONTEXT.source} />],
+            ['Costes', SPLITS_CONTEXT.costs],
+            ['Versión', SPLITS_CONTEXT.version],
+          ]}
+        />
         <div className="w-table-wrap">
           <table className="b-table">
             <thead>
@@ -98,6 +115,7 @@ export default function LaboratorioPage() {
                 <th scope="col">Período</th>
                 <th scope="col">Muestra</th>
                 <th scope="col">Resultado neto</th>
+                <th scope="col">Pérdidas</th>
                 <th scope="col">Drawdown máximo</th>
               </tr>
             </thead>
@@ -110,15 +128,19 @@ export default function LaboratorioPage() {
                   <td>{split.period}</td>
                   <td>{split.sample}</td>
                   <td className="b-num">{split.result}</td>
+                  <td>{split.losses}</td>
                   <td className="b-num">{split.drawdown}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <p className="b-secondary w-small" style={{ marginTop: 'var(--b-space-4)' }}>
-          Conclusión del ejemplo: la estrategia no pasa la puerta de validación. Un resultado
-          negativo también es evidencia y queda registrado.
+        <p className="b-metric__limits" style={{ marginTop: 'var(--b-space-4)' }}>
+          <strong>Limitaciones:</strong> {SPLITS_CONTEXT.limitations}
+        </p>
+        <p className="b-secondary w-small" style={{ marginTop: 'var(--b-space-2)' }}>
+          Conclusión del ejemplo: la estrategia no pasa la puerta de validación y se retira; nunca
+          llega a shadow. Un resultado negativo también es evidencia y queda registrado.
         </p>
       </Card>
     </>

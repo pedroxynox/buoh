@@ -18,10 +18,15 @@ export default function SenalesPage() {
       <div className="w-row" role="group" aria-label="Filtros de ejemplo">
         <span className="b-muted w-small">Mostrando:</span>
         <ModeBadge mode="shadow" showDescription />
-        <Badge tone="niebla">Últimos 5 minutos</Badge>
-        <Badge tone="niebla">R_100</Badge>
+        <Badge tone="niebla" icon="clock">
+          Últimos 5 minutos
+        </Badge>
+        <Badge tone="niebla" icon="chart">
+          R_75 y R_100
+        </Badge>
       </div>
 
+      <SectionTitle>Señales recientes</SectionTitle>
       <div className="w-grid w-grid--3">
         {SIGNALS.map((signal) => (
           <SignalCard key={signal.id} signal={signal} />

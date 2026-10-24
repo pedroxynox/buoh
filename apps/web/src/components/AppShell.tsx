@@ -9,6 +9,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { GLOBAL_STATUS } from '../fixtures';
 import { NAV_ITEMS } from '../navigation';
+import { MoreMenu } from './MoreMenu';
 import { NavLink } from './NavLink';
 
 /** Barra superior: marca, aviso de datos ficticios, modo y salud por separado (concepto §2). */
@@ -21,7 +22,7 @@ export function TopBar() {
         </Link>
         <FictitiousDataNotice />
       </div>
-      <div className="w-topbar__status" aria-label="Estado global">
+      <div className="w-topbar__status" role="group" aria-label="Estado global">
         <ModeBadge mode={GLOBAL_STATUS.mode} showDescription />
         <HealthBadge health={GLOBAL_STATUS.health} />
         <span className="w-topbar__user">
@@ -56,8 +57,15 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
       </main>
       <nav className="w-bottomnav" aria-label="Secciones principales">
         {NAV_ITEMS.filter((item) => item.primary).map((item) => (
-          <NavLink key={item.href} href={item.href} label={item.label} icon={item.icon} compact />
+          <NavLink
+            key={item.href}
+            href={item.href}
+            label={item.shortLabel ?? item.label}
+            icon={item.icon}
+            compact
+          />
         ))}
+        <MoreMenu items={NAV_ITEMS.filter((item) => !item.primary)} />
       </nav>
     </div>
   );
