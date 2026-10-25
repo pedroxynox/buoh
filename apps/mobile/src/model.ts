@@ -74,24 +74,27 @@ export const ONLY_ON_WEB = [
   'Revisar datasets y la auditoría completa',
 ] as const;
 
-/** Funciones de fases posteriores que el móvil enseña con candado. */
+/** Funciones de fases posteriores que el móvil enseña con candado; `id` es la fila del catálogo. */
 export const LOCKED_ON_MOBILE = [
   {
+    id: 'kill-switch',
     phase: '4',
     title: 'Detener todo (kill switch)',
     description:
       'Detendrá a la vez todas las estrategias, cuentas y órdenes, también desde el móvil. En modo shadow no hay órdenes que detener.',
   },
   {
+    id: 'autorizaciones',
     phase: '4',
     title: 'Autorizaciones de cuenta',
     description:
       'Revisar y revocar la conexión de una cuenta demo, con confirmación en el servidor.',
   },
   {
+    id: 'modo-real',
     phase: '6',
     title: 'Pedir el modo real',
     description:
-      'Pedir que una estrategia aprobada pase a dinero real. Tendrás que identificarte de nuevo, el servidor revisa que cumpla todas las condiciones y la petición queda registrada.',
+      'Pedir que una estrategia pase a dinero real, si se aprobó para eso en la Fase 5. Tendrás que identificarte de nuevo; el servidor comprueba que la estrategia, la cuenta y los límites estén aprobados, y la petición queda registrada.',
   },
 ] as const;

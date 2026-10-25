@@ -254,11 +254,11 @@ export function MasScreen() {
       <PageTitle
         eyebrow="Más"
         title="Fuentes, límites y lo que llega después"
-        summary="El móvil sirve para seguir el bot, detenerlo y, más adelante, pedir el modo real. Editar estrategias y políticas se hace en la web o el escritorio."
+        summary="El móvil sirve para seguir el bot. Más adelante también podrá detenerlo y pedir el modo real. Editar estrategias y políticas se hace en la web o el escritorio."
       />
       {LOCKED_ON_MOBILE.map((item) => (
         <PhaseLock
-          key={item.title}
+          key={item.id}
           phase={item.phase}
           title={item.title}
           description={item.description}

@@ -2,7 +2,7 @@
 
 Prototipo navegable de la app de Android e iOS (`V1-MOBILE-001`), con **datos ficticios** de [`@buoh/prototype-data`](../../packages/prototype-data/README.md). Decisiones en [ADR-0009](../../docs/arquitectura/adr/0009-prototipo-movil.md); diseño en el [concepto de interfaz](../../docs/diseno/concepto-de-interfaz.md) §7.
 
-Pestañas: Inicio, Señales, Alertas, Evidencia y Más. No envía órdenes, no se conecta a fuentes ni brókeres, no tiene campos de texto y no pide el modo real; el *kill switch* aparece con candado de Fase 4.
+Pestañas: Inicio, Señales, Alertas, Evidencia y Más. No envía órdenes, no se conecta a fuentes ni brókeres, no tiene campos de texto y no pide el modo real. El *kill switch* aparece con candado de Fase 4 y la petición del modo real, con candado de Fase 6.
 
 ## Comandos
 

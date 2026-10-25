@@ -62,7 +62,7 @@ Leyenda: ● disponible · ◐ solo lectura o resumen · — no disponible.
 | Ejecución `real` | Ver órdenes y posiciones del universo, cuentas y estrategias aprobados en la Fase 5 | 6 | ◐ | ◐ | ◐ |
 | Pedir el modo `real` | Solicitar que una estrategia aprobada pase a `real`; el servidor lo valida | 6 | ● | ● | ● |
 
-Detener (*kill switch*) está disponible en todas las plataformas porque reduce el riesgo. Pedir el modo `real` también se puede desde las tres, por decisión del propietario (2026-10-25). En todas sigue las mismas reglas: exige reautenticación, el servidor comprueba las puertas de la Fase 5 y la petición queda en auditoría. Cambiar una política de riesgo se hace desde web o escritorio.
+Detener (*kill switch*) está disponible en todas las plataformas porque reduce el riesgo. Pedir el modo `real` o cambiar una política de riesgo exige reautenticación y queda en auditoría. Pedir el modo `real` se puede desde las tres plataformas, por decisión del propietario (2026-10-25); en todas, el servidor solo acepta la petición si la estrategia, la cuenta y los instrumentos están entre los aprobados en la Fase 5. Cambiar una política se hace desde web o escritorio.
 
 ### Operación y cuenta
 
