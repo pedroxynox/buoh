@@ -51,7 +51,7 @@ function PageTitle({
     <View style={{ gap: space[1], marginBottom: space[2] }}>
       <Text
         style={{
-          fontFamily: font.semibold,
+          fontFamily: font.mono,
           fontSize: size.xs,
           letterSpacing: 1,
           color: theme.text.muted,

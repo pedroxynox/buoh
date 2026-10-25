@@ -5,6 +5,8 @@ import {
   contrastRatio,
   EXECUTION_MODE_PRESENTATION,
   ICONS,
+  LOGO_SYMBOL,
+  LOGO_WORDMARK,
   palette,
   renderCss,
   SERVICE_HEALTH_PRESENTATION,
@@ -127,12 +129,36 @@ describe('estados del contrato con texto, icono y tono (V1-DS-001)', () => {
     }
   });
 
-  it('el ámbar de marca no se usa en ningún estado', () => {
+  it('el verde azulado de marca no se usa en ningún estado', () => {
     for (const theme of THEMES) {
       const toneColors = TONES.flatMap((tone) => [theme.tones[tone].fg, theme.tones[tone].bg]);
-      for (const amber of [palette.ambar[400], palette.ambar[700], theme.brand.accent]) {
-        expect(toneColors).not.toContain(amber);
+      for (const brand of [
+        ...Object.values(palette.boreal),
+        theme.brand.accent,
+        theme.brand.mark,
+      ]) {
+        expect(toneColors).not.toContain(brand);
       }
+    }
+  });
+
+  it('el estado «saludable» se distingue del verde azulado de marca por el tono', () => {
+    // Guía §5: el verde de «saludable» se separa al menos 25° de tono del verde azulado del logo.
+    const hue = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16) / 255) as [
+        number,
+        number,
+        number,
+      ];
+      const max = Math.max(r, g, b);
+      const d = max - Math.min(r, g, b);
+      const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      return (h * 60 + 360) % 360;
+    };
+    const healthy = SERVICE_HEALTH_PRESENTATION.healthy.tone;
+    for (const theme of THEMES) {
+      const gap = Math.abs(hue(theme.tones[healthy].fg) - hue(theme.brand.mark));
+      expect(Math.min(gap, 360 - gap), theme.name).toBeGreaterThanOrEqual(25);
     }
   });
 });
@@ -155,13 +181,14 @@ describe('CSS generado desde los tokens (V1-DS-001)', () => {
 
   it('cada tema declara sus valores literales de la guía en su propio bloque', () => {
     expect(night).toMatchObject({
-      '--b-bg-canvas': '#0A101C',
+      '--b-bg-canvas': '#080F1B',
       '--b-bg-surface': '#0E1626',
       '--b-text': '#F4F6FB',
       '--b-text-2': '#C8D0E2',
       '--b-text-muted': '#8D9AB6',
-      '--b-action-bg': '#F0E5C6',
-      '--b-brand-iris': '#F2B544',
+      '--b-action-bg': '#EDECE0',
+      '--b-brand-mark': '#24A598',
+      '--b-brand-mark-detail': '#EDECE0',
       '--b-tone-rosa-fg': '#F283B3',
       '--b-tone-niebla-bg': '#1A2337',
     });
@@ -172,7 +199,8 @@ describe('CSS generado desde los tokens (V1-DS-001)', () => {
       '--b-text-2': '#33415C',
       '--b-text-muted': '#55627D',
       '--b-action-bg': '#0E1626',
-      '--b-brand-iris': '#F2B544',
+      '--b-brand-mark': '#11756B',
+      '--b-brand-mark-detail': '#0E1626',
       '--b-tone-rosa-fg': '#AA3166',
       '--b-tone-niebla-bg': '#ECEFF5',
     });
@@ -189,6 +217,7 @@ describe('CSS generado desde los tokens (V1-DS-001)', () => {
     );
     expect(shared['--b-space-0_5']).toBe('0.125rem');
     expect(shared['--b-font-mono']).toContain('JetBrains Mono');
+    expect(shared['--b-font-sans']).toMatch(/^'Sen Variable', 'Sen',/);
   });
 
   it('ningún texto usa opacidad: solo los controles desactivados', () => {
@@ -221,10 +250,42 @@ describe('guía de marca y recursos frente a los tokens (V1-BRAND-001)', () => {
     }
   });
 
+  it('cada archivo del logotipo usa los mismos trazados que src/logo.ts', () => {
+    const dir = new URL('../assets/', import.meta.url);
+    const read = (file: string) => readFileSync(new URL(file, dir), 'utf8');
+    const symbolColor = [
+      'buoh-simbolo.svg',
+      'buoh-simbolo-dia.svg',
+      'buoh-logo.svg',
+      'buoh-logo-dia.svg',
+      'buoh-icono.svg',
+    ];
+    for (const file of symbolColor) {
+      expect(read(file), file).toContain(`d="${LOGO_SYMBOL.primary}"`);
+      expect(read(file), file).toContain(`d="${LOGO_SYMBOL.detail}"`);
+    }
+    for (const file of ['buoh-simbolo-mono.svg', 'buoh-logo-mono.svg']) {
+      expect(read(file), file).toContain(`d="${LOGO_SYMBOL.mono}"`);
+    }
+    for (const file of [
+      'buoh-logo.svg',
+      'buoh-logo-dia.svg',
+      'buoh-logo-mono.svg',
+      'buoh-palabra.svg',
+    ]) {
+      expect(read(file), file).toContain(`d="${LOGO_WORDMARK.d}"`);
+    }
+    // Colores del original: verde azulado y crema sobre noche
+    expect(read('buoh-logo.svg')).toContain(`fill="${palette.boreal[400]}"`);
+    expect(read('buoh-logo.svg')).toContain(`fill="${palette.luna[200]}"`);
+    expect(read('buoh-icono.svg')).toContain(`fill="${palette.noche[900]}"`);
+    expect(read('buoh-logo.svg')).not.toMatch(/<text\b|font-family/);
+  });
+
   it('los SVG del logotipo usan solo colores de la paleta', () => {
     const dir = new URL('../assets/', import.meta.url);
     const files = readdirSync(dir).filter((f) => f.endsWith('.svg'));
-    expect(files.length).toBeGreaterThanOrEqual(3);
+    expect(files.length).toBeGreaterThanOrEqual(8);
     for (const file of files) {
       const svg = readFileSync(new URL(file, dir), 'utf8');
       for (const hex of svg.match(/#[0-9A-F]{6}/gi) ?? []) {

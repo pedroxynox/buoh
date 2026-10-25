@@ -38,7 +38,7 @@ export default function InicioPage() {
             </p>
           </div>
           <div className="s-hero__owl">
-            <BuohMark size={220} title="El búho de buoh" />
+            <BuohMark size={240} title="El búho de buoh" />
           </div>
         </div>
       </section>

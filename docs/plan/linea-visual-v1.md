@@ -4,7 +4,7 @@ schema_version: "1.0.0"
 status: "ready"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-10-25T14:00:00.000Z"
+last_reviewed_utc: "2026-10-25T19:00:00.000Z"
 ---
 
 # Plan ejecutable: línea visual V1
@@ -17,7 +17,7 @@ La línea visual corre en paralelo a [Fase 1](fase-1-fundacion-de-datos.md) y no
 
 ## 2. Estado y aprobación
 
-`ready`: este plan autoriza los incrementos V1.1 a V1.5 cuando se fusione el PR que los contiene. V1.4, el prototipo móvil, se añadió el 2026-10-25 ([ADR-0009](../arquitectura/adr/0009-prototipo-movil.md)), y V1.5, el prototipo de escritorio, el mismo día ([ADR-0010](../arquitectura/adr/0010-prototipo-de-escritorio.md)).
+`ready`: este plan autoriza los incrementos V1.1 a V1.6 cuando se fusione el PR que los contiene. V1.4, el prototipo móvil, se añadió el 2026-10-25 ([ADR-0009](../arquitectura/adr/0009-prototipo-movil.md)), V1.5, el prototipo de escritorio, el mismo día ([ADR-0010](../arquitectura/adr/0010-prototipo-de-escritorio.md)), y V1.6, la identidad a partir del logo del propietario, también ([ADR-0011](../arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)).
 
 ## 3. Corte de implementación
 
@@ -91,6 +91,18 @@ El [catálogo](../producto/funciones-y-disponibilidad.md) lista cada función de
 - sin campos de texto ni contraseñas; sin edición de estrategias o políticas; el *kill switch* aparece con candado de Fase 4 y la petición del modo real con candado de Fase 6;
 - `expo export` compila Android, iOS y web, y las pruebas comprueban cada pestaña renderizada.
 
+### `V1-BRAND-002` — Identidad a partir del logo del propietario
+
+La marca pasa al logo que envió el propietario ([ADR-0011](../arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)).
+
+**Aceptación:**
+
+- el símbolo y la palabra están vectorizados con figuras exactas y se parecen al original de `docs/diseno/logo-original.jpg` (medido en el PR);
+- hay versiones en color, para fondo claro, a una tinta e icono de app, todas con los mismos trazados de `packages/design-system/src/logo.ts`, comprobado por pruebas;
+- la paleta usa los colores medidos en el logo; el color de marca no se usa en ningún estado y el verde de «saludable» se separa de él al menos 25° de tono, comprobado por pruebas;
+- la interfaz usa Sen y JetBrains Mono, servidas desde el propio sitio o la app;
+- la web, el sitio, el móvil y el escritorio usan el logo nuevo, sin escribir la palabra con texto.
+
 ### `V1-DESKTOP-001` — Prototipo de escritorio
 
 `apps/desktop` muestra en una ventana de Windows el prototipo de `apps/web`, con Tauri 2 ([ADR-0010](../arquitectura/adr/0010-prototipo-de-escritorio.md)).
@@ -109,6 +121,7 @@ El [catálogo](../producto/funciones-y-disponibilidad.md) lista cada función de
 3. **V1.3:** sitio oficial en `apps/site` (`V1-SITE-001`).
 4. **V1.4:** prototipo móvil en `apps/mobile` y datos compartidos en `packages/prototype-data` (`V1-MOBILE-001`).
 5. **V1.5:** prototipo de escritorio en `apps/desktop` (`V1-DESKTOP-001`).
+6. **V1.6:** identidad a partir del logo del propietario (`V1-BRAND-002`).
 
 Cada incremento es un PR propio, con una revisión semántica.
 

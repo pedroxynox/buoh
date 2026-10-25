@@ -5,7 +5,9 @@
 import {
   EXECUTION_MODE_PRESENTATION,
   ICONS,
-  palette,
+  LOGO_LOCKUP,
+  LOGO_SYMBOL,
+  LOGO_WORDMARK,
   SERVICE_HEALTH_PRESENTATION,
   SEVERITY_PRESENTATION,
   type EvidenceSource,
@@ -18,7 +20,7 @@ import {
 import type { ExecutionMode, ServiceHealth } from '@buoh/contracts';
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 import { corner, font, size, space, theme, withAlpha } from './theme';
 
 export function Icon({
@@ -47,24 +49,35 @@ export function Icon({
   );
 }
 
-const HEAD = 'M10 14 13 5l7 6q4-1 8 0l7-6 3 9q4 8 1.5 17Q36 43 24 44 12 43 8.5 31 6 22 10 14Z';
-const BEAK = 'M24 31.2 26 34l-2 3.2-2-3.2Z';
-
-/** Símbolo de buoh, con la misma geometría que el SVG de la web. */
+/** Símbolo de buoh, con los mismos trazados que la web (`@buoh/design-system`). `dimension` es el alto. */
 export function BuohMark({ dimension = 28 }: { readonly dimension?: number }) {
-  const ring = theme.brand.eyeRing;
-  const iris = palette.ambar[400];
   return (
-    <Svg width={dimension} height={dimension} viewBox="0 0 48 48" aria-hidden>
-      <Path d={HEAD} fill={theme.brand.head} />
-      <Circle cx={18} cy={25} r={6.6} fill={ring} />
-      <Circle cx={30} cy={25} r={6.6} fill={ring} />
-      <Circle cx={18} cy={25} r={4.6} fill={iris} />
-      <Circle cx={30} cy={25} r={4.6} fill={iris} />
-      <Circle cx={18.6} cy={25.4} r={2} fill={ring} />
-      <Circle cx={30.6} cy={25.4} r={2} fill={ring} />
-      <Path d={BEAK} fill={iris} />
+    <Svg
+      width={(dimension * LOGO_SYMBOL.width) / LOGO_SYMBOL.height}
+      height={dimension}
+      viewBox={LOGO_SYMBOL.viewBox}
+      aria-hidden
+    >
+      <Path d={LOGO_SYMBOL.primary} fill={theme.brand.mark} />
+      <Path d={LOGO_SYMBOL.detail} fill={theme.brand.markDetail} />
     </Svg>
+  );
+}
+
+/** Logotipo completo (símbolo y palabra vectorizada). `dimension` es el alto. */
+export function BuohLogo({ dimension = 28 }: { readonly dimension?: number }) {
+  return (
+    <View accessible role="img" aria-label="buoh">
+      <Svg
+        width={(dimension * LOGO_LOCKUP.width) / LOGO_LOCKUP.height}
+        height={dimension}
+        viewBox={LOGO_LOCKUP.viewBox}
+      >
+        <Path d={LOGO_SYMBOL.primary} fill={theme.brand.mark} />
+        <Path d={LOGO_SYMBOL.detail} fill={theme.brand.markDetail} />
+        <Path d={LOGO_WORDMARK.d} fill={theme.brand.markDetail} />
+      </Svg>
+    </View>
   );
 }
 
@@ -302,7 +315,7 @@ export const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: 5,
     paddingHorizontal: 10,
-    borderRadius: corner.pill,
+    borderRadius: corner.sm,
     maxWidth: '100%',
   },
   badgeText: { fontFamily: font.semibold, fontSize: size.xs, flexShrink: 1 },

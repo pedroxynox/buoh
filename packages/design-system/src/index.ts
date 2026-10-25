@@ -2,6 +2,7 @@ export { contrastRatio, relativeLuminance, WCAG_AA } from './contrast.js';
 export { renderCss, sharedVariables, spaceVar, themeVariables } from './css.js';
 export type { EvidenceSource, PerformanceContext } from './evidence.js';
 export { ICONS, type IconName } from './icons.js';
+export { LOGO_GEOMETRY, LOGO_LOCKUP, LOGO_MIN, LOGO_SYMBOL, LOGO_WORDMARK } from './logo.js';
 export {
   EXECUTION_MODE_PRESENTATION,
   SERVICE_HEALTH_PRESENTATION,

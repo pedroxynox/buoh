@@ -8,11 +8,12 @@
   grid-template-areas:
     'top top'
     'nav main';
+  /* Un velo boreal apenas visible en la esquina; sin brillos sobre los controles. */
   background:
     radial-gradient(
-      1200px 500px at 85% -10%,
-      color-mix(in srgb, var(--b-brand-iris) 6%, transparent),
-      transparent 60%
+      1100px 420px at 88% -12%,
+      color-mix(in srgb, var(--b-brand-accent) 7%, transparent),
+      transparent 62%
     ),
     var(--b-bg-canvas);
 }
@@ -98,7 +99,7 @@
 .w-nav__link[aria-current='page'] {
   background: var(--b-bg-raised);
   color: var(--b-text);
-  box-shadow: inset 3px 0 0 var(--b-brand-iris);
+  box-shadow: inset 2px 0 0 var(--b-brand-accent);
 }
 .w-nav__phase {
   margin-left: auto;
@@ -551,7 +552,7 @@
     max-width: 9rem;
   }
   .w-nav__link--compact[aria-current='page'] {
-    box-shadow: inset 0 2px 0 var(--b-brand-iris);
+    box-shadow: inset 0 2px 0 var(--b-brand-accent);
   }
 }
 

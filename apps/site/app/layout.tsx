@@ -1,4 +1,4 @@
-import '@fontsource-variable/manrope';
+import '@fontsource-variable/sen';
 import '@fontsource-variable/jetbrains-mono';
 import '@buoh/design-system/buoh.css';
 import './site.css';
@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#0A101C',
+  themeColor: '#080F1B',
   colorScheme: 'dark',
 };
 

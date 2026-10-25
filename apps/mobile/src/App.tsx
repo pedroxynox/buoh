@@ -1,8 +1,8 @@
 import { JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono/500Medium';
-import { Manrope_400Regular } from '@expo-google-fonts/manrope/400Regular';
-import { Manrope_500Medium } from '@expo-google-fonts/manrope/500Medium';
-import { Manrope_600SemiBold } from '@expo-google-fonts/manrope/600SemiBold';
-import { Manrope_700Bold } from '@expo-google-fonts/manrope/700Bold';
+import { Sen_400Regular } from '@expo-google-fonts/sen/400Regular';
+import { Sen_500Medium } from '@expo-google-fonts/sen/500Medium';
+import { Sen_600SemiBold } from '@expo-google-fonts/sen/600SemiBold';
+import { Sen_700Bold } from '@expo-google-fonts/sen/700Bold';
 import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
@@ -16,10 +16,10 @@ import { space, theme } from './theme';
 export default function App() {
   const [tab, setTab] = useState<TabId>('inicio');
   const [loaded, error] = useFonts({
-    Manrope_400Regular,
-    Manrope_500Medium,
-    Manrope_600SemiBold,
-    Manrope_700Bold,
+    Sen_400Regular,
+    Sen_500Medium,
+    Sen_600SemiBold,
+    Sen_700Bold,
     JetBrainsMono_500Medium,
   });
   // Si las fuentes no cargan, la app se muestra igual con la letra del sistema.

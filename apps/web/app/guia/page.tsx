@@ -30,7 +30,7 @@ const MODES = Object.keys(EXECUTION_MODE_PRESENTATION) as ExecutionMode[];
 const HEALTH = Object.keys(SERVICE_HEALTH_PRESENTATION) as ServiceHealth[];
 const SEVERITIES = Object.keys(SEVERITY_PRESENTATION) as Severity[];
 
-const FAMILIES = ['noche', 'niebla', 'luna', 'ambar', 'papel'] as const;
+const FAMILIES = ['noche', 'niebla', 'luna', 'boreal', 'papel'] as const;
 
 /** Un icono de ejemplo por tono, tomado del estado que lo usa. */
 const TONE_EXAMPLE_ICON: Readonly<Record<Tone, IconName>> = {
@@ -100,17 +100,17 @@ export default function GuiaPage() {
 
       <SectionTitle>Logotipo</SectionTitle>
       <div className="w-grid w-grid--3">
-        <Card title="Símbolo" subtitle="Cara de búho con ojos ámbar">
+        <Card title="Símbolo" subtitle="Búho de orejas cruzadas, en verde azulado y crema">
           <div className="w-row" style={{ gap: 'var(--b-space-6)' }}>
             <BuohMark size={72} />
             <BuohMark size={40} />
             <BuohMark size={24} />
           </div>
         </Card>
-        <Card title="Logotipo" subtitle="Símbolo y palabra en Manrope 700">
+        <Card title="Logotipo" subtitle="Símbolo y palabra, vectorizados del logo original">
           <BuohLogo size={44} />
         </Card>
-        <Card title="Monocromo" subtitle="Cuando el ámbar no tiene contraste">
+        <Card title="Monocromo" subtitle="Una sola tinta, con los detalles separados">
           <div className="w-row b-secondary" style={{ gap: 'var(--b-space-6)' }}>
             <BuohMark size={56} variant="mono" />
             <BuohLogo size={32} variant="mono" />
@@ -198,7 +198,7 @@ export default function GuiaPage() {
       </div>
 
       <SectionTitle>Tipografía</SectionTitle>
-      <Card title="Manrope y JetBrains Mono" subtitle="Interfaz y cifras">
+      <Card title="Sen y JetBrains Mono" subtitle="Interfaz, y cifras y rótulos técnicos">
         {(['6xl', '4xl', '2xl', 'lg', 'base', 'sm'] as const).map((size) => (
           <div key={size} className="w-type-row">
             <span className="b-num b-muted w-small">{typography.size[size]}</span>

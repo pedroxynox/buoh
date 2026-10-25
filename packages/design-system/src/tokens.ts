@@ -1,12 +1,12 @@
 /**
- * Tokens de marca de buoh (guía: docs/diseno/marca-buoh.md).
+ * Tokens de marca de buoh (guía: docs/diseno/marca-buoh.md; identidad de ADR-0011).
  * Son datos puros: no dependen de React ni del navegador, para que web, móvil y escritorio usen los mismos valores.
  */
 
 export const palette = {
   noche: {
-    950: '#060A12',
-    900: '#0A101C',
+    950: '#050A12',
+    900: '#080F1B',
     850: '#0E1626',
     800: '#131D31',
     750: '#1A2337',
@@ -20,13 +20,17 @@ export const palette = {
     300: '#A7B2CB',
     400: '#8D9AB6',
   },
+  /** Crema del logo: palabra, detalles del símbolo y acción principal. */
   luna: {
-    100: '#F8F2E1',
-    200: '#F0E5C6',
+    100: '#F7F6EF',
+    200: '#EDECE0',
   },
-  ambar: {
-    400: '#F2B544',
-    700: '#8A5A00',
+  /** Verde azulado del logo: color de marca. Nunca es un estado. */
+  boreal: {
+    300: '#5CC8BA',
+    400: '#24A598',
+    700: '#11756B',
+    950: '#0B2523',
   },
   papel: {
     0: '#FFFFFF',
@@ -39,7 +43,7 @@ export const palette = {
     600: '#55627D',
     700: '#33415C',
   },
-  aurora: { 100: '#E1F4EE', 400: '#3CC8A4', 700: '#0B7259', 950: '#0D2925' },
+  aurora: { 100: '#E2F5E8', 400: '#5CCB7F', 700: '#16733A', 950: '#0E2A1A' },
   cielo: { 100: '#E2EDF8', 400: '#64B5F6', 700: '#1D67AD', 950: '#0D2136' },
   naranja: { 100: '#FAEADC', 400: '#F0904F', 700: '#A44C14', 950: '#2E1C10' },
   rojo: { 100: '#FAE3E3', 400: '#F27474', 700: '#B83434', 950: '#2F1518' },
@@ -84,7 +88,8 @@ export interface Theme {
     readonly muted: string;
     readonly inverse: string;
   };
-  readonly brand: { readonly accent: string; readonly head: string; readonly eyeRing: string };
+  /** Marca: `accent` señala (navegación activa, enlaces de marca); `mark` y `markDetail` pintan el símbolo. */
+  readonly brand: { readonly accent: string; readonly mark: string; readonly markDetail: string };
   readonly action: { readonly bg: string; readonly bgHover: string; readonly fg: string };
   readonly focus: string;
   readonly tones: Readonly<Record<Tone, ToneColors>>;
@@ -109,7 +114,7 @@ export const nightTheme: Theme = {
     muted: p.niebla[400],
     inverse: p.noche[900],
   },
-  brand: { accent: p.ambar[400], head: p.luna[200], eyeRing: p.noche[900] },
+  brand: { accent: p.boreal[400], mark: p.boreal[400], markDetail: p.luna[200] },
   action: { bg: p.luna[200], bgHover: p.luna[100], fg: p.noche[900] },
   focus: p.cielo[400],
   tones: {
@@ -122,7 +127,7 @@ export const nightTheme: Theme = {
     cian: { fg: p.cian[400], bg: p.cian[950] },
     rosa: { fg: p.rosa[400], bg: p.rosa[950] },
   },
-  chart: { line: p.luna[200], grid: p.noche[700], gap: p.naranja[400] },
+  chart: { line: p.boreal[300], grid: p.noche[700], gap: p.naranja[400] },
 };
 
 export const dayTheme: Theme = {
@@ -141,7 +146,7 @@ export const dayTheme: Theme = {
     muted: p.papel[600],
     inverse: p.niebla[50],
   },
-  brand: { accent: p.ambar[700], head: p.noche[850], eyeRing: p.papel[0] },
+  brand: { accent: p.boreal[700], mark: p.boreal[700], markDetail: p.noche[850] },
   action: { bg: p.noche[850], bgHover: p.noche[700], fg: p.niebla[50] },
   focus: p.cielo[700],
   tones: {
@@ -154,14 +159,14 @@ export const dayTheme: Theme = {
     cian: { fg: p.cian[700], bg: p.cian[100] },
     rosa: { fg: p.rosa[700], bg: p.rosa[100] },
   },
-  chart: { line: p.noche[850], grid: p.papel[200], gap: p.naranja[700] },
+  chart: { line: p.boreal[700], grid: p.papel[200], gap: p.naranja[700] },
 };
 
 export const themes = { noche: nightTheme, dia: dayTheme } as const;
 
 export const typography = {
   family: {
-    sans: "'Manrope Variable', 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif",
+    sans: "'Sen Variable', 'Sen', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif",
     mono: "'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace",
   },
   /** Escala en rem sobre 16 px. */
@@ -180,7 +185,7 @@ export const typography = {
   },
   weight: { regular: 400, medium: 500, semibold: 600, bold: 700 },
   lineHeight: { tight: 1.15, snug: 1.3, normal: 1.55 },
-  letterSpacing: { brand: '-0.02em', caps: '0.06em' },
+  letterSpacing: { brand: '-0.02em', caps: '0.08em' },
 } as const;
 
 export const space = {
@@ -200,7 +205,8 @@ export const space = {
   24: '6rem',
 } as const;
 
-export const radius = { sm: '6px', md: '10px', lg: '14px', xl: '20px', pill: '999px' } as const;
+/** Radios cortos: esquinas precisas, de instrumento. */
+export const radius = { sm: '4px', md: '6px', lg: '10px', xl: '14px', pill: '999px' } as const;
 
 export const motion = {
   duration: { fast: '120ms', base: '200ms', slow: '320ms' },

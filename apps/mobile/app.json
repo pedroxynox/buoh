@@ -6,7 +6,7 @@
     "platforms": ["ios", "android", "web"],
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#0A101C",
+    "backgroundColor": "#080F1B",
     "web": { "output": "single", "name": "buoh · prototipo móvil" },
     "experiments": { "tsconfigPaths": false }
   }

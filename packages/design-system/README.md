@@ -17,7 +17,7 @@ El tema noche es el predeterminado. Para el tema día, se añade `data-theme="di
 
 - Todo texto cumple 4,5:1 de contraste y todo borde de control o foco 3:1, en ambos temas.
 - Cada valor de `execution_mode`, `service_health` y `severity` de `@buoh/contracts` tiene etiqueta, descripción, icono y tono.
-- Modo y salud no comparten tonos, salvo el neutro de pausa y desactivado; el ámbar de marca no es un estado.
+- Modo y salud no comparten tonos, salvo el neutro de pausa y desactivado; el verde azulado de marca no es un estado.
 - El CSS contiene exactamente los valores de los tokens.
 - `MetricWithContext` exige origen (`backtest`, `shadow`, `demo` o `real`), período, muestra, costes, pérdidas, *drawdown*, versión y limitaciones, y las pruebas comprueban que muestra cada valor.
 
@@ -28,4 +28,4 @@ pnpm --filter @buoh/design-system run build
 pnpm --filter @buoh/design-system run test
 ```
 
-Las tipografías (Manrope y JetBrains Mono) las carga cada app desde Fontsource; este paquete solo nombra sus familias.
+Las tipografías (Sen y JetBrains Mono) las carga cada app desde Fontsource o `@expo-google-fonts`; este paquete solo nombra sus familias. El logotipo vectorizado está en `src/logo.ts` y `assets/` ([ADR-0011](../../docs/arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)).
