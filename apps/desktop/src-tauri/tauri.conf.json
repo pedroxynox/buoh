@@ -17,6 +17,7 @@
         "minWidth": 1024,
         "minHeight": 640,
         "center": true,
+        "preventOverflow": true,
         "backgroundColor": "#0A101C"
       }
     ],

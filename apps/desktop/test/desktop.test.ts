@@ -20,6 +20,7 @@ interface WindowConfig {
   readonly height: number;
   readonly minWidth: number;
   readonly minHeight: number;
+  readonly preventOverflow?: boolean;
   readonly url?: string;
 }
 
@@ -98,6 +99,8 @@ describe('prototipo de escritorio (V1-DESKTOP-001)', () => {
       expect(window.minWidth).toBeGreaterThanOrEqual(Number(breakpoint));
       expect(window.width).toBeGreaterThanOrEqual(window.minWidth);
       expect(window.height).toBeGreaterThanOrEqual(window.minHeight);
+      // En pantallas pequeñas (1366 × 768) la ventana se ajusta en vez de salirse.
+      expect(window.preventOverflow).toBe(true);
     }
   });
 
@@ -226,8 +229,44 @@ describe('prototipo de escritorio (V1-DESKTOP-001)', () => {
     expect(workflow).toContain('tauri build --ci -- --locked');
     expect(workflow).toContain('bundle/nsis/*-setup.exe');
     expect(workflow).toMatch(/retention-days: \d+/);
-    for (const path of ["'apps/desktop/**'", "'apps/web/**'", "'packages/**'"]) {
-      expect(workflow).toContain(path);
+  });
+
+  it('CI de Windows se lanza con todo lo que entra en la app y nada más', () => {
+    // apps/web y los paquetes de los que depende, según sus package.json.
+    const web = JSON.parse(read(join(ROOT, 'apps', 'web', 'package.json'))) as {
+      readonly dependencies: Readonly<Record<string, string>>;
+      readonly devDependencies: Readonly<Record<string, string>>;
+    };
+    const packages = new Set<string>();
+    const pending = [...Object.keys(web.dependencies), ...Object.keys(web.devDependencies)];
+    while (pending.length > 0) {
+      const name = pending.pop() ?? '';
+      const match = /^@buoh\/(.+)$/.exec(name);
+      if (match?.[1] === undefined || packages.has(match[1])) continue;
+      packages.add(match[1]);
+      const manifest = JSON.parse(read(join(ROOT, 'packages', match[1], 'package.json'))) as {
+        readonly dependencies?: Readonly<Record<string, string>>;
+      };
+      pending.push(...Object.keys(manifest.dependencies ?? {}));
     }
+    const triggers = [
+      ...(/ {2}pull_request:\n(?: {4}.*\n)+/.exec(workflow)?.[0] ?? '').matchAll(/- '([^']+)'/g),
+    ].map((match) => match[1]);
+    const expected = [
+      'apps/desktop/**',
+      'apps/web/**',
+      ...[...packages].map((name) => `packages/${name}/**`),
+    ];
+    for (const path of expected) {
+      expect(triggers, path).toContain(path);
+    }
+    expect(triggers.filter((path) => path?.startsWith('packages/')).sort()).toEqual(
+      expected.filter((path) => path.startsWith('packages/')).sort(),
+    );
+  });
+
+  it('pnpm corre los scripts con su emulador de shell, que Windows necesita', () => {
+    // Sin él, pnpm usa cmd.exe en Windows y `NEXT_TELEMETRY_DISABLED=1 next build` falla.
+    expect(read(join(ROOT, 'pnpm-workspace.yaml'))).toMatch(/^shellEmulator: true$/m);
   });
 });

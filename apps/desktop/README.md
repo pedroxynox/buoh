@@ -16,9 +16,13 @@ El instalador sale en `src-tauri/target/release/bundle/nsis/`. En CI lo compila 
 
 ## Instalarlo en Windows
 
-1. Descarga el artefacto `buoh-escritorio-windows` de la última ejecución del flujo `desktop` en GitHub Actions y descomprímelo.
-2. Abre `buoh_0.1.0_x64-setup.exe`. No pide permisos de administrador.
-3. El instalador no está firmado, así que Windows SmartScreen avisa: «Más información» y «Ejecutar de todas formas».
+1. En GitHub, abre **Actions › desktop** y elige la última ejecución de la rama `main` con la marca verde ✓. Si ninguna tiene archivo (se guardan 14 días), pulsa **Run workflow** con la rama `main` y espera a que termine.
+2. En esa ejecución, descarga `buoh-escritorio-windows` (sección *Artifacts*) y descomprímelo.
+3. Abre `buoh_0.1.0_x64-setup.exe`. No pide permisos de administrador.
+4. El instalador no está firmado, así que Windows SmartScreen avisa: pulsa «Más información» y «Ejecutar de todas formas».
+5. Si Windows dice que **Control inteligente de aplicaciones** bloqueó la app, no hay botón para seguir. No desactives esa protección: hay que esperar a un instalador firmado.
+
+Para quitarla: **Configuración › Aplicaciones › Aplicaciones instaladas › buoh › Desinstalar**.
 
 ## Estructura
 
@@ -26,7 +30,7 @@ El instalador sale en `src-tauri/target/release/bundle/nsis/`. En CI lo compila 
 |---|---|
 | `src-tauri/tauri.conf.json` | Ventana, política de contenido (CSP), permisos e instalador |
 | `src-tauri/src/main.rs` | Abre la ventana |
-| `src-tauri/src/navigation.rs` | Regla de navegación y sus pruebas |
+| `src-tauri/src/navigation.rs` | Regla de navegación (solo `http://tauri.localhost` en Windows) y sus pruebas |
 | `src-tauri/rust-toolchain.toml`, `Cargo.lock` | Versiones exactas de Rust y de sus paquetes |
 | `src-tauri/icons/` | Iconos generados con `tauri icon` desde el símbolo de la marca |
 | `test/` | Pruebas que no necesitan Windows |

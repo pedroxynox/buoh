@@ -98,7 +98,7 @@ El [catálogo](../producto/funciones-y-disponibilidad.md) lista cada función de
 **Aceptación:**
 
 - la ventana carga solo la exportación de `apps/web`, con la marca «Datos ficticios», y no baja del ancho en que la web cambia a la barra inferior;
-- el frontend no tiene comandos, capacidades ni complementos de Tauri; la política de contenido solo permite lo empaquetado y no admite `unsafe-eval`; toda navegación fuera de las páginas empaquetadas se bloquea;
+- el frontend no tiene comandos ni capacidades de Tauri, y el único complemento es la regla de navegación; la política de contenido solo permite lo empaquetado y no admite `unsafe-eval`; toda navegación fuera de las páginas empaquetadas se bloquea;
 - Rust, Tauri y su CLI están fijados, y Cargo usa `--locked`;
 - CI con Windows pasa `cargo fmt`, `cargo clippy` sin avisos y `cargo test`, y compila un instalador NSIS por usuario que queda como artefacto.
 

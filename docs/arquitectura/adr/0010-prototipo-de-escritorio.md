@@ -27,9 +27,11 @@ No es la app de Windows de la Fase 7, y la decisión 6 de ADR-0001 sigue valiend
 
 ### 2. Seguridad de la ventana
 
-- El frontend no tiene comandos de Rust, capacidades ni complementos de Tauri. `withGlobalTauri` está desactivado, el protocolo de archivos locales también y `freezePrototype` está activo.
+- El frontend no tiene comandos de Rust ni capacidades, y ningún complemento le expone comandos. El único complemento es la regla de navegación. `withGlobalTauri` está desactivado, el protocolo de archivos locales también y `freezePrototype` está activo.
 - La política de contenido (CSP) solo permite lo empaquetado, sin `unsafe-eval`. Tauri añade el hash de cada `<script>` en línea que genera Next.js. `style-src-attr 'unsafe-inline'` permite los atributos `style` que escribe React; los elementos `<style>` siguen limitados a lo empaquetado.
-- Un complemento propio bloquea toda navegación fuera de las páginas empaquetadas: internet, archivos del equipo, `javascript:` y `data:`.
+- Un complemento propio bloquea toda navegación fuera del origen de las páginas empaquetadas en Windows (`http://tauri.localhost`): internet, archivos del equipo, otro esquema u otro puerto, `javascript:` y `data:`.
+- La ventana se abre con `preventOverflow`, para no salirse de pantallas pequeñas como las de 1366 × 768.
+- `window.open` y los enlaces `target="_blank"` no abren ventanas, porque la app no define a quién dárselas.
 - Sin actualizaciones automáticas ni conexiones propias.
 
 ### 3. Stack
@@ -40,13 +42,14 @@ No es la app de Windows de la Fase 7, y la decisión 6 de ADR-0001 sigue valiend
 - Instalador NSIS por usuario, que no pide permisos de administrador, en español. Si falta WebView2, descarga su instalador oficial.
 - Identificador `io.github.pedroxynox.buoh`, basado en la cuenta de GitHub del propietario, porque buoh todavía no tiene dominio.
 - Iconos generados con `tauri icon` desde `packages/design-system/assets/buoh-simbolo.svg`.
+- pnpm ejecuta los scripts con su emulador de shell (`shellEmulator` en `pnpm-workspace.yaml`). Sin él, en Windows usaría `cmd.exe`, que no entiende scripts como `NEXT_TELEMETRY_DISABLED=1 next build`.
 
 ### 4. Evidencia
 
-- **En cada `pnpm run verify`:** pruebas de la configuración, de las versiones fijadas y del flujo de CI, y una prueba de que las páginas exportadas no usan nada que la CSP bloquee (manejadores en atributos, `javascript:`, marcos, formularios ni recursos externos).
+- **En cada `pnpm run verify`:** pruebas de la configuración, de las versiones fijadas y del flujo de CI, y una revisión estática de las páginas exportadas: no usan manejadores en atributos, `javascript:`, marcos, formularios ni recursos externos, que la CSP bloquearía. Esta revisión no ejecuta las páginas; la prueba real es abrir la app en Windows.
 - **En CI con Windows** (`.github/workflows/desktop.yml`): `cargo fmt`, `cargo clippy` sin avisos, `cargo test` y el instalador, que queda como artefacto 14 días. Corre cuando cambia algo que entra en la app y también se puede lanzar a mano.
 
-El flujo de Windows no corre en cada PR: los minutos de Windows cuestan el doble en un repositorio privado.
+El flujo de Windows no corre en cada PR, solo cuando cambian `apps/desktop`, `apps/web`, los paquetes de los que dependen o la configuración de pnpm, Node o turbo: los minutos de Windows cuestan el doble en un repositorio privado.
 
 ### 5. Instalador sin firmar
 
@@ -56,7 +59,8 @@ El instalador no está firmado. Windows SmartScreen avisará al abrirlo. Firmarl
 
 - El propietario puede instalar y abrir el prototipo en su PC antes de la Fase 7.
 - Entra Rust en el repositorio, limitado al contenedor como dice ADR-0003, y `Cargo.lock` suma unos 400 paquetes que hay que actualizar cuando haya avisos de seguridad.
-- Un cambio en `apps/web` o en `packages/**` también lanza la compilación de Windows.
+- Un cambio en `apps/web` o en sus paquetes también lanza la compilación de Windows.
+- Todos los scripts de pnpm pasan por su emulador de shell, también en Linux.
 
 ## Alternativas descartadas
 
@@ -72,7 +76,7 @@ El instalador no está firmado. Windows SmartScreen avisará al abrirlo. Firmarl
 
 - Probar el instalador en el PC del propietario.
 - Firmar el instalador y decidir cómo distribuir la app (sigue en `PROJECT_STATUS.md`).
-- En la app real: ventanas separables y un bloqueo explícito de `window.open`.
+- En la app real: ventanas separables y un manejador explícito de `window.open`.
 
 ## Referencias verificadas
 
