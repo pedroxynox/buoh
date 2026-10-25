@@ -11,6 +11,8 @@ import {
 import type { Tone } from '../tokens.js';
 import { Icon } from './Icon.js';
 
+// apps/mobile/src/ui.tsx repite estas insignias en React Native (ADR-0009): un cambio en las reglas
+// de borde fuerte o en el texto accesible debe hacerse también allí (estado-del-codigo D-01).
 export interface BadgeProps {
   readonly tone?: Tone;
   readonly icon?: IconName;

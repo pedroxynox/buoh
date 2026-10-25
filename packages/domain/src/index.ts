@@ -1,3 +1,8 @@
+/**
+ * Punto de entrada de @buoh/domain: lógica pura de Fase 1, sin red, reloj ni almacenamiento.
+ * Normaliza frames crudos, aplica las reglas de calidad, arma la publicación de un dataset y deriva
+ * la salud. El worker (apps/market-data-worker) le pasa los datos y guarda lo que devuelve.
+ */
 export { CONDITION_HEALTH, deriveHealthReport, type HealthInput } from './health.js';
 export {
   JsonLexemeError,

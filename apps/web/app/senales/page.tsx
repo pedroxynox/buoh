@@ -4,6 +4,10 @@ import { PageHeader } from '../../src/components/AppShell';
 import { SectionTitle, SignalCard } from '../../src/components/Pieces';
 import { SIGNALS } from '@buoh/prototype-data';
 
+/**
+ * Señales (concepto de interfaz §3): registro de señales con estrategia, versión, modo, vencimiento,
+ * calidad y enlace a su evidencia. Lo de Fase 3 en adelante aparece con candado.
+ */
 export const metadata: Metadata = { title: 'Señales' };
 
 export default function SenalesPage() {

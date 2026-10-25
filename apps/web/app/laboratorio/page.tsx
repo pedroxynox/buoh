@@ -15,6 +15,12 @@ import {
   STRATEGIES,
 } from '@buoh/prototype-data';
 
+/**
+ * Laboratorio (concepto de interfaz §3): versiones de estrategia, validación fuera de muestra y la
+ * curva de resultados con su contexto. El ejemplo pierde fuera de muestra a propósito (concepto §6).
+ * Datos: `equitySeries`, `BACKTEST_CONTEXT`, `BACKTEST_SPLITS` y `APPROVED_VALIDATION`. El `label`
+ * del gráfico se escribe a mano y debe coincidir con la curva (docs/diseno/flujo-de-graficas.md).
+ */
 export const metadata: Metadata = { title: 'Laboratorio' };
 
 export default function LaboratorioPage() {

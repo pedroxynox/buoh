@@ -42,6 +42,8 @@ export const SEGMENT_POLICY_VERSION = '1.0.0';
 export const CONTRACT_SCHEMA_VERSION = '1.0.0';
 export const CANONICALIZATION_VERSION = 'RFC8785';
 
+// Hay una copia de este esquema en packages/contracts/src/vector-integrity.ts para verificar los
+// vectores; mantenerlas iguales es el pendiente 4 de F1.2 (PROJECT_STATUS.md).
 export const qualityProfileSchema = z.strictObject({
   allowed_symbols: z.array(z.string().min(1)).min(1),
   gap_detection: z.literal('after_reconnection'),

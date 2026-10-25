@@ -9,6 +9,11 @@ import {
   INCIDENTS,
 } from '@buoh/prototype-data';
 
+/**
+ * Datos (concepto de interfaz §3): datasets publicados con su identificador e incidencias de calidad
+ * abiertas y resueltas. Muestra cómo se verá la Fase 2; hoy los datasets reales solo se consultan
+ * con `pnpm run data:replay` (runbook de ingesta).
+ */
 export const metadata: Metadata = { title: 'Datos' };
 
 export default function DatosPage() {

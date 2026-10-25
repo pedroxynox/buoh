@@ -1,3 +1,8 @@
+/**
+ * Las cinco pestañas del prototipo móvil (concepto de interfaz §7, ADR-0009). Qué muestra cada una se
+ * decide en model.ts, donde lo comprueban las pruebas; aquí solo se dibuja. Los únicos controles
+ * cambian de pestaña. No hay gráficos: la evidencia se muestra como cifra con su contexto.
+ */
 import {
   DEMO_NOW_UTC,
   formatUtc,

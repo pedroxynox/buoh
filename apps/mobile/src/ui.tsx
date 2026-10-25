@@ -1,6 +1,11 @@
 /**
  * Piezas visuales del prototipo móvil. Reproducen en React Native los componentes web del sistema de
  * diseño, con los mismos tokens, iconos y presentaciones de estado.
+ *
+ * Son copias a propósito: el móvil no puede importar `@buoh/design-system/react`, que trae React
+ * 19.3.1 (ADR-0009, regla de ESLint del móvil). Pero las reglas que no dependen de React (qué estado
+ * va con borde fuerte, el texto accesible de cada insignia, las filas del contexto de una métrica)
+ * están escritas dos veces y ya difieren en un texto (estado-del-codigo D-01 y D-02).
  */
 import {
   EXECUTION_MODE_PRESENTATION,

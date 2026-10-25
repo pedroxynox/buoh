@@ -13,6 +13,10 @@ import { NAV_ITEMS } from '../src/navigation';
 
 const OUT = fileURLToPath(new URL('../out/', import.meta.url));
 
+// Los ayudantes de abajo (files, textOf, mainOf, pageOf) y las pruebas de logo, títulos y recursos
+// externos están repetidos en apps/site/test/export.test.ts, con pequeñas diferencias en textOf
+// (estado-del-codigo D-03).
+
 function files(dir: string, extension: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
@@ -39,6 +43,8 @@ function mainOf(html: string): string {
   return html.slice(start, end);
 }
 
+// Frases prohibidas de la guía de marca §3. La misma lista está copiada en las pruebas del sitio y
+// del móvil; si la guía cambia, hay que cambiar las tres (estado-del-codigo D-04).
 const FORBIDDEN = [
   /ganancia garantizada/i,
   /sin riesgo/i,

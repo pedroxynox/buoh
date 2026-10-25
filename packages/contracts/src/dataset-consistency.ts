@@ -13,6 +13,9 @@ export interface DatasetConsistencyInput {
   readonly ticks: readonly MarketTick[];
 }
 
+// Orden canónico de ticks e incidencias (contratos de dominio, «Canonicalización y orden»). Quien
+// lo produce es packages/domain/src/quality.ts, con comparadores propios que deben coincidir con
+// estos; si cambia uno, cambian los dos (estado-del-codigo D-06).
 function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }

@@ -4,6 +4,10 @@ import type { ReactNode } from 'react';
 import { PAGES, RISK_SHORT, TAGLINE, TRADEMARK_NOTE } from './content';
 import { SiteNavLink } from './SiteNavLink';
 
+/**
+ * Marco común del sitio oficial (docs/diseno/sitio-oficial.md §3): cabecera con el menú, y pie con el
+ * aviso de riesgo, la nota de marcas de terceros y la declaración de privacidad en todas las páginas.
+ */
 export function SiteHeader() {
   return (
     <header className="s-header">

@@ -72,6 +72,8 @@ function sortedUnique(values: readonly string[]): string[] {
   return [...new Set(values)].sort();
 }
 
+// Orden canónico de ticks e incidencias del dataset. packages/contracts/src/dataset-consistency.ts
+// lo valida con sus propios comparadores, que deben coincidir con estos (estado-del-codigo D-06).
 function compareStrings(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }

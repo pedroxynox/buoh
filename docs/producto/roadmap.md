@@ -22,7 +22,8 @@ Este roadmap ordena el trabajo por evidencia y reducción de riesgo, no por fech
 2. prototipo navegable del producto con datos ficticios;
 3. sitio oficial estático;
 4. prototipo móvil con datos ficticios;
-5. prototipo de escritorio para Windows con datos ficticios.
+5. prototipo de escritorio para Windows con datos ficticios;
+6. identidad visual a partir del logo del propietario.
 
 **Criterio de salida:** el propietario revisó capturas de los prototipos y del sitio, y las pruebas de contraste y de estados pasan.
 

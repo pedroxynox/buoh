@@ -13,6 +13,9 @@ import { PAGES, RISK_SHORT, TRADEMARK_NOTE } from '../src/content';
 
 const OUT = fileURLToPath(new URL('../out/', import.meta.url));
 
+// Ayudantes y pruebas comunes con apps/web/test/export.test.ts (estado-del-codigo D-03). Este
+// textOf, a diferencia del de la web, también decodifica entidades HTML.
+
 function files(dir: string, extension: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
@@ -41,7 +44,11 @@ function mainOf(html: string): string {
   return html.slice(start, end);
 }
 
-/** Promesas y presiones prohibidas por la guía de marca §3. */
+/**
+ * Promesas y presiones prohibidas. Las seis primeras son las de la guía de marca §3, copiadas
+ * también en las pruebas de la web y el móvil; «regístrate», «suscríbete» y «compra ahora» solo
+ * están aquí y ninguna guía las nombra (estado-del-codigo D-04).
+ */
 const FORBIDDEN = [
   /ganancia garantizada/i,
   /sin riesgo/i,

@@ -1,3 +1,8 @@
+/**
+ * Taxonomías del sistema (contratos de dominio, «Taxonomías independientes»). Cada una es un eje
+ * propio: `execution_mode` no es `service_health` ni `strategy_lifecycle`, y `paused` existe en
+ * salud y en ciclo de vida con significados distintos (AGENTS.md, invariantes).
+ */
 import { z } from 'zod';
 
 export const deploymentEnvironmentSchema = z.enum(['development', 'test', 'staging', 'production']);
@@ -22,6 +27,7 @@ export const qualityIncidentTypeSchema = z.enum([
   'persistence_unavailable',
   'source_limit_exceeded',
 ]);
+// Subconjunto de incidencias que abre una condición con estado (abierta → resuelta) y degrada la salud.
 export const conditionTypeSchema = z.enum([
   'connection_lost',
   'event_gap_unresolved',
@@ -30,6 +36,7 @@ export const conditionTypeSchema = z.enum([
 ]);
 export const severitySchema = z.enum(['info', 'warning', 'error', 'critical']);
 export const closureTypeSchema = z.enum(['requested', 'remote', 'transport_error', 'timeout']);
+// Etapa de escritura en la que falló la persistencia (incidencia `persistence_unavailable`).
 export const persistenceStageSchema = z.enum([
   'raw_object_write',
   'source_event_index',
@@ -38,6 +45,7 @@ export const persistenceStageSchema = z.enum([
   'manifest_write',
   'manifest_commit',
 ]);
+// Recursos con límite de ADR-0004 §7 (frame, cola en memoria y archivo de esquemas de la fuente).
 export const sourceResourceSchema = z.enum([
   'websocket_frame',
   'in_memory_queue_events',

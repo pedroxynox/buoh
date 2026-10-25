@@ -3,6 +3,10 @@ import type { Metadata } from 'next';
 import { PageHeader } from '../../src/components/AppShell';
 import { formatUtc, SOURCES } from '@buoh/prototype-data';
 
+/**
+ * Conexiones (concepto de interfaz §3): estado de cada fuente (Deriv y los dos servidores MT5 de
+ * ADR-0007) y, con candado de Fase 4, las autorizaciones de cuenta.
+ */
 export const metadata: Metadata = { title: 'Conexiones' };
 
 export default function ConexionesPage() {

@@ -12,6 +12,12 @@ import {
   SOURCES,
 } from '@buoh/prototype-data';
 
+/**
+ * Mercados (concepto de interfaz §3): catálogo de instrumentos por fuente y el gráfico de precios de
+ * R_100 con su hueco marcado. Datos: `priceSeries`, `PRICE_GAPS` e `INSTRUMENTS` de @buoh/prototype-data.
+ * El `label` del gráfico es la única descripción que oye un lector de pantalla y se escribe a mano:
+ * si cambian los datos, hay que cambiarlo (docs/diseno/flujo-de-graficas.md).
+ */
 export const metadata: Metadata = { title: 'Mercados' };
 
 export default function MercadosPage() {

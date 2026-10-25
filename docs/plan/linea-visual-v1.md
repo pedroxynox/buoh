@@ -4,14 +4,14 @@ schema_version: "1.0.0"
 status: "ready"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-10-25T19:00:00.000Z"
+last_reviewed_utc: "2026-10-25T21:00:00.000Z"
 ---
 
 # Plan ejecutable: línea visual V1
 
 ## 1. Objetivo
 
-Dar a buoh una identidad visual propia y una interfaz que el propietario pueda ver y validar antes de que existan datos reales: marca, sistema de diseño, catálogo de funciones, prototipos navegables del producto (web y móvil) y sitio oficial.
+Dar a buoh una identidad visual propia y una interfaz que el propietario pueda ver y validar antes de que existan datos reales: marca, sistema de diseño, catálogo de funciones, prototipos navegables del producto (web, móvil y escritorio) y sitio oficial.
 
 La línea visual corre en paralelo a [Fase 1](fase-1-fundacion-de-datos.md) y no cambia su alcance ([ADR-0008](../arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)).
 

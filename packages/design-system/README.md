@@ -26,6 +26,7 @@ El tema noche es el predeterminado. Para el tema día, se añade `data-theme="di
 ```text
 pnpm --filter @buoh/design-system run build
 pnpm --filter @buoh/design-system run test
+pnpm --filter @buoh/design-system run logo:write   # vuelve a escribir assets/ desde src/logo.ts
 ```
 
 Las tipografías (Sen y JetBrains Mono) las carga cada app desde Fontsource o `@expo-google-fonts`; este paquete solo nombra sus familias. El logotipo vectorizado está en `src/logo.ts` y `assets/` ([ADR-0011](../../docs/arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)).

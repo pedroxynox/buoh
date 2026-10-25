@@ -4,6 +4,10 @@ import type { ReactNode } from 'react';
 /**
  * Gráficos propios (guía §8). El SVG dibuja solo líneas y áreas y se estira al contenedor;
  * los textos van en HTML encima, para que se lean al mismo tamaño en móvil y en escritorio.
+ *
+ * Es un componente de servidor: se renderiza en la exportación estática y no lleva JavaScript de
+ * cliente ni interacción. Hoy solo lo alimentan los datos ficticios de @buoh/prototype-data. El
+ * flujo completo está en docs/diseno/flujo-de-graficas.md.
  */
 
 /** Coordenadas internas del dibujo: 0–1000 en horizontal y 0–100 en vertical. */
@@ -17,6 +21,10 @@ interface Scale {
   readonly max: number;
 }
 
+/**
+ * Escala lineal con un 10 % de margen arriba y abajo. `includeZero` obliga a mostrar el cero (curva
+ * de resultados). Supone al menos un valor no nulo: con todos nulos, min y max serían infinitos.
+ */
 function scaleFor(values: readonly (number | null)[], includeZero = false): Scale {
   const finite = values.filter((v): v is number => v !== null);
   let min = Math.min(...finite);
@@ -51,6 +59,7 @@ function segments(values: readonly (number | null)[], s: Scale): string {
   return d;
 }
 
+// Convierten coordenadas del dibujo en porcentajes del contenedor, para colocar las etiquetas HTML.
 const pctX = (x: number) => `${((x / W) * 100).toFixed(2)}%`;
 const pctY = (y: number) => `${((y / H) * 100).toFixed(2)}%`;
 
@@ -74,6 +83,7 @@ function Frame({
   readonly children: ReactNode;
   readonly overlay?: ReactNode;
 }) {
+  // Cinco líneas de rejilla repartidas por igual en el rango con margen; no son valores redondos.
   const steps = 4;
   const ticks = Array.from({ length: steps + 1 }, (_, k) => s.min + ((s.max - s.min) * k) / steps);
   return (
@@ -140,6 +150,8 @@ export function PriceChart({
 }) {
   const s = scaleFor(values);
   return (
+    // `role="img"` hace que el lector de pantalla lea solo `label`: las etiquetas HTML de dentro
+    // quedan ocultas para él. Por eso la página escribe en `label` lo que muestra el gráfico.
     <div className="w-chart" role="img" aria-label={label}>
       <Frame
         s={s}
@@ -156,6 +168,7 @@ export function PriceChart({
           </span>
         ))}
       >
+        {/* La banda va del último tick antes del hueco al primero después, así se ven los dos bordes. */}
         {gaps.map((gap) => (
           <rect
             key={gap.start}
@@ -181,6 +194,7 @@ export function PriceChart({
   );
 }
 
+// Decimal con coma y signo menos tipográfico (−), como el resto de las cifras de resultados.
 const comma = (v: number, digits: number) => v.toFixed(digits).replace('.', ',').replace('-', '−');
 
 /** Curva de resultado acumulado (puntos porcentuales) con línea de cero y la peor caída marcada. */
@@ -230,6 +244,7 @@ export function EquityChart({
           strokeWidth="1.75"
           vectorEffect="non-scaling-stroke"
         />
+        {/* Peor caída: segmento vertical en el valle, desde la altura del máximo previo. */}
         <line
           x1={s.x(worst.at)}
           x2={s.x(worst.at)}

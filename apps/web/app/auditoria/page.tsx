@@ -3,6 +3,10 @@ import type { Metadata } from 'next';
 import { PageHeader } from '../../src/components/AppShell';
 import { AUDIT, formatUtc } from '@buoh/prototype-data';
 
+/**
+ * Auditoría (concepto de interfaz §3): eventos de datos y estrategias; la parte de órdenes, con
+ * candado de Fase 4.
+ */
 export const metadata: Metadata = { title: 'Auditoría' };
 
 export default function AuditoriaPage() {
