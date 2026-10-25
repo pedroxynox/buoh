@@ -92,6 +92,7 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 - [Plan de la línea visual V1](docs/plan/linea-visual-v1.md)
 - [Guía de marca](docs/diseno/marca-buoh.md)
 - [Concepto de interfaz](docs/diseno/concepto-de-interfaz.md)
+- [Sitio oficial](docs/diseno/sitio-oficial.md)
 - [Funciones y disponibilidad](docs/producto/funciones-y-disponibilidad.md)
 - [Contratos de dominio y eventos](docs/arquitectura/contratos-de-dominio.md)
 - [Seguridad y rigor cuantitativo](docs/gobierno/seguridad-y-rigor-cuantitativo.md)

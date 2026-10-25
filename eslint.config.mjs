@@ -73,4 +73,14 @@ export default defineConfig(
       },
     },
   },
+  {
+    files: ['apps/site/**/*.{ts,tsx}'],
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+        project: ['./apps/site/tsconfig.typecheck.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
 );
