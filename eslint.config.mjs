@@ -2,6 +2,7 @@
 import js from '@eslint/js';
 import { defineConfig } from 'eslint/config';
 import globals from 'globals';
+import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
@@ -11,6 +12,9 @@ export default defineConfig(
       '**/dist/**',
       '**/generated/**',
       '**/node_modules/**',
+      '**/.next/**',
+      '**/out/**',
+      '**/next-env.d.ts',
       'test-vectors/**',
     ],
   },
@@ -22,7 +26,7 @@ export default defineConfig(
     },
   },
   {
-    files: ['**/*.ts'],
+    files: ['**/*.{ts,tsx}'],
     extends: [
       js.configs.recommended,
       tseslint.configs.recommendedTypeChecked,
@@ -47,6 +51,14 @@ export default defineConfig(
       ],
       '@typescript-eslint/no-unnecessary-condition': 'error',
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
+    },
+  },
+  // Interfaces web (ADR-0008): React en navegador.
+  {
+    files: ['**/*.tsx', 'apps/web/**/*.ts', 'apps/site/**/*.ts'],
+    extends: [reactHooks.configs.flat['recommended-latest']],
+    languageOptions: {
+      globals: { ...globals.browser },
     },
   },
 );

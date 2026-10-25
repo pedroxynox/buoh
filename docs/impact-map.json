@@ -53,6 +53,21 @@
       ]
     },
     {
+      "id": "design-system",
+      "description": "Los tokens y componentes de marca deben coincidir con la guía de marca.",
+      "includes": ["packages/design-system/**"],
+      "requires_any": ["docs/diseno/marca-buoh.md"]
+    },
+    {
+      "id": "web-clients",
+      "description": "El prototipo y el sitio deben seguir el concepto de interfaz y ADR-0008.",
+      "includes": ["apps/web/**", "apps/site/**"],
+      "requires_any": [
+        "docs/diseno/concepto-de-interfaz.md",
+        "docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md"
+      ]
+    },
+    {
       "id": "documentation-guard",
       "description": "La política del guard debe permanecer explicada para contribuidores.",
       "includes": ["docs/impact-map.json", "scripts/check-doc-impact.*"],

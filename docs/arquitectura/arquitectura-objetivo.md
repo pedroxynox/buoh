@@ -50,7 +50,8 @@ buoh/
 │   ├── market-data-worker/      # ingesta, validación, normalización y trabajos de datos
 │   ├── signal-engine/           # evaluación en vivo y producción de SignalEvent
 │   ├── execution-gateway/       # futuro: único proceso con permiso de ejecutar
-│   ├── web/                     # Next.js: investigación, auditoría y control
+│   ├── web/                     # Next.js: investigación, auditoría y control (hoy, prototipo visual de ADR-0008)
+│   ├── site/                    # Next.js estático: sitio oficial de buoh (ADR-0008)
 │   ├── mobile/                  # Expo/React Native: Android e iOS
 │   └── desktop/                 # futuro: Tauri 2 para Windows
 ├── packages/
@@ -59,7 +60,7 @@ buoh/
 │   ├── strategy-sdk/            # interfaz restringida de estrategia; sin red ni secretos
 │   ├── risk-policy/             # evaluador puro de límites y elegibilidad
 │   ├── broker-adapters/         # interfaces y adaptadores aislados: Deriv y, después, MT5
-│   ├── design-system/           # tokens y componentes visuales de buoh
+│   ├── design-system/           # tokens y componentes visuales de buoh (guía: docs/diseno/marca-buoh.md)
 │   └── config/                  # configuración común de calidad y compilación
 ├── research/
 │   └── python/                  # análisis estadístico reproducible por lotes

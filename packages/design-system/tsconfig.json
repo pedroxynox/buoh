@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "jsx": "react-jsx",
+    "lib": ["ES2024", "DOM"],
+    "noEmit": true,
+    "rootDir": "../..",
+    "types": ["node", "vitest/globals"],
+    "paths": {
+      "@buoh/contracts": ["../contracts/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "scripts/**/*.mjs"]
+}

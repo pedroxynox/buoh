@@ -8,7 +8,7 @@ Antes de proponer o modificar archivos, lee en este orden:
 
 1. [`AGENTS.md`](AGENTS.md): proceso y jerarquía de autoridad.
 2. [`PROJECT_STATUS.md`](PROJECT_STATUS.md): estado vigente, objetivo y siguiente tarea.
-3. El plan de la fase enlazado desde `PROJECT_STATUS.md`.
+3. Los planes activos enlazados desde `PROJECT_STATUS.md`: el de la fase (`plan`) y los que corren en paralelo (`parallel_plans`).
 4. Los contratos, ADR y runbooks afectados por la tarea.
 5. El código y las pruebas relacionados, cuando existan.
 
@@ -88,4 +88,4 @@ El modelo revisor contrasta el diff con fuentes canónicas y vectores independie
 
 ## Desarrollo por fases
 
-Solo crea directorios y dependencias requeridos por el plan activo. La arquitectura objetivo describe el destino, no autoriza implementar todo el destino en una fase temprana.
+Solo crea directorios y dependencias requeridos por un plan activo (`plan` o `parallel_plans` de `PROJECT_STATUS.md`). La arquitectura objetivo describe el destino, no autoriza implementar todo el destino en una fase temprana.
