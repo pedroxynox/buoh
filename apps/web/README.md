@@ -8,7 +8,7 @@ No tiene API, cuentas, credenciales, conexión a fuentes ni brókeres. Ninguna p
 
 ```text
 pnpm --filter @buoh/web run build      # Next.js 16 con exportación estática a out/
-pnpm --filter @buoh/web run test       # fixtures y páginas exportadas (lee el último build)
+pnpm --filter @buoh/web run test       # cada página exportada (lee el último build)
 pnpm --filter @buoh/web run typecheck
 ```
 
@@ -20,8 +20,9 @@ pnpm --filter @buoh/web run typecheck
 |---|---|
 | `app/` | Una carpeta por sección, el marco (`layout.tsx`) y los estilos `w-*` (`globals.css`) |
 | `src/components/` | Marco con barra superior y navegación, gráficos SVG, tarjeta de señal y metadatos de datos |
-| `src/fixtures.ts` | Todos los datos ficticios, fijados en el código |
-| `test/` | Invariantes de los datos y comprobación de cada página de `out/` |
+| `test/` | Comprobación de cada página de `out/` |
+
+Los datos ficticios y sus pruebas de coherencia viven en [`@buoh/prototype-data`](../../packages/prototype-data/README.md), compartidos con el prototipo móvil.
 
 ## Configuración de TypeScript
 

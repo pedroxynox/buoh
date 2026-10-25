@@ -5,6 +5,8 @@ import {
   GLOBAL_STATUS,
   INCIDENT_LABELS,
   INCIDENT_STATUS,
+  SHADOW_RESULT,
+  SIGNAL_STATUS,
   SIGNALS,
   SOURCES,
   type SignalRow,
@@ -12,6 +14,7 @@ import {
 import { Pressable, Text, View } from 'react-native';
 import {
   alertsInOrder,
+  APPROVED_EVIDENCE,
   LATEST_SIGNALS,
   LOCKED_ON_MOBILE,
   ONLY_ON_WEB,
@@ -68,13 +71,25 @@ function PageTitle({
   );
 }
 
-const SIGNAL_STATUS = {
-  vigente: { tone: 'aurora', label: 'Vigente', icon: 'clock' },
-  vencida: { tone: 'niebla', label: 'Vencida', icon: 'circleSlash' },
-  descartada: { tone: 'naranja', label: 'Descartada: falta su tick de resultado', icon: 'gap' },
-} as const;
+function NavButton({ label, onPress }: { readonly label: string; readonly onPress: () => void }) {
+  return (
+    <Pressable
+      role="button"
+      onPress={onPress}
+      style={{ minHeight: TOUCH, justifyContent: 'center', alignSelf: 'flex-start' }}
+    >
+      <Text style={[styles.strong, { textDecorationLine: 'underline' }]}>{label}</Text>
+    </Pressable>
+  );
+}
 
-export function SignalCard({ signal }: { readonly signal: SignalRow }) {
+export function SignalCard({
+  signal,
+  onNavigate,
+}: {
+  readonly signal: SignalRow;
+  readonly onNavigate: (tab: TabId) => void;
+}) {
   const status = SIGNAL_STATUS[signal.status];
   return (
     <Card
@@ -102,6 +117,12 @@ export function SignalCard({ signal }: { readonly signal: SignalRow }) {
         <Badge tone={status.tone} icon={status.icon} label={status.label} />
       </View>
       <Text style={styles.muted}>Una señal no es una orden.</Text>
+      <NavButton
+        label="Ver evidencia"
+        onPress={() => {
+          onNavigate('evidencia');
+        }}
+      />
     </Card>
   );
 }
@@ -128,15 +149,12 @@ export function InicioScreen({ onNavigate }: { readonly onNavigate: (tab: TabId)
         <Text style={{ fontFamily: font.bold, fontSize: size.xxl, color: theme.text.primary }}>
           {String(OPEN_ALERTS)}
         </Text>
-        <Pressable
-          role="button"
+        <NavButton
+          label="Ver alertas"
           onPress={() => {
             onNavigate('alertas');
           }}
-          style={{ minHeight: TOUCH, justifyContent: 'center', alignSelf: 'flex-start' }}
-        >
-          <Text style={[styles.strong, { textDecorationLine: 'underline' }]}>Ver alertas</Text>
-        </Pressable>
+        />
       </Card>
       <Card title="Pausas automáticas" subtitle="Detenidas por la calidad de datos">
         {PAUSED_STRATEGIES.map((strategy) => (
@@ -149,13 +167,13 @@ export function InicioScreen({ onNavigate }: { readonly onNavigate: (tab: TabId)
       </Card>
       <SectionTitle>Últimas señales</SectionTitle>
       {LATEST_SIGNALS.map((signal) => (
-        <SignalCard key={signal.id} signal={signal} />
+        <SignalCard key={signal.id} signal={signal} onNavigate={onNavigate} />
       ))}
     </>
   );
 }
 
-export function SenalesScreen() {
+export function SenalesScreen({ onNavigate }: { readonly onNavigate: (tab: TabId) => void }) {
   return (
     <>
       <PageTitle
@@ -164,7 +182,7 @@ export function SenalesScreen() {
         summary="Cada señal dice qué estrategia y versión la emitió, cuándo vence, en qué modo está y con qué calidad de datos."
       />
       {SIGNALS.map((signal) => (
-        <SignalCard key={signal.id} signal={signal} />
+        <SignalCard key={signal.id} signal={signal} onNavigate={onNavigate} />
       ))}
     </>
   );
@@ -176,7 +194,7 @@ export function AlertasScreen() {
       <PageTitle
         eyebrow="Alertas"
         title="¿Qué necesita atención?"
-        summary="Primero lo que sigue abierto. Sin sonidos ni contadores: las alertas avisan, no apuran."
+        summary="Primero lo que sigue abierto. Sin sonidos ni cuentas atrás: las alertas avisan, no apuran."
       />
       <Card title="Incidencias de calidad">
         {alertsInOrder().map((incident) => {
@@ -201,26 +219,31 @@ export function AlertasScreen() {
 }
 
 export function EvidenciaScreen() {
-  const { context, validationContext, validation } = SHADOW_EVIDENCE;
+  const { context } = SHADOW_EVIDENCE;
   return (
     <>
       <PageTitle
         eyebrow="Evidencia"
-        title="¿Por qué confiar en esta estrategia?"
+        title="¿Esta estrategia tiene evidencia?"
         summary="Ninguna cifra va sola. La evidencia completa, con todos los tramos, está en la web."
       />
       <Card title={`${context.version} · en shadow`} subtitle="Desde su aprobación">
-        <MetricWithContext label="Pérdida neta hipotética" value="−0,3 %" context={context} />
+        <MetricWithContext
+          label="Pérdida neta hipotética"
+          value={SHADOW_RESULT}
+          context={context}
+        />
       </Card>
-      {validation === undefined || validationContext === undefined ? null : (
-        <Card title="Validación que la aprobó" subtitle="Prueba fuera de muestra">
+      <SectionTitle>Validaciones que aprobaron cada estrategia</SectionTitle>
+      {APPROVED_EVIDENCE.map((item) => (
+        <Card key={item.strategyId} title={item.version} subtitle="Prueba fuera de muestra">
           <MetricWithContext
             label="Resultado neto después de costes"
-            value={validation.result}
-            context={validationContext}
+            value={item.result}
+            context={item.context}
           />
         </Card>
-      )}
+      ))}
     </>
   );
 }
@@ -231,8 +254,16 @@ export function MasScreen() {
       <PageTitle
         eyebrow="Más"
         title="Fuentes, límites y lo que llega después"
-        summary="El móvil sirve para seguir el bot. Lo que cambia riesgo se hace en la web o el escritorio."
+        summary="El móvil sirve para seguir el bot. Lo que cambia el riesgo se hace en la web o el escritorio."
       />
+      {LOCKED_ON_MOBILE.map((item) => (
+        <PhaseLock
+          key={item.title}
+          phase={item.phase}
+          title={item.title}
+          description={item.description}
+        />
+      ))}
       <Card title="Fuentes" subtitle="Cada una con su propia salud">
         {SOURCES.map((source) => (
           <ListRow key={source.id}>
@@ -244,17 +275,9 @@ export function MasScreen() {
           </ListRow>
         ))}
       </Card>
-      {LOCKED_ON_MOBILE.map((item) => (
-        <PhaseLock
-          key={item.title}
-          phase={item.phase}
-          title={item.title}
-          description={item.description}
-        />
-      ))}
       <Card
         title="Solo en la web o el escritorio"
-        subtitle="Cambian riesgo o necesitan pantalla grande"
+        subtitle="Cambian el riesgo o necesitan pantalla grande"
       >
         {ONLY_ON_WEB.map((item) => (
           <View key={item} style={styles.row}>

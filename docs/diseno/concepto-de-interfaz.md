@@ -86,8 +86,9 @@ Diseño de la información del cliente web (`V1-UI-001`). El prototipo de `apps/
 Construcción y revisión:
 
 ```text
-pnpm --filter @buoh/web run build   # exporta a apps/web/out
-pnpm --filter @buoh/web run test    # comprueba fixtures y cada página exportada
+pnpm --filter @buoh/web run build              # exporta a apps/web/out
+pnpm --filter @buoh/web run test               # comprueba cada página exportada
+pnpm --filter @buoh/prototype-data run test    # comprueba la coherencia de los datos ficticios
 ```
 
 `apps/web/out` es un sitio estático: se puede abrir con cualquier servidor de archivos local. No se publica en internet (ADR-0008 §3).

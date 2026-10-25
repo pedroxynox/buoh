@@ -18,14 +18,15 @@ pnpm --filter @buoh/mobile run typecheck
 
 | Ruta | Qué contiene |
 |---|---|
-| `src/App.tsx` | Tipografías, barra superior con modo y salud, contenido y barra inferior |
+| `src/App.tsx` | Tipografías y pestaña actual |
+| `src/shell.tsx` | Barra superior con modo, salud y aviso de datos ficticios, y barra de pestañas |
 | `src/screens.tsx` | Las cinco pestañas |
 | `src/model.ts` | Qué muestra cada pestaña, comprobable sin teléfono |
 | `src/ui.tsx`, `src/theme.ts` | Insignias, tarjetas, iconos y logotipo con los tokens de `@buoh/design-system` |
-| `test/` | Pruebas de las pestañas renderizadas |
+| `test/` | Pruebas de las pestañas y del marco renderizados, y de la versión de React de `out/` |
 
 ## Configuración
 
-- Expo SDK 58 con React 19.3.0, la versión que exige React Native 0.88.
+- Expo SDK 58 con React 19.3.0, la versión que exige React Native 0.88. ESLint impide importar `@buoh/design-system/react`, que trae React 19.3.1.
 - Metro resuelve los paquetes del monorepo desde su build (`experiments.tsconfigPaths: false`).
 - `tsconfig.json` activa `skipLibCheck`, porque los tipos de React Native chocan con los de Node y del navegador.

@@ -86,7 +86,7 @@ El [catálogo](../producto/funciones-y-disponibilidad.md) lista cada función de
 
 - cinco pestañas: Inicio, Señales, Alertas, Evidencia y Más;
 - modo de ejecución y salud del servicio siempre visibles y separados, y la marca «Datos ficticios»;
-- toda cifra de desempeño con su contexto completo; toda señal con estrategia, versión, modo, vencimiento y calidad;
+- toda cifra de desempeño con su contexto completo; toda señal con estrategia, versión, modo, vencimiento, calidad y un enlace a su evidencia, como pide el catálogo;
 - sin campos de texto ni contraseñas; sin edición de estrategias o políticas ni petición del modo real; el *kill switch* aparece con candado de Fase 4;
 - `expo export` compila Android, iOS y web, y las pruebas comprueban cada pestaña renderizada.
 

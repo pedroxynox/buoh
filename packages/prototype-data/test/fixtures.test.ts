@@ -17,6 +17,7 @@ import {
   R100_TICK_SECONDS,
   SHADOW_CONTEXT,
   SHADOW_PERIOD_START_UTC,
+  SHADOW_RESULT,
   SIGNALS,
   SOURCES,
   SPLITS_CONTEXT,
@@ -183,6 +184,20 @@ describe('datos ficticios coherentes (V1-UI-001)', () => {
     expect(values.at(-1)).toBe(-0.4);
     expect(worstDrawdown(values).drop.toFixed(1)).toBe('3.6');
     expect(BACKTEST_CONTEXT.drawdown).toBe('−3,6\u00a0%');
+  });
+
+  it('el resultado en shadow es una pérdida pequeña, nunca mayor que su peor caída', () => {
+    const percent = (value: string) =>
+      Number(
+        value
+          .replace('−', '-')
+          .replace(/[^\d,-]/g, '')
+          .replace(',', '.'),
+      );
+    expect(percent(SHADOW_RESULT)).toBeLessThan(0);
+    expect(Math.abs(percent(SHADOW_RESULT))).toBeLessThanOrEqual(
+      Math.abs(percent(SHADOW_CONTEXT.drawdown)),
+    );
   });
 
   it('el hueco del gráfico coincide con la incidencia y la conexión perdida', () => {

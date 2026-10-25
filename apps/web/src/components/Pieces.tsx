@@ -1,8 +1,7 @@
-import type { IconName } from '@buoh/design-system';
 import { Badge, Icon, ModeBadge } from '@buoh/design-system/react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { formatUtcTime, type SignalRow } from '@buoh/prototype-data';
+import { formatUtcTime, SIGNAL_STATUS, type SignalRow } from '@buoh/prototype-data';
 
 /** Metadatos obligatorios de toda vista de datos (README, identidad de diseño). */
 export function DataMeta({ items }: { readonly items: readonly (readonly [string, ReactNode])[] }) {
@@ -17,17 +16,6 @@ export function DataMeta({ items }: { readonly items: readonly (readonly [string
     </dl>
   );
 }
-
-const SIGNAL_STATUS: Readonly<
-  Record<
-    SignalRow['status'],
-    { tone: 'aurora' | 'niebla' | 'naranja'; label: string; icon: IconName }
-  >
-> = {
-  vigente: { tone: 'aurora', label: 'Vigente', icon: 'clock' },
-  vencida: { tone: 'niebla', label: 'Vencida', icon: 'circleSlash' },
-  descartada: { tone: 'naranja', label: 'Descartada: falta su tick de resultado', icon: 'gap' },
-};
 
 /** Tarjeta de señal: estrategia, versión, condición, tiempos, modo, calidad y evidencia (concepto §4). */
 export function SignalCard({ signal }: { readonly signal: SignalRow }) {

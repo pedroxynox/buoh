@@ -86,6 +86,8 @@ export function Badge({
   const colors = theme.tones[tone];
   return (
     <View
+      accessible
+      role="img"
       aria-label={accessibleLabel ?? (detail === undefined ? label : `${label}. ${detail}`)}
       style={[
         styles.badge,

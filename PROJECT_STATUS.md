@@ -187,7 +187,7 @@ Ninguno para iniciar `F1.4b`.
 - Revisión de términos de Deriv MT5, Vantage y MetaQuotes, y entidad de Vantage aplicable. Se completa en el primer incremento de Fase 1B.
 - Orden entre Fase 1B (datos MT5) y Fase 2 (bot shadow). Se decide al cerrar Fase 1.
 - Dominio y alojamiento del sitio oficial, y revisión legal de su texto antes de publicarlo (ADR-0008).
-- Compilación y distribución de la app móvil.
+- Probar la app móvil en un teléfono real (Expo Go para el SDK 58 aún no está en las tiendas, o una compilación nativa), y cómo compilarla y distribuirla (ADR-0009).
 - Límites monetarios y política de riesgo para fases `demo` y `real`.
 - Proveedor de pagos y modelo de suscripción.
 

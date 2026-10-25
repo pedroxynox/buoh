@@ -17,7 +17,7 @@ import type {
   ServiceHealth,
   StrategyLifecycle,
 } from '@buoh/contracts';
-import type { IconName, PerformanceContext, Severity } from '@buoh/design-system';
+import type { IconName, PerformanceContext, Severity, Tone } from '@buoh/design-system';
 
 /** Espacio que no se corta entre un número y su unidad. */
 const NB = '\u00a0';
@@ -461,6 +461,20 @@ export const APPROVED_VALIDATION: readonly ValidationSummary[] = [
   },
 ];
 
+/** Contexto completo de la validación que aprobó una estrategia (mismos costes y límites que el ejemplo). */
+export function validationContextOf(row: ValidationSummary): PerformanceContext {
+  return {
+    source: SPLITS_CONTEXT.source,
+    period: row.window,
+    sample: row.sample,
+    costs: SPLITS_CONTEXT.costs,
+    losses: row.losses,
+    drawdown: row.drawdown,
+    version: row.version,
+    limitations: SPLITS_CONTEXT.limitations,
+  };
+}
+
 /** El período shadow empieza con la aprobación de la estrategia. */
 export const SHADOW_PERIOD_START_UTC = '2026-10-16T09:00:00.000Z';
 
@@ -474,6 +488,9 @@ export const SHADOW_CONTEXT: PerformanceContext = {
   version: 'Ruptura de rango v2',
   limitations: 'Ninguna orden se envió; cuatro días de muestra no bastan para sacar conclusiones.',
 };
+
+/** Resultado neto hipotético del período de `SHADOW_CONTEXT`: una pérdida pequeña. */
+export const SHADOW_RESULT = `−0,3${NB}%`;
 
 /**
  * Curva de resultado acumulado hipotético fuera de muestra (fórmula fija). Termina en −0,4 y su
@@ -559,6 +576,18 @@ export const SIGNALS: readonly SignalRow[] = [
     evidenceHref: '/laboratorio/#evidencia-ruptura-v2',
   },
 ];
+
+/** Presentación del estado de una señal, igual en web y móvil. */
+export const SIGNAL_STATUS: Readonly<
+  Record<
+    SignalRow['status'],
+    { readonly tone: Tone; readonly label: string; readonly icon: IconName }
+  >
+> = {
+  vigente: { tone: 'aurora', label: 'Vigente', icon: 'clock' },
+  vencida: { tone: 'niebla', label: 'Vencida', icon: 'circleSlash' },
+  descartada: { tone: 'naranja', label: 'Descartada: falta su tick de resultado', icon: 'gap' },
+};
 
 export interface AuditRow {
   readonly whenUtc: string;

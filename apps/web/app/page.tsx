@@ -19,6 +19,7 @@ import {
   INCIDENT_LABELS,
   INCIDENTS,
   SHADOW_CONTEXT,
+  SHADOW_RESULT,
   SIGNALS,
   SOURCES,
   STRATEGIES,
@@ -129,7 +130,7 @@ export default function ObservatorioPage() {
         >
           <MetricWithContext
             label="Pérdida neta hipotética"
-            value="−0,3 %"
+            value={SHADOW_RESULT}
             context={SHADOW_CONTEXT}
           />
         </Card>

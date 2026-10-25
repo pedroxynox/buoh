@@ -12,7 +12,7 @@ const svgModule = join(
 
 /**
  * Las pantallas se renderizan con React Native for Web: así las pruebas comprueban el contenido real
- * de cada pestaña sin un teléfono. Las extensiones `.web.*` eligen las versiones web de las librerías.
+ * de cada pestaña sin un teléfono. Las extensiones `.web.*` eligen las versiones web de las bibliotecas.
  */
 export default defineConfig({
   resolve: {

@@ -8,8 +8,8 @@ import {
   INCIDENTS,
   SHADOW_CONTEXT,
   SIGNALS,
-  SPLITS_CONTEXT,
   STRATEGIES,
+  validationContextOf,
   type IncidentRow,
 } from '@buoh/prototype-data';
 
@@ -21,7 +21,10 @@ export interface Tab {
   readonly icon: IconName;
 }
 
-/** Pestañas de la app (concepto de interfaz §7): Observatorio, Señales, Alertas, Evidencia y Más. */
+/**
+ * Pestañas de la app (concepto de interfaz §7): Observatorio (Inicio), Señales, Alertas y Evidencia.
+ * El *kill switch* va primero en «Más», con candado hasta la Fase 4.
+ */
 export const TABS: readonly Tab[] = [
   { id: 'inicio', label: 'Inicio', icon: 'eye' },
   { id: 'senales', label: 'Señales', icon: 'radar' },
@@ -46,30 +49,21 @@ export const PAUSED_STRATEGIES = STRATEGIES.filter((strategy) => strategy.lifecy
 /** En el inicio solo caben las dos señales más recientes. */
 export const LATEST_SIGNALS = SIGNALS.slice(0, 2);
 
-const validation = APPROVED_VALIDATION.find((row) => row.version === SHADOW_CONTEXT.version);
-
-/** Evidencia de la estrategia en shadow: su resultado y la validación que la aprobó. */
-export const SHADOW_EVIDENCE: {
+/** Evidencia de cada estrategia aprobada: la validación que la aprobó, con su contexto completo. */
+export const APPROVED_EVIDENCE: readonly {
+  readonly strategyId: string;
+  readonly version: string;
+  readonly result: string;
   readonly context: PerformanceContext;
-  readonly validation: typeof validation;
-  readonly validationContext: PerformanceContext | undefined;
-} = {
-  context: SHADOW_CONTEXT,
-  validation,
-  validationContext:
-    validation === undefined
-      ? undefined
-      : {
-          source: SPLITS_CONTEXT.source,
-          period: validation.window,
-          sample: validation.sample,
-          costs: SPLITS_CONTEXT.costs,
-          losses: validation.losses,
-          drawdown: validation.drawdown,
-          version: validation.version,
-          limitations: SPLITS_CONTEXT.limitations,
-        },
-};
+}[] = APPROVED_VALIDATION.map((row) => ({
+  strategyId: row.strategyId,
+  version: row.version,
+  result: row.result,
+  context: validationContextOf(row),
+}));
+
+/** Resultado en shadow de la estrategia activa. */
+export const SHADOW_EVIDENCE = { context: SHADOW_CONTEXT } as const;
 
 /**
  * Lo que el móvil no hace, según el catálogo de funciones: se explica en «Más» y no tiene controles.
