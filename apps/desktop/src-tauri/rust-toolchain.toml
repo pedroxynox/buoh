@@ -1,0 +1,5 @@
+# Versión exacta de Rust para el contenedor Tauri (ADR-0003 y ADR-0010).
+[toolchain]
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

@@ -54,7 +54,8 @@ android/.gradle/
 android/build/
 ios/Pods/
 ios/build/
-src-tauri/target/
+**/src-tauri/target/
+**/src-tauri/gen/
 
 # Sistema operativo y editor
 .DS_Store

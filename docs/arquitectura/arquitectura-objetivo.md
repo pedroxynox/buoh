@@ -53,7 +53,7 @@ buoh/
 │   ├── web/                     # Next.js: investigación, auditoría y control (hoy, prototipo visual de ADR-0008)
 │   ├── site/                    # Next.js estático: sitio oficial de buoh (ADR-0008)
 │   ├── mobile/                  # Expo/React Native: Android e iOS (hoy, prototipo visual de ADR-0009)
-│   └── desktop/                 # futuro: Tauri 2 para Windows
+│   └── desktop/                 # Tauri 2 para Windows (hoy, prototipo visual de ADR-0010)
 ├── packages/
 │   ├── contracts/               # Zod/OpenAPI/eventos versionados
 │   ├── domain/                  # tipos, unidades, cálculos puros y reglas compartidas
@@ -145,7 +145,7 @@ Una futura capa `TYPE_APPLICATION_OVERLAY` será de consulta, apagable y no tác
 
 ### Windows (futuro)
 
-Tauri encapsulará un cliente React que reutiliza `packages/domain`, `packages/contracts`, `packages/risk-policy` y `packages/design-system`. No empaquetará la pasarela de ejecución ni el entorno Python; toda acción sigue pasando por APIs autenticadas de buoh.
+Hoy `apps/desktop` es un prototipo que muestra la web exportada con datos ficticios ([ADR-0010](adr/0010-prototipo-de-escritorio.md)). La app real de Tauri encapsulará un cliente React que reutiliza `packages/domain`, `packages/contracts`, `packages/risk-policy` y `packages/design-system`. No empaquetará la pasarela de ejecución ni el entorno Python; toda acción sigue pasando por APIs autenticadas de buoh.
 
 ### Terminal MetaTrader 5 (futuro)
 

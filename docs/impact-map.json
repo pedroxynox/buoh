@@ -77,6 +77,15 @@
       ]
     },
     {
+      "id": "desktop",
+      "description": "El prototipo de escritorio debe seguir el concepto de interfaz y ADR-0010.",
+      "includes": ["apps/desktop/**", ".github/workflows/desktop.yml"],
+      "requires_any": [
+        "docs/diseno/concepto-de-interfaz.md",
+        "docs/arquitectura/adr/0010-prototipo-de-escritorio.md"
+      ]
+    },
+    {
       "id": "site",
       "description": "El sitio oficial debe seguir sus reglas de contenido y ADR-0008.",
       "includes": ["apps/site/**"],
