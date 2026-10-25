@@ -60,9 +60,9 @@ Leyenda: ● disponible · ◐ solo lectura o resumen · — no disponible.
 | Intenciones y órdenes `demo` | Ver lo que la pasarela pidió, lo que respondió el bróker y la reconciliación | 4 | ◐ | ◐ | ◐ |
 | *Kill switch* | Detener todo, una estrategia o un usuario | 4 | ● | ● | ● |
 | Ejecución `real` | Ver órdenes y posiciones del universo, cuentas y estrategias aprobados en la Fase 5 | 6 | ◐ | ◐ | ◐ |
-| Pedir el modo `real` | Solicitar que una estrategia aprobada pase a `real`; el servidor lo valida | 6 | ● | — | ● |
+| Pedir el modo `real` | Solicitar que una estrategia aprobada pase a `real`; el servidor lo valida | 6 | ● | ● | ● |
 
-Detener (*kill switch*) está disponible en todas las plataformas porque reduce el riesgo. Pedir el modo `real` o un cambio de política exige reautenticación y queda en auditoría; se hace desde web o escritorio, no desde el móvil.
+Detener (*kill switch*) está disponible en todas las plataformas porque reduce el riesgo. Pedir el modo `real` también se puede desde las tres, por decisión del propietario (2026-10-25). En todas sigue las mismas reglas: exige reautenticación, el servidor comprueba las puertas de la Fase 5 y la petición queda en auditoría. Cambiar una política de riesgo se hace desde web o escritorio.
 
 ### Operación y cuenta
 

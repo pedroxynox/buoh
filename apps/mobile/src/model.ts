@@ -67,11 +67,10 @@ export const SHADOW_EVIDENCE = { context: SHADOW_CONTEXT } as const;
 
 /**
  * Lo que el móvil no hace, según el catálogo de funciones: se explica en «Más» y no tiene controles.
- * Pedir el modo real y cambiar políticas exigen web o escritorio.
+ * Editar estrategias y políticas exige web o escritorio.
  */
 export const ONLY_ON_WEB = [
   'Editar hipótesis, estrategias y políticas de riesgo',
-  'Pedir que una estrategia pase al modo real',
   'Revisar datasets y la auditoría completa',
 ] as const;
 
@@ -88,5 +87,11 @@ export const LOCKED_ON_MOBILE = [
     title: 'Autorizaciones de cuenta',
     description:
       'Revisar y revocar la conexión de una cuenta demo, con confirmación en el servidor.',
+  },
+  {
+    phase: '6',
+    title: 'Pedir el modo real',
+    description:
+      'Pedir que una estrategia aprobada pase a dinero real. Tendrás que identificarte de nuevo, el servidor revisa que cumpla todas las condiciones y la petición queda registrada.',
   },
 ] as const;

@@ -150,15 +150,19 @@ describe('prototipo móvil (V1-MOBILE-001)', () => {
     }
   });
 
-  it('«Más» bloquea lo de Fase 4 y deja en la web lo que cambia riesgo, como el catálogo', () => {
+  it('«Más» muestra con candado lo de Fase 4 y 6, y deja en la web la edición, como el catálogo', () => {
     const text = textOf(<MasScreen />);
     for (const item of LOCKED_ON_MOBILE) {
-      expect(text).toContain(`Disponible en Fase ${item.phase}`);
+      expect(text).toContain(`${item.title} · Disponible en Fase ${item.phase}`);
     }
     const catalog = read('docs/producto/funciones-y-disponibilidad.md');
-    expect(catalog).toMatch(/\| Pedir el modo `real` \|[^\n]*\| 6 \| ● \| — \| ● \|/);
+    // El propietario decidió (2026-10-25) que el modo real también se pide desde el móvil.
+    expect(catalog).toMatch(/\| Pedir el modo `real` \|[^\n]*\| 6 \| ● \| ● \| ● \|/);
+    expect(LOCKED_ON_MOBILE.find((item) => item.title === 'Pedir el modo real')?.phase).toBe('6');
+    expect(ONLY_ON_WEB.some((item) => item.includes('modo real'))).toBe(false);
     expect(catalog).toMatch(/\| \*Kill switch\* \|[^\n]*\| 4 \| ● \| ● \| ● \|/);
-    expect(ONLY_ON_WEB.some((item) => item.includes('modo real'))).toBe(true);
+    expect(catalog).toMatch(/\| Políticas de riesgo \|[^\n]*\| 4 \| ● \| ◐ \| ● \|/);
+    expect(ONLY_ON_WEB.some((item) => item.includes('políticas de riesgo'))).toBe(true);
     expect(htmlOf(<MasScreen />)).not.toMatch(/role="button"/);
   });
 

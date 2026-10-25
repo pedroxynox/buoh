@@ -254,7 +254,7 @@ export function MasScreen() {
       <PageTitle
         eyebrow="Más"
         title="Fuentes, límites y lo que llega después"
-        summary="El móvil sirve para seguir el bot. Lo que cambia el riesgo se hace en la web o el escritorio."
+        summary="El móvil sirve para seguir el bot, detenerlo y, más adelante, pedir el modo real. Editar estrategias y políticas se hace en la web o el escritorio."
       />
       {LOCKED_ON_MOBILE.map((item) => (
         <PhaseLock
@@ -277,7 +277,7 @@ export function MasScreen() {
       </Card>
       <Card
         title="Solo en la web o el escritorio"
-        subtitle="Cambian el riesgo o necesitan pantalla grande"
+        subtitle="Necesitan pantalla grande o cambian las reglas del bot"
       >
         {ONLY_ON_WEB.map((item) => (
           <View key={item} style={styles.row}>

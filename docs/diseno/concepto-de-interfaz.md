@@ -95,7 +95,7 @@ pnpm --filter @buoh/prototype-data run test    # comprueba la coherencia de los 
 
 ## 7. Hacia móvil y escritorio
 
-- **Móvil:** Observatorio, Señales, Alertas, Evidencia y *kill switch*, con la barra inferior de §2. Sin edición de estrategias ni de políticas. El prototipo de `apps/mobile` (V1.4, [ADR-0009](../arquitectura/adr/0009-prototipo-movil.md)) lo implementa con cinco pestañas: Inicio, Señales, Alertas, Evidencia y Más; el *kill switch* está en «Más», con candado de Fase 4.
+- **Móvil:** Observatorio, Señales, Alertas, Evidencia y *kill switch*, con la barra inferior de §2. Sin edición de estrategias ni de políticas. Desde la Fase 6 también pide el modo real, con las mismas reglas que la web. El prototipo de `apps/mobile` (V1.4, [ADR-0009](../arquitectura/adr/0009-prototipo-movil.md)) lo implementa con cinco pestañas: Inicio, Señales, Alertas, Evidencia y Más; el *kill switch* está en «Más», con candado de Fase 4.
 - **Escritorio:** la misma estructura que la web, con ventanas que se pueden separar para seguir varios mercados.
 
 Ambos usan los mismos tokens de `packages/design-system`.
