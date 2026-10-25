@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 9
-updated_at_utc: "2026-10-24T05:00:00.000Z"
+status_version: 10
+updated_at_utc: "2026-10-24T06:00:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -34,11 +34,11 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
 - No existe todavía integración con Deriv, persistencia del `IngestionCursor`, cola en memoria del transporte ni despliegue.
 - MetaTrader 5 (Deriv MT5 y Vantage) queda decidido como segunda integración ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)): sus datos llegan en una Fase 1B posterior a Fase 1, y operar en MT5 empieza en Fase 4 (demo). No existe código de MT5.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
-- En paralelo a Fase 1 corre la [línea visual V1](docs/plan/linea-visual-v1.md) ([ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)). V1.1 entrega la [guía de marca](docs/diseno/marca-buoh.md), el [catálogo de funciones](docs/producto/funciones-y-disponibilidad.md), el [concepto de interfaz](docs/diseno/concepto-de-interfaz.md) y `packages/design-system`. No cambia el alcance ni la puerta de salida de Fase 1.
+- En paralelo a Fase 1 corre la [línea visual V1](docs/plan/linea-visual-v1.md) ([ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)). V1.1 entrega la [guía de marca](docs/diseno/marca-buoh.md), el [catálogo de funciones](docs/producto/funciones-y-disponibilidad.md), el [concepto de interfaz](docs/diseno/concepto-de-interfaz.md) y `packages/design-system`. V1.2 entrega el prototipo navegable en `apps/web`, con datos ficticios (`V1-UI-001`). No cambia el alcance ni la puerta de salida de Fase 1.
 
 ## Trabajo en paralelo autorizado
 
-**Línea visual V1.** Siguen V1.2, el prototipo navegable en `apps/web` con datos ficticios (`V1-UI-001`), y V1.3, el sitio oficial estático en `apps/site` (`V1-SITE-001`). Móvil y escritorio necesitan antes su propio incremento en el plan.
+**Línea visual V1.** Sigue V1.3, el sitio oficial estático en `apps/site` (`V1-SITE-001`). Móvil y escritorio necesitan antes su propio incremento en el plan.
 
 ## Siguiente tarea autorizada
 

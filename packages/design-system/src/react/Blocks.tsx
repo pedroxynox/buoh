@@ -116,12 +116,7 @@ export function MetricWithContext({
     ['Costes', context.costs],
     ['Pérdidas', context.losses],
     ['Drawdown máximo', context.drawdown],
-    [
-      'Versión',
-      <span key="version" className="b-num">
-        {context.version}
-      </span>,
-    ],
+    ['Versión', context.version],
   ];
   return (
     <div className="b-metric">
