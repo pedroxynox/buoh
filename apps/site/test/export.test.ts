@@ -8,6 +8,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { LOGO_FILES, LOGO_LOCKUP, LOGO_MIN, LOGO_WORDMARK } from '@buoh/design-system';
 import { PAGES, RISK_SHORT, TRADEMARK_NOTE } from '../src/content';
 
 const OUT = fileURLToPath(new URL('../out/', import.meta.url));
@@ -110,6 +111,25 @@ describe('sitio exportado (V1-SITE-001)', () => {
       const href = match[1] ?? '';
       expect(existsSync(join(OUT, pageOf(href))), `${page} → ${href}`).toBe(true);
     }
+  });
+
+  it.each(named)('%s lleva el logotipo vectorizado sin bajar del ancho mínimo', (page) => {
+    const html = read(page);
+    const viewBox = LOGO_LOCKUP.viewBox.replace(/\./g, '\\.');
+    const lockups = [...html.matchAll(new RegExp(`<svg\\b[^>]*viewBox="${viewBox}"[^>]*>`, 'g'))];
+    expect(lockups.length).toBeGreaterThan(0);
+    for (const [tag] of lockups) {
+      expect(Number(/\swidth="([\d.]+)"/.exec(tag)?.[1]), tag).toBeGreaterThanOrEqual(
+        LOGO_MIN.lockupPx,
+      );
+    }
+    expect(html).toContain(LOGO_WORDMARK.d);
+  });
+
+  it('el favicon es el icono del sistema de diseño', () => {
+    expect(readFileSync(new URL('../app/icon.svg', import.meta.url), 'utf8')).toBe(
+      LOGO_FILES['buoh-icono.svg'],
+    );
   });
 
   it('las hojas de estilo no cargan recursos de terceros', () => {

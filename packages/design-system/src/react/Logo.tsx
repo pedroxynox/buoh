@@ -45,7 +45,7 @@ export function BuohMark({ size = 32, variant = 'color', title = 'buoh' }: BuohM
 }
 
 export interface BuohLogoProps {
-  /** Alto en píxeles del conjunto (el del símbolo). */
+  /** Alto en píxeles del conjunto (el del símbolo). Con 31 o más, el ancho cumple el mínimo de la guía. */
   readonly size?: number;
   readonly variant?: 'color' | 'mono';
 }

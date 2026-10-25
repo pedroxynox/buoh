@@ -66,7 +66,7 @@ function ThemeSample({ theme }: { readonly theme: 'noche' | 'dia' }) {
   return (
     <div className="w-theme-sample" data-theme={theme}>
       <div className="w-row" style={{ justifyContent: 'space-between' }}>
-        <BuohLogo size={26} />
+        <BuohLogo size={32} />
         <span className="b-eyebrow">Tema {theme === 'noche' ? 'noche' : 'día'}</span>
       </div>
       <div className="w-row">

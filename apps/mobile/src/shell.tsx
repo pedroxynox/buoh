@@ -21,7 +21,7 @@ export function TopBar() {
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <BuohLogo dimension={28} />
+        <BuohLogo dimension={32} />
         <FictitiousDataNotice />
       </View>
       <View

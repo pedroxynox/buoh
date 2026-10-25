@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
   EXECUTION_MODE_PRESENTATION,
+  LOGO_MIN,
   LOGO_SYMBOL,
   LOGO_WORDMARK,
   SERVICE_HEALTH_PRESENTATION,
@@ -127,6 +128,11 @@ describe('componentes React', () => {
     expect(logo).not.toMatch(/<text\b/);
     expect(renderToStaticMarkup(<BuohMark />)).toContain('aria-label="buoh"');
     expect(renderToStaticMarkup(<BuohMark title={null} />)).toContain('aria-hidden="true"');
+  });
+
+  it('el logotipo por defecto no baja del ancho mínimo de la guía', () => {
+    const width = Number(/width="([\d.]+)"/.exec(renderToStaticMarkup(<BuohLogo />))?.[1]);
+    expect(width).toBeGreaterThanOrEqual(LOGO_MIN.lockupPx);
   });
 
   it('el símbolo conserva la proporción del original y su versión de una tinta', () => {

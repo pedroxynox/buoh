@@ -5,6 +5,10 @@ import {
   contrastRatio,
   EXECUTION_MODE_PRESENTATION,
   ICONS,
+  LOGO_FILES,
+  LOGO_GEOMETRY,
+  LOGO_INKS,
+  LOGO_MIN,
   LOGO_SYMBOL,
   LOGO_WORDMARK,
   palette,
@@ -250,36 +254,91 @@ describe('guía de marca y recursos frente a los tokens (V1-BRAND-001)', () => {
     }
   });
 
-  it('cada archivo del logotipo usa los mismos trazados que src/logo.ts', () => {
+  it('cada archivo de assets/ es exactamente el que generan los trazados de src/logo.ts', () => {
     const dir = new URL('../assets/', import.meta.url);
-    const read = (file: string) => readFileSync(new URL(file, dir), 'utf8');
-    const symbolColor = [
-      'buoh-simbolo.svg',
-      'buoh-simbolo-dia.svg',
-      'buoh-logo.svg',
-      'buoh-logo-dia.svg',
-      'buoh-icono.svg',
-    ];
-    for (const file of symbolColor) {
-      expect(read(file), file).toContain(`d="${LOGO_SYMBOL.primary}"`);
-      expect(read(file), file).toContain(`d="${LOGO_SYMBOL.detail}"`);
+    const files = readdirSync(dir).filter((f) => f.endsWith('.svg'));
+    expect(files.sort()).toEqual(Object.keys(LOGO_FILES).sort());
+    for (const file of files) {
+      expect(readFileSync(new URL(file, dir), 'utf8'), `${file}: pnpm run logo:write`).toBe(
+        LOGO_FILES[file],
+      );
     }
-    for (const file of ['buoh-simbolo-mono.svg', 'buoh-logo-mono.svg']) {
-      expect(read(file), file).toContain(`d="${LOGO_SYMBOL.mono}"`);
+    expect(LOGO_FILES['buoh-logo.svg']).not.toMatch(/<text\b|font-family/);
+  });
+
+  it('cada versión del logo usa las tintas de su tema (guía §4)', () => {
+    expect(LOGO_INKS.color).toEqual({
+      mark: themes.noche.brand.mark,
+      detail: themes.noche.brand.markDetail,
+    });
+    expect(LOGO_INKS.dia).toEqual({
+      mark: themes.dia.brand.mark,
+      detail: themes.dia.brand.markDetail,
+    });
+    // Colores medidos en el original
+    expect([LOGO_INKS.color.mark, LOGO_INKS.color.detail, LOGO_INKS.tile]).toEqual([
+      '#24A598',
+      '#EDECE0',
+      '#080F1B',
+    ]);
+    expect(LOGO_FILES['buoh-logo-dia.svg']).toContain(`fill="${palette.boreal[700]}"`);
+    expect(LOGO_FILES['buoh-logo-dia.svg']).toContain(`fill="${palette.noche[850]}"`);
+  });
+
+  it('los trazados no tienen curvas con un solo tirador ni tramos degenerados', () => {
+    for (const [name, d] of [
+      ['símbolo', LOGO_SYMBOL.primary],
+      ['detalles', LOGO_SYMBOL.detail],
+      ['monocromo', LOGO_SYMBOL.mono],
+      ['palabra', LOGO_WORDMARK.d],
+    ] as const) {
+      // pathData de paper.js: comandos relativos c, l, h, v y z tras un M absoluto
+      const curves = [
+        ...d.matchAll(/c(-?[\d.]+),(-?[\d.]+) (-?[\d.]+),(-?[\d.]+) (-?[\d.]+),(-?[\d.]+)/g),
+      ].map((m) => m.slice(1).map(Number) as [number, number, number, number, number, number]);
+      expect(curves.length, name).toBeGreaterThan(0);
+      for (const [x1, y1, x2, y2, x, y] of curves) {
+        const first = Math.hypot(x1, y1) === 0;
+        const second = Math.hypot(x - x2, y - y2) === 0;
+        expect(first && !second, `${name}: c${String(x1)},${String(y1)} …`).toBe(false);
+        expect(second && !first, `${name}: … ${String(x)},${String(y)}`).toBe(false);
+        expect(Math.hypot(x, y), name).toBeGreaterThanOrEqual(0.25);
+      }
+      for (const m of d.matchAll(/([lhv])(-?[\d.]+)(?:,(-?[\d.]+))?/g)) {
+        const length =
+          m[1] === 'l' ? Math.hypot(Number(m[2]), Number(m[3])) : Math.abs(Number(m[2]));
+        expect(length, `${name}: ${m[0]}`).toBeGreaterThanOrEqual(0.25);
+      }
     }
-    for (const file of [
-      'buoh-logo.svg',
-      'buoh-logo-dia.svg',
-      'buoh-logo-mono.svg',
-      'buoh-palabra.svg',
+  });
+
+  it('las medidas de construcción de la guía son las de LOGO_GEOMETRY', () => {
+    const g = LOGO_GEOMETRY;
+    // Una cifra decimal, redondeando la mitad hacia arriba como la guía (14,35 → 14,4).
+    const es = (v: number) => (Math.round(v * 10 + 1e-9) / 10).toFixed(1).replace('.', ',');
+    const table = guide.slice(guide.indexOf('### Construcción'), guide.indexOf('### Archivos'));
+    for (const value of [
+      g.ringRadius,
+      g.ringStroke,
+      g.earStroke,
+      g.earTipArcRadius,
+      g.earTipLength,
+      g.ringCenter[1] - g.crossing[1],
+      g.lidRadius,
+      g.lidStroke,
+      g.eyeRadius,
+      g.seam,
+      g.stem,
+      g.bowlTopBottom,
+      g.xHeight,
     ]) {
-      expect(read(file), file).toContain(`d="${LOGO_WORDMARK.d}"`);
+      expect(table, es(value)).toContain(es(value));
     }
-    // Colores del original: verde azulado y crema sobre noche
-    expect(read('buoh-logo.svg')).toContain(`fill="${palette.boreal[400]}"`);
-    expect(read('buoh-logo.svg')).toContain(`fill="${palette.luna[200]}"`);
-    expect(read('buoh-icono.svg')).toContain(`fill="${palette.noche[900]}"`);
-    expect(read('buoh-logo.svg')).not.toMatch(/<text\b|font-family/);
+    expect(table).toContain(`ascendentes ${String(Math.round(g.ascender))}`);
+    expect(table).toContain(`(${(g.xHeight / g.ascender).toFixed(2).replace('.', ',')})`);
+    expect(guide).toContain(`${String(LOGO_MIN.symbolPx)} px de alto`);
+    expect(guide).toContain(`${String(LOGO_MIN.lockupPx)} px de ancho`);
+    expect(guide).toContain(`(${es(2 * g.eyeRadius)} unidades`);
   });
 
   it('los SVG del logotipo usan solo colores de la paleta', () => {

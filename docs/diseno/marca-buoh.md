@@ -69,7 +69,7 @@ Medidas en unidades del original (845 × 348 px), comprobadas contra la imagen:
 - **Versión día:** el verde azulado pasa a `boreal.700` y el crema, a `noche.850`.
 - **Monocromo:** una sola tinta; los ojos, el pico y el arco superior quedan separados del resto por un hueco de 4 unidades.
 - **Área de respeto:** alrededor del logotipo, un espacio libre igual al diámetro de un ojo (28,7 unidades, un 15 % del alto del símbolo).
-- **Tamaño mínimo:** símbolo de 16 px de alto; conjunto de 96 px de ancho.
+- **Tamaño mínimo:** símbolo de 16 px de alto; conjunto de 96 px de ancho. El icono de app sigue los tamaños de cada sistema; en el favicon de 16 px el búho se ve como una silueta.
 
 No se permite: redibujar la palabra con una fuente, cambiar los colores fuera de las versiones de arriba, deformar, rotar, añadir contornos, sombras, brillos o degradados, colocarlo sobre fotos sin contraste o animarlo para llamar la atención.
 
@@ -146,7 +146,7 @@ Cada tono tiene además un fondo suave para insignias:
 | Cian | `#0B2731` | `#DEF2F5` |
 | Rosa | `#2F1526` | `#F9E3ED` |
 
-El modo de ejecución y la salud del servicio son ejes distintos ([fundamentos](../../.kiro/steering/fundamentos-buoh.md)): usan familias de color e iconos distintos y se muestran en lugares distintos. La única excepción es el tono neutro niebla, compartido por `paused` y `disabled`, que se distinguen por su icono, su texto y su lugar. `error` y `critical` comparten tono e icono; `critical` lleva además un borde más marcado. El verde de `healthy` se separa al menos 25° de tono del verde azulado de marca. El cian de `demo` está más cerca de él, pero es más claro y nunca va sin su texto y su icono. Verde y rojo **no** significan «ganar» y «perder»: un resultado negativo se muestra con su signo y la palabra «pérdida», y el color solo acompaña.
+El modo de ejecución y la salud del servicio son ejes distintos ([fundamentos](../../.kiro/steering/fundamentos-buoh.md)): usan familias de color e iconos distintos y se muestran en lugares distintos. La única excepción es el tono neutro niebla, compartido por `paused` y `disabled`, que se distinguen por su icono, su texto y su lugar. `error` y `critical` comparten tono e icono; `critical` lleva además un borde más marcado. El verde de `healthy` se separa al menos 25° de tono del verde azulado de marca. El cian de `demo` queda a unos 15°: de noche es más claro que la marca y de día casi igual de oscuro. Por eso ningún estado se comunica solo con color y el verde azulado nunca aparece en una insignia. Verde y rojo **no** significan «ganar» y «perder»: un resultado negativo se muestra con su signo y la palabra «pérdida», y el color solo acompaña.
 
 ### Temas
 
@@ -160,7 +160,7 @@ El modo de ejecución y la salud del servicio son ejes distintos ([fundamentos](
 | **Sen** (variable) | títulos, textos e interfaz | SIL OFL 1.1 |
 | **JetBrains Mono** (variable) | precios, cifras, identificadores, hashes y rótulos técnicos, con cifras tabulares | SIL OFL 1.1 |
 
-Sen es la fuente libre más parecida a la palabra del logo: de las 50 familias medidas, es la que más se le superpone (90 %, frente al 95 % del trazado vectorizado), y como el logo dibuja la «u» sin cola. La palabra del logo no se escribe con Sen; se usa su trazado.
+Sen es la fuente libre más parecida a la palabra del logo: de las 50 familias medidas, es la que más se le superpone (89,6 %, frente al 96 % del trazado vectorizado), y como el logo dibuja la «u» sin cola. La palabra del logo no se escribe con Sen; se usa su trazado.
 
 Escala (rem sobre 16 px): 0,75 · 0,8125 · 0,875 · 1 · 1,125 · 1,25 · 1,5 · 1,875 · 2,25 · 3 · 3,75. Títulos en peso 700, texto en 400–500, etiquetas en 600. Los rótulos sobre los títulos y las cabeceras de tabla van en JetBrains Mono, en mayúsculas y con espaciado de 0,08 em.
 
@@ -200,7 +200,7 @@ buoh es una herramienta técnica, y la interfaz lo muestra con medios sobrios:
 - **Esquinas cortas:** radios de 4, 6, 10 y 14 px. Las insignias son etiquetas rectangulares, no píldoras.
 - **Líneas finas:** bordes de 1 px. La portada del sitio lleva una retícula de 56 px casi invisible.
 - **Rótulos en monoespaciada:** ver §6.
-- **Toque boreal:** un velo de verde azulado de entre el 6 % y el 11 % en una esquina del fondo, quieto y siempre detrás del contenido. Nunca va sobre texto, botones ni insignias.
+- **Toque boreal:** un velo de verde azulado de entre el 5 % y el 11 %, en una esquina del fondo o detrás del símbolo, quieto y siempre detrás del contenido. Nunca va sobre texto, botones ni insignias.
 
 Para que no parezca hecho con IA, se evita:
 

@@ -3,6 +3,7 @@ export { renderCss, sharedVariables, spaceVar, themeVariables } from './css.js';
 export type { EvidenceSource, PerformanceContext } from './evidence.js';
 export { ICONS, type IconName } from './icons.js';
 export { LOGO_GEOMETRY, LOGO_LOCKUP, LOGO_MIN, LOGO_SYMBOL, LOGO_WORDMARK } from './logo.js';
+export { LOGO_FILES, LOGO_INKS } from './logo-svg.js';
 export {
   EXECUTION_MODE_PRESENTATION,
   SERVICE_HEALTH_PRESENTATION,

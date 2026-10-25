@@ -4,6 +4,7 @@
 - **Fecha:** 2026-10-25
 - **Ámbito:** línea visual V1, incremento V1.4; no cambia el alcance de Fase 1 ni adelanta la Fase 3
 - **Decisores:** Propietario de buoh, a propuesta de la dirección técnica
+- **Sustituida parcialmente por:** [ADR-0011](0011-identidad-desde-el-logo-del-propietario.md) en la tipografía (Sen en lugar de Manrope)
 - **Complementa:** [ADR-0001](0001-plataforma-y-stack.md) (móvil con Expo y React Native) y [ADR-0008](0008-linea-visual-marca-y-clientes-web.md) (que dejaba el móvil para un incremento propio)
 
 ## Contexto

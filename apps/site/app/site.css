@@ -105,7 +105,7 @@ html {
     ),
     radial-gradient(
       900px 260px at 62% -8%,
-      color-mix(in srgb, var(--b-chart-line) 6%, transparent),
+      color-mix(in srgb, var(--b-brand-accent) 5%, transparent),
       transparent 70%
     ),
     radial-gradient(900px 500px at 10% -20%, var(--b-bg-raised), transparent 70%);

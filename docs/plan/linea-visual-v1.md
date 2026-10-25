@@ -101,7 +101,8 @@ La marca pasa al logo que envió el propietario ([ADR-0011](../arquitectura/adr/
 - hay versiones en color, para fondo claro, a una tinta e icono de app, todas con los mismos trazados de `packages/design-system/src/logo.ts`, comprobado por pruebas;
 - la paleta usa los colores medidos en el logo; el color de marca no se usa en ningún estado y el verde de «saludable» se separa de él al menos 25° de tono, comprobado por pruebas;
 - la interfaz usa Sen y JetBrains Mono, servidas desde el propio sitio o la app;
-- la web, el sitio, el móvil y el escritorio usan el logo nuevo, sin escribir la palabra con texto.
+- la web, el sitio, el móvil y el escritorio usan el logo nuevo, sin escribir la palabra con texto y sin bajar del tamaño mínimo de la guía, comprobado por pruebas;
+- el estilo técnico de la guía §11 se aplica a todos los clientes: radios cortos, insignias rectangulares, rótulos en monoespaciada y, en el sitio, la retícula y el velo boreal.
 
 ### `V1-DESKTOP-001` — Prototipo de escritorio
 

@@ -4,7 +4,7 @@
 - **Fecha:** 2026-10-25
 - **Ámbito:** línea visual V1, incremento V1.6; no cambia el alcance de Fase 1
 - **Decisores:** Propietario de buoh, a propuesta de la dirección técnica
-- **Sustituye parcialmente:** [ADR-0008](0008-linea-visual-marca-y-clientes-web.md) §4, en la tipografía (Manrope pasa a Sen). El resto de ADR-0008 sigue vigente.
+- **Sustituye parcialmente:** la tipografía de [ADR-0008](0008-linea-visual-marca-y-clientes-web.md) §4 y de [ADR-0009](0009-prototipo-movil.md) §3 (Manrope pasa a Sen), y el origen de los iconos de [ADR-0010](0010-prototipo-de-escritorio.md) §3. El resto de esas ADR sigue vigente.
 
 ## Contexto
 
@@ -26,9 +26,16 @@ El logo se rehízo con figuras exactas ajustadas al original, no con un trazado 
 - **Símbolo:** anillo circular, orejas rectas a 45° con la punta curva, párpados en arco que nacen tangentes a las orejas, ojos circulares, pico triangular y una costura de 1 unidad donde cada oreja pasa sobre el anillo.
 - **Palabra:** palos rectos y óvalos de tensión ajustable. La «u» no tiene cola, como en el original.
 
-Las medidas se tomaron con detección de bordes a nivel de medio píxel y se ajustaron por mínimos cuadrados sobre la imagen. Las piezas se unen con operaciones booleanas en trazados limpios (24 curvas en el símbolo y 24 en la palabra). Frente al original, el error medio es de 6,7 niveles sobre 255 por canal, casi todo en el suavizado de los bordes del JPEG, y la palabra coincide en un 95 %.
+Las medidas se tomaron con detección de bordes a nivel de medio píxel y se ajustaron por mínimos cuadrados sobre la imagen. Las piezas se unen con operaciones booleanas y después se limpian: sin tramos de menos de 0,25 unidades y sin curvas con un solo tirador. Quedan 34 curvas en el símbolo y 24 en la palabra.
 
-Los trazados viven como datos en `packages/design-system/src/logo.ts`. De ellos salen los SVG de `assets/` y los componentes de la web y el móvil, y una prueba comprueba que coinciden. Las medidas de construcción están en la [guía de marca](../../diseno/marca-buoh.md) §4.
+Para comprobarlo, los trazados se superponen al original a escala 1, con su origen en el punto (103,68; 81,53) de la imagen:
+
+- error cuadrático medio de 5,8 niveles sobre 255 por canal en toda la imagen, sobre todo en el suavizado de los bordes del JPEG;
+- la palabra coincide en un 96 %.
+
+Las herramientas de medida y ajuste quedan fuera del repositorio, porque necesitan dependencias que ningún plan autoriza (paper.js, potrace y unas 50 fuentes).
+
+Los trazados viven como datos en `packages/design-system/src/logo.ts`. De ellos salen los componentes de la web y el móvil y los SVG de `assets/`, que `pnpm --filter @buoh/design-system run logo:write` vuelve a escribir. Las pruebas comprueban que los archivos coinciden y que los trazados no tienen curvas con un solo tirador ni tramos degenerados. Las medidas de construcción están en la [guía de marca](../../diseno/marca-buoh.md) §4.
 
 ### 2. Colores medidos en el original
 
@@ -42,12 +49,13 @@ El ámbar deja la paleta. El verde de «saludable» pasa de `#3CC8A4` a `#5CCB7F
 
 La palabra del logo no es una fuente instalable, así que siempre se usa su trazado. Para la interfaz se eligió la fuente libre más parecida, midiendo la superposición de «buoh» en 50 familias OFL de Fontsource a pesos 400–700:
 
-| Fuente | Superposición con el original |
+| Fuente (las cinco primeras) | Superposición con el original |
 |---|---|
-| Sen 600 | 90 % |
-| Host Grotesk 600 | 89 % |
-| Epilogue 600 | 87 % |
-| Lexend 500 | 86 % |
+| Sen 600 | 89,6 % |
+| Host Grotesk 600 | 89,1 % |
+| Epilogue 600 | 86,7 % |
+| Mulish 700 | 86,4 % |
+| Readex Pro 500 | 86,3 % |
 
 Se adopta **Sen** (SIL OFL 1.1). Además de ser la más parecida, dibuja la «u» sin cola, como el logo. Se instala con `@fontsource-variable/sen` 5.3.0 en la web y el sitio, y `@expo-google-fonts/sen` 0.4.2 en el móvil. JetBrains Mono se mantiene para cifras y pasa también a los rótulos técnicos.
 
@@ -70,10 +78,10 @@ Las reglas para no parecer hecho con IA están en la guía §11.
 
 | Alternativa | Motivo de descarte |
 |---|---|
-| Trazado automático (potrace) | Coincide un 95 %, igual que la reconstrucción, pero deja curvas onduladas por el JPEG. |
-| Escribir «buoh» con Sen | Sus palos, su altura x y sus curvas difieren del logo; solo coincide en un 90 %. |
+| Trazado automático (potrace) | Coincide un 95 %, casi como la reconstrucción, pero deja curvas onduladas por el JPEG. |
+| Escribir «buoh» con Sen | Sus palos, su altura x y sus curvas difieren del logo; solo coincide en un 89,6 %. |
 | Mantener Manrope | Se parece menos a la palabra del logo. |
-| Host Grotesk | Coincide casi igual en conjunto, pero su «u» lleva cola, al contrario que el logo (84 % en esa letra, frente al 89 % de Sen). |
+| Host Grotesk | Coincide casi igual en conjunto, pero su «u» lleva cola, al contrario que el logo (84,4 % en esa letra, frente al 89,3 % de Sen). |
 | Degradados boreales intensos | Contradicen la guía (§8) y dan el aspecto genérico que el propietario quiere evitar. |
 
 ## Referencias verificadas

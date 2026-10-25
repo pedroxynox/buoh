@@ -5,7 +5,13 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXECUTION_MODE_PRESENTATION, SERVICE_HEALTH_PRESENTATION } from '@buoh/design-system';
+import {
+  EXECUTION_MODE_PRESENTATION,
+  LOGO_LOCKUP,
+  LOGO_MIN,
+  LOGO_WORDMARK,
+  SERVICE_HEALTH_PRESENTATION,
+} from '@buoh/design-system';
 import {
   APPROVED_VALIDATION,
   GLOBAL_STATUS,
@@ -212,6 +218,16 @@ describe('marco de la app (V1-MOBILE-001)', () => {
     );
     expect(text).toContain('Datos ficticios');
     expect(html).not.toMatch(/role="button"/);
+    // El logotipo es el trazado vectorizado, sin la palabra escrita como texto, y cumple el ancho mínimo.
+    expect(html).toContain(LOGO_WORDMARK.d);
+    expect(html).toContain('aria-label="buoh"');
+    const logo =
+      new RegExp(`<svg\\b[^>]*viewBox="${LOGO_LOCKUP.viewBox.replace(/\./g, '\\.')}"[^>]*>`).exec(
+        html,
+      )?.[0] ?? '';
+    expect(Number(/\swidth="([\d.]+)"/.exec(logo)?.[1]), logo).toBeGreaterThanOrEqual(
+      LOGO_MIN.lockupPx,
+    );
   });
 
   it('la barra de pestañas tiene sus roles y marca solo la pestaña actual', () => {

@@ -49,23 +49,8 @@ export function Icon({
   );
 }
 
-/** Símbolo de buoh, con los mismos trazados que la web (`@buoh/design-system`). `dimension` es el alto. */
-export function BuohMark({ dimension = 28 }: { readonly dimension?: number }) {
-  return (
-    <Svg
-      width={(dimension * LOGO_SYMBOL.width) / LOGO_SYMBOL.height}
-      height={dimension}
-      viewBox={LOGO_SYMBOL.viewBox}
-      aria-hidden
-    >
-      <Path d={LOGO_SYMBOL.primary} fill={theme.brand.mark} />
-      <Path d={LOGO_SYMBOL.detail} fill={theme.brand.markDetail} />
-    </Svg>
-  );
-}
-
 /** Logotipo completo (símbolo y palabra vectorizada). `dimension` es el alto. */
-export function BuohLogo({ dimension = 28 }: { readonly dimension?: number }) {
+export function BuohLogo({ dimension = 32 }: { readonly dimension?: number }) {
   return (
     <View accessible role="img" aria-label="buoh">
       <Svg

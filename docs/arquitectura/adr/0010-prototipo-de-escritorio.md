@@ -4,6 +4,7 @@
 - **Fecha:** 2026-10-25
 - **Ámbito:** línea visual V1, incremento V1.5; no adelanta la app de Windows de la Fase 7
 - **Decisores:** Propietario de buoh, a propuesta de la dirección técnica
+- **Sustituida parcialmente por:** [ADR-0011](0011-identidad-desde-el-logo-del-propietario.md) en el origen de los iconos
 - **Complementa:** [ADR-0001](0001-plataforma-y-stack.md) (decisión 6: Windows con Tauri 2), [ADR-0003](0003-lenguajes-y-limites.md) (Rust solo para el contenedor Tauri) y [ADR-0008](0008-linea-visual-marca-y-clientes-web.md) (que dejaba el escritorio para un incremento propio)
 
 ## Contexto
