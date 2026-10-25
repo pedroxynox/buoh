@@ -16,6 +16,7 @@ on:
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'turbo.json'
+      - 'tsconfig.base.json'
       - '.node-version'
       - '.github/workflows/desktop.yml'
   push:
@@ -30,6 +31,7 @@ on:
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'turbo.json'
+      - 'tsconfig.base.json'
       - '.node-version'
       - '.github/workflows/desktop.yml'
   workflow_dispatch:

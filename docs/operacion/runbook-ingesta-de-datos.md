@@ -134,7 +134,7 @@ Servicios de [`infra/compose.yaml`](../../infra/compose.yaml): PostgreSQL 18 y S
 5. Opcional, para ensayar: `pnpm --filter @buoh/market-data-worker run fixture:publish` pasa los dos escenarios sintéticos de `test-vectors/market-data/v1` por el log raw-first (fuente `synthetic`) y publica cada uno desde sus segmentos cerrados. Es idempotente: un escenario ya activo se informa como `already_published`. Requiere que el log de `synthetic` esté vacío o tenga exactamente la forma del fixture.
 6. Reproducir: `pnpm run data:replay -- --dataset <dataset_id>` (recomputación) o añadir `--verify-only` (solo integridad).
 
-`data:replay` no contacta a Deriv, no escribe nada y emite una línea JSON en stdout:
+`data:replay` no contacta a Deriv, no escribe nada y emite una línea JSON en stdout. Antes compila el worker, y esos mensajes van a stderr (`scripts/data-replay.mjs`):
 
 | Salida | `status` | Significado |
 |---:|---|---|

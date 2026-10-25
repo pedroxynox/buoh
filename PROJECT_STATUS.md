@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 13
-updated_at_utc: "2026-10-25T14:00:00.000Z"
+status_version: 14
+updated_at_utc: "2026-10-25T15:00:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -187,7 +187,7 @@ Ninguno para iniciar `F1.4b`.
 - Revisión de términos de Deriv MT5, Vantage y MetaQuotes, y entidad de Vantage aplicable. Se completa en el primer incremento de Fase 1B.
 - Orden entre Fase 1B (datos MT5) y Fase 2 (bot shadow). Se decide al cerrar Fase 1.
 - Dominio y alojamiento del sitio oficial, y revisión legal de su texto antes de publicarlo (ADR-0008).
-- Probar el instalador de escritorio en el PC del propietario, y firmarlo antes de distribuirlo (ADR-0010).
+- Firmar el instalador de escritorio antes de distribuirlo (ADR-0010). El propietario ya lo instaló y probó en su PC el 2026-10-25.
 - Probar la app móvil en un teléfono real (Expo Go para el SDK 58 aún no está en las tiendas, o una compilación nativa), y cómo compilarla y distribuirla (ADR-0009).
 - Límites monetarios y política de riesgo para fases `demo` y `real`.
 - Proveedor de pagos y modelo de suscripción.

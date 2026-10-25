@@ -19,10 +19,10 @@ El instalador sale en `src-tauri/target/release/bundle/nsis/`. En CI lo compila 
 1. En GitHub, abre **Actions › desktop** y elige la última ejecución de la rama `main` con la marca verde ✓. Si ninguna tiene archivo (se guardan 14 días), pulsa **Run workflow** con la rama `main` y espera a que termine.
 2. En esa ejecución, descarga `buoh-escritorio-windows` (sección *Artifacts*) y descomprímelo.
 3. Abre `buoh_0.1.0_x64-setup.exe`. No pide permisos de administrador.
-4. El instalador no está firmado, así que Windows SmartScreen avisa: pulsa «Más información» y «Ejecutar de todas formas».
+4. El instalador no está firmado, así que aparece un aviso azul, «Windows protegió su PC». Pulsa «Más información» y después «Ejecutar de todas formas».
 5. Si Windows dice que **Control inteligente de aplicaciones** bloqueó la app, no hay botón para seguir. No desactives esa protección: hay que esperar a un instalador firmado.
 
-Para quitarla: **Configuración › Aplicaciones › Aplicaciones instaladas › buoh › Desinstalar**.
+Para quitarla en Windows 11: **Configuración › Aplicaciones › Aplicaciones instaladas**, botón «⋯» junto a buoh, **Desinstalar**. En Windows 10 la página se llama **Aplicaciones y características**.
 
 ## Estructura
 

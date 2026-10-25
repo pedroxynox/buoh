@@ -8,6 +8,7 @@ strictPeerDependencies: true
 allowBuilds:
   esbuild: true
 
-# Los scripts usan sintaxis de shell (`VAR=1 cmd`, `&&`, `1>&2`); el emulador de pnpm los corre
-# igual en Windows, donde si no se usaría cmd.exe (ADR-0010).
+# Los scripts usan `VAR=1 cmd` y `&&`; el emulador de pnpm los corre igual en Windows, donde si no se
+# usaría cmd.exe (ADR-0003, ADR-0010). No respeta `1>&2`: un script que deba separar stdout usa un
+# archivo de scripts/ (como data-replay.mjs).
 shellEmulator: true

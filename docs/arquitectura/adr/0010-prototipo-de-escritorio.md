@@ -49,6 +49,8 @@ No es la app de Windows de la Fase 7, y la decisión 6 de ADR-0001 sigue valiend
 - **En cada `pnpm run verify`:** pruebas de la configuración, de las versiones fijadas y del flujo de CI, y una revisión estática de las páginas exportadas: no usan manejadores en atributos, `javascript:`, marcos, formularios ni recursos externos, que la CSP bloquearía. Esta revisión no ejecuta las páginas; la prueba real es abrir la app en Windows.
 - **En CI con Windows** (`.github/workflows/desktop.yml`): `cargo fmt`, `cargo clippy` sin avisos, `cargo test` y el instalador, que queda como artefacto 14 días. Corre cuando cambia algo que entra en la app y también se puede lanzar a mano.
 
+El propietario instaló en su PC el instalador de la primera compilación verde de CI (2026-10-25) y lo aprobó.
+
 El flujo de Windows no corre en cada PR, solo cuando cambian `apps/desktop`, `apps/web`, los paquetes de los que dependen o la configuración de pnpm, Node o turbo: los minutos de Windows cuestan el doble en un repositorio privado.
 
 ### 5. Instalador sin firmar
@@ -74,7 +76,6 @@ El instalador no está firmado. Windows SmartScreen avisará al abrirlo. Firmarl
 
 ## Pendientes
 
-- Probar el instalador en el PC del propietario.
 - Firmar el instalador y decidir cómo distribuir la app (sigue en `PROJECT_STATUS.md`).
 - En la app real: ventanas separables y un manejador explícito de `window.open`.
 

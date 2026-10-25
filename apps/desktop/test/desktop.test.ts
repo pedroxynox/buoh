@@ -246,16 +246,34 @@ describe('prototipo de escritorio (V1-DESKTOP-001)', () => {
       packages.add(match[1]);
       const manifest = JSON.parse(read(join(ROOT, 'packages', match[1], 'package.json'))) as {
         readonly dependencies?: Readonly<Record<string, string>>;
+        readonly devDependencies?: Readonly<Record<string, string>>;
       };
-      pending.push(...Object.keys(manifest.dependencies ?? {}));
+      // turbo construye antes también las dependencias de desarrollo del monorepo (`^build`).
+      pending.push(
+        ...Object.keys(manifest.dependencies ?? {}),
+        ...Object.keys(manifest.devDependencies ?? {}),
+      );
     }
-    const triggers = [
-      ...(/ {2}pull_request:\n(?: {4}.*\n)+/.exec(workflow)?.[0] ?? '').matchAll(/- '([^']+)'/g),
-    ].map((match) => match[1]);
+    const pathsOf = (event: string) =>
+      [
+        ...(new RegExp(` {2}${event}:\\n(?: {4}.*\\n)+`).exec(workflow)?.[0] ?? '').matchAll(
+          /- '([^']+)'/g,
+        ),
+      ].map((match) => match[1]);
+    const triggers = pathsOf('pull_request');
+    expect(pathsOf('push')).toEqual(triggers);
     const expected = [
       'apps/desktop/**',
       'apps/web/**',
       ...[...packages].map((name) => `packages/${name}/**`),
+      // Configuración de la raíz que cambia cómo se instala o compila la app.
+      'package.json',
+      'pnpm-lock.yaml',
+      'pnpm-workspace.yaml',
+      'turbo.json',
+      'tsconfig.base.json',
+      '.node-version',
+      '.github/workflows/desktop.yml',
     ];
     for (const path of expected) {
       expect(triggers, path).toContain(path);
