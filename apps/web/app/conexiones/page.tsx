@@ -1,8 +1,7 @@
 import { Badge, Card, HealthBadge, Icon, PhaseLock } from '@buoh/design-system/react';
 import type { Metadata } from 'next';
 import { PageHeader } from '../../src/components/AppShell';
-import { SOURCES } from '../../src/fixtures';
-import { formatUtc } from '../../src/format';
+import { formatUtc, SOURCES } from '@buoh/prototype-data';
 
 export const metadata: Metadata = { title: 'Conexiones' };
 

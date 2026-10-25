@@ -1,8 +1,13 @@
 import { Badge, Card, SeverityTag } from '@buoh/design-system/react';
 import type { Metadata } from 'next';
 import { PageHeader } from '../../src/components/AppShell';
-import { DATASETS, INCIDENT_LABELS, INCIDENT_STATUS, INCIDENTS } from '../../src/fixtures';
-import { formatUtc } from '../../src/format';
+import {
+  DATASETS,
+  formatUtc,
+  INCIDENT_LABELS,
+  INCIDENT_STATUS,
+  INCIDENTS,
+} from '@buoh/prototype-data';
 
 export const metadata: Metadata = { title: 'Datos' };
 

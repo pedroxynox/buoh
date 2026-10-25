@@ -13,6 +13,8 @@ import { SectionTitle, SignalCard } from '../src/components/Pieces';
 import {
   DATASETS,
   DEMO_NOW_UTC,
+  formatUtc,
+  formatUtcTime,
   GLOBAL_STATUS,
   INCIDENT_LABELS,
   INCIDENTS,
@@ -20,8 +22,7 @@ import {
   SIGNALS,
   SOURCES,
   STRATEGIES,
-} from '../src/fixtures';
-import { formatUtc, formatUtcTime } from '../src/format';
+} from '@buoh/prototype-data';
 
 export default function ObservatorioPage() {
   const openIncidents = INCIDENTS.filter((incident) => incident.status === 'abierta');

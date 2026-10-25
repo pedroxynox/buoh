@@ -9,11 +9,11 @@ import {
   BACKTEST_SPLITS,
   EQUITY_TIME_LABELS,
   equitySeries,
+  formatUtc,
   LIFECYCLE_PRESENTATION,
   SPLITS_CONTEXT,
   STRATEGIES,
-} from '../../src/fixtures';
-import { formatUtc } from '../../src/format';
+} from '@buoh/prototype-data';
 
 export const metadata: Metadata = { title: 'Laboratorio' };
 

@@ -2,7 +2,7 @@ import { Badge, Card, ModeBadge, PhaseLock } from '@buoh/design-system/react';
 import type { Metadata } from 'next';
 import { PageHeader } from '../../src/components/AppShell';
 import { SectionTitle, SignalCard } from '../../src/components/Pieces';
-import { SIGNALS } from '../../src/fixtures';
+import { SIGNALS } from '@buoh/prototype-data';
 
 export const metadata: Metadata = { title: 'Señales' };
 

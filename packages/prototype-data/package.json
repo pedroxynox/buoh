@@ -1,0 +1,27 @@
+{
+  "name": "@buoh/prototype-data",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@buoh/design-system": "workspace:*"
+  },
+  "devDependencies": {
+    "@buoh/contracts": "workspace:*"
+  }
+}

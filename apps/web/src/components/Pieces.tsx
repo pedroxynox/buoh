@@ -2,8 +2,7 @@ import type { IconName } from '@buoh/design-system';
 import { Badge, Icon, ModeBadge } from '@buoh/design-system/react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import type { SignalRow } from '../fixtures';
-import { formatUtcTime } from '../format';
+import { formatUtcTime, type SignalRow } from '@buoh/prototype-data';
 
 /** Metadatos obligatorios de toda vista de datos (README, identidad de diseño). */
 export function DataMeta({ items }: { readonly items: readonly (readonly [string, ReactNode])[] }) {

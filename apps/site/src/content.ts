@@ -244,7 +244,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
     id: 'V1',
     title: 'Línea visual V1',
     state: 'en curso',
-    text: 'Marca, sistema de diseño, prototipo de la interfaz con datos ficticios y este sitio.',
+    text: 'Marca, sistema de diseño, prototipos web y móvil con datos ficticios y este sitio.',
   },
   {
     id: '1',

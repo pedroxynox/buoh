@@ -13,6 +13,7 @@ export default defineConfig(
       '**/generated/**',
       '**/node_modules/**',
       '**/.next/**',
+      '**/.expo/**',
       '**/out/**',
       '**/next-env.d.ts',
       'test-vectors/**',
@@ -69,6 +70,16 @@ export default defineConfig(
       parserOptions: {
         projectService: false,
         project: ['./apps/web/tsconfig.typecheck.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+  {
+    files: ['apps/mobile/**/*.{ts,tsx,mts}'],
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+        project: ['./apps/mobile/tsconfig.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },

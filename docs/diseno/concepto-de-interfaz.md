@@ -75,7 +75,7 @@ Diseño de la información del cliente web (`V1-UI-001`). El prototipo de `apps/
 
 `apps/web` implementa las diez secciones de §3 y una página 404, todas con el marco de §2. Detalles:
 
-- Los datos viven en `apps/web/src/fixtures.ts`, fijados a mano o calculados con fórmulas fijas; el instante de referencia es el 20 oct 2026, 14:32:05 UTC.
+- Los datos viven en `packages/prototype-data`, compartidos con el prototipo móvil, fijados a mano o calculados con fórmulas fijas; el instante de referencia es el 20 oct 2026, 14:32:05 UTC.
 - Cuentan una historia coherente, comprobada por pruebas: Deriv perdió la conexión, R_100 quedó con un hueco sin resolver, Deriv y la salud global están degradadas y la estrategia que usa R_100 se pausó sola. Solo emite señales vigentes una estrategia aprobada para shadow, y solo después de su aprobación.
 - Supuestos del prototipo, que el contrato todavía no fija: la salud global es la más severa de sus fuentes, y una pausa automática afecta solo a las estrategias del símbolo con datos degradados.
 - Los gráficos son SVG propios: el de precios corta la línea en los huecos y los rotula; el de resultados marca el cero y la peor caída. Sus textos van en HTML para leerse igual en móvil, con eje de tiempo.
@@ -94,7 +94,7 @@ pnpm --filter @buoh/web run test    # comprueba fixtures y cada página exportad
 
 ## 7. Hacia móvil y escritorio
 
-- **Móvil:** Observatorio, Señales, Alertas, Evidencia y *kill switch*, con la barra inferior de §2. Sin edición de estrategias ni de políticas.
+- **Móvil:** Observatorio, Señales, Alertas, Evidencia y *kill switch*, con la barra inferior de §2. Sin edición de estrategias ni de políticas. El prototipo de `apps/mobile` (V1.4, [ADR-0009](../arquitectura/adr/0009-prototipo-movil.md)) lo implementa con cinco pestañas: Inicio, Señales, Alertas, Evidencia y Más; el *kill switch* está en «Más», con candado de Fase 4.
 - **Escritorio:** la misma estructura que la web, con ventanas que se pueden separar para seguir varios mercados.
 
 Ambos usan los mismos tokens de `packages/design-system`.

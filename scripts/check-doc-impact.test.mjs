@@ -99,6 +99,7 @@ test('fija las reglas productivas y sus rutas críticas', () => {
       'test-vectors',
       'design-system',
       'web-clients',
+      'mobile',
       'site',
       'documentation-guard',
     ],
@@ -113,6 +114,8 @@ test('fija las reglas productivas y sus rutas críticas', () => {
     ['test-vectors/market-data/v1/manifest.json', 'docs/arquitectura/contratos-de-dominio.md'],
     ['packages/design-system/src/tokens.ts', 'docs/diseno/marca-buoh.md'],
     ['apps/web/app/page.tsx', 'docs/diseno/concepto-de-interfaz.md'],
+    ['apps/mobile/src/App.tsx', 'docs/arquitectura/adr/0009-prototipo-movil.md'],
+    ['packages/prototype-data/src/fixtures.ts', 'docs/diseno/concepto-de-interfaz.md'],
     ['apps/site/app/page.tsx', 'docs/diseno/sitio-oficial.md'],
     ['scripts/check-doc-impact.mjs', 'CONTRIBUTING.md'],
   ];

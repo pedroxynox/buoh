@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { worstDrawdown } from '../src/components/Charts';
+import { worstDrawdown } from '../src/drawdown.js';
 import {
   APPROVED_VALIDATION,
   AUDIT,
@@ -21,8 +21,8 @@ import {
   SOURCES,
   SPLITS_CONTEXT,
   STRATEGIES,
-} from '../src/fixtures';
-import { formatUtc } from '../src/format';
+} from '../src/fixtures.js';
+import { formatUtc } from '../src/format.js';
 
 const now = Date.parse(DEMO_NOW_UTC);
 

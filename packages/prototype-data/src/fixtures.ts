@@ -17,8 +17,7 @@ import type {
   ServiceHealth,
   StrategyLifecycle,
 } from '@buoh/contracts';
-import type { IconName, Severity } from '@buoh/design-system';
-import type { PerformanceContext } from '@buoh/design-system/react';
+import type { IconName, PerformanceContext, Severity } from '@buoh/design-system';
 
 /** Espacio que no se corta entre un número y su unidad. */
 const NB = '\u00a0';

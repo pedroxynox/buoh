@@ -4,7 +4,7 @@ schema_version: "1.0.0"
 status: "ready"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-10-24T05:00:00.000Z"
+last_reviewed_utc: "2026-10-25T05:00:00.000Z"
 ---
 
 # Plan ejecutable: Fase 1 — Fundación de datos
@@ -53,7 +53,7 @@ test-vectors/market-data/v1/
 
 ### Diferido explícitamente
 
-`apps/api`, `apps/web` (salvo el prototipo visual de la [línea visual V1](linea-visual-v1.md)), `apps/mobile`, `signal-engine`, `execution-gateway`, escritorio, Python, backtests, estrategias, señales, OAuth, cuentas, pagos, suscripciones, Redis, TimescaleDB, despliegue productivo de Render y fuentes MetaTrader 5 (Fase 1B, ADR-0007).
+`apps/api`, `apps/web` y `apps/mobile` (salvo los prototipos visuales de la [línea visual V1](linea-visual-v1.md)), `signal-engine`, `execution-gateway`, escritorio, Python, backtests, estrategias, señales, OAuth, cuentas, pagos, suscripciones, Redis, TimescaleDB, despliegue productivo de Render y fuentes MetaTrader 5 (Fase 1B, ADR-0007).
 
 No se crean directorios vacíos para estos componentes.
 
