@@ -48,11 +48,11 @@ describe('contenido del sitio frente a las fuentes canónicas (V1-SITE-001)', ()
     expect(active).toBe('active');
     expect(ROADMAP.filter((p) => p.state === 'en curso').map((p) => p.id)).toEqual([current]);
 
-    // Hechas en el sitio = completadas en el roadmap: la Fase 0 y la línea visual V1.
+    // Hechas en el sitio = completadas en el roadmap; entre ellas, la Fase 0 y la línea visual V1.
     const completed = roadmapPhases()
       .filter((p) => p.note === 'completada')
       .map((p) => p.id);
-    expect(completed).toEqual(['0', 'V1']);
+    expect(completed).toEqual(expect.arrayContaining(['0', 'V1']));
     expect(ROADMAP.filter((p) => p.state === 'hecha').map((p) => p.id)).toEqual(completed);
 
     // La línea V1 se cerró: su plan está `done` y ya no corre en paralelo (plan V1 §7).

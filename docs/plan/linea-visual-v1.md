@@ -19,7 +19,7 @@ La línea visual corrió en paralelo a [Fase 1](fase-1-fundacion-de-datos.md) y 
 
 `done` desde el 2026-10-25 (§7). El plan autorizó los incrementos V1.1 a V1.6, y todos se entregaron. V1.4, el prototipo móvil, se añadió el 2026-10-25 ([ADR-0009](../arquitectura/adr/0009-prototipo-movil.md)), V1.5, el prototipo de escritorio, el mismo día ([ADR-0010](../arquitectura/adr/0010-prototipo-de-escritorio.md)), y V1.6, la identidad a partir del logo del propietario, también ([ADR-0011](../arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)).
 
-Al cerrarse, el plan sale de los planes activos de [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md), así que ya no autoriza directorios ni dependencias nuevos (AGENTS.md, «Desarrollo por fases»). Las piezas de §3 siguen en el repositorio y se mantienen. Cerrarlo tampoco autoriza la app real de Windows, que sigue la decisión 6 de [ADR-0001](../arquitectura/adr/0001-plataforma-y-stack.md).
+Al cerrarse, el plan sale de los planes activos de [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md), así que ya no autoriza directorios ni dependencias nuevos (AGENTS.md, «Desarrollo por fases»). Las piezas de §3 siguen en el repositorio. Cerrarlo tampoco autoriza la app real de Windows, que sigue la decisión 6 de [ADR-0001](../arquitectura/adr/0001-plataforma-y-stack.md).
 
 ## 3. Corte de implementación
 

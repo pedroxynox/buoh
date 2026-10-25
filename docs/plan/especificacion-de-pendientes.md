@@ -23,6 +23,8 @@ Cada pendiente tiene un identificador `P-…` y estas partes:
 - **Abierto:** preguntas, dependencias y decisiones humanas.
 - **Propuesta:** solo cuando hay una sugerencia, separada de los hechos.
 
+Una entrada resuelta cambia el estado, lo esperado, los componentes, la aceptación y lo abierto por **Antes**, **Decisión del propietario** y **Resolución**, y a veces añade un **Límite** o una **Consecuencia que se mantiene**.
+
 Tipos de pendiente:
 
 - **sin empezar:** planificado y sin código;

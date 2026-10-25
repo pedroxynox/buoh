@@ -148,7 +148,7 @@ No hay pruebas de `scaleFor`, `segments` ni del SVG exportado.
 |---|---|---|
 | Líneas finas, sin degradados intensos ni 3D | guía §8 | Se cumple. |
 | Los huecos se marcan y no se suavizan | guía §8, concepto §4 | Se cumple para huecos. Las demás incidencias no se dibujan; la conexión perdida aparece solo en la etiqueta del hueco. |
-| Toda curva de resultados lleva modo, período, muestra y costes en la tarjeta de al lado | guía §8 | Se cumple. La tarjeta «Evidencia», junto a la curva, muestra el modo de la cifra (origen backtest), el período, la muestra y los costes de `BACKTEST_CONTEXT`, y el gráfico no los repite. Antes la guía los pedía dentro del gráfico; el propietario aceptó el 2026-10-25 que vayan al lado (P-V1-03, resuelto). |
+| Toda curva de resultados lleva modo, período, muestra y costes en la tarjeta de al lado | guía §8 | Se cumple. La tarjeta «Evidencia», junto a la curva, muestra el modo de la cifra (origen backtest), el período, la muestra y los costes de `BACKTEST_CONTEXT`. Del gráfico solo sale el período, en las fechas del eje y en su descripción accesible. Antes la guía los pedía dentro del gráfico; el propietario aceptó el 2026-10-25 que vayan al lado (P-V1-03, resuelto). |
 | La curva de resultados marca el cero y la peor caída | concepto §6 | Se cumple. La peor caída es un segmento vertical en el valle, sin marcar el máximo. |
 | Textos en HTML, con eje de tiempo | concepto §6 | Se cumple con etiquetas en índices fijos. No hay línea de eje ni rejilla vertical. |
 | SVG propios, sin bibliotecas de gráficos | concepto §6, ADR-0008 §4 | Se cumple: `apps/web` no depende de ninguna. |

@@ -39,7 +39,7 @@ No crees componentes futuros o directorios vacíos fuera del [corte de Fase 1](d
 
 ## Organización autorizada para la línea visual V1
 
-La línea visual V1 corrió en paralelo a Fase 1 y terminó el 2026-10-25. Su [plan](docs/plan/linea-visual-v1.md) y [ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md) autorizaron estas piezas, que siguen en el repositorio y se mantienen; los directorios y dependencias nuevos necesitan un plan activo:
+La línea visual V1 corrió en paralelo a Fase 1 y terminó el 2026-10-25. Su [plan](docs/plan/linea-visual-v1.md) y [ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md) autorizaron estas piezas, que siguen en el repositorio; los directorios y dependencias nuevos necesitan un plan activo:
 
 - `packages/design-system/`: tokens, CSS base y componentes React web; la guía es [`docs/diseno/marca-buoh.md`](docs/diseno/marca-buoh.md).
 - `apps/web/`: prototipo navegable del producto con datos ficticios, sin API, cuentas ni brókeres.
