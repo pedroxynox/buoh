@@ -77,7 +77,8 @@ export default function InicioPage() {
       </Section>
 
       <Section title="En qué estamos" lead="El estado real, sin adornos.">
-        <div className="s-grid s-grid--2">
+        {/* Con una sola fase en curso, la tarjeta ocupa todo el ancho en lugar de media fila. */}
+        <div className={now.length > 1 ? 's-grid s-grid--2' : 's-grid'}>
           {now.map((phase) => (
             <article key={phase.id} className="s-tile">
               <div className="s-row">

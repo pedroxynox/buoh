@@ -1,10 +1,10 @@
 ---
 plan_id: "V1-VISUAL"
 schema_version: "1.0.0"
-status: "ready"
+status: "done"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-10-25T21:00:00.000Z"
+last_reviewed_utc: "2026-10-25T22:00:00.000Z"
 ---
 
 # Plan ejecutable: línea visual V1
@@ -13,11 +13,13 @@ last_reviewed_utc: "2026-10-25T21:00:00.000Z"
 
 Dar a buoh una identidad visual propia y una interfaz que el propietario pueda ver y validar antes de que existan datos reales: marca, sistema de diseño, catálogo de funciones, prototipos navegables del producto (web, móvil y escritorio) y sitio oficial.
 
-La línea visual corre en paralelo a [Fase 1](fase-1-fundacion-de-datos.md) y no cambia su alcance ([ADR-0008](../arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)).
+La línea visual corrió en paralelo a [Fase 1](fase-1-fundacion-de-datos.md) y no cambió su alcance ([ADR-0008](../arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)).
 
 ## 2. Estado y aprobación
 
-`ready`: este plan autoriza los incrementos V1.1 a V1.6 cuando se fusione el PR que los contiene. V1.4, el prototipo móvil, se añadió el 2026-10-25 ([ADR-0009](../arquitectura/adr/0009-prototipo-movil.md)), V1.5, el prototipo de escritorio, el mismo día ([ADR-0010](../arquitectura/adr/0010-prototipo-de-escritorio.md)), y V1.6, la identidad a partir del logo del propietario, también ([ADR-0011](../arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)).
+`done` desde el 2026-10-25 (§7). El plan autorizó los incrementos V1.1 a V1.6, y todos se entregaron. V1.4, el prototipo móvil, se añadió el 2026-10-25 ([ADR-0009](../arquitectura/adr/0009-prototipo-movil.md)), V1.5, el prototipo de escritorio, el mismo día ([ADR-0010](../arquitectura/adr/0010-prototipo-de-escritorio.md)), y V1.6, la identidad a partir del logo del propietario, también ([ADR-0011](../arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)).
+
+Al cerrarse, el plan sale de los planes activos de [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md), así que ya no autoriza directorios ni dependencias nuevos (AGENTS.md, «Desarrollo por fases»). Las piezas de §3 siguen en el repositorio y se mantienen. Cerrarlo tampoco autoriza la app real de Windows, que sigue la decisión 6 de [ADR-0001](../arquitectura/adr/0001-plataforma-y-stack.md).
 
 ## 3. Corte de implementación
 
@@ -139,3 +141,5 @@ Cada incremento es un PR propio, con una revisión semántica.
 ## 7. Definition of Done
 
 La línea visual V1 está `done` cuando sus requisitos tienen evidencia fusionada y el propietario revisó capturas de los prototipos y del sitio.
+
+**Cumplida el 2026-10-25.** Los requisitos tienen evidencia fusionada en los PR de V1.1 a V1.6 (#11 a #17 y #19). El propietario decidió que sus aprobaciones ya registradas cuentan como la revisión de capturas: aprobó los prototipos antes de enviar su logo ([ADR-0011](../arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md), «Contexto») e instaló y aprobó el prototipo de escritorio ([ADR-0010](../arquitectura/adr/0010-prototipo-de-escritorio.md) §4).

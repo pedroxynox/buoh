@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 16
-updated_at_utc: "2026-10-25T21:00:00.000Z"
+status_version: 17
+updated_at_utc: "2026-10-25T22:00:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -10,8 +10,7 @@ next_requirements:
   - "F1-CATALOG-001"
   - "F1-SOURCE-001"
 plan: "docs/plan/fase-1-fundacion-de-datos.md"
-parallel_plans:
-  - "docs/plan/linea-visual-v1.md"
+parallel_plans: []
 ---
 
 # Estado actual de buoh
@@ -34,11 +33,13 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
 - No existe todavía integración con Deriv, persistencia del `IngestionCursor`, cola en memoria del transporte ni despliegue.
 - MetaTrader 5 (Deriv MT5 y Vantage) queda decidido como segunda integración ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)): sus datos llegan en una Fase 1B posterior a Fase 1, y operar en MT5 empieza en Fase 4 (demo). No existe código de MT5.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
-- En paralelo a Fase 1 corre la [línea visual V1](docs/plan/linea-visual-v1.md) ([ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)). V1.1 entrega la [guía de marca](docs/diseno/marca-buoh.md), el [catálogo de funciones](docs/producto/funciones-y-disponibilidad.md), el [concepto de interfaz](docs/diseno/concepto-de-interfaz.md) y `packages/design-system`. V1.2 entrega el prototipo navegable en `apps/web`, con datos ficticios (`V1-UI-001`). V1.3 entrega el [sitio oficial](docs/diseno/sitio-oficial.md) en `apps/site`, sin publicar (`V1-SITE-001`). V1.4 entrega el prototipo móvil en `apps/mobile` y comparte los datos ficticios en `packages/prototype-data` (`V1-MOBILE-001`, [ADR-0009](docs/arquitectura/adr/0009-prototipo-movil.md)). V1.5 entrega el prototipo de escritorio en `apps/desktop`, con Tauri 2 y un instalador de Windows compilado en CI (`V1-DESKTOP-001`, [ADR-0010](docs/arquitectura/adr/0010-prototipo-de-escritorio.md)). V1.6 cambia la identidad al logo del propietario, vectorizado, con su paleta, la tipografía Sen y un estilo más técnico (`V1-BRAND-002`, [ADR-0011](docs/arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)). No cambia el alcance ni la puerta de salida de Fase 1.
+- La [línea visual V1](docs/plan/linea-visual-v1.md) ([ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)) corrió en paralelo a Fase 1 y terminó el 2026-10-25. V1.1 entregó la [guía de marca](docs/diseno/marca-buoh.md), el [catálogo de funciones](docs/producto/funciones-y-disponibilidad.md), el [concepto de interfaz](docs/diseno/concepto-de-interfaz.md) y `packages/design-system`. V1.2 entregó el prototipo navegable en `apps/web`, con datos ficticios (`V1-UI-001`). V1.3 entregó el [sitio oficial](docs/diseno/sitio-oficial.md) en `apps/site`, sin publicar (`V1-SITE-001`). V1.4 entregó el prototipo móvil en `apps/mobile` y compartió los datos ficticios en `packages/prototype-data` (`V1-MOBILE-001`, [ADR-0009](docs/arquitectura/adr/0009-prototipo-movil.md)). V1.5 entregó el prototipo de escritorio en `apps/desktop`, con Tauri 2 y un instalador de Windows compilado en CI (`V1-DESKTOP-001`, [ADR-0010](docs/arquitectura/adr/0010-prototipo-de-escritorio.md)). V1.6 cambió la identidad al logo del propietario, vectorizado, con su paleta, la tipografía Sen y un estilo más técnico (`V1-BRAND-002`, [ADR-0011](docs/arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)). No cambió el alcance ni la puerta de salida de Fase 1.
 
 ## Trabajo en paralelo autorizado
 
-**Línea visual V1.** Sus requisitos tienen implementación. Para cerrarla falta que el propietario revise las capturas de los prototipos y del sitio (plan V1, §7). ADR-0001 sigue dejando la app real de Windows para cuando web y móvil estén validados; el prototipo de escritorio no la adelanta.
+Ninguno. La línea visual V1 terminó el 2026-10-25 (plan V1, §7): sus requisitos tienen evidencia fusionada, y el propietario decidió que sus aprobaciones ya registradas (ADR-0010 §4 y ADR-0011, «Contexto») cuentan como la revisión de capturas de los prototipos y del sitio. Sus piezas siguen en el repositorio y se mantienen; los directorios y dependencias nuevos necesitan un plan activo (AGENTS.md, «Desarrollo por fases»).
+
+Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja para cuando esté validado el núcleo web y móvil, y el roadmap la sitúa en la Fase 7. El prototipo de escritorio no la adelanta.
 
 ## Siguiente tarea autorizada
 
@@ -189,10 +190,7 @@ Ninguno para iniciar `F1.4b`.
 - Dominio y alojamiento del sitio oficial, y revisión legal de su texto antes de publicarlo (ADR-0008).
 - Firmar el instalador de escritorio antes de distribuirlo (ADR-0010). El propietario ya lo instaló y probó en su PC el 2026-10-25.
 - Probar la app móvil en un teléfono real (Expo Go para el SDK 58 aún no está en las tiendas, o una compilación nativa), y cómo compilarla y distribuirla (ADR-0009).
-- Si las aprobaciones ya registradas del propietario (ADR-0010 y ADR-0011) cuentan como la revisión de capturas que cierra la línea visual V1 (plan V1 §7), o si se revisan antes las capturas con la identidad V1.6 (P-V1-01 de la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md)).
-- Si la curva de resultados debe llevar modo, período, muestra y costes dentro del gráfico, como pide la guía de marca §8, o si la guía acepta el contexto al lado (P-V1-03).
-- Confirmar que «pedir» el modo `real` desde el móvil nunca es operar desde él, y qué cuenta como reautenticación en un teléfono (PR #16; P-V1-05).
-- Si CI puede aceptar una justificación de la guardia documental escrita en el PR, como dice `F1-GOV-001`, o si se cambia ese requisito (P-GOV-01).
+- Confirmar que «pedir» el modo `real` desde el móvil nunca es operar desde él, y qué cuenta como reautenticación en un teléfono (PR #16; P-V1-05 de la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md)).
 - Límites monetarios y política de riesgo para fases `demo` y `real`.
 - Proveedor de pagos y modelo de suscripción.
 

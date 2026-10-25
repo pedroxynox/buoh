@@ -11,38 +11,54 @@ import {
 
 const read = (path: string) => readFileSync(new URL(`../../../${path}`, import.meta.url), 'utf8');
 
-/** Fases del roadmap canónico: «## Fase 1B — Título (nota)» y «## Línea visual V1 (nota)». */
-function roadmapPhases(): { id: string; title: string }[] {
-  const phases: { id: string; title: string }[] = [];
+/**
+ * Fases del roadmap canónico, con la nota de su título: «## Fase 1B — Título (nota)» y
+ * «## Línea visual V1 (nota)». La nota «completada» marca una fase terminada.
+ */
+function roadmapPhases(): { id: string; title: string; note: string | undefined }[] {
+  const phases: { id: string; title: string; note: string | undefined }[] = [];
   for (const line of read('docs/producto/roadmap.md').split('\n')) {
-    const phase = /^## Fase (\w+) — (.+?)(?: \(.*\))?$/.exec(line);
+    const phase = /^## Fase (\w+) — (.+?)(?: \((.*)\))?$/.exec(line);
     if (phase !== null) {
-      phases.push({ id: phase[1] ?? '', title: phase[2] ?? '' });
+      phases.push({ id: phase[1] ?? '', title: phase[2] ?? '', note: phase[3] });
       continue;
     }
-    const line_v = /^## (Línea visual (V\d+))(?: \(.*\))?$/.exec(line);
+    const line_v = /^## (Línea visual (V\d+))(?: \((.*)\))?$/.exec(line);
     if (line_v !== null) {
-      phases.push({ id: line_v[2] ?? '', title: line_v[1] ?? '' });
+      phases.push({ id: line_v[2] ?? '', title: line_v[1] ?? '', note: line_v[3] });
     }
   }
   return phases;
 }
 
+/** Bloque inicial entre `---` de un documento, donde están sus campos de estado. */
+const frontMatter = (text: string) => /^---\n([\s\S]*?)\n---\n/.exec(text)?.[1] ?? '';
+
 describe('contenido del sitio frente a las fuentes canónicas (V1-SITE-001)', () => {
   it('las fases coinciden con docs/producto/roadmap.md, en el mismo orden', () => {
-    expect(ROADMAP.map(({ id, title }) => ({ id, title }))).toEqual(roadmapPhases());
+    expect(ROADMAP.map(({ id, title }) => ({ id, title }))).toEqual(
+      roadmapPhases().map(({ id, title }) => ({ id, title })),
+    );
   });
 
   it('el estado de las fases coincide con el roadmap y PROJECT_STATUS.md', () => {
-    const status = read('PROJECT_STATUS.md');
+    const status = frontMatter(read('PROJECT_STATUS.md'));
     const current = /^current_phase: "Fase (\w+) — /m.exec(status)?.[1];
     const active = /^phase_status: "(\w+)"/m.exec(status)?.[1];
     expect(active).toBe('active');
-    expect(ROADMAP.find((p) => p.id === current)?.state).toBe('en curso');
-    expect(ROADMAP.find((p) => p.id === '0')?.state).toBe('hecha');
-    expect(read('docs/producto/roadmap.md')).toContain('## Fase 0 — Fundación v2 (completada)');
-    expect(status).toContain('docs/plan/linea-visual-v1.md');
-    expect(ROADMAP.find((p) => p.id === 'V1')?.state).toBe('en curso');
+    expect(ROADMAP.filter((p) => p.state === 'en curso').map((p) => p.id)).toEqual([current]);
+
+    // Hechas en el sitio = completadas en el roadmap: la Fase 0 y la línea visual V1.
+    const completed = roadmapPhases()
+      .filter((p) => p.note === 'completada')
+      .map((p) => p.id);
+    expect(completed).toEqual(['0', 'V1']);
+    expect(ROADMAP.filter((p) => p.state === 'hecha').map((p) => p.id)).toEqual(completed);
+
+    // La línea V1 se cerró: su plan está `done` y ya no corre en paralelo (plan V1 §7).
+    expect(frontMatter(read('docs/plan/linea-visual-v1.md'))).toMatch(/^status: "done"$/m);
+    expect(status).not.toContain('linea-visual-v1.md');
+
     const current_index = ROADMAP.findIndex((p) => p.id === current);
     for (const phase of ROADMAP.slice(current_index + 1)) {
       expect(phase.state, phase.id).toBe('prevista');

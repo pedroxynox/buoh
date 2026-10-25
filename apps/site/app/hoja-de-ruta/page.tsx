@@ -11,7 +11,7 @@ export default function HojaDeRutaPage() {
       <PageIntro
         eyebrow="Hoja de ruta"
         title="Por puertas de calidad, no por fechas"
-        summary="Una fase de más riesgo solo empieza cuando la evidencia lo permite. Algunas corren en paralelo, como esta línea visual. Si la evidencia no alcanza, se espera: no hay fechas que obliguen a correr."
+        summary="Una fase de más riesgo solo empieza cuando la evidencia lo permite. Algunas corren en paralelo, como la línea visual que hizo este sitio. Si la evidencia no alcanza, se espera: no hay fechas que obliguen a correr."
       />
 
       <Section title="Fases">

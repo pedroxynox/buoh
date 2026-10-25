@@ -25,7 +25,7 @@ Todas las páginas comparten cabecera con menú y un pie con el aviso de riesgo 
 - Sin recursos de terceros: tipografías y estilos se sirven desde el propio sitio.
 - Sin cookies ni recogida de datos personales.
 - Deriv, MetaTrader 5, MetaQuotes y Vantage aparecen solo como integraciones previstas, con la nota de que buoh no está afiliado a ellos.
-- El estado de cada fase coincide con el roadmap y con `PROJECT_STATUS.md`. La línea visual V1 queda «en curso» hasta que el propietario revise las capturas (plan V1, §7).
+- El estado de cada fase coincide con el roadmap y con `PROJECT_STATUS.md`: «hecha» si el roadmap la marca completada, «en curso» si es la fase actual y «prevista» si viene después. La línea visual V1 figura como «hecha» desde su cierre del 2026-10-25 (plan V1, §7). La portada, en «En qué estamos», muestra solo las fases en curso.
 - Mientras no se publique, todas las páginas llevan `noindex, nofollow`.
 
 Las pruebas de `apps/site/test` comprueban estas reglas en las páginas exportadas y en su JavaScript, y comparan las fases, modos, plataformas e integraciones con el roadmap, el catálogo de funciones y ADR-0007. El texto sobre lo que existe hoy se escribió para la entrega `F1.4b`; una prueba falla cuando `PROJECT_STATUS.md` cambia de entrega, para obligar a revisarlo. La comprobación de «sin métricas» es aproximada: busca porcentajes y cifras con signo en el contenido. Además de las frases prohibidas de la guía de marca §3, las pruebas rechazan «regístrate», «suscríbete» y «compra ahora», por la regla de no tener registro ni compras ([estado del código](../arquitectura/estado-del-codigo.md) D-04).

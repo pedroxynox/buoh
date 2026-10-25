@@ -12,7 +12,9 @@ Este roadmap ordena el trabajo por evidencia y reducción de riesgo, no por fech
 
 **Salida:** las interfaces no pueden eludir la pasarela de riesgo, y cada persona sabe diferenciar `shadow`, `demo` y `real`.
 
-## Línea visual V1 (en paralelo a Fase 1)
+## Línea visual V1 (completada)
+
+**Estado:** `done` desde el 2026-10-25. Corrió en paralelo a Fase 1.
 
 **Objetivo:** dar a buoh su marca y una interfaz que se pueda ver y validar antes de tener datos reales ([ADR-0008](../arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md), [plan](../plan/linea-visual-v1.md)).
 
@@ -25,7 +27,7 @@ Este roadmap ordena el trabajo por evidencia y reducción de riesgo, no por fech
 5. prototipo de escritorio para Windows con datos ficticios;
 6. identidad visual a partir del logo del propietario.
 
-**Criterio de salida:** el propietario revisó capturas de los prototipos y del sitio, y las pruebas de contraste y de estados pasan.
+**Criterio de salida:** el propietario revisó capturas de los prototipos y del sitio, y las pruebas de contraste y de estados pasan. Se cumplió el 2026-10-25: el propietario decidió que sus aprobaciones ya registradas cuentan como esa revisión ([plan V1](../plan/linea-visual-v1.md) §7). La app real de Windows sigue en la Fase 7.
 
 ## Fase 1 — Fundación de datos
 

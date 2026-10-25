@@ -39,7 +39,7 @@ No crees componentes futuros o directorios vacíos fuera del [corte de Fase 1](d
 
 ## Organización autorizada para la línea visual V1
 
-En paralelo a Fase 1, el [plan de la línea visual](docs/plan/linea-visual-v1.md) y [ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md) autorizan:
+La línea visual V1 corrió en paralelo a Fase 1 y terminó el 2026-10-25. Su [plan](docs/plan/linea-visual-v1.md) y [ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md) autorizaron estas piezas, que siguen en el repositorio y se mantienen; los directorios y dependencias nuevos necesitan un plan activo:
 
 - `packages/design-system/`: tokens, CSS base y componentes React web; la guía es [`docs/diseno/marca-buoh.md`](docs/diseno/marca-buoh.md).
 - `apps/web/`: prototipo navegable del producto con datos ficticios, sin API, cuentas ni brókeres.
@@ -86,7 +86,7 @@ pnpm run docs:check -- --acknowledge=contracts:Razón explícita para incluir en
 
 GitHub Actions (`.github/workflows/verify.yml`) ejecuta `DOCS_BASE_REF=origin/main pnpm run verify:pr` en cada PR hacia `main` y en cada push a `main`, con el Node y pnpm fijados. Un segundo job ejecuta `pnpm run test:integration` contra los servicios de `infra/compose.yaml` con credenciales efímeras; localmente requiere esos servicios (ver el [runbook](docs/operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13)). El flujo `.github/workflows/desktop.yml` corre en Windows solo cuando cambian `apps/desktop`, `apps/web`, sus paquetes o la configuración de pnpm, Node, TypeScript o turbo: pasa `cargo fmt`, `cargo clippy` y `cargo test` y compila el instalador del prototipo de escritorio. `pnpm run data:replay` corre `scripts/data-replay.mjs`, y la guardia pide revisar el runbook de ingesta al tocarlo.
 
-Sin base, revisa cambios staged, unstaged y no rastreados. `verify:pr` exige `DOCS_BASE_REF` y revisa todo el rango comprometido contra la rama objetivo; lo no comprometido no cuenta. Si una ruta activa una regla, debe cambiar una fuente indicada o recibir una justificación de al menos 20 caracteres; la salida exige copiar esa razón al PR. La justificación solo se puede dar en la línea de comandos (`--acknowledge`): `verify:pr` y CI no la pasan, así que en CI toda regla activada exige cambiar una de sus fuentes, también cuando el cambio es solo de comentarios. La guardia nunca modifica documentación. ADR, seguridad y riesgo conservan revisión humana.
+Sin base, revisa cambios staged, unstaged y no rastreados. `verify:pr` exige `DOCS_BASE_REF` y revisa todo el rango comprometido contra la rama objetivo; lo no comprometido no cuenta. Si una ruta activa una regla, debe cambiar una fuente indicada o recibir una justificación de al menos 20 caracteres; la salida exige copiar esa razón al PR. La justificación solo se puede dar en la línea de comandos (`--acknowledge`): `verify:pr` y CI no la pasan, así que en CI toda regla activada exige cambiar una de sus fuentes, también cuando el cambio es solo de comentarios. Es lo que pide `F1-GOV-001`: el propietario decidió el 2026-10-25 que CI siga sin aceptar justificaciones. La guardia nunca modifica documentación. ADR, seguridad y riesgo conservan revisión humana.
 
 ## Pull requests
 
