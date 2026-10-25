@@ -47,7 +47,7 @@ function StatusBadge({
       strong={strong ?? false}
       title={`${axis}: ${presentation.label}. ${presentation.description}`}
     >
-      <span className="b-visually-hidden">{axis}: </span>
+      <span className="b-visually-hidden">{`${axis}: `}</span>
       {presentation.label}
       {showDescription ? (
         <span className="b-badge__detail">· {presentation.description}</span>

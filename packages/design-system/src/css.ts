@@ -115,8 +115,9 @@ a { color: inherit; }
   background: var(--b-tone-bg, var(--b-bg-raised)); color: var(--b-tone-fg, var(--b-text-2));
   font-size: var(--b-size-xs); font-weight: ${String(typography.weight.semibold)}; line-height: 1; white-space: nowrap;
 }
+.b-badge { max-width: 100%; }
 .b-badge .b-icon { width: 14px; height: 14px; }
-.b-badge__detail { font-weight: ${String(typography.weight.regular)}; }
+.b-badge__detail { font-weight: ${String(typography.weight.regular)}; white-space: normal; line-height: 1.25; }
 .b-badge--strong { border-width: 1.5px; border-color: var(--b-tone-fg, var(--b-text-2)); }
 
 .b-button {

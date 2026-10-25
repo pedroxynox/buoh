@@ -32,7 +32,7 @@ Diseño de la información del cliente web (`V1-UI-001`). El prototipo de `apps/
 
 - La navegación lateral marca con el número de fase las secciones cuya función entera empieza en Fase 4 o después (Ejecución y Riesgo). Conexiones y Auditoría se dibujan, y dentro bloquean solo sus partes de Fase 4.
 - **Corte del prototipo:** las funciones de las fases 1, 1B, 2 y 3 se dibujan con datos ficticios; las de la Fase 3B en adelante aparecen con el candado de fase y, como mucho, una vista previa sin controles.
-- Por debajo de 960 px, la navegación pasa a una barra inferior con las cinco secciones principales. Esa forma anticipa la app móvil.
+- Por debajo de 960 px, la navegación pasa a una barra inferior con Observatorio (rotulado «Inicio»), Mercados, Laboratorio, Señales y un menú «Más» con las demás secciones. Esa forma anticipa la app móvil.
 - La marca «Datos ficticios» solo existe en el prototipo y no se puede ocultar.
 
 ## 3. Secciones
@@ -71,7 +71,28 @@ Diseño de la información del cliente web (`V1-UI-001`). El prototipo de `apps/
 - **Error:** qué falló, desde cuándo y si los datos mostrados siguen siendo válidos.
 - **Degradado:** la insignia de salud cambia y las cifras afectadas muestran una marca de calidad.
 
-## 6. Hacia móvil y escritorio
+## 6. Prototipo implementado (V1.2)
+
+`apps/web` implementa las diez secciones de §3 y una página 404, todas con el marco de §2. Detalles:
+
+- Los datos viven en `apps/web/src/fixtures.ts`, fijados a mano o calculados con fórmulas fijas; el instante de referencia es el 20 oct 2026, 14:32:05 UTC.
+- Cuentan una historia coherente, comprobada por pruebas: Deriv perdió la conexión, R_100 quedó con un hueco sin resolver, Deriv y la salud global están degradadas y la estrategia que usa R_100 se pausó sola. Solo emite señales vigentes una estrategia aprobada para shadow, y solo después de su aprobación.
+- Supuestos del prototipo, que el contrato todavía no fija: la salud global es la más severa de sus fuentes, y una pausa automática afecta solo a las estrategias del símbolo con datos degradados.
+- Los gráficos son SVG propios: el de precios corta la línea en los huecos y los rotula; el de resultados marca el cero y la peor caída. Sus textos van en HTML para leerse igual en móvil, con eje de tiempo.
+- El ejemplo del laboratorio es deliberadamente honesto: la estrategia gana en entrenamiento y pierde fuera de muestra, así que no pasa la validación y se retira sin llegar a shadow.
+- Las únicas acciones son enlaces de navegación. Los botones de las secciones de Fase 4 están desactivados, y los de la guía visual son muestras sin efecto.
+- La guía visual dibuja también los estados de pantalla de §5: cargando, vacío, error y degradado.
+
+Construcción y revisión:
+
+```text
+pnpm --filter @buoh/web run build   # exporta a apps/web/out
+pnpm --filter @buoh/web run test    # comprueba fixtures y cada página exportada
+```
+
+`apps/web/out` es un sitio estático: se puede abrir con cualquier servidor de archivos local. No se publica en internet (ADR-0008 §3).
+
+## 7. Hacia móvil y escritorio
 
 - **Móvil:** Observatorio, Señales, Alertas, Evidencia y *kill switch*, con la barra inferior de §2. Sin edición de estrategias ni de políticas.
 - **Escritorio:** la misma estructura que la web, con ventanas que se pueden separar para seguir varios mercados.
