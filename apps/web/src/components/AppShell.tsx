@@ -18,7 +18,7 @@ export function TopBar() {
     <header className="w-topbar">
       <div className="w-topbar__brand">
         <Link href="/" className="w-topbar__home" aria-label="buoh, ir al observatorio">
-          <BuohLogo size={28} />
+          <BuohLogo size={32} />
         </Link>
         <FictitiousDataNotice />
       </div>

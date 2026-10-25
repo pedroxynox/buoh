@@ -5,6 +5,7 @@
 - **Ámbito:** trabajo en paralelo a Fase 1, sin cambiar su alcance ni su puerta de salida
 - **Decisores:** Propietario de buoh, a propuesta de la dirección técnica
 - **Complementada por:** [ADR-0009](0009-prototipo-movil.md) (prototipo móvil) y [ADR-0010](0010-prototipo-de-escritorio.md) (prototipo de escritorio)
+- **Sustituida parcialmente por:** [ADR-0011](0011-identidad-desde-el-logo-del-propietario.md) en la tipografía de §4 (Sen en lugar de Manrope)
 - **Complementa:** [ADR-0001](0001-plataforma-y-stack.md) y [ADR-0003](0003-lenguajes-y-limites.md) (web con Next.js y React) y la [arquitectura objetivo](../arquitectura-objetivo.md) (`packages/design-system` y `apps/web`); añade `apps/site`.
 
 ## Contexto
@@ -56,7 +57,7 @@ Móvil (`apps/mobile`) y escritorio (`apps/desktop`) quedaban diferidos, cada un
 - **Next.js 16.4** con App Router y exportación estática (`output: 'export'`), en las dos apps. El mínimo es 16.4.1, que corrige dos fallos críticos de ejecución remota y uno de denegación de servicio publicados el 2026-10-14, incluido el de los paquetes `react-server-dom-*` que Next.js incluye dentro ([The Hacker News](https://thehackernews.com/2026/10/nextjs-ships-out-of-band-patch-for-two.html)). Se fija la versión más reciente que tenga al menos un día publicada, como exige la política de pnpm (`minimumReleaseAge`); el 2026-10-24 es 16.4.2, porque 16.4.3 salió el 2026-10-23. La exportación estática no ejecuta un servidor Next.js, así que no expone Server Actions ni la caché de componentes.
 - **React 19.3.1** para `react` y `react-dom`, la versión vigente.
 - **CSS Modules y variables CSS** generadas desde los tokens. Sin framework de utilidades.
-- **Tipografías** Manrope y JetBrains Mono, licencia SIL OFL 1.1, alojadas dentro del sitio mediante Fontsource. No se cargan desde servicios externos.
+- **Tipografías** Manrope y JetBrains Mono (desde ADR-0011, Sen y JetBrains Mono), licencia SIL OFL 1.1, alojadas dentro del sitio mediante Fontsource. No se cargan desde servicios externos.
 - **Iconos y gráficos** propios en SVG, sin bibliotecas de iconos ni de gráficos.
 - La telemetría de Next.js se desactiva en los scripts.
 

@@ -1,7 +1,13 @@
 import { executionModeSchema, serviceHealthSchema } from '@buoh/contracts';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { EXECUTION_MODE_PRESENTATION, SERVICE_HEALTH_PRESENTATION } from '../src/index.js';
+import {
+  EXECUTION_MODE_PRESENTATION,
+  LOGO_MIN,
+  LOGO_SYMBOL,
+  LOGO_WORDMARK,
+  SERVICE_HEALTH_PRESENTATION,
+} from '../src/index.js';
 import {
   BuohLogo,
   BuohMark,
@@ -113,8 +119,29 @@ describe('componentes React', () => {
     expect(html).not.toContain('data-tone');
   });
 
-  it('el símbolo es decorativo dentro del logotipo y accesible solo', () => {
-    expect(renderToStaticMarkup(<BuohLogo />)).toContain('aria-hidden="true"');
+  it('el logotipo es una sola imagen accesible con el símbolo y la palabra vectorizada', () => {
+    const logo = renderToStaticMarkup(<BuohLogo />);
+    expect(logo).toContain('role="img"');
+    expect(logo).toContain('aria-label="buoh"');
+    expect(logo).toContain(LOGO_WORDMARK.d);
+    expect(logo).toContain(LOGO_SYMBOL.primary);
+    expect(logo).not.toMatch(/<text\b/);
     expect(renderToStaticMarkup(<BuohMark />)).toContain('aria-label="buoh"');
+    expect(renderToStaticMarkup(<BuohMark title={null} />)).toContain('aria-hidden="true"');
+  });
+
+  it('el logotipo por defecto no baja del ancho mínimo de la guía', () => {
+    const width = Number(/width="([\d.]+)"/.exec(renderToStaticMarkup(<BuohLogo />))?.[1]);
+    expect(width).toBeGreaterThanOrEqual(LOGO_MIN.lockupPx);
+  });
+
+  it('el símbolo conserva la proporción del original y su versión de una tinta', () => {
+    const html = renderToStaticMarkup(<BuohMark size={100} />);
+    const width = Number(/width="([\d.]+)"/.exec(html)?.[1]);
+    expect(width / 100).toBeCloseTo(LOGO_SYMBOL.width / LOGO_SYMBOL.height, 2);
+    const mono = renderToStaticMarkup(<BuohMark variant="mono" />);
+    expect(mono).toContain(LOGO_SYMBOL.mono);
+    expect(mono).toContain('fill="currentColor"');
+    expect(mono).not.toContain('var(--b-brand');
   });
 });

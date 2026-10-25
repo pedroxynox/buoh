@@ -6,12 +6,12 @@ import { MIN_TOUCH_TARGET_PX, nightTheme, radius, typography } from '@buoh/desig
 
 export const theme = nightTheme;
 
-/** Familias cargadas con expo-font (Manrope y JetBrains Mono, licencia OFL). */
+/** Familias cargadas con expo-font (Sen y JetBrains Mono, licencia OFL; ADR-0011). */
 export const font = {
-  regular: 'Manrope_400Regular',
-  medium: 'Manrope_500Medium',
-  semibold: 'Manrope_600SemiBold',
-  bold: 'Manrope_700Bold',
+  regular: 'Sen_400Regular',
+  medium: 'Sen_500Medium',
+  semibold: 'Sen_600SemiBold',
+  bold: 'Sen_700Bold',
   mono: 'JetBrainsMono_500Medium',
 } as const;
 

@@ -5,6 +5,12 @@ import {
   contrastRatio,
   EXECUTION_MODE_PRESENTATION,
   ICONS,
+  LOGO_FILES,
+  LOGO_GEOMETRY,
+  LOGO_INKS,
+  LOGO_MIN,
+  LOGO_SYMBOL,
+  LOGO_WORDMARK,
   palette,
   renderCss,
   SERVICE_HEALTH_PRESENTATION,
@@ -127,12 +133,36 @@ describe('estados del contrato con texto, icono y tono (V1-DS-001)', () => {
     }
   });
 
-  it('el ámbar de marca no se usa en ningún estado', () => {
+  it('el verde azulado de marca no se usa en ningún estado', () => {
     for (const theme of THEMES) {
       const toneColors = TONES.flatMap((tone) => [theme.tones[tone].fg, theme.tones[tone].bg]);
-      for (const amber of [palette.ambar[400], palette.ambar[700], theme.brand.accent]) {
-        expect(toneColors).not.toContain(amber);
+      for (const brand of [
+        ...Object.values(palette.boreal),
+        theme.brand.accent,
+        theme.brand.mark,
+      ]) {
+        expect(toneColors).not.toContain(brand);
       }
+    }
+  });
+
+  it('el estado «saludable» se distingue del verde azulado de marca por el tono', () => {
+    // Guía §5: el verde de «saludable» se separa al menos 25° de tono del verde azulado del logo.
+    const hue = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16) / 255) as [
+        number,
+        number,
+        number,
+      ];
+      const max = Math.max(r, g, b);
+      const d = max - Math.min(r, g, b);
+      const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      return (h * 60 + 360) % 360;
+    };
+    const healthy = SERVICE_HEALTH_PRESENTATION.healthy.tone;
+    for (const theme of THEMES) {
+      const gap = Math.abs(hue(theme.tones[healthy].fg) - hue(theme.brand.mark));
+      expect(Math.min(gap, 360 - gap), theme.name).toBeGreaterThanOrEqual(25);
     }
   });
 });
@@ -155,13 +185,14 @@ describe('CSS generado desde los tokens (V1-DS-001)', () => {
 
   it('cada tema declara sus valores literales de la guía en su propio bloque', () => {
     expect(night).toMatchObject({
-      '--b-bg-canvas': '#0A101C',
+      '--b-bg-canvas': '#080F1B',
       '--b-bg-surface': '#0E1626',
       '--b-text': '#F4F6FB',
       '--b-text-2': '#C8D0E2',
       '--b-text-muted': '#8D9AB6',
-      '--b-action-bg': '#F0E5C6',
-      '--b-brand-iris': '#F2B544',
+      '--b-action-bg': '#EDECE0',
+      '--b-brand-mark': '#24A598',
+      '--b-brand-mark-detail': '#EDECE0',
       '--b-tone-rosa-fg': '#F283B3',
       '--b-tone-niebla-bg': '#1A2337',
     });
@@ -172,7 +203,8 @@ describe('CSS generado desde los tokens (V1-DS-001)', () => {
       '--b-text-2': '#33415C',
       '--b-text-muted': '#55627D',
       '--b-action-bg': '#0E1626',
-      '--b-brand-iris': '#F2B544',
+      '--b-brand-mark': '#11756B',
+      '--b-brand-mark-detail': '#0E1626',
       '--b-tone-rosa-fg': '#AA3166',
       '--b-tone-niebla-bg': '#ECEFF5',
     });
@@ -189,6 +221,7 @@ describe('CSS generado desde los tokens (V1-DS-001)', () => {
     );
     expect(shared['--b-space-0_5']).toBe('0.125rem');
     expect(shared['--b-font-mono']).toContain('JetBrains Mono');
+    expect(shared['--b-font-sans']).toMatch(/^'Sen Variable', 'Sen',/);
   });
 
   it('ningún texto usa opacidad: solo los controles desactivados', () => {
@@ -221,10 +254,97 @@ describe('guía de marca y recursos frente a los tokens (V1-BRAND-001)', () => {
     }
   });
 
+  it('cada archivo de assets/ es exactamente el que generan los trazados de src/logo.ts', () => {
+    const dir = new URL('../assets/', import.meta.url);
+    const files = readdirSync(dir).filter((f) => f.endsWith('.svg'));
+    expect(files.sort()).toEqual(Object.keys(LOGO_FILES).sort());
+    for (const file of files) {
+      expect(readFileSync(new URL(file, dir), 'utf8'), `${file}: pnpm run logo:write`).toBe(
+        LOGO_FILES[file],
+      );
+    }
+    expect(LOGO_FILES['buoh-logo.svg']).not.toMatch(/<text\b|font-family/);
+  });
+
+  it('cada versión del logo usa las tintas de su tema (guía §4)', () => {
+    expect(LOGO_INKS.color).toEqual({
+      mark: themes.noche.brand.mark,
+      detail: themes.noche.brand.markDetail,
+    });
+    expect(LOGO_INKS.dia).toEqual({
+      mark: themes.dia.brand.mark,
+      detail: themes.dia.brand.markDetail,
+    });
+    // Colores medidos en el original
+    expect([LOGO_INKS.color.mark, LOGO_INKS.color.detail, LOGO_INKS.tile]).toEqual([
+      '#24A598',
+      '#EDECE0',
+      '#080F1B',
+    ]);
+    expect(LOGO_FILES['buoh-logo-dia.svg']).toContain(`fill="${palette.boreal[700]}"`);
+    expect(LOGO_FILES['buoh-logo-dia.svg']).toContain(`fill="${palette.noche[850]}"`);
+  });
+
+  it('los trazados no tienen curvas con un solo tirador ni tramos degenerados', () => {
+    for (const [name, d] of [
+      ['símbolo', LOGO_SYMBOL.primary],
+      ['detalles', LOGO_SYMBOL.detail],
+      ['monocromo', LOGO_SYMBOL.mono],
+      ['palabra', LOGO_WORDMARK.d],
+    ] as const) {
+      // pathData de paper.js: comandos relativos c, l, h, v y z tras un M absoluto
+      const curves = [
+        ...d.matchAll(/c(-?[\d.]+),(-?[\d.]+) (-?[\d.]+),(-?[\d.]+) (-?[\d.]+),(-?[\d.]+)/g),
+      ].map((m) => m.slice(1).map(Number) as [number, number, number, number, number, number]);
+      expect(curves.length, name).toBeGreaterThan(0);
+      for (const [x1, y1, x2, y2, x, y] of curves) {
+        const first = Math.hypot(x1, y1) === 0;
+        const second = Math.hypot(x - x2, y - y2) === 0;
+        expect(first && !second, `${name}: c${String(x1)},${String(y1)} …`).toBe(false);
+        expect(second && !first, `${name}: … ${String(x)},${String(y)}`).toBe(false);
+        expect(Math.hypot(x, y), name).toBeGreaterThanOrEqual(0.25);
+      }
+      for (const m of d.matchAll(/([lhv])(-?[\d.]+)(?:,(-?[\d.]+))?/g)) {
+        const length =
+          m[1] === 'l' ? Math.hypot(Number(m[2]), Number(m[3])) : Math.abs(Number(m[2]));
+        expect(length, `${name}: ${m[0]}`).toBeGreaterThanOrEqual(0.25);
+      }
+    }
+  });
+
+  it('las medidas de construcción de la guía son las de LOGO_GEOMETRY', () => {
+    const g = LOGO_GEOMETRY;
+    // Una cifra decimal, redondeando la mitad hacia arriba como la guía (14,35 → 14,4).
+    const es = (v: number) => (Math.round(v * 10 + 1e-9) / 10).toFixed(1).replace('.', ',');
+    const table = guide.slice(guide.indexOf('### Construcción'), guide.indexOf('### Archivos'));
+    for (const value of [
+      g.ringRadius,
+      g.ringStroke,
+      g.earStroke,
+      g.earTipArcRadius,
+      g.earTipLength,
+      g.ringCenter[1] - g.crossing[1],
+      g.lidRadius,
+      g.lidStroke,
+      g.eyeRadius,
+      g.seam,
+      g.stem,
+      g.bowlTopBottom,
+      g.xHeight,
+    ]) {
+      expect(table, es(value)).toContain(es(value));
+    }
+    expect(table).toContain(`ascendentes ${String(Math.round(g.ascender))}`);
+    expect(table).toContain(`(${(g.xHeight / g.ascender).toFixed(2).replace('.', ',')})`);
+    expect(guide).toContain(`${String(LOGO_MIN.symbolPx)} px de alto`);
+    expect(guide).toContain(`${String(LOGO_MIN.lockupPx)} px de ancho`);
+    expect(guide).toContain(`(${es(2 * g.eyeRadius)} unidades`);
+  });
+
   it('los SVG del logotipo usan solo colores de la paleta', () => {
     const dir = new URL('../assets/', import.meta.url);
     const files = readdirSync(dir).filter((f) => f.endsWith('.svg'));
-    expect(files.length).toBeGreaterThanOrEqual(3);
+    expect(files.length).toBeGreaterThanOrEqual(8);
     for (const file of files) {
       const svg = readFileSync(new URL(file, dir), 'utf8');
       for (const hex of svg.match(/#[0-9A-F]{6}/gi) ?? []) {

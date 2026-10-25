@@ -4,6 +4,7 @@
 - **Fecha:** 2026-10-25
 - **Ámbito:** línea visual V1, incremento V1.5; no adelanta la app de Windows de la Fase 7
 - **Decisores:** Propietario de buoh, a propuesta de la dirección técnica
+- **Sustituida parcialmente por:** [ADR-0011](0011-identidad-desde-el-logo-del-propietario.md) en el origen de los iconos
 - **Complementa:** [ADR-0001](0001-plataforma-y-stack.md) (decisión 6: Windows con Tauri 2), [ADR-0003](0003-lenguajes-y-limites.md) (Rust solo para el contenedor Tauri) y [ADR-0008](0008-linea-visual-marca-y-clientes-web.md) (que dejaba el escritorio para un incremento propio)
 
 ## Contexto
@@ -41,7 +42,7 @@ No es la app de Windows de la Fase 7, y la decisión 6 de ADR-0001 sigue valiend
 - El código Rust se limita a abrir la ventana y a la regla de navegación.
 - Instalador NSIS por usuario, que no pide permisos de administrador, en español. Si falta WebView2, descarga su instalador oficial.
 - Identificador `io.github.pedroxynox.buoh`, basado en la cuenta de GitHub del propietario, porque buoh todavía no tiene dominio.
-- Iconos generados con `tauri icon` desde `packages/design-system/assets/buoh-simbolo.svg`.
+- Iconos generados con `tauri icon` desde `packages/design-system/assets/buoh-icono.svg`, el símbolo sobre una baldosa noche ([ADR-0011](0011-identidad-desde-el-logo-del-propietario.md)).
 - pnpm ejecuta los scripts con su emulador de shell (`shellEmulator` en `pnpm-workspace.yaml`). Sin él, en Windows usaría `cmd.exe`, que no entiende scripts como `NEXT_TELEMETRY_DISABLED=1 next build`.
 
 ### 4. Evidencia

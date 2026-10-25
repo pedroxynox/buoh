@@ -18,7 +18,7 @@
         "minHeight": 640,
         "center": true,
         "preventOverflow": true,
-        "backgroundColor": "#0A101C"
+        "backgroundColor": "#080F1B"
       }
     ],
     "security": {

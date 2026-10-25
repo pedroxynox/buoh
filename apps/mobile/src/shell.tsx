@@ -6,7 +6,7 @@ import { GLOBAL_STATUS } from '@buoh/prototype-data';
 import { Pressable, Text, View } from 'react-native';
 import { TABS, type TabId } from './model';
 import { font, size, space, theme, TOUCH } from './theme';
-import { BuohMark, FictitiousDataNotice, HealthBadge, Icon, ModeBadge } from './ui';
+import { BuohLogo, FictitiousDataNotice, HealthBadge, Icon, ModeBadge } from './ui';
 
 export function TopBar() {
   return (
@@ -21,12 +21,7 @@ export function TopBar() {
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space[2] }}>
-          <BuohMark dimension={28} />
-          <Text style={{ fontFamily: font.bold, fontSize: size.xl, color: theme.text.primary }}>
-            buoh
-          </Text>
-        </View>
+        <BuohLogo dimension={32} />
         <FictitiousDataNotice />
       </View>
       <View

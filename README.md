@@ -69,7 +69,7 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 ## Identidad de diseño
 
 - **Carácter:** sereno, preciso, nocturno; no lúdico ni estimulante de sobreoperación.
-- **Paleta:** noche `#0A101C` como fondo, niebla `#F4F6FB` para el texto, luna `#F0E5C6` para la acción principal y ámbar `#F2B544` solo para los ojos del búho y el acento de marca. La [guía de marca](docs/diseno/marca-buoh.md) es la fuente canónica y sustituye la paleta inicial.
+- **Paleta:** la del logo del propietario: noche `#080F1B` como fondo, verde azulado `#24A598` como color de marca, crema `#EDECE0` para la palabra y la acción principal, y niebla `#F4F6FB` para el texto. La tipografía es Sen. La [guía de marca](docs/diseno/marca-buoh.md) tiene la paleta completa ([ADR-0011](docs/arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)).
 - **Accesibilidad:** contraste WCAG AA como mínimo, comprobado por pruebas; el color nunca será la única señal de ganancia, pérdida, riesgo o estado.
 - **Datos vivos:** toda vista muestra símbolo, fuente, zona horaria, intervalo, frescura, modo de ejecución y calidad de datos.
 
@@ -91,6 +91,7 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 - [ADR-0008: línea visual, marca y clientes web](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)
 - [ADR-0009: prototipo móvil](docs/arquitectura/adr/0009-prototipo-movil.md)
 - [ADR-0010: prototipo de escritorio](docs/arquitectura/adr/0010-prototipo-de-escritorio.md)
+- [ADR-0011: identidad desde el logo del propietario](docs/arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)
 - [Plan de la línea visual V1](docs/plan/linea-visual-v1.md)
 - [Guía de marca](docs/diseno/marca-buoh.md)
 - [Concepto de interfaz](docs/diseno/concepto-de-interfaz.md)

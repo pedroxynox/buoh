@@ -4,6 +4,7 @@
 - **Fecha:** 2026-10-25
 - **Ámbito:** línea visual V1, incremento V1.4; no cambia el alcance de Fase 1 ni adelanta la Fase 3
 - **Decisores:** Propietario de buoh, a propuesta de la dirección técnica
+- **Sustituida parcialmente por:** [ADR-0011](0011-identidad-desde-el-logo-del-propietario.md) en la tipografía (Sen en lugar de Manrope)
 - **Complementa:** [ADR-0001](0001-plataforma-y-stack.md) (móvil con Expo y React Native) y [ADR-0008](0008-linea-visual-marca-y-clientes-web.md) (que dejaba el móvil para un incremento propio)
 
 ## Contexto
@@ -46,7 +47,7 @@ Los formatos de fecha (`formatUtc`, `formatUtcTime`) y el cálculo de la peor ca
 - La web y el sitio siguen en React 19.3.1, la versión con la que se fijaron Next.js y el sitio (ADR-0008). Cada app instala su propia copia, así que el móvil puede quedarse en 19.3.0. Por eso el sistema de diseño acepta React `^19.3.0`.
 - `react-native-svg` para iconos, logotipo y gráficos, y `react-native-safe-area-context` para respetar los bordes del teléfono.
 - `react-native-web` para generar una versión web del prototipo y para las pruebas.
-- Tipografías Manrope y JetBrains Mono de `@expo-google-fonts` (OFL), empaquetadas en la app.
+- Tipografías Sen (desde [ADR-0011](0011-identidad-desde-el-logo-del-propietario.md); antes Manrope) y JetBrains Mono de `@expo-google-fonts` (OFL), empaquetadas en la app.
 - Sin biblioteca de navegación: una barra inferior propia basta para cinco pestañas y evita dependencias que el prototipo no necesita.
 - Metro resuelve los paquetes del monorepo desde su build (`experiments.tsconfigPaths: false`), igual que Next.js.
 - La telemetría de Expo se desactiva en los scripts.

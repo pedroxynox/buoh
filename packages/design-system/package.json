@@ -25,6 +25,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/write-css.mjs",
+    "logo:write": "tsc -p tsconfig.build.json && node scripts/write-logo-assets.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

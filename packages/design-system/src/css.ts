@@ -21,9 +21,8 @@ export function themeVariables(theme: Theme): Readonly<Record<string, string>> {
     '--b-text-muted': theme.text.muted,
     '--b-text-inverse': theme.text.inverse,
     '--b-brand-accent': theme.brand.accent,
-    '--b-brand-head': theme.brand.head,
-    '--b-brand-eye-ring': theme.brand.eyeRing,
-    '--b-brand-iris': palette.ambar[400],
+    '--b-brand-mark': theme.brand.mark,
+    '--b-brand-mark-detail': theme.brand.markDetail,
     '--b-action-bg': theme.action.bg,
     '--b-action-bg-hover': theme.action.bgHover,
     '--b-action-fg': theme.action.fg,
@@ -87,7 +86,7 @@ body {
 h1, h2, h3, h4 { margin: 0; line-height: ${String(typography.lineHeight.tight)}; letter-spacing: ${typography.letterSpacing.brand}; font-weight: ${String(typography.weight.bold)}; }
 p { margin: 0; }
 a { color: inherit; }
-::selection { background: var(--b-brand-iris); color: ${palette.noche[900]}; }
+::selection { background: ${palette.boreal[400]}; color: ${palette.noche[900]}; }
 :focus-visible { outline: 2px solid var(--b-focus); outline-offset: 2px; border-radius: var(--b-radius-sm); }
 [data-theme] { background: var(--b-bg-canvas); color: var(--b-text); }
 
@@ -97,7 +96,7 @@ a { color: inherit; }
 }
 .b-num { font-family: var(--b-font-mono); font-variant-numeric: tabular-nums; letter-spacing: 0; }
 .b-eyebrow {
-  font-size: var(--b-size-xs); font-weight: ${String(typography.weight.semibold)};
+  font-family: var(--b-font-mono); font-size: var(--b-size-xs); font-weight: ${String(typography.weight.medium)};
   letter-spacing: ${typography.letterSpacing.caps}; text-transform: uppercase; color: var(--b-text-muted);
 }
 .b-muted { color: var(--b-text-muted); }
@@ -110,7 +109,7 @@ a { color: inherit; }
 
 .b-badge {
   display: inline-flex; align-items: center; gap: 0.375rem;
-  padding: 0.3rem 0.65rem; border-radius: var(--b-radius-pill);
+  padding: 0.3rem 0.6rem; border-radius: var(--b-radius-sm);
   border: 1px solid color-mix(in srgb, var(--b-tone-fg, var(--b-text-2)) 40%, transparent);
   background: var(--b-tone-bg, var(--b-bg-raised)); color: var(--b-tone-fg, var(--b-text-2));
   font-size: var(--b-size-xs); font-weight: ${String(typography.weight.semibold)}; line-height: 1; white-space: nowrap;
@@ -173,7 +172,7 @@ a { color: inherit; }
 .b-table { width: 100%; border-collapse: collapse; font-size: var(--b-size-md); }
 .b-table th {
   text-align: left; padding: var(--b-space-2) var(--b-space-3); color: var(--b-text-muted);
-  font-size: var(--b-size-xs); font-weight: ${String(typography.weight.semibold)}; letter-spacing: ${typography.letterSpacing.caps}; text-transform: uppercase;
+  font-family: var(--b-font-mono); font-size: var(--b-size-xs); font-weight: ${String(typography.weight.medium)}; letter-spacing: ${typography.letterSpacing.caps}; text-transform: uppercase;
 }
 .b-table td { padding: var(--b-space-3); border-top: 1px solid var(--b-border-subtle); vertical-align: middle; }
 .b-table tbody tr:hover { background: var(--b-bg-hover); }

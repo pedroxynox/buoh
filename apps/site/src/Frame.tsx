@@ -9,7 +9,7 @@ export function SiteHeader() {
     <header className="s-header">
       <div className="s-container s-header__inner">
         <Link href="/" className="s-header__home" aria-label="buoh, inicio">
-          <BuohLogo size={30} />
+          <BuohLogo size={32} />
         </Link>
         <nav aria-label="Secciones del sitio" className="s-nav">
           {PAGES.filter((page) => page.href !== '/').map((page) => (
