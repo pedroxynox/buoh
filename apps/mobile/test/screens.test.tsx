@@ -150,15 +150,27 @@ describe('prototipo móvil (V1-MOBILE-001)', () => {
     }
   });
 
-  it('«Más» bloquea lo de Fase 4 y deja en la web lo que cambia riesgo, como el catálogo', () => {
+  it('«Más» muestra con candado lo de Fase 4 y 6, y deja en la web la edición, como el catálogo', () => {
     const text = textOf(<MasScreen />);
     for (const item of LOCKED_ON_MOBILE) {
-      expect(text).toContain(`Disponible en Fase ${item.phase}`);
+      expect(text).toContain(`${item.title} · Disponible en Fase ${item.phase}`);
     }
     const catalog = read('docs/producto/funciones-y-disponibilidad.md');
-    expect(catalog).toMatch(/\| Pedir el modo `real` \|[^\n]*\| 6 \| ● \| — \| ● \|/);
-    expect(catalog).toMatch(/\| \*Kill switch\* \|[^\n]*\| 4 \| ● \| ● \| ● \|/);
-    expect(ONLY_ON_WEB.some((item) => item.includes('modo real'))).toBe(true);
+    /** Fase de una fila del catálogo si está disponible (●) en web, móvil y escritorio. */
+    const phaseOnAllPlatforms = (row: string) =>
+      new RegExp(`\\| ${row} \\|[^|\\n]*\\| (\\d+) \\| ● \\| ● \\| ● \\|`).exec(catalog)?.[1];
+    const lock = (id: string) => LOCKED_ON_MOBILE.find((item) => item.id === id);
+    // El propietario decidió (2026-10-25) que el modo real también se pide desde el móvil.
+    const realPhase = phaseOnAllPlatforms('Pedir el modo `real`');
+    const killSwitchPhase = phaseOnAllPlatforms('\\*Kill switch\\*');
+    expect(realPhase).toMatch(/^\d+$/);
+    expect(killSwitchPhase).toMatch(/^\d+$/);
+    expect(lock('modo-real')?.phase).toBe(realPhase);
+    expect(lock('kill-switch')?.phase).toBe(killSwitchPhase);
+    expect(ONLY_ON_WEB.some((item) => /\breal\b/i.test(item))).toBe(false);
+    // Editar políticas sigue fuera del móvil: el catálogo le da solo lectura (◐).
+    expect(catalog).toMatch(/\| Políticas de riesgo \|[^|\n]*\| \d+ \| ● \| ◐ \| ● \|/);
+    expect(ONLY_ON_WEB.some((item) => item.includes('políticas de riesgo'))).toBe(true);
     expect(htmlOf(<MasScreen />)).not.toMatch(/role="button"/);
   });
 
@@ -181,7 +193,7 @@ describe('prototipo móvil (V1-MOBILE-001)', () => {
   it('el «kill switch» con candado es lo primero en «Más»', () => {
     const text = textOf(<MasScreen />);
     const first = LOCKED_ON_MOBILE[0];
-    expect(first.title).toMatch(/kill switch/);
+    expect(first.id).toBe('kill-switch');
     expect(text.indexOf(first.title)).toBeGreaterThan(-1);
     expect(text.indexOf(first.title)).toBeLessThan(text.indexOf('Cada una con su propia salud'));
   });

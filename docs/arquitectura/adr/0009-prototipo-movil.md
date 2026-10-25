@@ -27,9 +27,9 @@ Hechos verificados el 2026-10-25:
 - Señales;
 - Alertas;
 - Evidencia;
-- Más, que incluye las fuentes, el *kill switch* con candado y lo que solo se hace en la web o el escritorio.
+- Más, que incluye las fuentes, lo que llega en fases posteriores (con candado) y lo que solo se hace en la web o el escritorio.
 
-Sigue las reglas de ADR-0008 §2. Como dice el [catálogo de funciones](../../producto/funciones-y-disponibilidad.md), no edita estrategias ni políticas y no pide el modo real.
+Sigue las reglas de ADR-0008 §2. Como dice el [catálogo de funciones](../../producto/funciones-y-disponibilidad.md), no edita estrategias ni políticas. Pedir el modo real llega al móvil en la Fase 6 (el propietario lo decidió el 2026-10-25, después de aceptarse esta ADR), así que el prototipo lo muestra con candado y sin controles.
 
 Además, como es un prototipo, sus únicos controles cambian de pestaña: «Ver alertas» en Inicio y «Ver evidencia» en cada señal. El *kill switch* con candado va lo primero en «Más».
 
