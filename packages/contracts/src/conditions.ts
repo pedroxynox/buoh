@@ -16,8 +16,8 @@ import { sourceEventSchema, type SourceEvent } from './source-events.js';
 
 /**
  * `OperationalConditionEvent` (contratos de dominio, «OperationalConditionEvent»): una condición
- * con estado que se abre por una incidencia y se resuelve con evidencia nueva. Las condiciones
- * abiertas son las que impiden la salud `healthy`.
+ * con estado que se abre por una incidencia y se resuelve con evidencia nueva. Mientras haya una
+ * abierta, la salud no puede ser `healthy` (hay otras causas: ver packages/domain/src/health.ts).
  */
 const conditionBase = {
   schema_version: schemaVersionSchema,
@@ -382,7 +382,8 @@ export function validateConditionCausality(
 
 /**
  * Tipos de condición que siguen abiertos al final del log, únicos y ordenados (la entrada de
- * `open_condition_types` en `HealthReport`). Usa el mismo orden que validateConditionCausality.
+ * `open_condition_types` en `HealthReport`). Ordena igual que validateConditionCausality, y como
+ * `compareConditions` de packages/domain/src/quality.ts (estado-del-codigo D-13).
  */
 export function reduceOpenConditions(
   input: readonly z.infer<typeof operationalConditionEventSchema>[],

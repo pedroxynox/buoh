@@ -3,8 +3,8 @@ import type { Metadata } from 'next';
 import { PageHeader } from '../../src/components/AppShell';
 
 /**
- * Ejecución (concepto de interfaz §3): llega en Fase 4. La página explica el recorrido de una orden
- * y muestra los modos demo y real con candado; no tiene controles (ADR-0008 §2).
+ * Ejecución (concepto de interfaz §3). Su función empieza en Fase 4, así que no tiene controles
+ * (ADR-0008 §2); el modo real se muestra solo como insignia, sin candado propio.
  */
 export const metadata: Metadata = { title: 'Ejecución' };
 

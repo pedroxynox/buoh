@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 15
-updated_at_utc: "2026-10-25T19:00:00.000Z"
+status_version: 16
+updated_at_utc: "2026-10-25T21:00:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -189,6 +189,10 @@ Ninguno para iniciar `F1.4b`.
 - Dominio y alojamiento del sitio oficial, y revisión legal de su texto antes de publicarlo (ADR-0008).
 - Firmar el instalador de escritorio antes de distribuirlo (ADR-0010). El propietario ya lo instaló y probó en su PC el 2026-10-25.
 - Probar la app móvil en un teléfono real (Expo Go para el SDK 58 aún no está en las tiendas, o una compilación nativa), y cómo compilarla y distribuirla (ADR-0009).
+- Si las aprobaciones ya registradas del propietario (ADR-0010 y ADR-0011) cuentan como la revisión de capturas que cierra la línea visual V1 (plan V1 §7), o si se revisan antes las capturas con la identidad V1.6 (P-V1-01 de la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md)).
+- Si la curva de resultados debe llevar modo, período, muestra y costes dentro del gráfico, como pide la guía de marca §8, o si la guía acepta el contexto al lado (P-V1-03).
+- Confirmar que «pedir» el modo `real` desde el móvil nunca es operar desde él, y qué cuenta como reautenticación en un teléfono (PR #16; P-V1-05).
+- Si CI puede aceptar una justificación de la guardia documental escrita en el PR, como dice `F1-GOV-001`, o si se cambia ese requisito (P-GOV-01).
 - Límites monetarios y política de riesgo para fases `demo` y `real`.
 - Proveedor de pagos y modelo de suscripción.
 

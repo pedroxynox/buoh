@@ -33,7 +33,7 @@ graph BT
   desktop["apps/desktop"] -. "carga apps/web/out" .-> web
 ```
 
-Las dos mitades no se tocan: la ruta de datos (contracts, domain y worker) no tiene API, y los clientes visuales solo usan datos ficticios.
+Entre las dos mitades no circulan datos: la ruta de datos (contracts, domain y worker) no tiene API, y los clientes visuales solo usan datos ficticios. Lo único que comparten es código: el sistema de diseño importa de `@buoh/contracts` los tipos `ExecutionMode`, `ServiceHealth` y `severitySchema`.
 
 ### Reglas que conviene conocer antes de cambiar código
 
@@ -42,11 +42,13 @@ Las dos mitades no se tocan: la ruta de datos (contracts, domain y worker) no ti
 - **Guardia documental** ([`docs/impact-map.json`](../impact-map.json)): tocar código de un área exige cambiar alguna de sus fuentes canónicas en el mismo PR, también si solo se añaden comentarios. En CI no se puede justificar una excepción.
 - **Móvil:** ESLint prohíbe importar `@buoh/design-system/react` en `apps/mobile` (React 19.3.0 frente a 19.3.1; ADR-0009).
 - **pnpm** corre los scripts con su emulador de shell (`shellEmulator`). Un script que deba separar stdout usa un archivo de `scripts/` (ADR-0003).
-- `test-vectors/` es el oráculo y no se edita.
+- `test-vectors/` es el oráculo. Solo cambia si el mismo PR justifica el contrato o la decisión en los contratos de dominio o en ADR-0004 (regla `test-vectors` de la guardia).
 
 ## 2. Código repetido
 
 Cada hallazgo tiene un identificador (D-xx) para citarlo desde comentarios y PR. **Hechos:** las ubicaciones y lo que se repite, comprobados leyendo el código. **Propuestas:** lo que se podría hacer, sin aplicar. Ninguna se ha aplicado: refactorizar exige un PR propio con su revisión.
+
+El PR que resuelva un D-xx quita del código los comentarios que lo citan y lo marca aquí como resuelto, con el número del PR. Los identificadores no se reutilizan.
 
 ### 2.1 Duplicación real
 
@@ -66,7 +68,9 @@ Misma lógica o el mismo conocimiento en varios lugares, que debería cambiar a 
 **D-02. Textos de evidencia, candado de fase y aviso de datos ficticios**
 - Dónde: `packages/design-system/src/react/Blocks.tsx` y `apps/mobile/src/ui.tsx` (`EvidenceSourceBadge`, `PhaseLock`, `FictitiousDataNotice` y las filas de `MetricWithContext`).
 - Qué se repite: «Disponible en Fase N», «Datos ficticios» y las etiquetas y el orden de Período, Muestra, Costes, Pérdidas, Drawdown máximo y Versión.
-- **Ya difieren:** el origen backtest se anuncia como «Origen: backtest sobre datos pasados» en la web y «Origen: backtest» en el móvil.
+- **Ya difieren:** la insignia de origen backtest muestra «Backtest» en las dos plataformas, pero:
+  - en la web, el texto accesible es «Origen: Backtest» y la ventana de ayuda (`title`) dice «Origen: backtest sobre datos pasados»;
+  - en el móvil, el texto accesible (`accessibleLabel`) es «Origen: backtest» y no hay ventana de ayuda.
 - Riesgo: añadir un campo obligatorio al contexto de una cifra (guía §3) obliga a tocar dos componentes y dos pruebas.
 - Propuesta: constantes sin React en `packages/design-system/src/evidence.ts`, por ejemplo `PERFORMANCE_CONTEXT_ROWS`, `phaseLockText` y `FICTITIOUS_DATA_LABEL`.
 
@@ -94,7 +98,7 @@ Misma lógica o el mismo conocimiento en varios lugares, que debería cambiar a 
   - quien lo produce: `packages/domain/src/quality.ts` (`compareStrings`, `compareTicks` y `compareIncidents`);
   - quien lo valida: `packages/contracts/src/dataset-consistency.ts` (`compareCodeUnits`, `compareTicks` y `compareIncidents`);
   - el mismo comparador, una tercera vez: `compareJcsKeys` en `packages/domain/src/serialization.ts`.
-- Aparte: `compareUtc` (`packages/contracts/src/scalars.ts`) usa `localeCompare`, que solo equivale porque los instantes tienen formato fijo.
+- Aparte: `compareUtc` (`packages/contracts/src/scalars.ts`) usa `localeCompare`, que solo equivale porque los instantes tienen formato fijo. El orden de las condiciones tiene el mismo problema (D-13).
 - Riesgo: si cambia el orden en un lado, la validación rechaza datasets bien construidos o acepta mal ordenados.
 - Propuesta: exportar los comparadores desde `@buoh/contracts` y usarlos en `domain`, que ya depende de él.
 
@@ -130,14 +134,20 @@ Misma lógica o el mismo conocimiento en varios lugares, que debería cambiar a 
   - en las hojas de estilo: el enlace para saltar al contenido, igual en las dos.
 - Propuesta: tomar `themeColor` del token y llevar el enlace de salto a `buoh.css`. Que sean dos apps es intencional (ADR-0008 §3).
 
-**D-12. Ayudantes de las pruebas del worker**
-- Dónde: `readVector` y `forbidAmbientEffects` en `test/publication-replay.test.ts` y `test/raw-first-log.test.ts`; `rejection` en dos pruebas de `integration/`.
-- **Sin confirmar:** que los cuerpos sean idénticos; solo se compararon los nombres.
-- Propuesta: moverlos a `test/support/`, que ya existe.
+**D-12. Ayudantes de las pruebas que prohíben efectos externos**
+- Dónde:
+  - `readVector` y `forbidAmbientEffects` en `apps/market-data-worker/test/publication-replay.test.ts` y `apps/market-data-worker/test/raw-first-log.test.ts`. Los cuerpos son idénticos (comparados texto a texto);
+  - las dos, otra vez, en `packages/domain/test/pipeline-vectors.test.ts`. `readVector` es idéntica; `forbidAmbientEffects` solo cambia los mensajes de error («… en el pipeline»);
+  - `rejection` en dos pruebas de `apps/market-data-worker/integration/`, sin comparar sus cuerpos.
+- Riesgo: si se añade un efecto prohibido, por ejemplo otra fuente de azar, hay que acordarse de las tres copias.
+- Propuesta: dentro del worker, moverlos a `test/support/`, que ya existe. Compartirlos con `domain` exigiría un módulo común (ver D-03).
 
 **D-13. Orden de las condiciones**
-- Dónde: `validateConditionCausality` y `reduceOpenConditions` en `packages/contracts/src/conditions.ts`. Las dos ordenan por `occurred_at_utc` y luego por `condition_event_id`.
-- Propuesta: un comparador local.
+- Dónde: las condiciones se ordenan por `occurred_at_utc` y luego por `condition_event_id` (contratos de dominio, «OperationalConditionEvent») en tres sitios:
+  - `compareConditions` en `packages/domain/src/quality.ts`, que compara por unidades UTF-16 (`compareStrings`);
+  - `validateConditionCausality` y `reduceOpenConditions` en `packages/contracts/src/conditions.ts`, que usan `localeCompare`.
+- Riesgo: los dos métodos dan el mismo orden solo porque los instantes y los identificadores tienen formato fijo. Si cambia ese formato, `domain` podría escribir las condiciones en un orden que `contracts` lee de otra forma.
+- Propuesta: un único comparador exportado desde `@buoh/contracts`, por unidades UTF-16, usado en los tres sitios.
 
 **D-14. Esquema del perfil de calidad**
 - Dónde: `qualityProfileSchema` en `packages/domain/src/profile.ts` y su copia en `packages/contracts/src/vector-integrity.ts`.
@@ -151,6 +161,7 @@ Misma lógica o el mismo conocimiento en varios lugares, que debería cambiar a 
 | `next.config.ts`, `tsconfig` y `not-found.tsx` de web y sitio | Son aplicaciones separadas (ADR-0008 §3), con identificadores de build distintos que comprueban sus pruebas. |
 | Valores esperados escritos en las pruebas (etiquetas de pestañas, filas del contexto) | Hacen de oráculo: importarlos del código haría que la prueba se comprobara a sí misma (AGENTS.md: pruebas derivadas de los criterios). |
 | Pruebas que leen documentos (roadmap, catálogo, concepto) | Cada una comprueba una regla distinta contra su fuente. Solo el ayudante de lectura se repite. |
+| Anchos de pantalla 1200, 960 y 640 px escritos a mano en `apps/web/app/globals.css` y `apps/site/app/site.css` (el sitio usa 960 y 640) | Coinciden con `breakpoints` de `packages/design-system/src/tokens.ts`, pero una variable CSS no puede usarse dentro de `@media`. Si cambian los tokens, hay que cambiar también las dos hojas a mano. |
 
 ### 2.3 Parecido, pero no repetido
 
@@ -158,7 +169,8 @@ Misma lógica o el mismo conocimiento en varios lugares, que debería cambiar a 
 - **Formatos de fecha:** `formatUtc` y `formatUtcTime` solo existen en `prototype-data`. `epochSecondsToUtc` del normalizador hace otra cosa: produce instantes para los contratos.
 - **Hash y JCS:** `canonicalJson` y `sha256Hex` existen una vez (`packages/contracts/src/identity.ts`).
 - **Configuración y errores del worker:** la configuración se lee en un solo sitio, y las clases de error solo comparten el patrón de nombre.
-- **Rust:** `navigation.rs` es el único código Rust.
+- **Filtros de los datos ficticios:** `status === 'abierta'` y `lifecycle === 'paused'` aparecen en `apps/web/app/page.tsx` y en `apps/mobile/src/model.ts`, y también en una prueba. Son una línea cada uno; no se cuentan como duplicación.
+- **Rust:** hay tres archivos, `main.rs`, `build.rs` y `navigation.rs`, y no repiten lógica. La lógica propia está en `navigation.rs`.
 
 ### 2.4 Exportaciones sin uso fuera de su paquete
 

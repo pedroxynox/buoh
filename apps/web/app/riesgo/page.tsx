@@ -3,8 +3,8 @@ import type { Metadata } from 'next';
 import { PageHeader } from '../../src/components/AppShell';
 
 /**
- * Riesgo (concepto de interfaz §3): políticas de riesgo y kill switch, con candado de Fase 4. Solo
- * describe qué cubrirá una política, sin valores ni controles.
+ * Riesgo (concepto de interfaz §3). Sin valores ni controles: los límites reales los fijará la
+ * política de riesgo de Fase 4, y el kill switch se activa en esa fase.
  */
 export const metadata: Metadata = { title: 'Riesgo' };
 

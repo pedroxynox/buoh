@@ -5,7 +5,7 @@ Cómo funcionan hoy los gráficos de buoh, desde los datos hasta la pantalla. Se
 ## 1. Resumen
 
 - Hay **dos gráficos**, los dos en el prototipo web (`apps/web`): el de precios de R_100 en `/mercados` y la curva de resultados en `/laboratorio`.
-- Los dos se alimentan **solo de datos ficticios** de `packages/prototype-data`, calculados con fórmulas fijas. No hay azar, reloj real ni red.
+- Los dos se alimentan **solo de datos ficticios** de `packages/prototype-data`, calculados con fórmulas fijas. El código no usa azar, reloj real ni red.
 - Son **SVG propios** dibujados en el servidor durante la exportación estática de Next.js. No llevan JavaScript de cliente ni interacción.
 - La app de escritorio muestra los mismos dos gráficos porque carga la exportación de la web. El móvil y el sitio no tienen gráficos.
 - Los datos reales de Fase 1 (`market-data-worker` y `packages/domain`) **no están conectados** a ningún gráfico: no existe API ni dependencia entre ellos.
@@ -136,7 +136,7 @@ No hay. Los gráficos no responden a pasar el ratón ni a tocar, y no tienen ven
 
 | Prueba | Qué comprueba |
 |---|---|
-| `packages/prototype-data/test/fixtures.test.ts` | El hueco coincide con las incidencias y la conexión perdida; la curva termina en −0,4 y cae 3,6, igual que `BACKTEST_CONTEXT`; las series salen iguales en cada llamada. |
+| `packages/prototype-data/test/fixtures.test.ts` | El hueco coincide con las incidencias y la conexión perdida; la curva termina en −0,4 y cae 3,6, igual que `BACKTEST_CONTEXT`; `priceSeries()` sale igual al llamarla dos veces. Nada vuelve a llamar a `equitySeries()` para compararla. |
 | `apps/web/test/export.test.ts` | Nada propio de los gráficos. Sí comprueba que `/laboratorio` muestra el contexto completo de cada cifra. |
 | `packages/design-system/test/tokens.test.ts` | Que los colores de los gráficos salen de la paleta. No mide su contraste. |
 
@@ -152,7 +152,7 @@ No hay pruebas de `scaleFor`, `segments` ni del SVG exportado.
 | La curva de resultados marca el cero y la peor caída | concepto §6 | Se cumple. La peor caída es un segmento vertical en el valle, sin marcar el máximo. |
 | Textos en HTML, con eje de tiempo | concepto §6 | Se cumple con etiquetas en índices fijos. No hay línea de eje ni rejilla vertical. |
 | SVG propios, sin bibliotecas de gráficos | concepto §6, ADR-0008 §4 | Se cumple: `apps/web` no depende de ninguna. |
-| Sin azar ni reloj real | ADR-0008 §2 | Se cumple, y lo comprueba una prueba. |
+| Sin azar ni reloj real | ADR-0008 §2 | Se cumple por construcción: las series son fórmulas fijas del índice. Ninguna prueba prohíbe `Math.random` o `Date.now` en `apps/web` ni en `prototype-data`; solo se comprueba que `priceSeries()` se repite. |
 | Contraste comprobado por pruebas | guía §10 | En parte: las etiquetas usan colores con contraste probado, pero la línea y la rejilla no se miden. |
 | Gráficos de ticks y velas, en web, móvil (resumen) y escritorio | catálogo de funciones, Fase 2 | Es el destino, no lo actual. Hoy solo hay una línea de ticks ficticios, y nada en el móvil. |
 

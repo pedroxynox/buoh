@@ -1,7 +1,7 @@
 /**
  * Taxonomías del sistema (contratos de dominio, «Taxonomías independientes»). Cada una es un eje
- * propio: `execution_mode` no es `service_health` ni `strategy_lifecycle`, y `paused` existe en
- * salud y en ciclo de vida con significados distintos (AGENTS.md, invariantes).
+ * propio: `execution_mode` no es `service_health` ni `strategy_lifecycle` (AGENTS.md, invariantes),
+ * y `paused` es un estado operativo o de estrategia, nunca un entorno (.kiro/steering/fundamentos-buoh.md).
  */
 import { z } from 'zod';
 

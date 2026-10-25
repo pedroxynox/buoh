@@ -15,8 +15,8 @@ export const schemaVersionSchema = z.string().regex(SCHEMA_VERSION_PATTERN);
 
 const utcTimestampMsStructuralSchema = z.iso.datetime({ offset: false, precision: 3 });
 
-// El formato ISO por sí solo acepta fechas imposibles (por ejemplo, 30 de febrero). Volver a
-// serializar con toISOString exige además que el instante exista y se escriba igual: «Z» y 3 decimales.
+// Defensa adicional: el instante debe volver a escribirse idéntico con toISOString («Z» y 3
+// decimales). El formato de Zod ya rechaza fechas imposibles; esto protege si su validador cambia.
 export const utcTimestampMsSchema = utcTimestampMsStructuralSchema.refine((value) => {
   const parsed = new Date(value);
   return !Number.isNaN(parsed.valueOf()) && parsed.toISOString() === value;
@@ -46,8 +46,9 @@ export function isSortedUnique(values: readonly string[]): boolean {
 }
 
 /**
- * Compara instantes `UtcTimestampMs`. Usa `localeCompare`, que solo equivale al orden por unidades
- * UTF-16 porque estos textos tienen formato fijo; el resto del orden canónico compara con `<`.
+ * Compara instantes `UtcTimestampMs` con `localeCompare`, igual que el orden de condiciones en
+ * conditions.ts. Equivale al orden por unidades UTF-16 (el `<` de isSortedUnique y del orden de
+ * ticks e incidencias) solo porque estos textos tienen formato fijo (estado-del-codigo D-06).
  */
 export function compareUtc(left: string, right: string): number {
   return left.localeCompare(right);

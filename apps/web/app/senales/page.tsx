@@ -5,8 +5,8 @@ import { SectionTitle, SignalCard } from '../../src/components/Pieces';
 import { SIGNALS } from '@buoh/prototype-data';
 
 /**
- * Señales (concepto de interfaz §3): registro de señales con estrategia, versión, modo, vencimiento,
- * calidad y enlace a su evidencia. Lo de Fase 3 en adelante aparece con candado.
+ * Señales (concepto de interfaz §3). Cada tarjeta enlaza a su evidencia en /laboratorio por un
+ * ancla (`evidenceHref`); si cambia el id de la sección, el enlace se rompe.
  */
 export const metadata: Metadata = { title: 'Señales' };
 

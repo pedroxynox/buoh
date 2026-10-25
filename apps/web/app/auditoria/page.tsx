@@ -4,8 +4,8 @@ import { PageHeader } from '../../src/components/AppShell';
 import { AUDIT, formatUtc } from '@buoh/prototype-data';
 
 /**
- * Auditoría (concepto de interfaz §3): eventos de datos y estrategias; la parte de órdenes, con
- * candado de Fase 4.
+ * Auditoría (concepto de interfaz §3). Las órdenes solo existirán desde Fase 4, por eso esa parte
+ * va con candado y los eventos de hoy son de datos y estrategias.
  */
 export const metadata: Metadata = { title: 'Auditoría' };
 

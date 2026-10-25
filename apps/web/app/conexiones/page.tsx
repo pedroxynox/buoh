@@ -4,8 +4,8 @@ import { PageHeader } from '../../src/components/AppShell';
 import { formatUtc, SOURCES } from '@buoh/prototype-data';
 
 /**
- * Conexiones (concepto de interfaz §3): estado de cada fuente (Deriv y los dos servidores MT5 de
- * ADR-0007) y, con candado de Fase 4, las autorizaciones de cuenta.
+ * Conexiones (concepto de interfaz §3). Deriv MT5 y Vantage aparecen como fuentes separadas, con
+ * salud propia, porque cada servidor MT5 es una fuente (ADR-0007).
  */
 export const metadata: Metadata = { title: 'Conexiones' };
 
