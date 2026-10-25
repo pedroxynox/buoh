@@ -28,10 +28,11 @@ Todas las páginas comparten cabecera con menú y un pie con el aviso de riesgo 
 - El estado de cada fase coincide con el roadmap y con `PROJECT_STATUS.md`. La línea visual V1 queda «en curso» hasta que el propietario revise las capturas (plan V1, §7).
 - Mientras no se publique, todas las páginas llevan `noindex, nofollow`.
 
-Las pruebas de `apps/site/test` comprueban cada regla en las páginas exportadas y comparan las fases con el roadmap.
+Las pruebas de `apps/site/test` comprueban estas reglas en las páginas exportadas y en su JavaScript, y comparan las fases, modos, plataformas e integraciones con el roadmap, el catálogo de funciones y ADR-0007. El texto sobre lo que existe hoy se escribió para la entrega `F1.4b`; una prueba falla cuando `PROJECT_STATUS.md` cambia de entrega, para obligar a revisarlo. La comprobación de «sin métricas» es aproximada: busca porcentajes y cifras con signo en el contenido.
 
 ## 4. Pendiente antes de publicar
 
 - Dominio y alojamiento (ADR-0008).
 - Revisión legal del aviso de riesgo y de la nota de marcas.
+- Comprobar que el alojamiento elegido no pone cookies y saber cuánto guarda sus registros de acceso; si no se cumple, cambiar la frase de privacidad del pie en el mismo PR.
 - Quitar `noindex` en el mismo PR que publique el sitio.

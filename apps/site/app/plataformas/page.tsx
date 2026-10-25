@@ -57,7 +57,7 @@ export default function PlataformasPage() {
             autorización delegada (OAuth), revocable cuando quieras. MetaTrader 5 no ofrece ese tipo
             de autorización; por eso, para MT5 solo se usarán cuentas propias del dueño del proyecto
             y su contraseña la guardará únicamente la terminal MT5. Los servicios de buoh nunca la
-            reciben.
+            recibirán.
           </p>
         </div>
       </Section>

@@ -29,7 +29,7 @@ export default function AvisoDeRiesgoPage() {
             histórica (backtest), de un bot en modo shadow o de una cuenta de práctica (demo). Una
             estrategia que funcionó puede dejar de funcionar.
           </p>
-          <p>Opera solo con dinero que puedas permitirte perder.</p>
+          <p>Si operas, hazlo solo con dinero que puedas permitirte perder.</p>
         </div>
       </Section>
 
@@ -56,8 +56,8 @@ export default function AvisoDeRiesgoPage() {
         <div className="s-prose">
           <p>{TRADEMARK_NOTE}</p>
           <p>
-            Los datos de mercado pertenecen a sus fuentes. buoh no los redistribuye; los usa solo
-            para validación interna.
+            Los datos de mercado pertenecen a sus fuentes. buoh no los redistribuye: en esta etapa
+            los usa solo para validación interna.
           </p>
         </div>
       </Section>

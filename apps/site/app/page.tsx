@@ -15,10 +15,10 @@ export default function InicioPage() {
             <p className="b-eyebrow">Investigación · Señales · Ejecución controlada</p>
             <h1 className="s-hero__title">{TAGLINE}</h1>
             <p className="s-hero__summary">
-              buoh es un sistema para estudiar el trading con datos fiables: investiga estrategias,
-              emite señales que explican de dónde vienen y, solo si una puerta de calidad lo
-              aprueba, ejecuta con límites de riesgo. Mide los resultados, incluidas las pérdidas.
-              No promete ganancias.
+              buoh es un sistema en desarrollo para estudiar el trading con datos fiables.
+              Investigará estrategias, emitirá señales que explican de dónde vienen y, solo si una
+              puerta de calidad lo aprueba, ejecutará con límites de riesgo. Medirá los resultados,
+              incluidas las pérdidas. No promete ganancias.
             </p>
             <div className="s-hero__actions">
               <Link className="b-button b-button--primary" href="/como-funciona/">
@@ -93,7 +93,7 @@ export default function InicioPage() {
         </div>
         <p className="s-more">
           <Link className="s-link" href="/hoja-de-ruta/">
-            Toda la hoja de ruta <Icon name="arrowUpRight" />
+            Toda la hoja de ruta
           </Link>
         </p>
       </Section>

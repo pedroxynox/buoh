@@ -1,5 +1,9 @@
 /* Estilos del sitio oficial (prefijo s-). Colores y medidas salen solo de las variables del sistema de diseño. */
 
+html {
+  scroll-padding-top: 5rem;
+}
+
 .s-container {
   width: 100%;
   max-width: 72rem;
@@ -422,13 +426,13 @@
   background: var(--b-bg-canvas);
 }
 .s-roadmap__item--hecha .s-roadmap__marker::after {
-  border-color: var(--b-tone-aurora-fg);
-  background: var(--b-tone-aurora-fg);
+  border-color: var(--b-text-muted);
+  background: var(--b-text-muted);
 }
-/* El ámbar es solo de marca (guía §5): el estado «en curso» usa el tono cielo, como su insignia. */
+/* Las fases no son estados del servicio: sin tonos de salud y sin ámbar (guía §5 y §7). */
 .s-roadmap__item--en-curso .s-roadmap__marker::after {
-  border-color: var(--b-tone-cielo-fg);
-  background: var(--b-tone-cielo-fg);
+  border: 3px solid var(--b-text);
+  background: var(--b-bg-canvas);
 }
 .s-roadmap__body {
   display: grid;
@@ -529,8 +533,21 @@
 }
 
 @media (max-width: 640px) {
+  html {
+    scroll-padding-top: 0;
+  }
   .s-container {
     padding: 0 var(--b-space-4);
+  }
+  /* En el móvil la cabecera no se fija: ocuparía un cuarto de la pantalla y taparía el contenido. */
+  .s-header {
+    position: static;
+  }
+  .s-nav__link,
+  .s-footer__nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
   }
   .s-header__inner {
     padding-top: var(--b-space-2);

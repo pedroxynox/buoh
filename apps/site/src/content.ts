@@ -21,12 +21,18 @@ export const PAGES: readonly SitePage[] = [
 
 export const TAGLINE = 'Observa con calma. Decide con evidencia.';
 
+/**
+ * Entrega siguiente de PROJECT_STATUS.md para la que se escribió el texto sobre lo que existe hoy.
+ * Una prueba falla cuando cambia, para obligar a revisar el sitio.
+ */
+export const WRITTEN_FOR_NEXT_DELIVERY = 'F1.4b';
+
 /** Aviso corto que va en el pie de todas las páginas. */
 export const RISK_SHORT =
   'Operar opciones y CFD implica un riesgo alto de perder dinero. Ningún resultado pasado, simulado o de práctica asegura resultados futuros. buoh no da asesoramiento financiero.';
 
 export const TRADEMARK_NOTE =
-  'Deriv, MetaTrader 5, MetaQuotes y Vantage son marcas de sus respectivos titulares. buoh no está afiliado a ellos ni cuenta con su respaldo; se nombran solo como integraciones previstas.';
+  'Deriv y Vantage son marcas de sus titulares, y MetaTrader 5 es marca de MetaQuotes. buoh no está afiliado a ninguno de ellos ni cuenta con su respaldo; los nombra solo para describir integraciones previstas.';
 
 export interface Plane {
   readonly name: string;
@@ -47,14 +53,14 @@ export const PLANES: readonly Plane[] = [
     name: 'Señales',
     icon: 'radar',
     summary:
-      'Cada señal dice qué estrategia y versión la emitió, cuándo vence, en qué modo está y con qué calidad de datos.',
+      'Cada señal dirá qué estrategia y versión la emitió, cuándo vence, en qué modo está y con qué calidad de datos.',
     never: 'Una señal no es una orden.',
   },
   {
     name: 'Ejecución',
     icon: 'send',
     summary:
-      'Un servicio aislado en el servidor aplica la política de riesgo, registra cada intento y lo compara con el bróker.',
+      'Un servicio aislado en el servidor aplicará la política de riesgo, registrará cada intento y lo comparará con el bróker.',
     never: 'Ninguna pantalla envía órdenes por su cuenta.',
   },
 ];
@@ -87,7 +93,7 @@ export const CYCLE: readonly Step[] = [
   },
   {
     title: 'Real, solo si se aprueba',
-    text: 'Una cuenta, una estrategia y unos límites concretos, después de una evaluación técnica, operativa y legal.',
+    text: 'Una cuenta, una estrategia y unos límites concretos, después de una evaluación estadística, técnica, operativa y legal.',
   },
 ];
 
@@ -159,7 +165,7 @@ export const NEVER: readonly string[] = [
   'Prometer ganancias o presentar una hipótesis como certeza.',
   'Recibir depósitos, hacer retiros o custodiar dinero de nadie.',
   'Pedir la contraseña de tu cuenta Deriv o contraseñas de terceros.',
-  'Enviar órdenes desde una página web, un móvil o una capa flotante.',
+  'Enviar órdenes desde una página web, un móvil, una aplicación de escritorio o una capa flotante.',
   'Leer tu pantalla o manejar otras aplicaciones por ti.',
   'Operar en mercados, países o cuentas que no se hayan aprobado explícitamente.',
 ];
@@ -181,7 +187,7 @@ export const PLATFORMS: readonly PlatformInfo[] = [
   {
     name: 'Android e iOS',
     icon: 'radar',
-    role: 'Seguir el bot: estado, señales, alertas, evidencia y el interruptor de emergencia.',
+    role: 'Seguir el bot: estado, señales, alertas, evidencia y autorizaciones seguras.',
     phase: 'Fase 3',
   },
   {
@@ -312,10 +318,10 @@ export const FAQ: readonly Question[] = [
   },
   {
     q: '¿Me pedirán contraseñas?',
-    a: 'Nunca la de tu cuenta Deriv ni contraseñas de terceros. La futura conexión con Deriv será por autorización delegada (OAuth). En MetaTrader 5, la contraseña la guarda solo la terminal y los servicios de buoh nunca la reciben.',
+    a: 'Nunca la de tu cuenta Deriv ni contraseñas de terceros. La futura conexión con Deriv será por autorización delegada (OAuth). En MetaTrader 5 solo se usarán cuentas propias del dueño del proyecto; su contraseña la guardará solo la terminal y los servicios de buoh nunca la recibirán.',
   },
   {
     q: '¿buoh opera por mí?',
-    a: 'Hoy no. En el futuro solo lo hará en demo primero y, si se aprueba, en real, siempre a través de un servicio de servidor con límites de riesgo.',
+    a: 'Hoy no. Primero se usará solo con cuentas propias: en demo y, si se aprueba, en real, siempre a través de un servicio de servidor con límites de riesgo. Ofrecer ejecución a otras personas depende de una evaluación legal y de cumplimiento que todavía no se ha hecho.',
   },
 ];

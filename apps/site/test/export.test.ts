@@ -83,6 +83,7 @@ describe('sitio exportado (V1-SITE-001)', () => {
     }
   });
 
+  // Aproximación: una métrica de desempeño casi siempre lleva un porcentaje o una cifra con signo.
   it.each(named)('%s no muestra métricas de desempeño', (page) => {
     const text = textOf(mainOf(read(page)));
     expect(text).not.toMatch(/%/);
@@ -118,6 +119,23 @@ describe('sitio exportado (V1-SITE-001)', () => {
       const css = readFileSync(sheet, 'utf8');
       expect(css, sheet).not.toMatch(/url\(\s*['"]?https?:/i);
       expect(css, sheet).not.toMatch(/@import\s+(url\()?\s*['"]?https?:/i);
+    }
+  });
+
+  it('el JavaScript del sitio no usa cookies, almacenamiento ni envíos a terceros', () => {
+    const scripts = files(join(OUT, '_next'), '.js');
+    expect(scripts.length).toBeGreaterThan(0);
+    for (const script of scripts) {
+      const js = readFileSync(script, 'utf8');
+      for (const api of [
+        'document.cookie',
+        'localStorage',
+        'sessionStorage',
+        'indexedDB',
+        'sendBeacon',
+      ]) {
+        expect(js.includes(api), `${script} usa ${api}`).toBe(false);
+      }
     }
   });
 

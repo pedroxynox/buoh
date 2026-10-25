@@ -11,10 +11,10 @@ export default function ComoFuncionaPage() {
       <PageIntro
         eyebrow="Cómo funciona"
         title="Del dato a la decisión, paso a paso"
-        summary="Cada paso deja una huella que se puede revisar. Ninguno se salta: una estrategia solo avanza cuando el anterior lo aprueba."
+        summary="Cada paso deja una huella que se puede revisar y ninguno se salta. Esta página describe el diseño: hoy existe la base de datos; lo demás llega por fases."
       />
 
-      <Section title="El ciclo" lead="Seis pasos, con una puerta de calidad entre cada uno.">
+      <Section title="El ciclo" lead="Seis pasos, con una puerta de calidad entre uno y otro.">
         <ol className="s-steps">
           {CYCLE.map((step) => (
             <li key={step.title} className="s-steps__item">
@@ -46,8 +46,8 @@ export default function ComoFuncionaPage() {
             </span>
             <h3 className="s-tile__title">Huecos a la vista</h3>
             <p className="b-secondary">
-              Una desconexión deja un hueco. buoh intenta recuperarlo con la historia de la fuente;
-              si no puede, lo marca y el servicio pasa a degradado.
+              Una desconexión deja un hueco. buoh intentará recuperarlo con la historia de la
+              fuente; si no puede, lo marcará y el servicio pasará a degradado.
             </p>
           </article>
           <article className="s-tile">
@@ -96,7 +96,7 @@ export default function ComoFuncionaPage() {
               </li>
             </ul>
             <p className="b-muted s-small">
-              Con datos degradados, las estrategias afectadas se pausan solas.
+              Con datos degradados, las estrategias afectadas se pausarán solas.
             </p>
           </article>
         </div>

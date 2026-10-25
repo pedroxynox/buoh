@@ -8,7 +8,12 @@
     "test": {
       "dependsOn": ["build"],
       "outputs": [],
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/test-vectors/**"]
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/test-vectors/**",
+        "$TURBO_ROOT$/docs/**",
+        "$TURBO_ROOT$/PROJECT_STATUS.md"
+      ]
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],

@@ -133,6 +133,7 @@ Escala (rem sobre 16 px): 0,75 · 0,8125 · 0,875 · 1 · 1,125 · 1,25 · 1,5 �
 - Propios, en SVG, sobre una retícula de 24 px.
 - Trazo de 1,75 px, extremos y uniones redondeados, sin rellenos.
 - Cada estado tiene un icono fijo. Un mismo icono solo se repite entre ejes cuando el significado es el mismo (por ejemplo, `degraded` y la severidad `warning`); modo y salud nunca comparten icono.
+- Las fases del producto (hecha, en curso, prevista) no son estados del servicio: usan el tono neutro niebla y sus propios iconos (bandera, progreso y reloj).
 
 ## 8. Gráficos
 
