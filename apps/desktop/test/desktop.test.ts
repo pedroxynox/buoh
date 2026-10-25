@@ -272,15 +272,11 @@ describe('prototipo de escritorio (V1-DESKTOP-001)', () => {
       'pnpm-workspace.yaml',
       'turbo.json',
       'tsconfig.base.json',
+      '.npmrc',
       '.node-version',
       '.github/workflows/desktop.yml',
     ];
-    for (const path of expected) {
-      expect(triggers, path).toContain(path);
-    }
-    expect(triggers.filter((path) => path?.startsWith('packages/')).sort()).toEqual(
-      expected.filter((path) => path.startsWith('packages/')).sort(),
-    );
+    expect([...triggers].sort()).toEqual([...expected].sort());
   });
 
   it('pnpm corre los scripts con su emulador de shell, que Windows necesita', () => {

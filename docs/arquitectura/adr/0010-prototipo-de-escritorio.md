@@ -51,7 +51,7 @@ No es la app de Windows de la Fase 7, y la decisión 6 de ADR-0001 sigue valiend
 
 El propietario instaló en su PC el instalador de la primera compilación verde de CI (2026-10-25) y lo aprobó.
 
-El flujo de Windows no corre en cada PR, solo cuando cambian `apps/desktop`, `apps/web`, los paquetes de los que dependen o la configuración de pnpm, Node o turbo: los minutos de Windows cuestan el doble en un repositorio privado.
+El flujo de Windows no corre en cada PR, solo cuando cambian `apps/desktop`, `apps/web`, los paquetes de los que dependen o la configuración de pnpm, Node, TypeScript o turbo: los minutos de Windows cuestan el doble en un repositorio privado.
 
 ### 5. Instalador sin firmar
 

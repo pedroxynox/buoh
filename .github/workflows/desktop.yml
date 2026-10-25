@@ -2,7 +2,8 @@ name: desktop
 
 # Prototipo de escritorio (ADR-0010): compila el instalador de Windows y corre las pruebas de Rust.
 # Solo corre cuando cambia algo que entra en la app (apps/desktop, apps/web y sus paquetes) o la
-# configuración de pnpm, Node o turbo, para no gastar minutos de Windows. También se lanza a mano.
+# configuración de pnpm, Node, TypeScript o turbo, para no gastar minutos de Windows. También se
+# lanza a mano.
 on:
   pull_request:
     branches: [main]
@@ -17,6 +18,7 @@ on:
       - 'pnpm-workspace.yaml'
       - 'turbo.json'
       - 'tsconfig.base.json'
+      - '.npmrc'
       - '.node-version'
       - '.github/workflows/desktop.yml'
   push:
@@ -32,6 +34,7 @@ on:
       - 'pnpm-workspace.yaml'
       - 'turbo.json'
       - 'tsconfig.base.json'
+      - '.npmrc'
       - '.node-version'
       - '.github/workflows/desktop.yml'
   workflow_dispatch:
