@@ -60,10 +60,19 @@
     },
     {
       "id": "web-clients",
-      "description": "El prototipo y el sitio deben seguir el concepto de interfaz y ADR-0008.",
-      "includes": ["apps/web/**", "apps/site/**"],
+      "description": "El prototipo debe seguir el concepto de interfaz y ADR-0008.",
+      "includes": ["apps/web/**"],
       "requires_any": [
         "docs/diseno/concepto-de-interfaz.md",
+        "docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md"
+      ]
+    },
+    {
+      "id": "site",
+      "description": "El sitio oficial debe seguir sus reglas de contenido y ADR-0008.",
+      "includes": ["apps/site/**"],
+      "requires_any": [
+        "docs/diseno/sitio-oficial.md",
         "docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md"
       ]
     },
