@@ -126,7 +126,7 @@ El orden entre Fase 1B y Fase 2 se decide al cerrar Fase 1.
 
 **Objetivo:** decidir, con evidencia, si una estrategia y el servicio están aptos para un piloto real limitado.
 
-**Precondiciones:** estabilidad *shadow* y demo, protocolo estadístico superado, observabilidad operativa, revisión de amenazas, modelo de soporte, jurisdicción y modelo comercial definidos, y análisis de cumplimiento aplicable concluido.
+**Precondiciones:** estabilidad *shadow* y demo, protocolo estadístico superado, observabilidad operativa, revisión de amenazas (que define, entre otras cosas, qué cuenta como reautenticación en un teléfono), modelo de soporte, jurisdicción y modelo comercial definidos, y análisis de cumplimiento aplicable concluido.
 
 **Criterio de salida:** aprobación explícita o rechazo documentado para un universo acotado. El rechazo es un resultado correcto si la evidencia, regulación o fiabilidad no bastan; no elimina la meta comercial de dinero real.
 
