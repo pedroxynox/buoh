@@ -1,13 +1,13 @@
 # Especificación de pendientes
 
-Inventario de lo que falta, está incompleto o no está documentado, comparando el código del commit `869ba4e` con los planes, `PROJECT_STATUS.md`, las ADR y las guías. Revisado el 2026-10-25.
+Inventario de lo que falta, está incompleto o no está documentado, comparando el código del commit `869ba4e` con los planes, `PROJECT_STATUS.md`, las ADR y las guías. Revisado el 2026-10-25. Ese mismo día el propietario resolvió P-V1-01, P-V1-03 y P-GOV-01; cada entrada registra su decisión.
 
 No es un plan de fase: no tiene requisitos propios ni `status`, y `PROJECT_STATUS.md` no lo enlaza como `plan` ni como `parallel_plans`.
 
 **Este documento no autoriza trabajo ni añade requisitos.** Cada comportamiento esperado cita la fuente que ya lo pide. Lo que autoriza trabajo sigue siendo:
 
 - [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md): siguiente tarea autorizada;
-- el plan activo de la fase: [Fase 1](fase-1-fundacion-de-datos.md) y [línea visual V1](linea-visual-v1.md).
+- el plan activo de la fase, [Fase 1](fase-1-fundacion-de-datos.md). La [línea visual V1](linea-visual-v1.md) terminó el 2026-10-25 (P-V1-01).
 
 Si este documento y una de esas fuentes difieren, manda la fuente; hay que corregir este documento.
 
@@ -23,13 +23,16 @@ Cada pendiente tiene un identificador `P-…` y estas partes:
 - **Abierto:** preguntas, dependencias y decisiones humanas.
 - **Propuesta:** solo cuando hay una sugerencia, separada de los hechos.
 
+Una entrada resuelta cambia el estado, lo esperado, los componentes, la aceptación y lo abierto por **Antes**, **Decisión del propietario** y **Resolución**, y a veces añade un **Límite** o una **Consecuencia que se mantiene**.
+
 Tipos de pendiente:
 
 - **sin empezar:** planificado y sin código;
 - **parcial:** hay piezas, pero no el comportamiento completo;
 - **sin documentar:** existe, pero ningún documento lo describe;
 - **contradicho:** el documento dice algo que el código no hace;
-- **menor registrado:** anotado en un PR, una ADR o `PROJECT_STATUS.md`.
+- **menor registrado:** anotado en un PR, una ADR o `PROJECT_STATUS.md`;
+- **resuelto:** decidido o terminado. La entrada se conserva con su decisión, y su identificador no se reutiliza.
 
 ## 1. Fase 1 — Fundación de datos
 
@@ -160,20 +163,16 @@ Comprobado en el repositorio:
 
 ## 2. Línea visual V1
 
-### P-V1-01. Cierre de la línea visual — parcial, con decisión humana
+La línea terminó el 2026-10-25 (P-V1-01). Los demás pendientes de esta sección no forman parte de su criterio de cierre (plan V1 §7).
+
+### P-V1-01. Cierre de la línea visual — resuelto
 
 - **Objetivo:** marcar la línea visual V1 como `done` con la evidencia que pide su plan.
 - **Fuente:** plan V1 §7 y roadmap («Criterio de salida»).
-- **Estado (verificado):**
-  - los requisitos `V1-*` tienen implementación fusionada;
-  - `PROJECT_STATUS.md` todavía dice que, para cerrarla, falta que el propietario revise las capturas;
-  - ADR-0011 dice: «El propietario aprobó los prototipos y envió un logo propio». Eso fue antes de la identidad V1.6;
-  - ADR-0010 registra que el propietario instaló y aprobó el instalador de escritorio;
-  - no hay registro en el repositorio de su revisión de las capturas con la identidad V1.6.
-- **Esperado:** la línea queda `done` cuando sus requisitos tienen evidencia fusionada y el propietario revisó las capturas de los prototipos y del sitio.
-- **Componentes:** solo `PROJECT_STATUS.md`, y el roadmap si cambia el estado de la línea.
-- **Aceptación (plan V1 §7):** la misma frase de «Esperado».
-- **Abierto (decisión humana):** que el propietario confirme si sus aprobaciones ya registradas cuentan como la revisión del §7, o si quiere revisar antes las capturas con la identidad V1.6. Si cuentan, el cierre se registra en `PROJECT_STATUS.md`, que pide actualizarse cuando cambia el estado de una fase.
+- **Antes:** los requisitos `V1-*` tenían implementación fusionada, pero no había registro de que el propietario revisara las capturas con la identidad V1.6. ADR-0011 registra que aprobó los prototipos antes de enviar su logo, y ADR-0010 §4, que instaló y aprobó el prototipo de escritorio.
+- **Decisión del propietario (2026-10-25):** esas aprobaciones ya registradas cuentan como la revisión de capturas del plan V1 §7.
+- **Resolución:** la línea queda `done` en `PROJECT_STATUS.md` (sale de `parallel_plans`), en el plan V1 (§2 y §7), en el roadmap y en el sitio oficial (`apps/site/src/content.ts`, comprobado por `apps/site/test/content.test.ts`).
+- **Límite:** cerrar V1 no autoriza la app real de Windows, que sigue la decisión 6 de ADR-0001.
 
 ### P-V1-02. Pendientes de la identidad (`V1-BRAND-002`, PR #19) — menor registrado
 
@@ -188,15 +187,13 @@ Comprobado en el repositorio:
 - **Aceptación:** no indicados. Los criterios de `V1-BRAND-002` ya se cumplen.
 - **Abierto:** ninguna fuente fija cuándo atenderlos. Pueden ir en un PR propio del sistema de diseño.
 
-### P-V1-03. Contexto dentro de la curva de resultados — contradicho
+### P-V1-03. Contexto de la curva de resultados — resuelto
 
 - **Objetivo:** que la curva de resultados y la guía de marca digan lo mismo.
-- **Fuente:** guía de marca §8: «Toda curva de resultados indica modo, período, muestra y costes en el propio gráfico».
-- **Estado (verificado):** `EquityChart` no recibe contexto. El período solo se ve en las fechas del eje; la muestra y los costes están en la tarjeta «Evidencia» de al lado ([flujo de gráficos](../diseno/flujo-de-graficas.md) §9).
-- **Esperado:** según la guía §8, el modo, el período, la muestra y los costes se ven dentro del gráfico.
-- **Componentes:** `apps/web/src/components/Charts.tsx` y `apps/web/app/laboratorio/page.tsx`, o bien la guía de marca §8.
-- **Aceptación:** no indicados más allá de la frase de la guía.
-- **Abierto (decisión humana):** cambiar el gráfico para cumplir la guía, o aceptar en la guía que el contexto vaya al lado. Lo primero cambia código; lo segundo, la guía.
+- **Fuente:** guía de marca §8.
+- **Antes:** la guía pedía modo, período, muestra y costes «en el propio gráfico». `EquityChart` no recibe contexto: el período solo se ve en las fechas del eje, y el contexto completo está en la tarjeta «Evidencia» de al lado.
+- **Decisión del propietario (2026-10-25):** el contexto se queda fuera del gráfico, en la tarjeta de al lado.
+- **Resolución:** la guía §8 acepta el contexto en la tarjeta de al lado, y el [flujo de gráficos](../diseno/flujo-de-graficas.md) §9 da la regla por cumplida. El código no cambia.
 
 ### P-V1-04. Gráficos: accesibilidad, pruebas y unidades — sin documentar hasta ahora
 
@@ -258,19 +255,17 @@ Comprobado en el repositorio:
 
 ## 3. Proceso del repositorio
 
-### P-GOV-01. Justificar una excepción de la guardia documental en CI — contradicho
+### P-GOV-01. Justificar una excepción de la guardia documental en CI — resuelto
 
 - **Objetivo:** que el plan, CONTRIBUTING.md y la guardia digan lo mismo sobre cómo se justifica una excepción.
-- **Fuente:** plan de Fase 1 (`F1-GOV-001`): el chequeo «exige actualización o justificación explícita en el PR».
-- **Estado (verificado):**
-  - la justificación solo se acepta en la línea de comandos (`--acknowledge` en `scripts/check-doc-impact.mjs`); `verify:pr` y CI no la pasan;
-  - el mensaje de error de la guardia dice «justifica la excepción en un PR», pero escribir la razón en el PR no hace pasar CI;
-  - CONTRIBUTING.md ya describe el comportamiento real (corregido junto con este documento);
+- **Fuente:** plan de Fase 1 (`F1-GOV-001`).
+- **Antes:**
+  - `F1-GOV-001` decía que el chequeo «exige actualización o justificación explícita en el PR», y el mensaje de error de la guardia pedía justificar «la excepción en un PR»;
+  - la justificación solo se acepta en la línea de comandos (`--acknowledge` en `scripts/check-doc-impact.mjs`), y `verify:pr` y CI no la pasan, así que escribir la razón en el PR no hace pasar CI;
   - consecuencia en este análisis: el worker quedó sin comentarios nuevos, porque su regla pedía cambiar el runbook o ADR-0004 sin motivo.
-- **Esperado:** según `F1-GOV-001`, una justificación explícita en el PR basta.
-- **Componentes:** `scripts/check-doc-impact.mjs`, `.github/workflows/verify.yml`, CONTRIBUTING.md y, si cambia el requisito, el plan de Fase 1.
-- **Aceptación:** no indicados.
-- **Abierto (decisión humana):** permitir que CI lea una justificación del PR, o cambiar el requisito y el mensaje para que no sugieran ese camino. Lo primero cambia la guardia y su revisión; lo segundo, solo textos.
+- **Decisión del propietario (2026-10-25):** la guardia se queda como está, y CI sigue sin aceptar justificaciones.
+- **Resolución:** el texto de `F1-GOV-001` y el mensaje de error describen lo que hace la guardia, y CONTRIBUTING.md registra la decisión. El comportamiento no cambia: las mismas reglas, comprobaciones y códigos de salida.
+- **Consecuencia que se mantiene:** tocar código de un área, aunque solo sea con comentarios, exige cambiar una de sus fuentes en el mismo PR.
 
 ## 4. Fases posteriores
 
@@ -306,12 +301,11 @@ Solo se listan; sus planes no existen todavía y el roadmap describe el destino.
 
 ## 6. Decisiones humanas abiertas
 
+P-V1-01, P-V1-03 y P-GOV-01 ya no figuran aquí: el propietario las resolvió el 2026-10-25, y cada entrada registra su decisión.
+
 | Decisión | Pendiente | Dónde se registra hoy |
 |---|---|---|
-| ¿Las aprobaciones del propietario cierran la revisión de capturas de la línea V1? | P-V1-01 | `PROJECT_STATUS.md` |
-| ¿La curva de resultados lleva el contexto dentro, o se cambia la guía? | P-V1-03 | `PROJECT_STATUS.md` |
 | ¿«Pedir» el modo real desde el móvil, nunca operar? | P-V1-05 | `PROJECT_STATUS.md` y PR #16 |
-| ¿Se permite justificar en CI una excepción de la guardia, o se cambia el requisito? | P-GOV-01 | `PROJECT_STATUS.md` |
 | Probar en un teléfono real y cómo distribuir la app | P-V1-05 | `PROJECT_STATUS.md` |
 | Firmar el instalador de escritorio | P-V1-06 | `PROJECT_STATUS.md` |
 | Dominio, alojamiento y revisión legal del sitio | P-V1-07 | `PROJECT_STATUS.md` |

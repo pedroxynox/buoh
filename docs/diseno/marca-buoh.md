@@ -176,9 +176,9 @@ Escala (rem sobre 16 px): 0,75 · 0,8125 · 0,875 · 1 · 1,125 · 1,25 · 1,5 �
 
 - Líneas finas sobre fondo noche; sin degradados intensos ni efectos 3D.
 - Los huecos y las incidencias de datos se marcan en el gráfico, no se suavizan.
-- Toda curva de resultados indica modo, período, muestra y costes en el propio gráfico.
+- Toda curva de resultados lleva su modo, período, muestra y costes en la tarjeta de al lado, que en pantallas estrechas pasa debajo. El gráfico no tiene que repetirlos.
 
-Cómo están hechos hoy los gráficos, y qué parte de estas reglas cumplen, está en [flujo de gráficos](flujo-de-graficas.md). La curva del prototipo muestra su contexto en la tarjeta de al lado, no dentro del gráfico; está pendiente de decisión (P-V1-03 de la [especificación de pendientes](../plan/especificacion-de-pendientes.md)).
+Cómo están hechos hoy los gráficos, y qué parte de estas reglas cumplen, está en [flujo de gráficos](flujo-de-graficas.md). Antes, esta guía pedía ese contexto dentro del gráfico; el propietario decidió el 2026-10-25 que vaya en la tarjeta de al lado (P-V1-03 de la [especificación de pendientes](../plan/especificacion-de-pendientes.md)).
 
 ## 9. Movimiento
 

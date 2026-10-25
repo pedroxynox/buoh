@@ -220,7 +220,7 @@ async function main() {
 
   if (result.violations.length > 0) {
     console.error(
-      'La documentación requerida no cambió. Actualiza la fuente canónica o justifica la excepción en un PR y ajusta el cambio antes de fusionar.',
+      'La documentación requerida no cambió: actualiza una de las fuentes indicadas. Una justificación (--acknowledge) solo se acepta en la línea de comandos y se copia al PR; CI no la admite.',
     );
     process.exitCode = 1;
   }

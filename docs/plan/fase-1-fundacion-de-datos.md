@@ -4,7 +4,7 @@ schema_version: "1.0.0"
 status: "ready"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-10-25T21:00:00.000Z"
+last_reviewed_utc: "2026-10-25T22:00:00.000Z"
 ---
 
 # Plan ejecutable: Fase 1 — Fundación de datos
@@ -135,7 +135,7 @@ El adaptador usa el endpoint público documentado, sin OAuth, PAT ni OTP, y vali
 
 ### `F1-GOV-001` — Guardia documental inicial
 
-El scaffolding añade un mapa de impacto y un chequeo local que indique qué fuentes documentales revisar según las rutas cambiadas. El chequeo no modifica automáticamente ADR, seguridad o riesgo; exige actualización o justificación explícita en el PR.
+El scaffolding añade un mapa de impacto y un chequeo que indica qué fuentes documentales revisar según las rutas cambiadas. El chequeo no modifica ADR, seguridad ni riesgo. Si una ruta cambiada activa una regla, exige que alguna de sus fuentes se actualice en el mismo cambio. Una excepción solo se acepta con una justificación explícita de al menos 20 caracteres dada en la línea de comandos (`--acknowledge`), que se copia al PR. `verify:pr` y CI no pasan justificaciones, así que en CI toda regla activada exige cambiar una de sus fuentes (decisión del propietario, 2026-10-25).
 
 **Evidencia:** pruebas del mapa para cambios en contratos, worker, infraestructura y documentación.
 
