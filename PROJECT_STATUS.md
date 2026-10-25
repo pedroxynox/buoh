@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 17
-updated_at_utc: "2026-10-25T22:00:00.000Z"
+status_version: 18
+updated_at_utc: "2026-10-25T23:00:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -173,6 +173,7 @@ El antiguo pendiente 1 (atribución de símbolo y mensajes que no son ticks) que
 - Hasta incorporar un writer Parquet, ticks e incidencias se publican como NDJSON sin compresión; `dataset_id` no depende del formato físico.
 - Alojamiento productivo en Render para PostgreSQL, API y web; el despliegue sigue diferido ([ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)).
 - MetaTrader 5 entra por un puente MQL5 dentro de la terminal; cada servidor MT5 es una fuente propia; las contraseñas MT5, solo de cuentas propias, las guarda la terminal y los servicios de buoh nunca las reciben ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
+- Desde el móvil se pueden encender y apagar estrategias del bot, también con dinero real, como con un control remoto. Ningún cliente abre operaciones a mano ni se comunica con el bróker para ejecutar: todo pasa por el servidor, `execution-gateway` y su política de riesgo ([catálogo de funciones](docs/producto/funciones-y-disponibilidad.md) §1; decisión del propietario del 2026-10-25).
 
 ## Bloqueos
 
@@ -190,7 +191,7 @@ Ninguno para iniciar `F1.4b`.
 - Dominio y alojamiento del sitio oficial, y revisión legal de su texto antes de publicarlo (ADR-0008).
 - Firmar el instalador de escritorio antes de distribuirlo (ADR-0010). El propietario ya lo instaló y probó en su PC el 2026-10-25.
 - Probar la app móvil en un teléfono real (Expo Go para el SDK 58 aún no está en las tiendas, o una compilación nativa), y cómo compilarla y distribuirla (ADR-0009).
-- Confirmar que «pedir» el modo `real` desde el móvil nunca es operar desde él, y qué cuenta como reautenticación en un teléfono (PR #16; P-V1-05 de la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md)).
+- Qué cuenta como reautenticación en un teléfono para pedir el modo `real` o volver a encender una estrategia en `real` desde el móvil. Se define en la revisión de amenazas de la Fase 5 (P-V1-05 de la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md)).
 - Límites monetarios y política de riesgo para fases `demo` y `real`.
 - Proveedor de pagos y modelo de suscripción.
 
