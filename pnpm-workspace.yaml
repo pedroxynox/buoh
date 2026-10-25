@@ -7,3 +7,7 @@ strictPeerDependencies: true
 
 allowBuilds:
   esbuild: true
+
+# Los scripts usan sintaxis de shell (`VAR=1 cmd`, `&&`, `1>&2`); el emulador de pnpm los corre
+# igual en Windows, donde si no se usaría cmd.exe (ADR-0010).
+shellEmulator: true

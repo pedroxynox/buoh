@@ -4,7 +4,7 @@
 - **Fecha:** 2026-10-24
 - **Ámbito:** trabajo en paralelo a Fase 1, sin cambiar su alcance ni su puerta de salida
 - **Decisores:** Propietario de buoh, a propuesta de la dirección técnica
-- **Complementada por:** [ADR-0009](0009-prototipo-movil.md) (prototipo móvil)
+- **Complementada por:** [ADR-0009](0009-prototipo-movil.md) (prototipo móvil) y [ADR-0010](0010-prototipo-de-escritorio.md) (prototipo de escritorio)
 - **Complementa:** [ADR-0001](0001-plataforma-y-stack.md) y [ADR-0003](0003-lenguajes-y-limites.md) (web con Next.js y React) y la [arquitectura objetivo](../arquitectura-objetivo.md) (`packages/design-system` y `apps/web`); añade `apps/site`.
 
 ## Contexto
@@ -34,7 +34,7 @@ La línea visual autoriza:
 | `apps/web` | Prototipo navegable de la interfaz del producto con datos ficticios | No tiene API, autenticación, cuentas, conexión a fuentes ni brókeres |
 | `apps/site` | Sitio oficial estático de buoh | No tiene formularios, registro, pagos, suscripciones ni métricas de desempeño |
 
-Móvil (`apps/mobile`) y escritorio (`apps/desktop`) siguen diferidos. Cada uno necesitará su propio incremento del plan.
+Móvil (`apps/mobile`) y escritorio (`apps/desktop`) quedaban diferidos, cada uno con su propio incremento del plan. Llegaron en V1.4 (ADR-0009) y V1.5 (ADR-0010).
 
 ### 2. Reglas del prototipo
 

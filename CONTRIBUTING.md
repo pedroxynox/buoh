@@ -44,11 +44,12 @@ En paralelo a Fase 1, el [plan de la línea visual](docs/plan/linea-visual-v1.md
 - `packages/design-system/`: tokens, CSS base y componentes React web; la guía es [`docs/diseno/marca-buoh.md`](docs/diseno/marca-buoh.md).
 - `apps/web/`: prototipo navegable del producto con datos ficticios, sin API, cuentas ni brókeres.
 - `apps/mobile/`: prototipo móvil (Expo) con datos ficticios ([ADR-0009](docs/arquitectura/adr/0009-prototipo-movil.md)).
+- `apps/desktop/`: prototipo de escritorio (Tauri 2) que muestra `apps/web` en Windows ([ADR-0010](docs/arquitectura/adr/0010-prototipo-de-escritorio.md)). Su Rust se compila en el flujo `desktop` de CI.
 - `packages/prototype-data/`: datos ficticios compartidos por los prototipos.
 - `apps/site/`: sitio oficial estático, sin formularios ni recursos de terceros; sus reglas de contenido están en [`docs/diseno/sitio-oficial.md`](docs/diseno/sitio-oficial.md).
 - `docs/diseno/`: marca y concepto de interfaz.
 
-La guardia documental pide revisar la guía de marca al tocar `packages/design-system/**`, el concepto de interfaz o ADR-0008 al tocar `apps/web/**` o `packages/prototype-data/**`, el concepto de interfaz o ADR-0009 al tocar `apps/mobile/**`, y las reglas del sitio o ADR-0008 al tocar `apps/site/**`.
+La guardia documental pide revisar la guía de marca al tocar `packages/design-system/**`, el concepto de interfaz o ADR-0008 al tocar `apps/web/**` o `packages/prototype-data/**`, el concepto de interfaz o ADR-0009 al tocar `apps/mobile/**`, el concepto de interfaz o ADR-0010 al tocar `apps/desktop/**` o su flujo de CI, y las reglas del sitio o ADR-0008 al tocar `apps/site/**`.
 
 ## Reglas de implementación
 
@@ -83,7 +84,7 @@ DOCS_BASE_REF=origin/main pnpm run verify:pr
 pnpm run docs:check -- --acknowledge=contracts:Razón explícita para incluir en el PR
 ```
 
-GitHub Actions (`.github/workflows/verify.yml`) ejecuta `DOCS_BASE_REF=origin/main pnpm run verify:pr` en cada PR hacia `main` y en cada push a `main`, con el Node y pnpm fijados. Un segundo job ejecuta `pnpm run test:integration` contra los servicios de `infra/compose.yaml` con credenciales efímeras; localmente requiere esos servicios (ver el [runbook](docs/operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13)).
+GitHub Actions (`.github/workflows/verify.yml`) ejecuta `DOCS_BASE_REF=origin/main pnpm run verify:pr` en cada PR hacia `main` y en cada push a `main`, con el Node y pnpm fijados. Un segundo job ejecuta `pnpm run test:integration` contra los servicios de `infra/compose.yaml` con credenciales efímeras; localmente requiere esos servicios (ver el [runbook](docs/operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13)). El flujo `.github/workflows/desktop.yml` corre en Windows solo cuando cambian `apps/desktop`, `apps/web`, sus paquetes o la configuración de pnpm, Node o turbo: pasa `cargo fmt`, `cargo clippy` y `cargo test` y compila el instalador del prototipo de escritorio.
 
 Sin base, revisa cambios staged, unstaged y no rastreados. `verify:pr` exige `DOCS_BASE_REF` y revisa todo el rango comprometido contra la rama objetivo. Si una ruta activa una regla, debe cambiar una fuente indicada o recibir una justificación de al menos 20 caracteres; la salida exige copiar esa razón al PR. La guardia nunca modifica documentación. ADR, seguridad y riesgo conservan revisión humana.
 

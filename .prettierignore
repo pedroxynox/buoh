@@ -8,3 +8,5 @@ pnpm-lock.yaml
 packages/contracts/generated/**
 **/*.md
 test-vectors/**
+**/src-tauri/target/**
+**/src-tauri/gen/**

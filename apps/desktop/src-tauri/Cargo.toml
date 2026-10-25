@@ -1,0 +1,18 @@
+[package]
+name = "buoh-desktop"
+version = "0.1.0"
+description = "Prototipo de escritorio de buoh con datos ficticios (ADR-0010)"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "=2.7.2", features = [] }
+
+[dependencies]
+# Sin `dynamic-acl` (permisos añadidos en ejecución) ni las opciones de Linux: solo Windows.
+tauri = { version = "=2.12.3", default-features = false, features = [
+  "wry",
+  "compression",
+  "common-controls-v6",
+] }

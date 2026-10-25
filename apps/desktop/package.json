@@ -1,0 +1,15 @@
+{
+  "name": "@buoh/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tauri:build": "turbo run build --filter=@buoh/web && tauri build -- --locked",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@buoh/web": "workspace:*",
+    "@tauri-apps/cli": "2.12.4"
+  }
+}

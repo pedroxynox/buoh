@@ -1,6 +1,6 @@
 # ADR-0003: Lenguajes y límites de responsabilidad técnica
 
-- **Estado:** Aceptada; complementada por [ADR-0007](0007-varias-fuentes-y-metatrader-5.md) (MQL5 limitado al puente de MetaTrader 5)
+- **Estado:** Aceptada; complementada por [ADR-0007](0007-varias-fuentes-y-metatrader-5.md) (MQL5 limitado al puente de MetaTrader 5) y [ADR-0010](0010-prototipo-de-escritorio.md) (Rust en el contenedor Tauri del prototipo de escritorio)
 - **Fecha:** 2026-10-17
 - **Decisores:** Dirección técnica de buoh
 

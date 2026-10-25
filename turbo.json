@@ -12,7 +12,8 @@
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/test-vectors/**",
         "$TURBO_ROOT$/docs/**",
-        "$TURBO_ROOT$/PROJECT_STATUS.md"
+        "$TURBO_ROOT$/PROJECT_STATUS.md",
+        "$TURBO_ROOT$/.github/workflows/**"
       ]
     },
     "typecheck": {

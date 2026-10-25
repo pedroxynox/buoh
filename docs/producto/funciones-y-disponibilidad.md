@@ -8,7 +8,7 @@ Catálogo de todo lo que buoh hará, en qué fase se habilita y en qué platafor
 |---|---|---|
 | **Web** | Estación principal: investigación, señales, auditoría y configuración | Fase 2; prototipo visual en V1.2 |
 | **Móvil** (Android e iOS) | Seguir el bot: estado, señales, alertas, evidencia y autorizaciones seguras | Fase 3; prototipo visual en V1.4 |
-| **Escritorio** (Windows, Tauri 2) | La misma estación de la web, como aplicación instalada | Fase 7 |
+| **Escritorio** (Windows, Tauri 2) | La misma estación de la web, como aplicación instalada | Fase 7; prototipo visual en V1.5 |
 | **Sitio oficial** | Explicar qué es buoh, cómo trabaja y en qué estado está | V1.3 |
 
 Ninguna plataforma envía órdenes al bróker. Las órdenes solo salen de `execution-gateway` en el servidor ([ADR-0002](../arquitectura/adr/0002-senales-y-ejecucion-controlada.md)). Los clientes pueden **ver**, **pedir** y **detener**; nunca **operar** por su cuenta. **Pedir** significa enviar al servidor una solicitud que este valida y registra, como aprobar una versión de estrategia, cambiar una política o autorizar un modo; nunca es una orden.

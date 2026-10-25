@@ -4,7 +4,7 @@ schema_version: "1.0.0"
 status: "ready"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-10-25T05:00:00.000Z"
+last_reviewed_utc: "2026-10-25T14:00:00.000Z"
 ---
 
 # Plan ejecutable: línea visual V1
@@ -17,7 +17,7 @@ La línea visual corre en paralelo a [Fase 1](fase-1-fundacion-de-datos.md) y no
 
 ## 2. Estado y aprobación
 
-`ready`: este plan autoriza los incrementos V1.1 a V1.4 cuando se fusione el PR que los contiene. V1.4, el prototipo móvil, se añadió el 2026-10-25 ([ADR-0009](../arquitectura/adr/0009-prototipo-movil.md)). El escritorio necesita un incremento propio en este plan antes de crear código.
+`ready`: este plan autoriza los incrementos V1.1 a V1.5 cuando se fusione el PR que los contiene. V1.4, el prototipo móvil, se añadió el 2026-10-25 ([ADR-0009](../arquitectura/adr/0009-prototipo-movil.md)), y V1.5, el prototipo de escritorio, el mismo día ([ADR-0010](../arquitectura/adr/0010-prototipo-de-escritorio.md)).
 
 ## 3. Corte de implementación
 
@@ -28,13 +28,14 @@ packages/design-system/   # tokens, CSS base y componentes React web
 apps/web/                 # prototipo navegable con datos ficticios
 apps/site/                # sitio oficial estático
 apps/mobile/              # prototipo móvil (Expo) con datos ficticios
+apps/desktop/             # prototipo de escritorio (Tauri 2) que muestra apps/web
 packages/prototype-data/  # datos ficticios compartidos por los prototipos
 docs/diseno/              # marca y concepto de interfaz
 ```
 
 ### Diferido explícitamente
 
-API, autenticación, cuentas, conexión a fuentes o brókeres, datos reales, formularios, analítica de visitantes, publicación del sitio o de la app, compilaciones nativas firmadas y `apps/desktop`.
+API, autenticación, cuentas, conexión a fuentes o brókeres, datos reales, formularios, analítica de visitantes, publicación del sitio o de las apps, compilaciones nativas firmadas y ventanas de escritorio separables.
 
 ## 4. Requisitos
 
@@ -90,12 +91,24 @@ El [catálogo](../producto/funciones-y-disponibilidad.md) lista cada función de
 - sin campos de texto ni contraseñas; sin edición de estrategias o políticas; el *kill switch* aparece con candado de Fase 4 y la petición del modo real con candado de Fase 6;
 - `expo export` compila Android, iOS y web, y las pruebas comprueban cada pestaña renderizada.
 
+### `V1-DESKTOP-001` — Prototipo de escritorio
+
+`apps/desktop` muestra en una ventana de Windows el prototipo de `apps/web`, con Tauri 2 ([ADR-0010](../arquitectura/adr/0010-prototipo-de-escritorio.md)).
+
+**Aceptación:**
+
+- la ventana carga solo la exportación de `apps/web`, con la marca «Datos ficticios», y no baja del ancho en que la web cambia a la barra inferior;
+- el frontend no tiene comandos ni capacidades de Tauri, y el único complemento es la regla de navegación; la política de contenido solo permite lo empaquetado y no admite `unsafe-eval`; toda navegación fuera de las páginas empaquetadas se bloquea;
+- Rust, Tauri y su CLI están fijados, y Cargo usa `--locked`;
+- CI con Windows pasa `cargo fmt`, `cargo clippy` sin avisos y `cargo test`, y compila un instalador NSIS por usuario que queda como artefacto.
+
 ## 5. Secuencia de entrega
 
 1. **V1.1:** guía de marca, catálogo de funciones, concepto de interfaz y `packages/design-system` (`V1-BRAND-001`, `V1-DS-001`, `V1-FUNC-001`).
 2. **V1.2:** prototipo navegable en `apps/web` (`V1-UI-001`).
 3. **V1.3:** sitio oficial en `apps/site` (`V1-SITE-001`).
 4. **V1.4:** prototipo móvil en `apps/mobile` y datos compartidos en `packages/prototype-data` (`V1-MOBILE-001`).
+5. **V1.5:** prototipo de escritorio en `apps/desktop` (`V1-DESKTOP-001`).
 
 Cada incremento es un PR propio, con una revisión semántica.
 
@@ -107,6 +120,7 @@ Cada incremento es un PR propio, con una revisión semántica.
 | `pnpm --filter @buoh/web run build` | V1.2 | exporta el prototipo a `apps/web/out` |
 | `pnpm --filter @buoh/site run build` | V1.3 | exporta el sitio a `apps/site/out` |
 | `pnpm --filter @buoh/mobile run build` | V1.4 | compila Android, iOS y web en `apps/mobile/out` |
+| `pnpm --filter @buoh/desktop run tauri:build` | V1.5 | solo en Windows: exporta la web y crea el instalador NSIS |
 
 ## 7. Definition of Done
 
