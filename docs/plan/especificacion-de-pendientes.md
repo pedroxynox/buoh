@@ -1,6 +1,6 @@
 # Especificación de pendientes
 
-Inventario de lo que falta, está incompleto o no está documentado, comparando el código del commit `869ba4e` con los planes, `PROJECT_STATUS.md`, las ADR y las guías. Revisado el 2026-10-25. Ese mismo día el propietario resolvió P-V1-01, P-V1-03 y P-GOV-01, y en P-V1-05 qué es operar desde el móvil; cada entrada registra su decisión.
+Inventario de lo que falta, está incompleto o no está documentado, comparando el código del commit `869ba4e` con los planes, `PROJECT_STATUS.md`, las ADR y las guías. Revisado el 2026-10-25. Ese mismo día el propietario resolvió P-V1-01, P-V1-03 y P-GOV-01, y en P-V1-05 lo que él llama «operar desde el celular»; cada entrada registra su decisión.
 
 No es un plan de fase: no tiene requisitos propios ni `status`, y `PROJECT_STATUS.md` no lo enlaza como `plan` ni como `parallel_plans`.
 
@@ -222,11 +222,13 @@ La línea terminó el 2026-10-25 (P-V1-01). Los demás pendientes de esta secci�
 - **Estado (verificado):**
   - no se probó en un teléfono real; Expo Go para el SDK 58 no estaba en las tiendas al aceptar ADR-0009;
   - las pruebas usan React Native for Web, y no ven diferencias de Android o iOS;
-  - el PR #16 dejó dos puntos abiertos: qué cuenta como reautenticación en un teléfono, como riesgo para la revisión de amenazas de la Fase 5, y qué significa operar desde el móvil.
-- **Resuelto (2026-10-25), qué es operar desde el móvil:** el propietario decidió que es encender o apagar estrategias del bot, también con dinero real, como con un control remoto, y nunca abrir operaciones a mano. Todo sigue pasando por el servidor, `execution-gateway` y su política de riesgo. El catálogo de funciones lo registra (§1 y la fila «Volver a encender») sin ADR, porque no cambia la ejecución ni el riesgo: ADR-0002, decisión 8, ya define los móviles como clientes de observación, control y autorización segura.
+  - qué cuenta como reautenticación en un teléfono sigue abierto, como riesgo para la revisión de amenazas de la Fase 5.
+- **Antes:** el PR #16 dejó abiertos ese punto y la confirmación del propietario de que «pedir» el modo real desde el móvil nunca es operar desde él.
+- **Decisión del propietario (2026-10-25):** lo que él llama «operar desde el celular» es encender o apagar estrategias del bot, también con dinero real, como con un control remoto, y nunca abrir operaciones a mano. Todo sigue pasando por el servidor, `execution-gateway` y su política de riesgo.
+- **Resolución:** el catálogo de funciones lo registra en §1 y en la fila «Volver a encender», que reactiva una estrategia detenida con las condiciones de operación y control de riesgo §6 a §8 y del protocolo de validación §5. No hace falta ADR, porque no cambia la ejecución ni el riesgo: ADR-0002, decisión 8, ya define los móviles como clientes de observación, control y autorización segura.
 - **Esperado:**
   - ADR-0009 y `PROJECT_STATUS.md` piden probar la app en un teléfono real y decidir cómo compilarla y distribuirla;
-  - el catálogo de funciones permite desde el móvil pedir el modo `real` (Fase 6) y volver a encender lo detenido (Fase 4), con autenticación y auditoría, y con reautenticación en `real`. Ninguna fuente define qué cuenta como reautenticación en un teléfono; lo decide la revisión de amenazas de la Fase 5 (roadmap).
+  - el catálogo de funciones permite desde el móvil pedir el modo `real` (Fase 6) y volver a encender una estrategia detenida (Fase 4), con autenticación y auditoría, con reautenticación en `real` y, si se pausó por un incidente o una condición de corte, con las condiciones del protocolo de validación §5. Ninguna fuente define qué cuenta como reautenticación en un teléfono; lo decide la revisión de amenazas de la Fase 5 (roadmap).
 - **Componentes:** `apps/mobile`, ADR-0009 y el catálogo de funciones.
 - **Aceptación:** no indicados.
 - **Abierto:** probar en un teléfono real y cómo distribuir la app son decisiones o pruebas humanas; la reautenticación en un teléfono queda para la revisión de amenazas de la Fase 5.
@@ -302,7 +304,7 @@ Solo se listan; sus planes no existen todavía y el roadmap describe el destino.
 
 ## 6. Decisiones humanas abiertas
 
-P-V1-01, P-V1-03 y P-GOV-01 ya no figuran aquí, ni qué es operar desde el móvil (P-V1-05): el propietario las resolvió el 2026-10-25, y cada entrada registra su decisión.
+P-V1-01, P-V1-03 y P-GOV-01 ya no figuran aquí, ni lo que el propietario llama «operar desde el celular» (P-V1-05): las resolvió el 2026-10-25, y cada entrada registra su decisión.
 
 | Decisión | Pendiente | Dónde se registra hoy |
 |---|---|---|
