@@ -24,6 +24,8 @@ El primer scaffolding fijará **Node.js 24.22.0 LTS** y **pnpm 12.14.0** mediant
 
 La selección se revisó el 2026-10-17 contra [releases oficiales de Node.js](https://nodejs.org/en/about/previous-releases) y [pnpm 12.14.0](https://pnpm.io/blog/releases/12.14.0). El contenido externo fue reformulado para cumplir restricciones de licencia.
 
+Desde 2026-10-25, pnpm ejecuta los scripts con su emulador de shell (`shellEmulator` en `pnpm-workspace.yaml`), para que `VAR=1 cmd` y `&&` funcionen igual en Linux y en Windows ([ADR-0010](0010-prototipo-de-escritorio.md)). El emulador no respeta redirecciones entre descriptores como `1>&2`: un script que deba dejar stdout limpio, como `data:replay`, usa un archivo Node en `scripts/`.
+
 ### Herramientas ejecutables de F1.1
 
 - TypeScript 6 estricto compila contratos; el lockfile fija la versión exacta compatible con `typescript-eslint`.
