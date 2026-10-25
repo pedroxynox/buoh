@@ -216,6 +216,7 @@ Comprobado en el repositorio:
   - la alternativa textual o tabular;
   - la unidad de la peor caída;
   - una prueba de contraste de los tokens `chart`.
+- **Abierto:** ninguna fuente dice si esto se hace antes de la Fase 2 o dentro de ella.
 
 ### P-V1-05. Móvil: teléfono real, reautenticación e interpretación del modo real — menor registrado y decisiones humanas
 

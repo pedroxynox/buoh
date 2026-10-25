@@ -33,7 +33,7 @@ graph BT
   desktop["apps/desktop"] -. "carga apps/web/out" .-> web
 ```
 
-Entre las dos mitades no circulan datos: la ruta de datos (contracts, domain y worker) no tiene API, y los clientes visuales solo usan datos ficticios. Lo único que comparten es código: el sistema de diseño importa de `@buoh/contracts` los tipos `ExecutionMode`, `ServiceHealth` y `severitySchema`.
+Entre las dos mitades no circulan datos: la ruta de datos (contracts, domain y worker) no tiene API, y los clientes visuales solo usan datos ficticios. Lo único que comparten son tipos: el sistema de diseño, `prototype-data`, `apps/web/app/guia/page.tsx` y `apps/mobile/src/ui.tsx` importan de `@buoh/contracts` solo con `import type` (por ejemplo `ExecutionMode` y `ServiceHealth`). `prototype-data`, la web, el móvil y el sitio también declaran `@buoh/contracts` en su `package.json`; la tabla y el diagrama omiten esas flechas para no cargarlos.
 
 ### Reglas que conviene conocer antes de cambiar código
 
