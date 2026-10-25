@@ -74,6 +74,7 @@ export const ICONS = {
   document: ['M7 3h7l4 4v14H7Z', 'M14 3v4h4', 'M10 12h5', 'M10 16h3'],
   archive: ['M3.5 4.5h17v4h-17Z', 'M5 8.5v11h14v-11', 'M10 12.5h4'],
   flag: ['M5.5 21V4', 'M5.5 4.5h11l-2.5 4 2.5 4h-11'],
+  bell: ['M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15Z', 'M10 20.5a2 2 0 0 0 4 0'],
   progress: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z', 'M12 3v18'],
 } as const satisfies Record<string, readonly string[]>;
 

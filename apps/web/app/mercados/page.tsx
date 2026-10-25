@@ -10,7 +10,7 @@ import {
   PRICE_TIME_LABELS,
   priceSeries,
   SOURCES,
-} from '../../src/fixtures';
+} from '@buoh/prototype-data';
 
 export const metadata: Metadata = { title: 'Mercados' };
 

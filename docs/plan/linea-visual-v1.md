@@ -4,20 +4,20 @@ schema_version: "1.0.0"
 status: "ready"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-10-24T05:00:00.000Z"
+last_reviewed_utc: "2026-10-25T05:00:00.000Z"
 ---
 
 # Plan ejecutable: línea visual V1
 
 ## 1. Objetivo
 
-Dar a buoh una identidad visual propia y una interfaz que el propietario pueda ver y validar antes de que existan datos reales: marca, sistema de diseño, catálogo de funciones, prototipo navegable del producto y sitio oficial.
+Dar a buoh una identidad visual propia y una interfaz que el propietario pueda ver y validar antes de que existan datos reales: marca, sistema de diseño, catálogo de funciones, prototipos navegables del producto (web y móvil) y sitio oficial.
 
 La línea visual corre en paralelo a [Fase 1](fase-1-fundacion-de-datos.md) y no cambia su alcance ([ADR-0008](../arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)).
 
 ## 2. Estado y aprobación
 
-`ready`: este plan autoriza los incrementos V1.1 a V1.3 cuando se fusione el PR que lo contiene. Móvil y escritorio necesitan un incremento propio en este plan antes de crear código.
+`ready`: este plan autoriza los incrementos V1.1 a V1.4 cuando se fusione el PR que los contiene. V1.4, el prototipo móvil, se añadió el 2026-10-25 ([ADR-0009](../arquitectura/adr/0009-prototipo-movil.md)). El escritorio necesita un incremento propio en este plan antes de crear código.
 
 ## 3. Corte de implementación
 
@@ -27,12 +27,14 @@ La línea visual corre en paralelo a [Fase 1](fase-1-fundacion-de-datos.md) y no
 packages/design-system/   # tokens, CSS base y componentes React web
 apps/web/                 # prototipo navegable con datos ficticios
 apps/site/                # sitio oficial estático
+apps/mobile/              # prototipo móvil (Expo) con datos ficticios
+packages/prototype-data/  # datos ficticios compartidos por los prototipos
 docs/diseno/              # marca y concepto de interfaz
 ```
 
 ### Diferido explícitamente
 
-API, autenticación, cuentas, conexión a fuentes o brókeres, datos reales, formularios, analítica de visitantes, publicación del sitio, `apps/mobile` y `apps/desktop`.
+API, autenticación, cuentas, conexión a fuentes o brókeres, datos reales, formularios, analítica de visitantes, publicación del sitio o de la app, compilaciones nativas firmadas y `apps/desktop`.
 
 ## 4. Requisitos
 
@@ -76,11 +78,24 @@ El [catálogo](../producto/funciones-y-disponibilidad.md) lista cada función de
 
 **Aceptación:** sin formularios, registro, pagos, métricas de desempeño ni recursos de terceros; con advertencia de riesgo y nota de marcas de terceros en todas las páginas.
 
+### `V1-MOBILE-001` — Prototipo móvil
+
+`apps/mobile` implementa el móvil del [concepto de interfaz](../diseno/concepto-de-interfaz.md) §7 con los datos ficticios de `packages/prototype-data` ([ADR-0009](../arquitectura/adr/0009-prototipo-movil.md)).
+
+**Aceptación:**
+
+- cinco pestañas: Inicio, Señales, Alertas, Evidencia y Más;
+- modo de ejecución y salud del servicio siempre visibles y separados, y la marca «Datos ficticios»;
+- toda cifra de desempeño con su contexto completo; toda señal con estrategia, versión, modo, vencimiento, calidad y un enlace a su evidencia, como pide el catálogo;
+- sin campos de texto ni contraseñas; sin edición de estrategias o políticas ni petición del modo real; el *kill switch* aparece con candado de Fase 4;
+- `expo export` compila Android, iOS y web, y las pruebas comprueban cada pestaña renderizada.
+
 ## 5. Secuencia de entrega
 
 1. **V1.1:** guía de marca, catálogo de funciones, concepto de interfaz y `packages/design-system` (`V1-BRAND-001`, `V1-DS-001`, `V1-FUNC-001`).
 2. **V1.2:** prototipo navegable en `apps/web` (`V1-UI-001`).
 3. **V1.3:** sitio oficial en `apps/site` (`V1-SITE-001`).
+4. **V1.4:** prototipo móvil en `apps/mobile` y datos compartidos en `packages/prototype-data` (`V1-MOBILE-001`).
 
 Cada incremento es un PR propio, con una revisión semántica.
 
@@ -91,7 +106,8 @@ Cada incremento es un PR propio, con una revisión semántica.
 | `pnpm run verify` | ya existe | incluye tipos, lint, pruebas y build de las piezas nuevas |
 | `pnpm --filter @buoh/web run build` | V1.2 | exporta el prototipo a `apps/web/out` |
 | `pnpm --filter @buoh/site run build` | V1.3 | exporta el sitio a `apps/site/out` |
+| `pnpm --filter @buoh/mobile run build` | V1.4 | compila Android, iOS y web en `apps/mobile/out` |
 
 ## 7. Definition of Done
 
-La línea visual V1 está `done` cuando sus cinco requisitos tienen evidencia fusionada y el propietario revisó capturas del prototipo y del sitio.
+La línea visual V1 está `done` cuando sus requisitos tienen evidencia fusionada y el propietario revisó capturas de los prototipos y del sitio.

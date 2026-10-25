@@ -4,7 +4,8 @@
     "paths": {
       "@buoh/contracts": ["../../packages/contracts/src/index.ts"],
       "@buoh/design-system": ["../../packages/design-system/src/index.ts"],
-      "@buoh/design-system/react": ["../../packages/design-system/src/react/index.ts"]
+      "@buoh/design-system/react": ["../../packages/design-system/src/react/index.ts"],
+      "@buoh/prototype-data": ["../../packages/prototype-data/src/index.ts"]
     }
   }
 }

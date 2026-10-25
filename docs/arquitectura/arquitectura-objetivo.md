@@ -52,7 +52,7 @@ buoh/
 │   ├── execution-gateway/       # futuro: único proceso con permiso de ejecutar
 │   ├── web/                     # Next.js: investigación, auditoría y control (hoy, prototipo visual de ADR-0008)
 │   ├── site/                    # Next.js estático: sitio oficial de buoh (ADR-0008)
-│   ├── mobile/                  # Expo/React Native: Android e iOS
+│   ├── mobile/                  # Expo/React Native: Android e iOS (hoy, prototipo visual de ADR-0009)
 │   └── desktop/                 # futuro: Tauri 2 para Windows
 ├── packages/
 │   ├── contracts/               # Zod/OpenAPI/eventos versionados

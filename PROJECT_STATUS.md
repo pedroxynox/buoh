@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 11
-updated_at_utc: "2026-10-25T04:00:00.000Z"
+status_version: 12
+updated_at_utc: "2026-10-25T05:00:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -34,11 +34,11 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
 - No existe todavía integración con Deriv, persistencia del `IngestionCursor`, cola en memoria del transporte ni despliegue.
 - MetaTrader 5 (Deriv MT5 y Vantage) queda decidido como segunda integración ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)): sus datos llegan en una Fase 1B posterior a Fase 1, y operar en MT5 empieza en Fase 4 (demo). No existe código de MT5.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
-- En paralelo a Fase 1 corre la [línea visual V1](docs/plan/linea-visual-v1.md) ([ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)). V1.1 entrega la [guía de marca](docs/diseno/marca-buoh.md), el [catálogo de funciones](docs/producto/funciones-y-disponibilidad.md), el [concepto de interfaz](docs/diseno/concepto-de-interfaz.md) y `packages/design-system`. V1.2 entrega el prototipo navegable en `apps/web`, con datos ficticios (`V1-UI-001`). V1.3 entrega el [sitio oficial](docs/diseno/sitio-oficial.md) en `apps/site`, sin publicar (`V1-SITE-001`). No cambia el alcance ni la puerta de salida de Fase 1.
+- En paralelo a Fase 1 corre la [línea visual V1](docs/plan/linea-visual-v1.md) ([ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)). V1.1 entrega la [guía de marca](docs/diseno/marca-buoh.md), el [catálogo de funciones](docs/producto/funciones-y-disponibilidad.md), el [concepto de interfaz](docs/diseno/concepto-de-interfaz.md) y `packages/design-system`. V1.2 entrega el prototipo navegable en `apps/web`, con datos ficticios (`V1-UI-001`). V1.3 entrega el [sitio oficial](docs/diseno/sitio-oficial.md) en `apps/site`, sin publicar (`V1-SITE-001`). V1.4 entrega el prototipo móvil en `apps/mobile` y comparte los datos ficticios en `packages/prototype-data` (`V1-MOBILE-001`, [ADR-0009](docs/arquitectura/adr/0009-prototipo-movil.md)). No cambia el alcance ni la puerta de salida de Fase 1.
 
 ## Trabajo en paralelo autorizado
 
-**Línea visual V1.** Sus cinco requisitos tienen implementación. Para cerrarla falta que el propietario revise las capturas del prototipo y del sitio (plan V1, §7). Móvil y escritorio necesitan antes su propio incremento en el plan.
+**Línea visual V1.** Sus requisitos tienen implementación. Para cerrarla falta que el propietario revise las capturas de los prototipos y del sitio (plan V1, §7). El escritorio necesita antes su propio incremento en el plan; ADR-0001 deja la app real de Windows para cuando web y móvil estén validados.
 
 ## Siguiente tarea autorizada
 
@@ -187,7 +187,7 @@ Ninguno para iniciar `F1.4b`.
 - Revisión de términos de Deriv MT5, Vantage y MetaQuotes, y entidad de Vantage aplicable. Se completa en el primer incremento de Fase 1B.
 - Orden entre Fase 1B (datos MT5) y Fase 2 (bot shadow). Se decide al cerrar Fase 1.
 - Dominio y alojamiento del sitio oficial, y revisión legal de su texto antes de publicarlo (ADR-0008).
-- Compilación y distribución de la app móvil.
+- Probar la app móvil en un teléfono real (Expo Go para el SDK 58 aún no está en las tiendas, o una compilación nativa), y cómo compilarla y distribuirla (ADR-0009).
 - Límites monetarios y política de riesgo para fases `demo` y `real`.
 - Proveedor de pagos y modelo de suscripción.
 

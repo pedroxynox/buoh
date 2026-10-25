@@ -1,8 +1,7 @@
 import { Card, PhaseLock } from '@buoh/design-system/react';
 import type { Metadata } from 'next';
 import { PageHeader } from '../../src/components/AppShell';
-import { AUDIT } from '../../src/fixtures';
-import { formatUtc } from '../../src/format';
+import { AUDIT, formatUtc } from '@buoh/prototype-data';
 
 export const metadata: Metadata = { title: 'Auditoría' };
 

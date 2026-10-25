@@ -7,7 +7,7 @@ import {
 } from '@buoh/design-system/react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { GLOBAL_STATUS } from '../fixtures';
+import { GLOBAL_STATUS } from '@buoh/prototype-data';
 import { NAV_ITEMS } from '../navigation';
 import { MoreMenu } from './MoreMenu';
 import { NavLink } from './NavLink';

@@ -60,11 +60,20 @@
     },
     {
       "id": "web-clients",
-      "description": "El prototipo debe seguir el concepto de interfaz y ADR-0008.",
-      "includes": ["apps/web/**"],
+      "description": "El prototipo web y sus datos ficticios deben seguir el concepto de interfaz y ADR-0008.",
+      "includes": ["apps/web/**", "packages/prototype-data/**"],
       "requires_any": [
         "docs/diseno/concepto-de-interfaz.md",
         "docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md"
+      ]
+    },
+    {
+      "id": "mobile",
+      "description": "El prototipo móvil debe seguir el concepto de interfaz y ADR-0009.",
+      "includes": ["apps/mobile/**"],
+      "requires_any": [
+        "docs/diseno/concepto-de-interfaz.md",
+        "docs/arquitectura/adr/0009-prototipo-movil.md"
       ]
     },
     {

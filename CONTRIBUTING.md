@@ -43,10 +43,12 @@ En paralelo a Fase 1, el [plan de la línea visual](docs/plan/linea-visual-v1.md
 
 - `packages/design-system/`: tokens, CSS base y componentes React web; la guía es [`docs/diseno/marca-buoh.md`](docs/diseno/marca-buoh.md).
 - `apps/web/`: prototipo navegable del producto con datos ficticios, sin API, cuentas ni brókeres.
+- `apps/mobile/`: prototipo móvil (Expo) con datos ficticios ([ADR-0009](docs/arquitectura/adr/0009-prototipo-movil.md)).
+- `packages/prototype-data/`: datos ficticios compartidos por los prototipos.
 - `apps/site/`: sitio oficial estático, sin formularios ni recursos de terceros; sus reglas de contenido están en [`docs/diseno/sitio-oficial.md`](docs/diseno/sitio-oficial.md).
 - `docs/diseno/`: marca y concepto de interfaz.
 
-La guardia documental pide revisar la guía de marca al tocar `packages/design-system/**`, el concepto de interfaz o ADR-0008 al tocar `apps/web/**`, y las reglas del sitio o ADR-0008 al tocar `apps/site/**`.
+La guardia documental pide revisar la guía de marca al tocar `packages/design-system/**`, el concepto de interfaz o ADR-0008 al tocar `apps/web/**` o `packages/prototype-data/**`, el concepto de interfaz o ADR-0009 al tocar `apps/mobile/**`, y las reglas del sitio o ADR-0008 al tocar `apps/site/**`.
 
 ## Reglas de implementación
 

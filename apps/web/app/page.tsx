@@ -13,15 +13,17 @@ import { SectionTitle, SignalCard } from '../src/components/Pieces';
 import {
   DATASETS,
   DEMO_NOW_UTC,
+  formatUtc,
+  formatUtcTime,
   GLOBAL_STATUS,
   INCIDENT_LABELS,
   INCIDENTS,
   SHADOW_CONTEXT,
+  SHADOW_RESULT,
   SIGNALS,
   SOURCES,
   STRATEGIES,
-} from '../src/fixtures';
-import { formatUtc, formatUtcTime } from '../src/format';
+} from '@buoh/prototype-data';
 
 export default function ObservatorioPage() {
   const openIncidents = INCIDENTS.filter((incident) => incident.status === 'abierta');
@@ -128,7 +130,7 @@ export default function ObservatorioPage() {
         >
           <MetricWithContext
             label="Pérdida neta hipotética"
-            value="−0,3 %"
+            value={SHADOW_RESULT}
             context={SHADOW_CONTEXT}
           />
         </Card>

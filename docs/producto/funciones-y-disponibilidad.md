@@ -7,7 +7,7 @@ Catálogo de todo lo que buoh hará, en qué fase se habilita y en qué platafor
 | Plataforma | Papel | Fase |
 |---|---|---|
 | **Web** | Estación principal: investigación, señales, auditoría y configuración | Fase 2; prototipo visual en V1.2 |
-| **Móvil** (Android e iOS) | Seguir el bot: estado, señales, alertas, evidencia y autorizaciones seguras | Fase 3 |
+| **Móvil** (Android e iOS) | Seguir el bot: estado, señales, alertas, evidencia y autorizaciones seguras | Fase 3; prototipo visual en V1.4 |
 | **Escritorio** (Windows, Tauri 2) | La misma estación de la web, como aplicación instalada | Fase 7 |
 | **Sitio oficial** | Explicar qué es buoh, cómo trabaja y en qué estado está | V1.3 |
 

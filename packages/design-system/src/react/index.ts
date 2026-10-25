@@ -5,8 +5,7 @@ export {
   FictitiousDataNotice,
   MetricWithContext,
   PhaseLock,
-  type EvidenceSource,
-  type PerformanceContext,
 } from './Blocks.js';
+export type { EvidenceSource, PerformanceContext } from '../evidence.js';
 export { Icon, type IconProps } from './Icon.js';
 export { BuohLogo, BuohMark, type BuohLogoProps, type BuohMarkProps } from './Logo.js';

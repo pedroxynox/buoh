@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "buoh",
+    "slug": "buoh-prototipo",
+    "version": "0.0.0",
+    "platforms": ["ios", "android", "web"],
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0A101C",
+    "web": { "output": "single", "name": "buoh · prototipo móvil" },
+    "experiments": { "tsconfigPaths": false }
+  }
+}

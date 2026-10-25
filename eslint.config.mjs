@@ -5,6 +5,12 @@ import globals from 'globals';
 import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
+const MOBILE_NO_WEB_COMPONENTS = {
+  group: ['@buoh/design-system/react', '@buoh/design-system/react/*'],
+  message:
+    'Los componentes web del design system traen React 19.3.1; el móvil usa solo la entrada raíz (ADR-0009).',
+};
+
 export default defineConfig(
   {
     ignores: [
@@ -13,6 +19,7 @@ export default defineConfig(
       '**/generated/**',
       '**/node_modules/**',
       '**/.next/**',
+      '**/.expo/**',
       '**/out/**',
       '**/next-env.d.ts',
       'test-vectors/**',
@@ -71,6 +78,39 @@ export default defineConfig(
         project: ['./apps/web/tsconfig.typecheck.json'],
         tsconfigRootDir: import.meta.dirname,
       },
+    },
+  },
+  // Móvil (ADR-0009): React Native exige React 19.3.0 exacto. Los componentes web del design system
+  // traen React 19.3.1 y no deben entrar en el paquete móvil; la app tampoco usa react-dom.
+  {
+    files: ['apps/mobile/**/*.{ts,tsx,mts}'],
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+        project: ['./apps/mobile/tsconfig.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [MOBILE_NO_WEB_COMPONENTS] }],
+    },
+  },
+  {
+    files: ['apps/mobile/index.ts', 'apps/mobile/src/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            MOBILE_NO_WEB_COMPONENTS,
+            {
+              group: ['react-dom', 'react-dom/*'],
+              message:
+                'La app móvil dibuja con React Native; react-dom solo se usa en las pruebas.',
+            },
+          ],
+        },
+      ],
     },
   },
   {

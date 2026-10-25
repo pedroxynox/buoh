@@ -4,6 +4,7 @@
 - **Fecha:** 2026-10-24
 - **Ámbito:** trabajo en paralelo a Fase 1, sin cambiar su alcance ni su puerta de salida
 - **Decisores:** Propietario de buoh, a propuesta de la dirección técnica
+- **Complementada por:** [ADR-0009](0009-prototipo-movil.md) (prototipo móvil)
 - **Complementa:** [ADR-0001](0001-plataforma-y-stack.md) y [ADR-0003](0003-lenguajes-y-limites.md) (web con Next.js y React) y la [arquitectura objetivo](../arquitectura-objetivo.md) (`packages/design-system` y `apps/web`); añade `apps/site`.
 
 ## Contexto

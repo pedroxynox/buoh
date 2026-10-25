@@ -89,6 +89,7 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 - [ADR-0006: alojamiento productivo en Render](docs/arquitectura/adr/0006-alojamiento-en-render.md)
 - [ADR-0007: varias fuentes y MetaTrader 5](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)
 - [ADR-0008: línea visual, marca y clientes web](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)
+- [ADR-0009: prototipo móvil](docs/arquitectura/adr/0009-prototipo-movil.md)
 - [Plan de la línea visual V1](docs/plan/linea-visual-v1.md)
 - [Guía de marca](docs/diseno/marca-buoh.md)
 - [Concepto de interfaz](docs/diseno/concepto-de-interfaz.md)

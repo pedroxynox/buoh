@@ -20,9 +20,10 @@ Este roadmap ordena el trabajo por evidencia y reducción de riesgo, no por fech
 
 1. guía de marca, catálogo de funciones, concepto de interfaz y sistema de diseño;
 2. prototipo navegable del producto con datos ficticios;
-3. sitio oficial estático.
+3. sitio oficial estático;
+4. prototipo móvil con datos ficticios.
 
-**Criterio de salida:** el propietario revisó capturas del prototipo y del sitio, y las pruebas de contraste y de estados pasan. Móvil y escritorio necesitan su propio incremento antes de empezar.
+**Criterio de salida:** el propietario revisó capturas de los prototipos y del sitio, y las pruebas de contraste y de estados pasan. El escritorio necesita su propio incremento antes de empezar.
 
 ## Fase 1 — Fundación de datos
 
