@@ -4,6 +4,11 @@ import { PageHeader } from '../../src/components/AppShell';
 import { SectionTitle, SignalCard } from '../../src/components/Pieces';
 import { SIGNALS } from '@buoh/prototype-data';
 
+/**
+ * Señales (concepto de interfaz §3). Cada tarjeta enlaza a su evidencia con `evidenceHref`: a una
+ * fila de /laboratorio por un ancla (`evidencia-<estrategia>`) o a /datos. Ninguna prueba comprueba
+ * el ancla; si cambia el id de la fila, el enlace se rompe sin aviso.
+ */
 export const metadata: Metadata = { title: 'Señales' };
 
 export default function SenalesPage() {

@@ -9,6 +9,10 @@ import {
   INCIDENTS,
 } from '@buoh/prototype-data';
 
+/**
+ * Datos (concepto de interfaz §3). Los datasets e incidencias son ficticios: los datasets reales de
+ * Fase 1 no llegan a ningún cliente y hoy solo se comprueban con `pnpm run data:replay`.
+ */
 export const metadata: Metadata = { title: 'Datos' };
 
 export default function DatosPage() {

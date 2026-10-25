@@ -1,3 +1,8 @@
+// Guardia documental (CONTRIBUTING.md, «Guardia documental»). Lee docs/impact-map.json: cada regla
+// asocia rutas de código (`includes`) con las fuentes canónicas que deben revisarse en el mismo
+// cambio (`requires_any`). Solo comprueba que alguna de esas fuentes cambió, no qué dice: el
+// contenido lo juzga la revisión humana. Se usa desde `pnpm run docs:check` (cambios locales) y
+// `docs:check:pr` (rango comprometido contra la rama objetivo, el que corre en CI).
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -6,10 +11,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, '..');
 
+// Escapa todo menos `*`, que lo traduce globToRegExp. `?` tampoco se escapa: el mapa no lo usa.
 function escapeRegex(value) {
   return value.replace(/[.+^${}()|[\]\\]/g, '\\$&');
 }
 
+/** Glob mínimo: `**` cruza directorios y `*` no. Se ancla a la ruta completa desde la raíz. */
 export function globToRegExp(glob) {
   const doubleStarToken = '\u0000';
   const expression = escapeRegex(glob)
@@ -62,6 +69,10 @@ export function validateImpactMap(value) {
   return value;
 }
 
+/**
+ * Regla activada (`triggered`) = algún archivo cambiado coincide con `includes`. Es violación si no
+ * cambió ninguna fuente de `requires_any` y no hay justificación (`--acknowledge`) para esa regla.
+ */
 export function evaluateDocumentationImpact(changedFiles, map, acknowledgements = new Map()) {
   const files = [...new Set(changedFiles.map((file) => file.replaceAll('\\', '/')))].sort();
   const triggered = [];
@@ -102,6 +113,10 @@ function runGit(arguments_) {
     .filter(Boolean);
 }
 
+/**
+ * Con base (`--base` o `DOCS_BASE_REF`): solo los commits de `base...HEAD`; lo no comprometido no
+ * cuenta. Sin base: cambios staged, unstaged y archivos nuevos no ignorados.
+ */
 export function collectChangedFiles(baseReference) {
   if (baseReference !== undefined) {
     return runGit(['diff', '--name-only', '--diff-filter=ACMRDT', `${baseReference}...HEAD`]);
@@ -133,6 +148,11 @@ function parseBaseReference(arguments_) {
   return value;
 }
 
+/**
+ * `--acknowledge=regla:razón` acepta una regla sin cambiar su fuente. Solo existe en la línea de
+ * comandos: `verify:pr` y CI no pasan ninguna, así que en CI toda regla activada exige cambiar una
+ * fuente de `requires_any`.
+ */
 export function parseAcknowledgements(arguments_) {
   const acknowledgements = new Map();
   for (const argument of arguments_.filter((item) => item.startsWith('--acknowledge='))) {

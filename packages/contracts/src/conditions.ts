@@ -14,6 +14,11 @@ import {
 } from './scalars.js';
 import { sourceEventSchema, type SourceEvent } from './source-events.js';
 
+/**
+ * `OperationalConditionEvent` (contratos de dominio, «OperationalConditionEvent»): una condición
+ * con estado que se abre por una incidencia y se resuelve con evidencia nueva. Mientras haya una
+ * abierta, la salud no puede ser `healthy` (hay otras causas: ver packages/domain/src/health.ts).
+ */
 const conditionBase = {
   schema_version: schemaVersionSchema,
   condition_event_id: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
@@ -68,6 +73,10 @@ export const operationalConditionEventSchema =
     }
   });
 
+/**
+ * La clave identifica la situación, no el evento: la apertura y su resolución comparten clave, y
+ * una segunda apertura con la misma clave sin resolver es un error (`CONDITION_OPEN_DUPLICATE`).
+ */
 function deriveConditionKey(type: string, identity: JsonValue): string {
   return `${type}:sha256:${sha256Hex(canonicalJson(identity))}`;
 }
@@ -194,6 +203,12 @@ function getExpectedConditionKey(
   }
 }
 
+/**
+ * Comprueba que cada condición tiene la causa correcta: una apertura nace de una sola incidencia
+ * de su tipo, y una resolución referencia su apertura y la evidencia propia de su tipo
+ * (reconexión para `connection_lost`, recuperación completa del mismo rango para un hueco, y al
+ * menos una referencia más para el resto). Recorre en orden de `occurred_at_utc`.
+ */
 export function validateConditionCausality(
   input: ConditionCausalityInput,
 ): ConditionCausalityResult {
@@ -365,6 +380,11 @@ export function validateConditionCausality(
   };
 }
 
+/**
+ * Tipos de condición que siguen abiertos al final del log, únicos y ordenados (la entrada de
+ * `open_condition_types` en `HealthReport`). Ordena igual que validateConditionCausality, y como
+ * `compareConditions` de packages/domain/src/quality.ts (estado-del-codigo D-13).
+ */
 export function reduceOpenConditions(
   input: readonly z.infer<typeof operationalConditionEventSchema>[],
 ): string[] {

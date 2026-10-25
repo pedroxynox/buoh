@@ -17,7 +17,7 @@ Cualquier persona o motor de IA debe leer, en orden:
 
 ## Desarrollo actual
 
-Fase 1 tiene contratos runtime (F1.1), normalización y calidad puras (F1.2) y, sobre PostgreSQL y almacenamiento S3-compatible locales, log raw-first, publicación y replay (F1.3). Todavía no conecta con Deriv ni ejecuta operaciones.
+Fase 1 tiene contratos runtime (F1.1), normalización y calidad puras (F1.2), log raw-first, publicación y replay sobre PostgreSQL y almacenamiento S3-compatible locales (F1.3), y las reglas de calidad 2.0.0 para fuentes como Deriv (F1.4a). Todavía no conecta con Deriv ni ejecuta operaciones. En paralelo, la línea visual V1 dejó la marca, el sistema de diseño, prototipos web, móvil y de escritorio con datos ficticios, y el sitio oficial sin publicar. El [estado del código](docs/arquitectura/estado-del-codigo.md) resume cómo se conectan las piezas, y la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md), lo que falta.
 
 ```text
 pnpm install
@@ -98,6 +98,9 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 - [Sitio oficial](docs/diseno/sitio-oficial.md)
 - [Funciones y disponibilidad](docs/producto/funciones-y-disponibilidad.md)
 - [Contratos de dominio y eventos](docs/arquitectura/contratos-de-dominio.md)
+- [Estado del código](docs/arquitectura/estado-del-codigo.md)
+- [Flujo de gráficos](docs/diseno/flujo-de-graficas.md)
+- [Especificación de pendientes](docs/plan/especificacion-de-pendientes.md)
 - [Seguridad y rigor cuantitativo](docs/gobierno/seguridad-y-rigor-cuantitativo.md)
 - [Protocolo de validación de estrategias](docs/gobierno/protocolo-de-validacion-de-estrategias.md)
 - [Operación y control de riesgo](docs/gobierno/operacion-y-control-de-riesgo.md)

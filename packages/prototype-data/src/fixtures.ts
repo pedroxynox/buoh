@@ -86,7 +86,11 @@ export function r100TickTimeUtc(index: number): string {
   ).toISOString();
 }
 
-/** Ticks que faltan: índices `start` a `end - 1` (14:30:00 a 14:30:10). */
+/**
+ * Ticks que faltan: índices `start` a `end - 1` (14:30:00 a 14:30:10). Su hora y su motivo coinciden
+ * con `INCIDENTS` (conexión perdida e `event_gap_unresolved`), pero la etiqueta se escribe a mano:
+ * la coherencia la comprueba una prueba, no el código (docs/diseno/flujo-de-graficas.md).
+ */
 export const PRICE_GAPS: readonly {
   readonly start: number;
   readonly end: number;
@@ -104,6 +108,7 @@ export function priceSeries(): readonly (number | null)[] {
   return values;
 }
 
+/** Etiquetas del eje de tiempo: la hora HH:MM:SS (UTC) recortada del ISO, sin `formatUtcTime`. */
 export const PRICE_TIME_LABELS = [0, 30, 60, R100_TICKS - 1].map((index) => ({
   index,
   label: r100TickTimeUtc(index).slice(11, 19),
@@ -495,6 +500,10 @@ export const SHADOW_RESULT = `−0,3${NB}%`;
 /**
  * Curva de resultado acumulado hipotético fuera de muestra (fórmula fija). Termina en −0,4 y su
  * peor caída es de 3,6 puntos, coherente con `BACKTEST_CONTEXT`.
+ *
+ * Los valores son puntos porcentuales de resultado acumulado; la caída se mide en esas mismas
+ * unidades, no como porcentaje desde el máximo. Los 121 puntos no tienen un paso de tiempo
+ * definido: `EQUITY_TIME_LABELS` solo reparte las fechas a lo largo de la curva.
  */
 export function equitySeries(): readonly number[] {
   const values: number[] = [];

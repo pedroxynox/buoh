@@ -11,6 +11,11 @@ import {
   uuidV7Schema,
 } from './scalars.js';
 
+/**
+ * `HealthReport` (contratos de dominio, «HealthReport»). En Fase 1 el worker nunca ejecuta, por eso
+ * `execution_mode` solo admite `disabled`. La derivación pura vive en packages/domain/src/health.ts;
+ * el comando que lo emite (`data:health`) llega en F1.5.
+ */
 export const healthReportStructuralSchema = z
   .strictObject({
     schema_version: schemaVersionSchema,

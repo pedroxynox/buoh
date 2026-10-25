@@ -5,6 +5,11 @@ import { Icon } from '@buoh/design-system/react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+/**
+ * Enlace de navegación. Es componente de cliente porque necesita la ruta actual para marcar la
+ * sección activa. La exportación usa `trailingSlash`, así que se compara siempre con barra final;
+ * la portada solo está activa en `/`, porque todas las rutas empiezan por `/`.
+ */
 export function NavLink({
   href,
   label,

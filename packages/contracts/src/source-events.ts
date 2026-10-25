@@ -14,6 +14,11 @@ import {
   uuidV7Schema,
 } from './scalars.js';
 
+/**
+ * `SourceEvent`: lo que llega de una fuente, en orden de observación (contratos de dominio,
+ * «SourceEvent»). El frame crudo se guarda tal cual (`payload_utf8`) con su hash; normalizar o
+ * clasificar calidad nunca lo reescribe.
+ */
 export const rawSourceFrameStructuralSchema = z.strictObject({
   kind: z.literal('raw_source_frame'),
   schema_version: schemaVersionSchema,
@@ -135,6 +140,8 @@ export const sourceEventSchema = z.union([
   historyRecoveryResultSchema,
 ]);
 
+// Estado de avance por fuente y símbolo. El esquema existe desde F1.1, pero todavía no se
+// persiste: llega con la reconexión (F1.5, ADR-0005).
 export const ingestionCursorSchema = z
   .strictObject({
     schema_version: schemaVersionSchema,

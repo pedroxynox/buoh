@@ -84,7 +84,7 @@ Los tokens de `packages/design-system` no dependen de React ni del navegador, pa
 ## Pendientes
 
 - Dominio y alojamiento del sitio oficial.
-- Incremento de móvil (React Native) y de escritorio (Tauri 2).
+- ~~Incremento de móvil (React Native) y de escritorio (Tauri 2).~~ Entregados en V1.4 (ADR-0009) y V1.5 (ADR-0010).
 - Revisión legal del texto del sitio antes de publicarlo.
 
 ## Referencias verificadas

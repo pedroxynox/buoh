@@ -3,6 +3,10 @@ import type { Metadata } from 'next';
 import { PageHeader } from '../../src/components/AppShell';
 import { formatUtc, SOURCES } from '@buoh/prototype-data';
 
+/**
+ * Conexiones (concepto de interfaz §3). Deriv MT5 y Vantage aparecen como fuentes separadas, con
+ * salud propia, porque cada servidor MT5 es una fuente (ADR-0007).
+ */
 export const metadata: Metadata = { title: 'Conexiones' };
 
 export default function ConexionesPage() {

@@ -13,6 +13,11 @@ import {
   uuidV7Schema,
 } from './scalars.js';
 
+/**
+ * `MarketTick` (contratos de dominio, «MarketTick»). Patrón común del paquete: el esquema
+ * `…Structural` describe la forma y se publica como JSON Schema; el esquema refinado añade las
+ * invariantes que JSON Schema no expresa (decimales, orden, hash) y es el que se usa en runtime.
+ */
 export const marketTickStructuralSchema = z
   .strictObject({
     schema_version: schemaVersionSchema,
@@ -31,6 +36,10 @@ export const marketTickStructuralSchema = z
   })
   .meta({ id: 'MarketTick', title: 'MarketTick' });
 
+/**
+ * Identidad del tick sin `observation_id` ni horas de recepción: el mismo tick recibido dos veces
+ * tiene el mismo fingerprint, y así se detectan duplicados y conflictos de hora de fuente.
+ */
 export function deriveTickFingerprint(
   tick: Pick<
     z.infer<typeof marketTickStructuralSchema>,

@@ -1,3 +1,8 @@
+/**
+ * Punto de entrada de @buoh/contracts: esquemas runtime (Zod), identidades canónicas (JCS y SHA-256)
+ * y validaciones entre artefactos. Es la fuente de verdad de los formatos (AGENTS.md); los
+ * JSON Schema de generated/ salen de los esquemas `…Structural` con `pnpm run schemas:generate`.
+ */
 export {
   ContractContextError,
   deriveConnectionConditionKey,

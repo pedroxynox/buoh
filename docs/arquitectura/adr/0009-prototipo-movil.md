@@ -80,7 +80,7 @@ Probar en un teléfono real (Expo Go cuando salga para el SDK 58, o una compilac
 ## Pendientes
 
 - Probar en un teléfono real y elegir cómo distribuir la app (sigue en `PROJECT_STATUS.md`).
-- Prototipo de escritorio (V1.5), con su propio incremento.
+- ~~Prototipo de escritorio (V1.5), con su propio incremento.~~ Entregado en V1.5 (ADR-0010).
 
 ## Referencias verificadas
 

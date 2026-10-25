@@ -3,6 +3,8 @@ import type { EvidenceSource, PerformanceContext } from '../evidence.js';
 import { Badge, ModeBadge } from './Badges.js';
 import { Icon } from './Icon.js';
 
+// PhaseLock, FictitiousDataNotice, EvidenceSourceBadge y MetricWithContext tienen su copia React
+// Native en apps/mobile/src/ui.tsx; sus textos deben coincidir (estado-del-codigo D-02).
 export function Card({
   title,
   subtitle,

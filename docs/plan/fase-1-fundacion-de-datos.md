@@ -4,7 +4,7 @@ schema_version: "1.0.0"
 status: "ready"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-10-25T05:00:00.000Z"
+last_reviewed_utc: "2026-10-25T21:00:00.000Z"
 ---
 
 # Plan ejecutable: Fase 1 — Fundación de datos
@@ -53,7 +53,7 @@ test-vectors/market-data/v1/
 
 ### Diferido explícitamente
 
-`apps/api`, `apps/web` y `apps/mobile` (salvo los prototipos visuales de la [línea visual V1](linea-visual-v1.md)), `signal-engine`, `execution-gateway`, escritorio, Python, backtests, estrategias, señales, OAuth, cuentas, pagos, suscripciones, Redis, TimescaleDB, despliegue productivo de Render y fuentes MetaTrader 5 (Fase 1B, ADR-0007).
+`apps/api`, `apps/web`, `apps/mobile` y el escritorio (salvo los prototipos visuales de la [línea visual V1](linea-visual-v1.md)), `signal-engine`, `execution-gateway`, Python, backtests, estrategias, señales, OAuth, cuentas, pagos, suscripciones, Redis, TimescaleDB, despliegue productivo de Render y fuentes MetaTrader 5 (Fase 1B, ADR-0007).
 
 No se crean directorios vacíos para estos componentes.
 
@@ -157,7 +157,7 @@ Una prueba viva nunca sustituye una prueba offline, porque la red y el mercado n
 1. **F1.1:** Node/pnpm fijados, contratos runtime, validador de integridad del fixture, `verify`, `test:vectors` y guardia documental (`F1-FOUND-001`, `F1-CONTRACT-001`, `F1-GOV-001`).
 2. **F1.2:** normalización y reglas de calidad puras; completar oráculo del pipeline (`F1-VECTOR-001`, `F1-QUALITY-001`).
 3. **F1.3:** PostgreSQL, object storage, source event log, publicación y replay (`F1-STREAM-001`, `F1-DATASET-001`).
-4. **F1.4:** catálogo y streaming público de Deriv (`F1-CATALOG-001`, `F1-SOURCE-001`).
+4. **F1.4:** catálogo y streaming público de Deriv (`F1-CATALOG-001`, `F1-SOURCE-001`). Se entrega en dos partes: F1.4a (reglas de calidad 2.0.0) y F1.4b (catálogo, adaptador y `data:smoke`), según `PROJECT_STATUS.md`.
 5. **F1.5:** reconexión, recuperación, salud y demostración de puerta (`F1-RECONNECT-001`, `F1-HEALTH-001`).
 
 Cada incremento debe ser utilizable, revisable y sin componentes futuros vacíos.

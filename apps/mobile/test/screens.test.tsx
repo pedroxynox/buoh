@@ -66,6 +66,8 @@ const SCREENS = [
   ['mas', <MasScreen key="m" />],
 ] as const;
 
+// Frases prohibidas de la guía de marca §3. La misma lista está copiada en las pruebas de la web y
+// del sitio; si la guía cambia, hay que cambiar las tres (estado-del-codigo D-04).
 const FORBIDDEN = [
   /ganancia garantizada/i,
   /sin riesgo/i,

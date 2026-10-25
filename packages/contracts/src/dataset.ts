@@ -15,6 +15,14 @@ import {
   uuidV7Schema,
 } from './scalars.js';
 
+/**
+ * Manifiestos de dataset (contratos de dominio, «LogicalArtifactRef» a «PublishedManifestRecord»).
+ * Un artefacto lógico es contenido (registros en JCS); un objeto de almacenamiento es su archivo
+ * físico, que puede ir comprimido. El `dataset_id` sale solo de `manifest_core`: el mismo contenido
+ * da el mismo identificador aunque se publique otra vez con otro `publication_id`.
+ */
+
+/** SHA-256 de cero bytes: el hash lógico obligatorio de un rol sin registros. */
 export const EMPTY_SEQUENCE_SHA256 =
   'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 
@@ -123,6 +131,7 @@ export const datasetManifestCoreStructuralSchema = z
   })
   .meta({ id: 'DatasetManifestCore', title: 'DatasetManifestCore' });
 
+// Orden canónico de los roles lógicos: el de la enumeración de arriba.
 const roleOrder = new Map(logicalArtifactRoleSchema.options.map((role, index) => [role, index]));
 
 export const datasetManifestCoreSchema = datasetManifestCoreStructuralSchema.superRefine(
@@ -301,6 +310,7 @@ export const datasetManifestSchema = datasetManifestStructuralSchema.superRefine
       });
     }
 
+    // Además de un objeto por artefacto lógico, todo dataset guarda el perfil de calidad y el esquema de fuente.
     const expectedPhysicalIds = new Set([
       ...value.manifest_core.logical_artifacts.map((artifact) => artifact.artifact_id),
       'quality_profile:000000',

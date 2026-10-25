@@ -178,6 +178,8 @@ Escala (rem sobre 16 px): 0,75 · 0,8125 · 0,875 · 1 · 1,125 · 1,25 · 1,5 �
 - Los huecos y las incidencias de datos se marcan en el gráfico, no se suavizan.
 - Toda curva de resultados indica modo, período, muestra y costes en el propio gráfico.
 
+Cómo están hechos hoy los gráficos, y qué parte de estas reglas cumplen, está en [flujo de gráficos](flujo-de-graficas.md). La curva del prototipo muestra su contexto en la tarjeta de al lado, no dentro del gráfico; está pendiente de decisión (P-V1-03 de la [especificación de pendientes](../plan/especificacion-de-pendientes.md)).
+
 ## 9. Movimiento
 
 - Duraciones de 120, 200 y 320 ms, con curva suave.

@@ -11,7 +11,10 @@ export function ndjsonBytes(records: readonly unknown[]): Uint8Array {
   return utf8(canonicalSequence(records as readonly JsonValue[]));
 }
 
-/** Documento JCS sin newline, tal como se almacena un manifiesto. */
+/**
+ * Documento JCS sin newline, tal como se almacena un manifiesto. Debe dar los mismos bytes que
+ * `canonicalManifestBytes` de @buoh/contracts, que valida el registro publicado (estado-del-codigo D-10).
+ */
 export function canonicalJsonBytes(value: unknown): Uint8Array {
   return utf8(canonicalJson(value as JsonValue));
 }
