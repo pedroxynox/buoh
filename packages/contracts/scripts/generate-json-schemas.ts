@@ -12,6 +12,7 @@ import {
 } from '../src/dataset.js';
 import { healthReportStructuralSchema } from '../src/health.js';
 import { marketTickStructuralSchema } from '../src/market-tick.js';
+import { sourceCatalogSnapshotStructuralSchema } from '../src/source-catalog.js';
 import { ingestionCursorSchema, sourceEventStructuralSchema } from '../src/source-events.js';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,6 +27,7 @@ const schemas = [
   ['market-tick.schema.json', marketTickStructuralSchema],
   ['operational-condition-event.schema.json', operationalConditionEventStructuralSchema],
   ['published-manifest-record.schema.json', publishedManifestRecordStructuralSchema],
+  ['source-catalog-snapshot.schema.json', sourceCatalogSnapshotStructuralSchema],
   ['source-event.schema.json', sourceEventStructuralSchema],
 ] as const;
 

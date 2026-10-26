@@ -76,6 +76,14 @@ export {
   type UuidV7,
 } from './scalars.js';
 export {
+  deriveCatalogContentSha256,
+  deriveCatalogSnapshotId,
+  derivActiveSymbolEntrySchema,
+  sourceCatalogSnapshotSchema,
+  type DerivActiveSymbolEntry,
+  type SourceCatalogSnapshot,
+} from './source-catalog.js';
+export {
   connectionClosedSchema,
   connectionOpenedSchema,
   historyRecoveryResultSchema,

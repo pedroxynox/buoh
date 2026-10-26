@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/SourceCatalogSnapshot",
+  "$defs": {
+    "SourceCatalogSnapshot": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "snapshot_id": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "catalog_format": {
+          "type": "string",
+          "const": "deriv_active_symbols"
+        },
+        "catalog_normalizer_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "connector_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_schema_release": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_schema_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "observation_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "raw_payload_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "received_at_utc": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+        },
+        "entry_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "content_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "entries": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "underlying_symbol": {
+                "type": "string",
+                "minLength": 1
+              },
+              "underlying_symbol_name": {
+                "type": "string"
+              },
+              "underlying_symbol_type": {
+                "type": "string"
+              },
+              "market": {
+                "type": "string"
+              },
+              "submarket": {
+                "type": "string"
+              },
+              "subgroup": {
+                "type": "string"
+              },
+              "pip_size": {
+                "type": "string",
+                "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+              },
+              "exchange_is_open": {
+                "type": "number",
+                "enum": [
+                  0,
+                  1
+                ]
+              },
+              "is_trading_suspended": {
+                "type": "number",
+                "enum": [
+                  0,
+                  1
+                ]
+              }
+            },
+            "required": [
+              "underlying_symbol",
+              "underlying_symbol_name",
+              "underlying_symbol_type",
+              "market",
+              "submarket",
+              "subgroup",
+              "pip_size",
+              "exchange_is_open",
+              "is_trading_suspended"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "snapshot_id",
+        "source",
+        "catalog_format",
+        "catalog_normalizer_version",
+        "connector_version",
+        "source_schema_release",
+        "source_schema_sha256",
+        "observation_id",
+        "raw_payload_sha256",
+        "received_at_utc",
+        "entry_count",
+        "content_sha256",
+        "entries"
+      ],
+      "additionalProperties": false,
+      "title": "SourceCatalogSnapshot"
+    }
+  }
+}
