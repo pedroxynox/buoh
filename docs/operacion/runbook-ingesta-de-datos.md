@@ -87,7 +87,33 @@ Con reglas 2.0.0 (Deriv), los mensajes cuyo `msg_type` declara el perfil en `non
 4. No truncar ni interpretar parcialmente un frame o archivo como válido.
 5. Reabrir solo con configuración versionada y continuidad verificada.
 
+Desde F1.4b, los límites de `schemas.zip` se aplican al cargar los esquemas de Deriv (ver «Carga de los esquemas de Deriv»).
+
 Desde F1.3b, un frame de más de 1 048 576 bytes se rechaza antes de crear el `RawSourceFrame`. Queda una incidencia `source_limit_exceeded` con severidad `error` y una condición abierta en el registro operativo, y la entrada se cierra; solo se admite después el `ConnectionClosed` del cierre. Un `ConnectionOpened` durable resuelve la condición (`input_reopened`) y reabre la entrada. En F1.3b esa reapertura no verifica todavía la continuidad del paso 5: la verificación llega con la reconexión (F1.5). Los límites de la cola en memoria llegan con el transporte real (F1.4/F1.5).
+
+### Carga de los esquemas de Deriv
+
+Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §2), el worker sabe cargar el `schemas.zip` de la release fijada en ADR-0004 §2 (`apps/market-data-worker/src/deriv/schema-archive.ts`). Lo descarga de su release en GitHub, porque buoh no guarda esos esquemas en Git. El adaptador que lo usa al arrancar, antes de abrir el WebSocket, llega con el transporte (ADR-0012 §12, PR 5). Ese llamador aplica el tiempo máximo de 30 000 ms con su reloj inyectado, y no se conecta si la carga falla. La carga comprueba, en este orden:
+
+1. la descarga: como mucho 5 242 880 bytes. Un `Content-Length` mayor se rechaza sin leer el cuerpo, y una descarga sin él se corta en cuanto lo supera;
+2. el SHA-256 del archivo, antes de abrirlo;
+3. el directorio del ZIP, sin descomprimir: no puede usar ZIP64, y admite como mucho 1000 entradas, 10 485 760 bytes declarados por entrada y 52 428 800 en total;
+4. que estén las 14 entradas que usa buoh (petición y respuesta de `active_symbols`, `forget`, `forget_all`, `ping`, `ticks`, `ticks_history` y `time`). Solo esas se descomprimen, y cada una tiene que medir lo que declara, tener el SHA-256 fijado para ella y compilar con su validador estricto.
+
+Las huellas de las 14 entradas cubren lo que el lector de ZIP no comprueba: no valida el CRC-32, y una entrada más larga de lo que declara saldría cortada. Cambiar de release exige un PR con pruebas del adaptador (ADR-0004 §2) que fije el SHA-256 del archivo y el de sus 14 entradas, calculados con un lector independiente que compruebe el CRC-32, como `zipfile` de Python.
+
+Cualquier fallo deja la salud en `failed`. No se reintenta con contenido no confiable (ADR-0004 §12). El resultado da un motivo y un dato saneado (`detail`):
+
+| Motivo | Qué indica | Qué hacer |
+|---|---|---|
+| `source_limit_exceeded` | se superó un límite (`detail` dice cuál) | queda una incidencia `critical` y una condición abierta en el registro operativo. Revisar si la release cambió; nunca subir el límite sin configuración versionada y revisión |
+| `archive_sha256_mismatch` | el archivo no es el fijado (`detail` da el hash recibido) | no usarlo. Comprobar la release en GitHub. Cambiar de release exige un PR con pruebas del adaptador (ADR-0004 §2), nunca seguir `latest` |
+| `archive_invalid` | el ZIP está roto o usa ZIP64 (`detail` dice `zip64`), o una entrada extraída no mide lo que declara o no tiene su SHA-256 fijado (`detail` la nombra) | igual que un hash distinto: no se usa |
+| `schema_entry_missing` | faltan entradas (`detail` las nombra) | la release no es la esperada; no se usa |
+| `schema_entry_invalid` | una entrada no es JSON, tiene otro `$schema` o no compila en modo estricto (`detail` la nombra) | igual |
+| `download_status` (`detail` da el código HTTP), `download_failed` o `download_timeout` | GitHub no respondió bien, no se pudo conectar o venció el tiempo | reintentar más tarde. No hay incidencia, porque no se recibió contenido |
+
+La condición de un límite de esquema se resuelve con el primer `ConnectionOpened` durable de una ejecución posterior que sí cargó los esquemas.
 
 ### Almacenamiento no disponible o backlog lleno por conteo/bytes
 
