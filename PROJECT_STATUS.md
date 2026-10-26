@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 18
-updated_at_utc: "2026-10-25T23:00:00.000Z"
+status_version: 19
+updated_at_utc: "2026-10-26T00:00:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -46,6 +46,17 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 **`F1.4b` — Catálogo y streaming público de Deriv.**
 
 Implementar el catálogo versionado de `active_symbols` (`F1-CATALOG-001`) y el adaptador público de Deriv con esquemas fijados, límites, keepalive y correlación (`F1-SOURCE-001`), entregando sus frames al `RawFirstIngestor` con un perfil de reglas 2.0.0, más el smoke opt-in `pnpm run data:smoke`.
+
+Las decisiones técnicas están en [ADR-0012](docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md):
+
+- dependencias nuevas: el transporte `ws`, el validador `ajv-draft-04` (elegido por el dialecto del esquema) y `fflate` para leer `schemas.zip`;
+- la forma y las versiones del snapshot del catálogo;
+- las incidencias de respuestas pedidas;
+- el perfil de medición;
+- el bloqueo por fuente;
+- el smoke en memoria.
+
+La ADR fija también una secuencia de siete PR. Los puntos de partida de abajo se comprobaron antes de la ADR; donde difieran, manda la ADR.
 
 Decisiones del propietario para F1.4b:
 

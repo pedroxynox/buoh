@@ -6,7 +6,7 @@ Desde F1.1, [`packages/contracts`](../../packages/contracts/) es canónico para 
 
 Las validaciones que JSON Schema no expresa —hashes derivados, orden, cardinalidad entre artifacts y relaciones entre campos— permanecen en los esquemas runtime y sus pruebas. Un consumidor no debe sustituir la validación runtime por validar únicamente el JSON Schema. Las invariantes entre artefactos de un dataset (conteos, orden canónico, unión tick→raw, referencias de incidencias, procedencia y extremos temporales) están en `validateDatasetConsistency`, que usan el verificador de vectores y `data:replay` en ambos modos.
 
-Fase 1 implementa `SourceEvent`, `MarketTick`, `DataQualityIncident`, `OperationalConditionEvent`, `IngestionCursor`, `DatasetManifest`, `PublishedManifestRecord` y `HealthReport`. Estrategias, señales y ejecución permanecen conceptuales.
+Fase 1 implementa `SourceEvent`, `MarketTick`, `DataQualityIncident`, `OperationalConditionEvent`, `IngestionCursor`, `DatasetManifest`, `PublishedManifestRecord` y `HealthReport`. F1.4b añade `SourceCatalogSnapshot` ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md)). Estrategias, señales y ejecución permanecen conceptuales.
 
 ## Evidencia de F1.1
 
@@ -385,6 +385,53 @@ open_condition_types: ("connection_lost" | "event_gap_unresolved" |
 
 `persistence_unavailable` y `source_limit_exceeded` son incidencias operativas cuando impiden crear un source event durable; permanecen en el registro operativo PostgreSQL y no se insertan retroactivamente en un dataset publicado. Los artifacts `quality_incidents` y `operational_conditions` del dataset contienen únicamente eventos derivables de sus source events.
 
+## `SourceCatalogSnapshot`
+
+Definido para F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §7, `F1-CATALOG-001`) y pendiente de implementar en `packages/contracts`. Es una versión del catálogo oficial de una fuente, derivada de un `RawSourceFrame` durable que trae la respuesta completa. Es inmutable: un catálogo distinto crea otro snapshot.
+
+```text
+schema_version: "1.0.0"
+snapshot_id: DerivedEventId
+source: string
+catalog_format: "deriv_active_symbols"
+catalog_normalizer_version: "1.0.0"
+connector_version: string
+source_schema_release: string
+source_schema_sha256: Sha256Hex
+observation_id: UuidV7
+raw_payload_sha256: Sha256Hex
+received_at_utc: UtcTimestampMs
+entry_count: integer >= 1
+content_sha256: Sha256Hex
+entries: DerivActiveSymbolEntry[]   # no vacía
+```
+
+`DerivActiveSymbolEntry`, con los nombres y valores oficiales sin traducir ni reinterpretar:
+
+```text
+underlying_symbol: Symbol
+underlying_symbol_name: string
+underlying_symbol_type: string
+market: string
+submarket: string
+subgroup: string
+pip_size: DecimalString            # lexema recibido, sin exponente
+exchange_is_open: 0 | 1
+is_trading_suspended: 0 | 1
+```
+
+- **Procedencia.** `source`, `connector_version`, `observation_id`, `raw_payload_sha256` y `received_at_utc` son los del frame. `source_schema_release` es la release fijada, y `source_schema_sha256`, el SHA-256 del JCS del esquema de respuesta con que se validó (`active_symbols_response.schema.json`).
+- **Identidad.** `snapshot_id` es `sha256:` + SHA-256 del JCS del snapshot sin `snapshot_id`. `content_sha256` es el hash de secuencia de `entries` (JCS por línea, unidas por `\n`, con newline final), y `entry_count`, su longitud.
+- **Orden.** `entries` va ordenada por `underlying_symbol` en unidades UTF-16 y no repite códigos.
+- **Campos fuera.** `trade_count` no entra: es un contador que cambió en todas las entradas entre dos consultas separadas por 8 s (ADR-0012), y con él cada consulta sería una versión. El raw lo conserva.
+- **Dos `pip_size`.** El `pip_size` del catálogo es la variación mínima que publica Deriv (por ejemplo `0.01`). No es el de `MarketTick`, que cuenta decimales.
+- **Versiones.**
+  - Un índice PostgreSQL append-only asigna versiones contiguas desde 1 por `source + catalog_format`.
+  - Un snapshot se guarda solo si su `content_sha256` difiere del de la última versión; volver a un contenido anterior también crea versión.
+  - La versión la pone el índice y no forma parte del snapshot.
+  - El documento es el JCS del snapshot, sin newline, en el almacenamiento de objetos con clave por contenido.
+- **Respuesta inválida.** Un `error`, no cumplir el esquema fijado, una lista vacía, códigos repetidos o un número con exponente no crean versión. El último snapshot válido sigue vigente, y quien pidió el catálogo registra la incidencia de [respuestas pedidas](#incidencias-de-respuestas-pedidas) con el motivo `source_error_response`, `schema_validation_failed`, `catalog_empty`, `catalog_duplicate_symbol` o `catalog_exponent_not_supported`.
+
 ## Replay de dataset
 
 `pnpm run data:replay -- --dataset <id>` ejecuta por defecto **recomputación**, sin red:
@@ -461,6 +508,24 @@ Cada registro de un dataset declara la misma versión de contrato que su manifie
 
 Aplicadas a los source events del vector v1, las reglas 2.0.0 dan los mismos ticks y las mismas incidencias y condiciones, salvo sus campos de versión e IDs derivados. El vector v1 sigue fijado a 1.0.0, y el replay conserva lector y recomputación para ambos conjuntos.
 
+### Validador del esquema de fuente
+
+Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §2), el validador se elige por el `$schema` del documento de esquema de fuente:
+
+- draft 2020-12: `Ajv2020`, como en los vectores;
+- draft-04: `ajv` con `ajv-draft-04`, como en Deriv;
+- cualquier otro: crear el perfil falla.
+
+Los dos validan en modo estricto. En draft-04 solo se admiten como anotación, sin validar, las palabras clave `auth_required` y `examples` de la release fijada de Deriv. El replay obtiene el mismo validador del esquema que el dataset publica.
+
+### Perfil de medición
+
+Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §8), el perfil de calidad admite `purpose: "measurement"`, opcional.
+
+- Sin ese campo, el perfil es de publicación, como hasta ahora; los perfiles existentes conservan sus bytes y sus hashes.
+- Un perfil de medición usa las reglas 2.0.0, declara `non_tick_msg_types` y no lleva `maximum_delivery_delay_ms` ni `maximum_event_gap_ms`. Los umbrales live se fijan después con lo que mida el smoke.
+- La derivación de un dataset y su publicación lo rechazan, así que nunca publica. El ingestor y el normalizador lo aceptan.
+
 ### Registro operativo de persistencia y límites
 
 Implementado en F1.3b ([ADR-0005](adr/0005-persistencia-local-y-formato-fisico-f1-3.md), `apps/market-data-worker/src/operational`). Vive en tablas PostgreSQL append-only (`operational_incidents`, `operational_conditions`) separadas de los datasets y nunca entra en sus artifacts. Cada escritura se valida con `validateConditionCausality` antes de persistirse. Sus incidencias declaran reglas 1.0.0 y esquema de incidencias 1.0.0 sea cual sea el perfil de la fuente: las reglas de persistencia y límites son las mismas en ambos conjuntos y nunca llevan `invalid_source_frame`.
@@ -478,6 +543,31 @@ Implementado en F1.3b ([ADR-0005](adr/0005-persistencia-local-y-formato-fisico-f
 - Si PostgreSQL no está disponible no se puede registrar: se emite una alerta estructurada y sanitizada en stderr, sin afirmar persistencia y sin inserción retroactiva posterior.
 - El motivo (`evidence.reason`) es el código o nombre del error de almacenamiento, nunca su mensaje.
 - Mientras quede una condición abierta, incluida una de una ejecución anterior, la entrada sigue cerrada hasta el `ConnectionOpened` que la resuelve.
+
+Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §3 y §4), el transporte también registra aquí dos límites que actúan antes del `RawFirstIngestor`:
+
+- el frame que el cliente WebSocket corta por superar 1 048 576 bytes. Su `observed_value` es el tamaño declarado en la cabecera, y su `observed_ref`, un UUIDv7 nuevo, porque el frame nunca llega;
+- la cola en memoria llena (`in_memory_queue_events` o `in_memory_queue_bytes`), con el `observation_id` del frame que no cupo.
+
+En los dos casos el transporte pausa el ingestor y cierra la entrada con `ConnectionClosed` (`closure_type: requested`).
+
+### Incidencias de respuestas pedidas
+
+Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §6). Las reglas 2.0.0 no comprueban las respuestas declaradas en `non_tick_msg_types`. Quien pidió una respuesta declarada la compara con el esquema de respuesta de su operación en la release fijada. Si la respuesta trae `error`, no cumple ese esquema o, en el catálogo, no puede convertirse en snapshot, quien la pidió registra un `DataQualityIncident`:
+
+| Campo | Valor |
+|---|---|
+| `incident_type` | `invalid_source_frame` |
+| `schema_version` y `quality_rule_version` | `2.0.0` |
+| `severity` | `error` |
+| `observed_ref` y `observed_at_utc` | `observation_id` y `received_at_utc` del frame |
+| `related_refs` | `[]` |
+| `symbol` | `echo_req.ticks` si el perfil lo permite; si no, `null` |
+| `evidence` | `raw_payload_sha256` y el motivo: `source_error_response`, `schema_validation_failed` o uno de los del catálogo |
+
+Así, la incidencia se puede volver a derivar del frame durable. Vive en la tabla PostgreSQL append-only `requested_response_incidents`, fuera de los datasets y del registro operativo: no abre condiciones ni cambia la salud.
+
+El perfil de Deriv no declara `ticks` ni `error`. Una suscripción fallida (`msg_type` `ticks`) y la respuesta a un método desconocido (`msg_type` `error`) llegan con un objeto `error`, y las reglas 2.0.0 ya las registran como `source_error_response`.
 
 ## Contratos futuros
 

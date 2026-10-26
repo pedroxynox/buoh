@@ -1,6 +1,6 @@
 # ADR-0004: Pipeline y reproducción de datos de Fase 1
 
-- **Estado:** Aceptada; §6–§9 complementadas por [ADR-0005](0005-persistencia-local-y-formato-fisico-f1-3.md) (servicios locales, formato físico transitorio y log raw-first de F1.3)
+- **Estado:** Aceptada; §6–§9 complementadas por [ADR-0005](0005-persistencia-local-y-formato-fisico-f1-3.md) (servicios locales, formato físico transitorio y log raw-first de F1.3); §2, §6, §7, §12 y §13 complementadas por [ADR-0012](0012-catalogo-y-adaptador-publico-de-deriv.md) (catálogo, adaptador público y smoke de F1.4b)
 - **Fecha:** 2026-10-17
 - **Ámbito:** Fase 1
 - **Decisores:** Dirección técnica de buoh
