@@ -100,7 +100,7 @@ Usa [la plantilla](.github/pull_request_template.md) y declara:
 - impacto técnico/documental;
 - riesgos, límites y siguiente relevo.
 
-El usuario conserva la decisión de solicitar cambios o fusionar. No subas directamente a `main`.
+El agente fusiona sus PR con las condiciones de [AGENTS.md](AGENTS.md) («Fusión»): revisión semántica sin hallazgos bloqueantes, CI en verde y un comentario en el PR. El propietario puede pedir cambios, revertir un PR o retirar esa delegación. No subas directamente a `main`.
 
 ## Git y commits
 

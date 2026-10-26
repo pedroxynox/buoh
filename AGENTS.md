@@ -63,7 +63,7 @@ Los detalles completos están en [fundamentos de buoh](.kiro/steering/fundamento
 6. Ejecuta las verificaciones disponibles y conserva comandos y resultados exactos.
 7. Revisa impacto documental y actualiza la fuente canónica correspondiente.
 8. Actualiza `PROJECT_STATUS.md` solo si cambian fase, objetivo, tarea siguiente, bloqueo, decisión pendiente o evidencia de salida.
-9. Abre un PR pequeño usando la plantilla; el usuario conserva la decisión de fusionar.
+9. Abre un PR pequeño usando la plantilla y fusiónalo con las condiciones de «Fusión».
 
 No se considera terminado un cambio porque compile o porque un comando termine con código cero: verifica cada criterio de aceptación aplicable.
 
@@ -85,6 +85,16 @@ El modelo revisor contrasta el diff con fuentes canónicas y vectores independie
 - Cada PR recibe una sola revisión semántica.
 - Solo se repite si encontró hallazgos bloqueantes, y únicamente tras corregirlos.
 - Los hallazgos menores no reabren la revisión: quedan anotados en el PR como pendientes.
+
+### Fusión
+
+Desde el 2026-10-26, por decisión del propietario, el agente fusiona sus propios PR sin esperar al propietario, cuando se cumplen las tres condiciones:
+
+- la revisión semántica terminó sin hallazgos bloqueantes;
+- los checks de CI están en verde sobre el último commit del PR;
+- el agente deja antes en el PR un comentario que dice que fusiona por esta decisión y qué condiciones se cumplieron.
+
+Si el PR necesita una decisión del propietario sobre riesgo, dinero, producto o seguridad, el agente la pide primero y fusiona solo después de que la tome. El propietario puede pedir cambios, revertir un PR fusionado o retirar esta delegación cuando quiera. Nadie sube cambios directamente a `main`.
 
 ## Desarrollo por fases
 
