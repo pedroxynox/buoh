@@ -66,13 +66,15 @@ export function deriveCatalogContentSha256(entries: StructuralSnapshot['entries'
 }
 
 /**
- * `snapshot_id`: `sha256:` + SHA-256 del JCS del snapshot sin `snapshot_id`. Se construye con los
- * campos del contrato, uno por uno, para que un campo ajeno nunca entre en la identidad.
+ * `snapshot_id`: `sha256:` + SHA-256 del JCS del snapshot sin `snapshot_id`. El cuerpo se arma con
+ * los campos del contrato, uno por uno, así que un campo ajeno de primer nivel no entra en la
+ * identidad, y `satisfies` obliga a añadir aquí todo campo nuevo del esquema. Las entradas entran
+ * tal como llegan: quien llame directamente a esta función debe pasar entradas ya validadas.
  */
 export function deriveCatalogSnapshotId(
   snapshot: Omit<StructuralSnapshot, 'snapshot_id'>,
 ): `sha256:${string}` {
-  const body: JsonValue = {
+  const body = {
     catalog_format: snapshot.catalog_format,
     catalog_normalizer_version: snapshot.catalog_normalizer_version,
     connector_version: snapshot.connector_version,
@@ -86,7 +88,7 @@ export function deriveCatalogSnapshotId(
     source: snapshot.source,
     source_schema_release: snapshot.source_schema_release,
     source_schema_sha256: snapshot.source_schema_sha256,
-  };
+  } satisfies Record<Exclude<keyof StructuralSnapshot, 'snapshot_id'>, JsonValue>;
   return deriveEventId(body);
 }
 

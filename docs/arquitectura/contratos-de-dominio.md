@@ -389,7 +389,7 @@ open_condition_types: ("connection_lost" | "event_gap_unresolved" |
 
 Definido para F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §7, `F1-CATALOG-001`) e implementado en `packages/contracts` (`sourceCatalogSnapshotSchema`, con `deriveCatalogContentSha256` y `deriveCatalogSnapshotId`). Es una versión del catálogo oficial de una fuente, derivada de un `RawSourceFrame` durable que trae la respuesta completa. Es inmutable: un catálogo distinto crea otro snapshot.
 
-El JSON Schema generado (`source-catalog-snapshot`) describe la forma. El orden de `entries`, `entry_count` y los dos hashes solo los comprueba el esquema runtime.
+El JSON Schema generado (`source-catalog-snapshot`) describe la forma. Solo el esquema runtime comprueba el orden y la unicidad de `entries`, que `entry_count` sea su longitud y los dos hashes.
 
 ```text
 schema_version: "1.0.0"
