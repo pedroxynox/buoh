@@ -16,6 +16,7 @@ export {
 export { loadSyntheticFixture, type FixtureScenario, type SyntheticFixture } from './fixture.js';
 export { createUuidV7Generator } from './ids.js';
 export {
+  buildRawSourceFrame,
   RawFirstIngestor,
   type FrameInput,
   type PersistenceFailureReport,

@@ -41,9 +41,9 @@ Tipos de pendiente:
 - **Objetivo:** guardar versiones inmutables de la lista oficial de símbolos de Deriv.
 - **Fuente:** plan de Fase 1 §6 (`F1-CATALOG-001`), ADR-0004 §6 y `PROJECT_STATUS.md` (siguiente tarea `F1.4b`).
 - **Estado (verificado):**
-  - no hay módulo, comando, migración ni tabla de catálogo en `apps/market-data-worker`;
-  - los contratos de dominio describen el snapshot desde ADR-0012, `packages/contracts` lo implementa (`sourceCatalogSnapshotSchema`, PR 2 de F1.4b) y `packages/domain` convierte la respuesta de Deriv en snapshot (`deriveCatalogSnapshot`, PR 3); faltan la consulta, el almacenamiento con sus versiones y el comando;
-  - `PROJECT_STATUS.md` confirma que no hay integración con Deriv.
+  - los contratos de dominio describen el snapshot desde ADR-0012, `packages/contracts` lo implementa (`sourceCatalogSnapshotSchema`, PR 2 de F1.4b) y `packages/domain` convierte la respuesta de Deriv en snapshot (`deriveCatalogSnapshot`, PR 3);
+  - desde el PR 5, el adaptador del worker pide `active_symbols`, crea el snapshot desde el frame durable y lo guarda con la regla de versiones a través del puerto `CatalogStore` (`apps/market-data-worker/src/deriv/`). Un catálogo inválido deja su incidencia y no reemplaza la última versión válida. En las pruebas, el almacén es un doble en memoria;
+  - faltan el almacén en PostgreSQL y almacenamiento de objetos, con su migración (PR 6), y el comando (PR 7).
 - **Esperado:** el worker consulta `active_symbols` por el canal público. Guarda un snapshot con fecha de recepción UTC, versión del conector, versión del esquema de fuente, hash de contenido y la lista sin reinterpretar los nombres oficiales. Los snapshots son inmutables en almacenamiento de objetos, con índice en PostgreSQL.
 - **Componentes:** `packages/contracts` (el esquema `SourceCatalogSnapshot`, ya hecho), `packages/domain` (la conversión de la respuesta de Deriv) y `apps/market-data-worker` (adaptador, almacenamiento y migración).
 - **Aceptación (plan §6):**
@@ -60,10 +60,11 @@ Tipos de pendiente:
 - **Fuente:** plan de Fase 1 §6, ADR-0004 §2 y §7, y `PROJECT_STATUS.md` («Puntos de partida ya comprobados para F1.4b»).
 - **Estado (verificado):**
   - ya existen, desde F1.4a: las reglas de calidad 2.0.0, `non_tick_msg_types`, la atribución por `echo_req`, el límite de frame en `RawFirstIngestor.receiveFrame` y la evaluación de límites de cola en `packages/domain/src/health.ts`;
-  - no hay transporte WebSocket, keepalive ni tiempos de espera;
-  - no hay correlación de solicitudes y respuestas, ni descarga de `schemas.zip` con su SHA-256 y sus límites de ZIP;
   - desde el PR 3 de F1.4b, `packages/domain` elige el validador por el dialecto del esquema (Ajv 2020 o `ajv-draft-04`), tiene un perfil de medición que nunca deriva ni publica, y hace las comprobaciones puras de las respuestas pedidas y su incidencia;
-  - el normalizador sigue siendo uno por versión de reglas; el 2.0.0 ya lee las rutas de Deriv (ADR-0012 §2).
+  - desde el PR 4, el worker descarga `schemas.zip` con su SHA-256 y sus límites de ZIP;
+  - desde el PR 5, el worker tiene el adaptador (`apps/market-data-worker/src/deriv/`): transporte `ws`, cola en memoria con sus límites, correlación por `req_id` y `msg_type`, keepalive, tiempos de espera y pausa del ingestor desde el transporte. Lo prueban un socket, un reloj y un temporizador falsos, y `test:integration` comprueba el corte de `ws` con un servidor local;
+  - el normalizador sigue siendo uno por versión de reglas; el 2.0.0 ya lee las rutas de Deriv (ADR-0012 §2);
+  - faltan el almacén de las incidencias de respuestas pedidas en PostgreSQL (PR 6) y `pnpm run data:smoke` (PR 7).
 - **Esperado:**
   - endpoint público documentado, sin OAuth, PAT ni OTP;
   - respuestas validadas contra la release de esquemas fijada;

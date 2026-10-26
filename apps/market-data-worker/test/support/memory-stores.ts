@@ -3,8 +3,14 @@ import {
   type DeploymentEnvironment,
   type OperationalConditionEvent,
   type PublishedManifestRecord,
+  type SourceCatalogSnapshot,
 } from '@buoh/contracts';
 
+import {
+  type CatalogStore,
+  type CatalogVersion,
+  type RequestedResponseIncidentStore,
+} from '../../src/deriv/ports.js';
 import { ObjectReadError, PublicationConflictError, PublicationError } from '../../src/errors.js';
 import { type OperationalStore } from '../../src/operational/registry.js';
 import {
@@ -222,6 +228,70 @@ export class MemoryOperationalStore implements OperationalStore {
     }
     this.incidents.push(...input.incidents);
     this.conditions.push(...input.conditions);
+    return Promise.resolve();
+  }
+}
+
+/**
+ * Versiones del catálogo en memoria con la regla de ADR-0012 §7: versión nueva solo si cambia el
+ * `content_sha256` respecto de la última. `failNext` simula PostgreSQL no disponible una vez.
+ */
+export class MemoryCatalogStore implements CatalogStore {
+  readonly versions: CatalogVersion[] = [];
+  failNext = false;
+
+  #maybeFail(): Promise<void> {
+    if (!this.failNext) {
+      return Promise.resolve();
+    }
+    this.failNext = false;
+    return Promise.reject(Object.assign(new Error('Fallo inyectado'), { code: 'ECONNREFUSED' }));
+  }
+
+  #latest(source: string, catalogFormat: string): CatalogVersion | null {
+    return (
+      this.versions
+        .filter(
+          (item) =>
+            item.snapshot.source === source && item.snapshot.catalog_format === catalogFormat,
+        )
+        .at(-1) ?? null
+    );
+  }
+
+  async latest(
+    source: string,
+    catalogFormat: SourceCatalogSnapshot['catalog_format'],
+  ): Promise<CatalogVersion | null> {
+    await this.#maybeFail();
+    return this.#latest(source, catalogFormat);
+  }
+
+  async record(snapshot: SourceCatalogSnapshot): Promise<{
+    readonly status: 'created' | 'unchanged';
+    readonly version: number;
+  }> {
+    await this.#maybeFail();
+    const last = this.#latest(snapshot.source, snapshot.catalog_format);
+    if (last !== null && last.snapshot.content_sha256 === snapshot.content_sha256) {
+      return { status: 'unchanged', version: last.version };
+    }
+    const version = (last?.version ?? 0) + 1;
+    this.versions.push({ snapshot, version });
+    return { status: 'created', version };
+  }
+}
+
+/** Incidencias de respuestas pedidas en memoria; `failAppend` simula PostgreSQL no disponible. */
+export class MemoryRequestedResponseIncidentStore implements RequestedResponseIncidentStore {
+  readonly incidents: DataQualityIncident[] = [];
+  failAppend = false;
+
+  append(incident: DataQualityIncident): Promise<void> {
+    if (this.failAppend) {
+      return Promise.reject(Object.assign(new Error('Fallo inyectado'), { code: 'ECONNREFUSED' }));
+    }
+    this.incidents.push(incident);
     return Promise.resolve();
   }
 }

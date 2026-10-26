@@ -1,11 +1,18 @@
-import { rawSourceFrameSchema, sha256Hex, type SourceEvent } from '@buoh/contracts';
+import {
+  rawSourceFrameSchema,
+  sha256Hex,
+  type RawSourceFrame,
+  type SourceEvent,
+} from '@buoh/contracts';
 import {
   CONTRACT_SCHEMA_VERSION,
   evaluateSourceLimit,
   normalizeRawFrame,
+  SOURCE_LIMITS,
   type InvalidFrameReason,
   type PipelineProfile,
   type SegmentCloseReason,
+  type SourceLimitViolation,
   type UnflaggedTick,
 } from '@buoh/domain';
 
@@ -34,6 +41,26 @@ export interface FrameInput {
   readonly observation_id: string;
   readonly payload_utf8: string;
   readonly received_at_utc: string;
+}
+
+/**
+ * `RawSourceFrame` de un frame del transporte. Es pura: el ingestor la usa antes de escribir, y quien
+ * correlaciona respuestas la repite sobre el texto que conserva para obtener el mismo frame sin
+ * releer el log (ADR-0012 §5).
+ */
+export function buildRawSourceFrame(frame: FrameInput, profile: PipelineProfile): RawSourceFrame {
+  return rawSourceFrameSchema.parse({
+    connection_id: frame.connection_id,
+    connector_version: profile.connector_version,
+    kind: 'raw_source_frame',
+    observation_id: frame.observation_id,
+    payload_utf8: frame.payload_utf8,
+    // Hash sobre los bytes UTF-8 exactos; nunca se reserializa el payload.
+    raw_payload_sha256: sha256Hex(frame.payload_utf8),
+    received_at_utc: frame.received_at_utc,
+    schema_version: CONTRACT_SCHEMA_VERSION,
+    source: profile.source,
+  });
 }
 
 export type ReceiveOutcome =
@@ -160,18 +187,7 @@ export class RawFirstIngestor {
       return { resource: violation.evidence.resource, status: 'limit_exceeded' };
     }
 
-    const raw = rawSourceFrameSchema.parse({
-      connection_id: frame.connection_id,
-      connector_version: this.#input.profile.connector_version,
-      kind: 'raw_source_frame',
-      observation_id: frame.observation_id,
-      payload_utf8: frame.payload_utf8,
-      // Hash sobre los bytes UTF-8 exactos; nunca se reserializa el payload.
-      raw_payload_sha256: sha256Hex(frame.payload_utf8),
-      received_at_utc: frame.received_at_utc,
-      schema_version: CONTRACT_SCHEMA_VERSION,
-      source: this.#input.profile.source,
-    });
+    const raw = buildRawSourceFrame(frame, this.#input.profile);
     const outcome = await this.#append(raw, raw.observation_id);
     if (outcome.status !== 'durable') {
       return outcome;
@@ -195,6 +211,35 @@ export class RawFirstIngestor {
       });
     }
     return outcome;
+  }
+
+  /**
+   * Límite que el transporte detecta antes de `receiveFrame` (ADR-0012 §3 y §4): un frame que `ws`
+   * cortó por su tamaño declarado o un frame que no cupo en la cola. Pausa la entrada y registra
+   * `source_limit_exceeded`, como `receiveFrame` con un frame de más de 1 MiB. Solo escribe en el
+   * registro operativo, nunca en el log; el transporte lo llama desde el mismo consumidor que entrega
+   * los frames, así que el ingestor sigue recibiendo una sola llamada a la vez.
+   */
+  async pauseForSourceLimit(input: {
+    readonly observed_at_utc: string;
+    /** `observation_id` que el transporte asignó al frame rechazado. */
+    readonly observed_ref: string;
+    readonly violation: SourceLimitViolation;
+  }): Promise<ReceiveOutcome> {
+    const { resource } = input.violation.evidence;
+    // Solo los límites de frame y de cola pausan la entrada. Los de esquema dejan `failed` y los
+    // registra la carga de esquemas.
+    if (SOURCE_LIMITS[resource].health !== 'paused') {
+      throw new TypeError(`El recurso ${resource} no pausa la entrada.`);
+    }
+    this.#paused = true;
+    await this.#input.registry.recordSourceLimitExceeded({
+      observed_at_utc: input.observed_at_utc,
+      observed_ref: input.observed_ref,
+      related_refs: this.#relatedRefs(),
+      violation: input.violation,
+    });
+    return { resource, status: 'limit_exceeded' };
   }
 
   /**

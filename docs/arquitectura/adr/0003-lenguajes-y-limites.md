@@ -43,6 +43,7 @@ Motivos completos en [ADR-0012](0012-catalogo-y-adaptador-publico-de-deriv.md):
 
 - Ajv valida los esquemas de fuentes externas según su dialecto: `Ajv2020` para 2020-12, como los vectores, y `ajv-draft-04` para draft-04, el de la release fijada de Deriv (§2). `ajv-draft-04` es del equipo de Ajv, no tiene dependencias propias y usa el `ajv` que ya está en el repositorio.
 - `fflate` lee `schemas.zip` en el worker (§2): da el tamaño declarado de cada entrada antes de descomprimirla y extrae solo las que se piden. No tiene dependencias; un lector propio sobre `node:zlib` sería más código delicado que mantener.
+- `ws` es el cliente WebSocket del worker (§3): rechaza un mensaje por su tamaño declarado antes de leer su contenido (`maxPayload`) y permite desactivar la compresión. El `WebSocket` global de Node reúne el mensaje entero antes de que buoh pueda rechazarlo. `ws` no tiene dependencias propias, y sus tipos vienen de `@types/ws`, solo para compilar.
 
 ### Python — investigación cuantitativa aislada
 
