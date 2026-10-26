@@ -7,7 +7,12 @@ import type { FormatsPlugin } from 'ajv-formats';
 import { describe, expect, it } from 'vitest';
 
 import * as publicContracts from '../src/index.js';
-import { datasetManifestSchema, marketTickSchema, sourceEventSchema } from '../src/index.js';
+import {
+  datasetManifestSchema,
+  marketTickSchema,
+  sourceCatalogSnapshotSchema,
+  sourceEventSchema,
+} from '../src/index.js';
 
 function loadExportedSchema(name: string): object {
   const url = import.meta.resolve(`@buoh/contracts/json-schema/${name}`);
@@ -44,6 +49,7 @@ describe('JSON Schema exportado', () => {
     expect('marketTickStructuralSchema' in publicContracts).toBe(false);
     expect('datasetManifestStructuralSchema' in publicContracts).toBe(false);
     expect('sourceEventStructuralSchema' in publicContracts).toBe(false);
+    expect('sourceCatalogSnapshotStructuralSchema' in publicContracts).toBe(false);
   });
 
   it('es accesible por subpath público y coincide en restricciones estructurales', () => {
@@ -77,5 +83,34 @@ describe('JSON Schema exportado', () => {
 
     expect(tickValidator(invalid)).toBe(true);
     expect(marketTickSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it('describe la forma del snapshot de catálogo y deja orden y hashes al runtime', () => {
+    const catalogValidator = ajv.compile(loadExportedSchema('source-catalog-snapshot'));
+    const snapshot = sourceCatalogSnapshotSchema.parse(
+      JSON.parse(
+        readFileSync(new URL('./fixtures/source-catalog-snapshot.json', import.meta.url), 'utf8'),
+      ) as unknown,
+    );
+    const [first, ...rest] = snapshot.entries;
+    if (first === undefined) {
+      throw new TypeError('Fixture sin entradas.');
+    }
+
+    expect(catalogValidator(snapshot)).toBe(true);
+    expect(
+      catalogValidator({ ...snapshot, entries: [{ ...first, trade_count: 1 }, ...rest] }),
+    ).toBe(false);
+    expect(
+      catalogValidator({ ...snapshot, entries: [{ ...first, pip_size: '1e-3' }, ...rest] }),
+    ).toBe(false);
+    expect(catalogValidator({ ...snapshot, entries: [] })).toBe(false);
+
+    const reordered = { ...snapshot, entries: [...snapshot.entries].reverse() };
+    expect(catalogValidator(reordered)).toBe(true);
+    expect(sourceCatalogSnapshotSchema.safeParse(reordered).success).toBe(false);
+    const wrongHash = { ...snapshot, content_sha256: '0'.repeat(64) };
+    expect(catalogValidator(wrongHash)).toBe(true);
+    expect(sourceCatalogSnapshotSchema.safeParse(wrongHash).success).toBe(false);
   });
 });

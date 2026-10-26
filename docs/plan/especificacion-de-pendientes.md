@@ -36,16 +36,16 @@ Tipos de pendiente:
 
 ## 1. Fase 1 — Fundación de datos
 
-### P-F1-01. Catálogo público versionado (`F1-CATALOG-001`) — sin empezar
+### P-F1-01. Catálogo público versionado (`F1-CATALOG-001`) — parcial
 
 - **Objetivo:** guardar versiones inmutables de la lista oficial de símbolos de Deriv.
 - **Fuente:** plan de Fase 1 §6 (`F1-CATALOG-001`), ADR-0004 §6 y `PROJECT_STATUS.md` (siguiente tarea `F1.4b`).
 - **Estado (verificado):**
   - no hay módulo, comando, migración ni tabla de catálogo en `apps/market-data-worker`;
-  - `packages/contracts` no tiene un esquema de snapshot de catálogo; los contratos de dominio lo describen desde ADR-0012;
+  - los contratos de dominio describen el snapshot desde ADR-0012, y `packages/contracts` lo implementa (`sourceCatalogSnapshotSchema`, PR 2 de F1.4b); faltan la conversión desde la respuesta de Deriv, el almacenamiento y el comando;
   - `PROJECT_STATUS.md` confirma que no hay integración con Deriv.
 - **Esperado:** el worker consulta `active_symbols` por el canal público. Guarda un snapshot con fecha de recepción UTC, versión del conector, versión del esquema de fuente, hash de contenido y la lista sin reinterpretar los nombres oficiales. Los snapshots son inmutables en almacenamiento de objetos, con índice en PostgreSQL.
-- **Componentes:** `apps/market-data-worker` (adaptador, almacenamiento y migración). `packages/contracts` solo si hace falta un esquema nuevo.
+- **Componentes:** `packages/contracts` (el esquema `SourceCatalogSnapshot`, ya hecho), `packages/domain` (la conversión de la respuesta de Deriv) y `apps/market-data-worker` (adaptador, almacenamiento y migración).
 - **Aceptación (plan §6):**
   - dos snapshots se guardan como versiones distintas si cambia el contenido;
   - un payload inválido no reemplaza el último snapshot válido y genera una incidencia.

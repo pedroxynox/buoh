@@ -12,7 +12,7 @@ Fase 1 implementa `SourceEvent`, `MarketTick`, `DataQualityIncident`, `Operation
 
 - Zod 4 mantiene contratos estrictos y uniones discriminadas.
 - `canonicalize` implementa RFC 8785 para IDs y hashes estructurados.
-- `pnpm run schemas:generate` produce ocho JSON Schema; `schemas:check` detecta deriva.
+- `pnpm run schemas:generate` produjo ocho JSON Schema en F1.1, y nueve desde F1.4b con `SourceCatalogSnapshot`; `schemas:check` detecta deriva.
 - `pnpm run test:vectors` verifica manifiestos, raw hashes, IDs derivados, publicaciones y escenarios principal/cero-ticks sin red.
 - Desde F1.2, `test:vectors` además regenera con `packages/domain` todos los artefactos de ambos escenarios y los compara byte a byte.
 
@@ -387,7 +387,9 @@ open_condition_types: ("connection_lost" | "event_gap_unresolved" |
 
 ## `SourceCatalogSnapshot`
 
-Definido para F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §7, `F1-CATALOG-001`) y pendiente de implementar en `packages/contracts`. Es una versión del catálogo oficial de una fuente, derivada de un `RawSourceFrame` durable que trae la respuesta completa. Es inmutable: un catálogo distinto crea otro snapshot.
+Definido para F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §7, `F1-CATALOG-001`) e implementado en `packages/contracts` (`sourceCatalogSnapshotSchema`, con `deriveCatalogContentSha256` y `deriveCatalogSnapshotId`). Es una versión del catálogo oficial de una fuente, derivada de un `RawSourceFrame` durable que trae la respuesta completa. Es inmutable: un catálogo distinto crea otro snapshot.
+
+El JSON Schema generado (`source-catalog-snapshot`) describe la forma. Solo el esquema runtime comprueba el orden y la unicidad de `entries`, que `entry_count` sea su longitud y los dos hashes.
 
 ```text
 schema_version: "1.0.0"
