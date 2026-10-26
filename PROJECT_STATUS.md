@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 18
-updated_at_utc: "2026-10-25T23:00:00.000Z"
+status_version: 19
+updated_at_utc: "2026-10-26T00:00:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -47,6 +47,20 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 
 Implementar el catálogo versionado de `active_symbols` (`F1-CATALOG-001`) y el adaptador público de Deriv con esquemas fijados, límites, keepalive y correlación (`F1-SOURCE-001`), entregando sus frames al `RawFirstIngestor` con un perfil de reglas 2.0.0, más el smoke opt-in `pnpm run data:smoke`.
 
+Las decisiones técnicas están en [ADR-0012](docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md):
+
+- dependencias nuevas: el transporte `ws`, el validador `ajv-draft-04` (elegido por el dialecto del esquema) y `fflate` para leer `schemas.zip`;
+- la forma y las versiones del snapshot del catálogo;
+- las incidencias de respuestas pedidas;
+- el perfil de medición;
+- el bloqueo por fuente;
+- el smoke en memoria.
+
+La ADR fija también una secuencia de siete PR. Los puntos de partida de abajo se comprobaron antes de la ADR, que los concreta en dos cosas:
+
+- el correlador no relee el log, porque el transporte conserva el texto de cada frame que entrega (§5);
+- tras un límite de frame o de cola, el cierre es `transport_error`, para que la pérdida quede visible (§4).
+
 Decisiones del propietario para F1.4b:
 
 - el primer smoke usa un solo índice sintético de Deriv (por ejemplo Volatility 100), con el nombre exacto tomado del catálogo oficial;
@@ -58,7 +72,7 @@ El perfil 2.0.0 exige umbrales enteros de retraso y hueco. El smoke solo normali
 Puntos de partida ya comprobados para F1.4b:
 
 - **Preparación para varias fuentes** ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md) §2). El transporte con sus límites, el normalizador, el vocabulario del perfil (`non_tick_msg_types`) y el validador de esquemas propios de Deriv se eligen por fuente; hoy `normalizeRawFrame` y el validador Ajv 2020 están fijos. La elección se deriva del perfil y las versiones que el dataset ya publica, para que el replay la reproduzca sin configuración externa. El log y la publicación no cambian. Los vectores v1 siguen con su normalizador, y no se crea código, directorio ni dependencia de MT5.
-- **Esquemas de Deriv.** En la release fijada (ADR-0004 §2), los esquemas de las operaciones que usa buoh (`active_symbols`, `ticks`, `ticks_history`, `ping`, `time`, `forget` y `forget_all`) son JSON Schema draft-04, en archivos `<operación>_request.schema.json` y `<operación>_response.schema.json`. Otras operaciones de la release, que buoh no usa, están en draft-07. Hace falta un validador compatible con draft-04; Ajv 8, que ya usa `@buoh/domain`, no lo admite, así que es una dependencia nueva que el PR de F1.4b debe justificar. Esas siete respuestas exigen `msg_type` y `echo_req`, y en `ticks_response` el objeto `tick` solo exige `pip_size`.
+- **Esquemas de Deriv.** En la release fijada (ADR-0004 §2), los esquemas de las operaciones que usa buoh (`active_symbols`, `ticks`, `ticks_history`, `ping`, `time`, `forget` y `forget_all`) son JSON Schema draft-04, en archivos `<operación>_request.schema.json` y `<operación>_response.schema.json`. Las demás operaciones de la release, que buoh no usa, mezclan draft-04 y draft-07. Hace falta un validador compatible con draft-04; Ajv 8, que ya usa `@buoh/domain`, no lo admite, así que es una dependencia nueva que el PR de F1.4b debe justificar. Esas siete respuestas exigen `msg_type` y `echo_req`, y en `ticks_response` el objeto `tick` solo exige `pip_size`.
 - **Descarga de `schemas.zip`.** El adaptador la rechaza si el SHA-256 no coincide (ADR-0004 §2) y aplica los límites de descarga y de contenido expandido de ADR-0004 §7; superar cualquiera aborta la carga con salud `failed`.
 - **Perfil Deriv.** Declara en `non_tick_msg_types` solo las respuestas que el adaptador pide, nunca `tick`. En la release, `active_symbols`, `ping`, `time`, `forget` y `forget_all` responden con un `msg_type` del mismo nombre. `ticks_history` responde `history` (o `candles` si se pide `style: candles`), y con suscripción sigue con `tick`, que pasa por las reglas de ticks (u `ohlc` con `style: candles`).
 - **Errores en respuestas pedidas.** Las reglas 2.0.0 no registran un `error` dentro de una respuesta declarada: quien la pidió debe comprobarlo y registrarlo ([contratos de dominio](docs/arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-200)). Para eso el correlador de solicitudes y respuestas tiene que leer el raw (pendiente 3 de F1.4a), y F1.4b debe decidir cómo se registra.

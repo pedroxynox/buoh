@@ -5,6 +5,7 @@
 - **Ámbito:** reglas de diseño desde F1.4b; integración MT5 después de Fase 1
 - **Decisores:** Propietario de buoh, a propuesta de la dirección técnica
 - **Complementa:** [ADR-0002](0002-senales-y-ejecucion-controlada.md) (añade un bróker y una excepción a la decisión 6) y [ADR-0003](0003-lenguajes-y-limites.md) (añade MQL5 con un límite estricto). No cambia el alcance de Fase 1 ni [ADR-0004](0004-pipeline-y-reproduccion-de-datos-fase-1.md).
+- **Complementada por:** [ADR-0012](0012-catalogo-y-adaptador-publico-de-deriv.md), que concreta §2 para Deriv: el validador se elige por el dialecto del esquema de fuente.
 
 ## Contexto
 

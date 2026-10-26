@@ -42,18 +42,17 @@ Tipos de pendiente:
 - **Fuente:** plan de Fase 1 §6 (`F1-CATALOG-001`), ADR-0004 §6 y `PROJECT_STATUS.md` (siguiente tarea `F1.4b`).
 - **Estado (verificado):**
   - no hay módulo, comando, migración ni tabla de catálogo en `apps/market-data-worker`;
-  - `packages/contracts` no tiene un esquema de snapshot de catálogo, y los contratos de dominio no lo describen;
+  - `packages/contracts` no tiene un esquema de snapshot de catálogo; los contratos de dominio lo describen desde ADR-0012;
   - `PROJECT_STATUS.md` confirma que no hay integración con Deriv.
 - **Esperado:** el worker consulta `active_symbols` por el canal público. Guarda un snapshot con fecha de recepción UTC, versión del conector, versión del esquema de fuente, hash de contenido y la lista sin reinterpretar los nombres oficiales. Los snapshots son inmutables en almacenamiento de objetos, con índice en PostgreSQL.
 - **Componentes:** `apps/market-data-worker` (adaptador, almacenamiento y migración). `packages/contracts` solo si hace falta un esquema nuevo.
 - **Aceptación (plan §6):**
   - dos snapshots se guardan como versiones distintas si cambia el contenido;
   - un payload inválido no reemplaza el último snapshot válido y genera una incidencia.
-- **Abierto:**
-  - la forma del registro de snapshot no está definida; AGENTS.md pide actualizar los contratos o una ADR antes del código;
-  - no se dice qué incidencia registra un catálogo inválido;
-  - el catálogo no decide el universo comercial: es una decisión pendiente en `PROJECT_STATUS.md`;
-  - el propietario fijó que el primer smoke use un solo índice sintético, con el nombre exacto del catálogo.
+- **Decidido en ADR-0012** (§1, §7 y contratos de dominio, `SourceCatalogSnapshot`):
+  - la forma del snapshot, sus versiones y la incidencia de un catálogo inválido (`invalid_source_frame`, registrada por quien pidió el catálogo);
+  - el símbolo del primer smoke: el propietario fijó un solo índice sintético con el nombre exacto del catálogo, y ADR-0012 elige `R_100`, «Volatility 100 Index».
+- **Abierto:** el catálogo no decide el universo comercial: es una decisión pendiente en `PROJECT_STATUS.md`.
 
 ### P-F1-02. Adaptador público de Deriv (`F1-SOURCE-001`) — parcial
 
@@ -74,12 +73,13 @@ Tipos de pendiente:
   - frames entregados al `RawFirstIngestor` con el perfil de reglas 2.0.0, sin publicar datos vivos.
 - **Componentes:** `apps/market-data-worker`, `packages/domain` (elegir perfil, normalizador y validador según la fuente) y nuevas dependencias.
 - **Aceptación (plan §6):** pruebas del adaptador con fixtures y transporte y reloj falsos, más `pnpm run data:smoke` opt-in (P-F1-03).
-- **Abierto:**
-  - el validador draft-04 es una dependencia nueva que el PR debe justificar;
-  - hay que elegir entre la biblioteca `ws` y el `WebSocket` global de Node 24;
-  - hay que decidir cómo se registran los errores dentro de respuestas pedidas (pendiente 3 de F1.4a);
-  - hace falta una sola instancia por fuente o un bloqueo por fuente (pendiente 6 de F1.3);
-  - hay que dar un camino para registrar los frames que el cliente WebSocket corta antes del ingestor.
+- **Decidido en ADR-0012:**
+  - validador `ajv-draft-04`, elegido por el dialecto del esquema (§2);
+  - transporte `ws`, porque el `WebSocket` global no limita el tamaño (§3);
+  - errores en respuestas pedidas, en `requested_response_incidents` (§6);
+  - bloqueo por fuente en PostgreSQL (§9);
+  - frames cortados por el cliente: tamaño declarado y pausa desde el transporte (§3 y §4).
+- **Abierto:** cada PR de implementación justifica su dependencia nueva.
 
 ### P-F1-03. `pnpm run data:smoke` — sin empezar
 
@@ -93,9 +93,8 @@ Tipos de pendiente:
   - los umbrales de retraso y hueco se fijan después, con lo que mida.
 - **Componentes:** `package.json` raíz y `apps/market-data-worker`.
 - **Aceptación:** la del plan §7.
-- **Abierto:**
-  - ningún documento dice cómo ni dónde se cumple el borrado en 24 horas;
-  - el plan §5 lo sitúa en «F1.4» y `PROJECT_STATUS.md` en `F1.4b` (ver §5 de este documento).
+- **Decidido en ADR-0012** (§10): el smoke guarda todo en memoria y lo borra al terminar, así que el borrado en 24 horas se cumple sin tablas ni objetos que limpiar.
+- **Abierto:** el plan §5 lo sitúa en «F1.4» y `PROJECT_STATUS.md` en `F1.4b` (ver §5 de este documento).
 
 ### P-F1-04. Reconexión y recuperación de historia (`F1-RECONNECT-001`) — parcial
 

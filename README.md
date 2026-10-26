@@ -92,6 +92,7 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 - [ADR-0009: prototipo móvil](docs/arquitectura/adr/0009-prototipo-movil.md)
 - [ADR-0010: prototipo de escritorio](docs/arquitectura/adr/0010-prototipo-de-escritorio.md)
 - [ADR-0011: identidad desde el logo del propietario](docs/arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)
+- [ADR-0012: catálogo y adaptador público de Deriv (F1.4b)](docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md)
 - [Plan de la línea visual V1](docs/plan/linea-visual-v1.md)
 - [Guía de marca](docs/diseno/marca-buoh.md)
 - [Concepto de interfaz](docs/diseno/concepto-de-interfaz.md)
