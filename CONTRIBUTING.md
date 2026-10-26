@@ -86,7 +86,7 @@ pnpm run docs:check -- --acknowledge=contracts:Razón explícita para incluir en
 
 GitHub Actions (`.github/workflows/verify.yml`) ejecuta `DOCS_BASE_REF=origin/main pnpm run verify:pr` en cada PR hacia `main` y en cada push a `main`, con el Node y pnpm fijados. Un segundo job ejecuta `pnpm run test:integration` contra los servicios de `infra/compose.yaml` con credenciales efímeras; localmente requiere esos servicios (ver el [runbook](docs/operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13)). El flujo `.github/workflows/desktop.yml` corre en Windows solo cuando cambian `apps/desktop`, `apps/web`, sus paquetes o la configuración de pnpm, Node, TypeScript o turbo: pasa `cargo fmt`, `cargo clippy` y `cargo test` y compila el instalador del prototipo de escritorio. `pnpm run data:replay` corre `scripts/data-replay.mjs` y `pnpm run data:smoke`, `scripts/data-smoke.mjs`; la guardia pide revisar el runbook de ingesta al tocar cualquiera de los dos. `data:smoke` es opt-in: sin `--live` no abre conexiones, así que ni `verify` ni CI tocan la red.
 
-Sin base, revisa cambios staged, unstaged y no rastreados. `verify:pr` exige `DOCS_BASE_REF` y revisa todo el rango comprometido contra la rama objetivo; lo no comprometido no cuenta. Si una ruta activa una regla, debe cambiar una fuente indicada o recibir una justificación de al menos 20 caracteres; la salida exige copiar esa razón al PR. La justificación solo se puede dar en la línea de comandos (`--acknowledge`): `verify:pr` y CI no la pasan, así que en CI toda regla activada exige cambiar una de sus fuentes, también cuando el cambio es solo de comentarios. Es lo que pide `F1-GOV-001`: el propietario decidió el 2026-10-25 que CI siga sin aceptar justificaciones. La guardia nunca modifica documentación. ADR, seguridad y riesgo conservan revisión humana.
+Sin base, revisa cambios staged, unstaged y no rastreados. `verify:pr` exige `DOCS_BASE_REF` y revisa todo el rango comprometido contra la rama objetivo; lo no comprometido no cuenta. Si una ruta activa una regla, debe cambiar una fuente indicada o recibir una justificación de al menos 20 caracteres; la salida exige copiar esa razón al PR. La justificación solo se puede dar en la línea de comandos (`--acknowledge`): `verify:pr` y CI no la pasan, así que en CI toda regla activada exige cambiar una de sus fuentes, también cuando el cambio es solo de comentarios. Es lo que pide `F1-GOV-001`: el propietario decidió el 2026-10-25 que CI siga sin aceptar justificaciones. La guardia nunca modifica documentación. La seguridad y el riesgo conservan revisión humana: un PR que los afecte espera el visto bueno del propietario antes de fusionarse ([AGENTS.md](AGENTS.md), «Fusión»). Las ADR cuyo único decisor es la dirección técnica siguen el flujo normal de fusión. Crear una ADR que nombre al propietario entre sus decisores, o cambiar una de sus decisiones, espera su visto bueno.
 
 ## Pull requests
 
@@ -100,7 +100,7 @@ Usa [la plantilla](.github/pull_request_template.md) y declara:
 - impacto técnico/documental;
 - riesgos, límites y siguiente relevo.
 
-El usuario conserva la decisión de solicitar cambios o fusionar. No subas directamente a `main`.
+El agente fusiona sus PR con las condiciones de [AGENTS.md](AGENTS.md) («Fusión»). No subas directamente a `main`.
 
 ## Git y commits
 

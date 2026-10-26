@@ -11,13 +11,14 @@ Notas prácticas para sesiones de Kiro. No deciden nada: el proceso está en [`A
 - El propietario no es programador. Explicar en español sencillo, con frases cortas y sin jerga; si hace falta un término técnico, decir qué significa.
 - Ante conflicto o decisión ausente, seguir el protocolo de `AGENTS.md`. Los detalles técnicos que ese protocolo deja al agente se resuelven investigando, sin trasladarlos al propietario.
 - Cuando el protocolo pida una decisión humana, explicar al propietario las opciones y la recomendación en palabras simples.
-- Al terminar, dar el enlace del PR y esperar a que el propietario lo fusione.
+- Al terminar, fusionar el PR con las condiciones de `AGENTS.md` («Fusión») y dar al propietario el enlace del PR y un resumen corto. Si el PR espera su visto bueno, explicarle el cambio en palabras simples y preguntar.
 
 ## Comandos y GitHub
 
 - El Node global del sandbox puede no ser el fijado. Ejecutar todo con `pnpm`, que descarga y usa el Node de `devEngines` en `package.json`.
 - Antes de cada commit, ejecutar `DOCS_BASE_REF=origin/main pnpm run verify:pr` y confirmar que el código de salida es 0. El final del log no basta: un fallo de tipos puede quedar más arriba.
 - Los subcomandos `gh pr` y `gh issue` no funcionan aquí, y `gh run list` tampoco. Crear el PR con `gh api repos/pedroxynox/buoh/pulls -f title=… -F body=@<archivo> -f head=<rama> -f base=main` y revisar CI con `gh api repos/pedroxynox/buoh/commits/<sha>/check-runs`.
+- Para fusionar: primero el comentario con `gh api repos/pedroxynox/buoh/issues/<n>/comments -f body=…`, y después `gh api -X PUT repos/pedroxynox/buoh/pulls/<n>/merge -f merge_method=merge -f sha=<commit con CI en verde>`. Con `sha`, GitHub rechaza la fusión (409) si el PR cambió entretanto.
 - Guardar cuerpos de PR, logs y binarios auxiliares fuera del repo, por ejemplo en `/projects/sandbox/.buoh-local/`.
 
 ## PostgreSQL y SeaweedFS sin Docker

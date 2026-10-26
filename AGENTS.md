@@ -63,7 +63,7 @@ Los detalles completos están en [fundamentos de buoh](.kiro/steering/fundamento
 6. Ejecuta las verificaciones disponibles y conserva comandos y resultados exactos.
 7. Revisa impacto documental y actualiza la fuente canónica correspondiente.
 8. Actualiza `PROJECT_STATUS.md` solo si cambian fase, objetivo, tarea siguiente, bloqueo, decisión pendiente o evidencia de salida.
-9. Abre un PR pequeño usando la plantilla; el usuario conserva la decisión de fusionar.
+9. Abre un PR pequeño usando la plantilla y fusiónalo con las condiciones de «Fusión».
 
 No se considera terminado un cambio porque compile o porque un comando termine con código cero: verifica cada criterio de aceptación aplicable.
 
@@ -85,6 +85,22 @@ El modelo revisor contrasta el diff con fuentes canónicas y vectores independie
 - Cada PR recibe una sola revisión semántica.
 - Solo se repite si encontró hallazgos bloqueantes, y únicamente tras corregirlos.
 - Los hallazgos menores no reabren la revisión: quedan anotados en el PR como pendientes.
+
+### Fusión
+
+El propietario decidió el 2026-10-26 que el agente fusione sus propios PR («siempre haces merge tú»). El agente fusiona sin esperarlo solo si se cumplen estas condiciones:
+
+- la revisión semántica terminó sin hallazgos bloqueantes, y los commits posteriores a ella solo corrigen sus hallazgos; cualquier otro cambio va en un PR nuevo;
+- CI está en verde sobre el último commit del PR, y la fusión se pide para ese commit;
+- antes de fusionar, deja en el PR un comentario que dice que fusiona por esta decisión, qué condiciones se cumplieron, qué commit se revisó y cuál se fusiona. Si el PR esperó al propietario, el comentario dice también cuándo y con qué palabras dio su visto bueno o su decisión.
+
+Tres casos esperan al propietario:
+
+- si el PR marca en la plantilla «Seguridad, secretos o permisos» o «Riesgo, señales o ejecución», el agente le explica el cambio en palabras simples y fusiona solo con su visto bueno, porque la seguridad y el riesgo conservan revisión humana (`CONTRIBUTING.md`);
+- si el PR necesita una decisión del propietario sobre producto, dinero, riesgo o seguridad, el agente la pide primero («Protocolo ante conflictos o vacíos») y fusiona solo después;
+- si el PR crea una ADR que nombra al propietario entre sus decisores, o cambia una decisión de una ADR así, fusiona solo con su visto bueno. Las ADR cuyo único decisor es la dirección técnica siguen el flujo normal.
+
+El propietario puede pedir cambios, revertir un PR fusionado o volver a fusionar él mismo cuando quiera. Nadie sube cambios directamente a `main`.
 
 ## Desarrollo por fases
 

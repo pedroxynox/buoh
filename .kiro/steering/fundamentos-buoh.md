@@ -69,7 +69,7 @@ buoh es un bot multiplataforma de investigación cuantitativa, señales trazable
 
 - El repositorio de buoh comienza privado.
 - El agente prepara cambios en ramas de trabajo, crea y actualiza los pull requests mediante la automatización configurada; nunca sube cambios directamente a `main`.
-- El usuario revisa los pull requests y conserva la decisión de aprobar, solicitar cambios o fusionarlos.
+- El agente fusiona sus pull requests con las condiciones de `AGENTS.md` («Fusión»). El propietario puede revisar cualquiera, pedir cambios, revertirlo o volver a fusionar él mismo.
 - El agente no altera configuración de Git, identidad, autoría ni atribución para ocultar quién realizó un cambio.
 - Antes de abrir un pull request, revisar `CONTRIBUTING.md`, ejecutar las verificaciones disponibles y resumir alcance, riesgos y documentación afectada.
 - No incluir secretos, datos reales de mercado, tokens de Deriv, credenciales ni resultados sensibles en commits o pull requests.
