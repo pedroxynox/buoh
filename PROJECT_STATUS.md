@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
 status_version: 22
-updated_at_utc: "2026-10-26T14:10:00.000Z"
+updated_at_utc: "2026-10-26T14:40:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -125,14 +125,15 @@ Catálogo versionado (`F1-CATALOG-001`) y adaptador público de Deriv (`F1-SOURC
 - Pruebas offline, sin red, reloj real ni aleatoriedad:
   - contratos (40 en total): `SourceCatalogSnapshot`, su JSON Schema, su orden y sus dos hashes;
   - dominio (79 en total): validador por dialecto (Ajv 2020 o `ajv-draft-04`), perfil de medición que nunca publica, conversión del catálogo con sus seis motivos e incidencia de respuestas pedidas;
-  - worker (117 en total): carga de `schemas.zip` con su SHA-256, sus límites y las huellas de sus 14 entradas (18); adaptador con socket, reloj y temporizador falsos, que cubre catálogo, suscripción, keepalive, tiempos de espera, cola y sus límites, frame cortado, cierres y respuestas pedidas (41); bloqueo por fuente (4); y el smoke completo con su resultado saneado (7).
+  - worker (122 en total): carga de `schemas.zip` con su SHA-256, sus límites y las huellas de sus 14 entradas (18); adaptador con socket, reloj y temporizador falsos, que cubre catálogo, suscripción, keepalive, tiempos de espera, cola y sus límites, frame cortado, cierres y respuestas pedidas (41); bloqueo por fuente (4); y el smoke con su resultado saneado y sus salidas 0, 1 y 2 (12).
 - `pnpm run test:integration` (44 en total, 24 de F1.4b): el corte de `ws` con un servidor local, con un mensaje entero y uno fragmentado, y un cierre previsto sobre `ws` real; versiones del catálogo, incidencias de respuestas pedidas y bloqueo por fuente contra PostgreSQL 18 y almacenamiento S3-compatible.
-- Smoke vivo opt-in, `pnpm run data:smoke -- --live`, el 2026-10-26 de 13:55:24 a 13:57:25 UTC, con la release de esquemas `production_v20260901_0` (SHA-256 `adaab0ac…e7c3`). Resultado saneado:
+- Smoke vivo opt-in, `pnpm run data:smoke -- --live`, el 2026-10-26 de 14:34:24 a 14:36:24 UTC, con la release de esquemas `production_v20260901_0` (SHA-256 `adaab0ac…e7c3`). Resultado saneado:
   - `passed`, salida 0, cierre `requested`;
   - `R_100`, «Volatility 100 Index», en un catálogo de 89 entradas (`content_sha256` `cf5b1c49d668b2fe8388029455ba32e58ff26b2c27c443604def0c2a8ce15141`);
   - 66 frames durables en memoria: 61 ticks, 2 `ping` y una respuesta a `active_symbols`, `time` y `forget_all`; ningún frame inválido ni incidencia;
-  - retraso de entrega en ms: mínimo 247, p50 361, p90 443, p99 1007 y máximo 1007. Deriv da la hora de cada tick en segundos enteros, así que el retraso puede incluir hasta 999 ms de redondeo;
-  - 2000 ms entre las horas de ticks consecutivos en los 60 intervalos, y 36 ms de desfase con la hora del servidor;
+  - retraso de entrega de los 60 ticks posteriores al primero, en ms: mínimo 189, p50 263, p90 356, y p99 y máximo 454. El primero llegó con 917 ms; puede ser un tick que Deriv ya tenía al suscribirse, y por eso va aparte;
+  - 2000 ms entre las horas de ticks consecutivos en los 60 intervalos, y 931 ms de desfase medido con la hora del servidor;
+  - Deriv da sus horas en segundos enteros, así que el retraso y el desfase medidos pueden superar a los reales hasta en 999 ms;
   - nada se escribió fuera del proceso (ADR-0004 §13).
 
 ## Pendientes registrados de F1.4a
@@ -146,7 +147,7 @@ El antiguo pendiente 3 (el sink `nonTickFrame` no deja ver un `error`) quedó re
 
 ## Pendientes registrados de F1.3
 
-Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la lista completa está en cada PR. Los más relevantes para F1.4 y el despliegue:
+Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la lista completa está en cada PR. Los más relevantes para F1.5 y el despliegue:
 
 1. Si la conexión cae durante el `COMMIT` de una publicación, se informa "no se confirmó" aunque pudo confirmarse.
 2. Publicar no aplica los límites de lectura del replay. `normalized_ticks` y `quality_incidents` son un único artefacto que crece con el dataset. Resolver antes de publicar datasets live largos.

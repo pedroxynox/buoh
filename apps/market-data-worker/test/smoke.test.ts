@@ -6,7 +6,8 @@ import {
   distribution,
   parseSmokeArgs,
   runSmoke,
-  SMOKE_NOTE,
+  smokeCommand,
+  smokeExitCode,
   UsageError,
   type OperationalAlert,
   type SmokeReport,
@@ -116,7 +117,7 @@ describe('runSmoke', () => {
     await settle();
     socket.text(derivMessages.catalog(1));
     await settle();
-    // Tres ticks: retrasos de 400, 700 y 250 ms, y 2 s entre sus horas.
+    // Tres ticks: retrasos de 400 ms (el primero, aparte), 700 y 250 ms, y 2 s entre sus horas.
     await run.clock.advance(400);
     socket.text(derivMessages.tick(2, START_EPOCH, '100.25'));
     await settle();
@@ -138,10 +139,11 @@ describe('runSmoke', () => {
       catalog: { content_sha256: CATALOG_CONTENT_SHA256, entry_count: 2 },
       closure: { closure_type: 'requested', persisted: true, reason: 'requested' },
       connector_version: DERIV_CONNECTOR_VERSION,
-      delivery_delay_ms: { count: 3, max: 700, min: 250, p50: 400, p90: 700, p99: 700 },
+      delivery_delay_ms: { count: 2, max: 700, min: 250, p50: 250, p90: 700, p99: 700 },
       duration_seconds: 10,
       end: { status: 'completed' },
       finished_at_utc: '2026-03-02T10:00:10.400Z',
+      first_tick_delay_ms: 400,
       frames: {
         invalid: 0,
         non_tick: { active_symbols: 1, forget_all: 1, time: 1 },
@@ -149,7 +151,8 @@ describe('runSmoke', () => {
         ticks: 3,
       },
       incidents: { invalid_frames: {}, operational: {}, requested_responses: {} },
-      note: SMOKE_NOTE,
+      // El aviso de ADR-0012 §10, escrito aquí como oráculo.
+      note: 'Deriv da sus horas en segundos enteros: el retraso y el desfase medidos pueden superar a los reales hasta en 999 ms. El primer tick de la suscripción va aparte, porque puede ser uno que Deriv ya tenía.',
       schemas: {
         archive_sha256: run.fixture.expected.archive_sha256,
         release: 'synthetic-deriv-1',
@@ -169,6 +172,53 @@ describe('runSmoke', () => {
       expect(line).not.toContain(forbidden);
     }
     expect(run.alerts).toEqual([]);
+    expect(smokeExitCode(report)).toBe(0);
+  });
+
+  it('falla sin ticks normalizados aunque la conexión termine con el cierre previsto', async () => {
+    const run = smoke();
+    await settle();
+    const socket = run.socket();
+    socket.open();
+    await settle();
+    socket.text(derivMessages.catalog(1));
+    await settle();
+    // Confirma la suscripción, pero su precio con exponente no se normaliza.
+    socket.text(derivMessages.tick(2, START_EPOCH, '1e2'));
+    await settle();
+    socket.text(derivMessages.time(3, START_EPOCH));
+    await settle();
+    await run.clock.advance(10_000);
+    socket.text(derivMessages.forgetAll(4));
+    const report = await run.run;
+
+    expect(report).toMatchObject({
+      delivery_delay_ms: null,
+      end: { status: 'completed' },
+      first_tick_delay_ms: null,
+      frames: { invalid: 1, ticks: 0 },
+      incidents: { invalid_frames: { quote_exponent_not_supported: 1 } },
+      status: 'failed',
+    });
+    expect(smokeExitCode(report)).toBe(1);
+  });
+
+  it('cuenta las incidencias del registro operativo de un frame cortado', async () => {
+    const run = smoke();
+    await settle();
+    const socket = run.socket();
+    socket.open();
+    await settle();
+    socket.emit({ kind: 'frame_too_large', observed_value: 2_000_000 });
+    const report = await run.run;
+
+    expect(report).toMatchObject({
+      closure: { closure_type: 'transport_error', persisted: true, reason: 'websocket_frame' },
+      end: { reason: 'websocket_frame', status: 'paused' },
+      incidents: { operational: { source_limit_exceeded: 1 } },
+      status: 'failed',
+    });
+    expect(smokeExitCode(report)).toBe(1);
   });
 
   it('falla si el símbolo no está en el catálogo, sin distribuciones', async () => {
@@ -188,6 +238,7 @@ describe('runSmoke', () => {
       symbol_name: null,
       tick_interval_ms: null,
     });
+    expect(smokeExitCode(report)).toBe(1);
   });
 
   it('cuenta los frames inválidos y las respuestas pedidas inválidas sin dejar de pasar', async () => {
@@ -251,6 +302,70 @@ describe('runSmoke', () => {
       end: { reason: 'archive_sha256_mismatch', status: 'failed' },
       schemas: null,
       status: 'failed',
+    });
+  });
+});
+
+describe('smokeCommand', () => {
+  function dependencies(overrides: Partial<Parameters<typeof smokeCommand>[1]> = {}) {
+    forbidAmbientEffects();
+    const clock = new ManualClock(START);
+    const fixture = syntheticSchemaArchive();
+    const connections: unknown[] = [];
+    return {
+      connections,
+      deps: {
+        alert: () => undefined,
+        connect: () => {
+          connections.push(1);
+          throw new Error('no debería conectar');
+        },
+        expected: fixture.expected,
+        fetch: () => Promise.resolve(new Response(fixture.archive)),
+        nextId: () => uuid(1),
+        now: clock.now,
+        scheduler: clock.scheduler,
+        zlibVersion: 'test',
+        ...overrides,
+      },
+    };
+  }
+
+  it('sin --live da salida 2 y una línea UsageError, sin cargar nada', async () => {
+    let fetched = false;
+    const { deps } = dependencies({
+      fetch: () => {
+        fetched = true;
+        throw new Error('no debería descargar');
+      },
+    });
+    const result = await smokeCommand([], deps);
+    expect(result.exitCode).toBe(2);
+    expect(JSON.parse(result.line)).toMatchObject({ code: 'UsageError', status: 'failed' });
+    expect(fetched).toBe(false);
+  });
+
+  it('un símbolo que el esquema de ticks no admite también es un error de uso', async () => {
+    const { connections, deps } = dependencies();
+    const result = await smokeCommand(['--live', '--symbol', 'R'], deps);
+    expect(result.exitCode).toBe(2);
+    expect(JSON.parse(result.line)).toMatchObject({
+      end: { detail: 'ticks', reason: 'request_invalid', status: 'failed' },
+      status: 'failed',
+    });
+    expect(connections).toEqual([]);
+  });
+
+  it('un error inesperado da code UNEXPECTED y salida 1', async () => {
+    const { deps } = dependencies({
+      now: () => {
+        throw new RangeError('reloj roto');
+      },
+    });
+    const result = await smokeCommand(['--live'], deps);
+    expect(result).toEqual({
+      exitCode: 1,
+      line: '{"code":"UNEXPECTED","message":"RangeError","status":"failed"}',
     });
   });
 });

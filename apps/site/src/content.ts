@@ -250,7 +250,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
     id: '1',
     title: 'Fundación de datos',
     state: 'en curso',
-    text: 'Ya existen los contratos de datos, la normalización, las reglas de calidad, la publicación de datasets reproducibles y la conexión de solo lectura con el canal público de Deriv. Falta recuperar datos tras una desconexión y mostrar la salud del servicio.',
+    text: 'Ya existen los contratos de datos, la normalización, las reglas de calidad, la publicación de datasets reproducibles y una primera lectura de prueba del canal público de Deriv, la integración prevista para esta fase. Faltan la recuperación de datos tras una desconexión y un reporte de salud estructurado.',
   },
   {
     id: '1B',

@@ -85,6 +85,8 @@ export {
   DERIV_TIME_RESOLUTION_MS,
   distribution,
   runSmoke,
+  smokeCommand,
+  smokeExitCode,
   SMOKE_NOTE,
   type Distribution,
   type SmokeInput,

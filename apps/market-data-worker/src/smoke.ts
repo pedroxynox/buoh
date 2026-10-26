@@ -15,13 +15,15 @@ import {
   InMemorySourceLogStore,
 } from './memory/stores.js';
 import { OperationalRegistry, type OperationalAlert } from './operational/registry.js';
+import { UsageError } from './replay-args.js';
+import { parseSmokeArgs } from './smoke-args.js';
 import { SourceEventLog } from './source-log/source-event-log.js';
 
 /** Resolución del tiempo de Deriv: segundos enteros. */
 export const DERIV_TIME_RESOLUTION_MS = 1000;
 
 export const SMOKE_NOTE =
-  'Deriv da la hora de cada tick en segundos enteros: el retraso medido puede incluir hasta 999 ms de redondeo.';
+  'Deriv da sus horas en segundos enteros: el retraso y el desfase medidos pueden superar a los reales hasta en 999 ms. El primer tick de la suscripción va aparte, porque puede ser uno que Deriv ya tenía.';
 
 /** Mínimo, percentiles por rango más cercano y máximo, en milisegundos. */
 export interface Distribution {
@@ -45,11 +47,16 @@ export interface SmokeReport {
     readonly reason: string;
   } | null;
   readonly connector_version: string;
-  /** Recepción menos la hora del tick. */
+  /** Recepción menos la hora del tick, sin el primer tick de la suscripción. */
   readonly delivery_delay_ms: Distribution | null;
   readonly duration_seconds: number;
   readonly end: DerivSessionEnd;
   readonly finished_at_utc: string;
+  /**
+   * Retraso del primer tick de la suscripción. Va aparte porque puede ser un tick que Deriv ya
+   * tenía al suscribirse, así que su retraso puede incluir su antigüedad.
+   */
+  readonly first_tick_delay_ms: number | null;
   readonly frames: {
     readonly invalid: number;
     /** Respuestas pedidas que no son ticks, por `msg_type`. */
@@ -184,6 +191,7 @@ export async function runSmoke(input: SmokeInput): Promise<SmokeReport> {
 
   const snapshot = result.catalog?.snapshot ?? null;
   const passed = result.end.status === 'completed' && tickTimes.length > 0;
+  const delays = tickTimes.map((tick) => tick.received - tick.event);
   return {
     catalog:
       snapshot === null
@@ -191,10 +199,11 @@ export async function runSmoke(input: SmokeInput): Promise<SmokeReport> {
         : { content_sha256: snapshot.content_sha256, entry_count: snapshot.entry_count },
     closure: result.closure,
     connector_version: DERIV_CONNECTOR_VERSION,
-    delivery_delay_ms: distribution(tickTimes.map((tick) => tick.received - tick.event)),
+    delivery_delay_ms: distribution(delays.slice(1)),
     duration_seconds: input.durationSeconds,
     end: result.end,
     finished_at_utc: finishedAt,
+    first_tick_delay_ms: delays[0] ?? null,
     frames: {
       invalid: invalid.length,
       non_tick: tally(nonTick),
@@ -225,4 +234,55 @@ export async function runSmoke(input: SmokeInput): Promise<SmokeReport> {
       tickTimes.slice(1).map((tick, index) => tick.event - (tickTimes[index]?.event ?? tick.event)),
     ),
   };
+}
+
+/**
+ * Código de salida del smoke (ADR-0012 §10): 0 si pasa, 1 si falla y 2 si es un error de uso. Un
+ * símbolo que el esquema de la petición `ticks` no admite es un error de uso, aunque se detecte
+ * después de cargar los esquemas.
+ */
+export function smokeExitCode(report: SmokeReport): 0 | 1 | 2 {
+  if (report.status === 'passed') {
+    return 0;
+  }
+  return report.end.status === 'failed' && report.end.reason === 'request_invalid' ? 2 : 1;
+}
+
+/**
+ * El comando completo, sin efectos propios: interpreta los argumentos, corre el smoke y devuelve
+ * la línea JSON y el código de salida. Un error inesperado da `code: UNEXPECTED` y salida 1.
+ */
+export async function smokeCommand(
+  argv: readonly string[],
+  dependencies: Omit<SmokeInput, 'durationSeconds' | 'symbol'>,
+): Promise<{ readonly exitCode: 0 | 1 | 2; readonly line: string }> {
+  let options;
+  try {
+    options = parseSmokeArgs(argv);
+  } catch (error) {
+    if (error instanceof UsageError) {
+      return {
+        exitCode: 2,
+        line: JSON.stringify({ code: error.name, message: error.message, status: 'failed' }),
+      };
+    }
+    throw error;
+  }
+  try {
+    const report = await runSmoke({
+      ...dependencies,
+      durationSeconds: options.durationSeconds,
+      symbol: options.symbol,
+    });
+    return { exitCode: smokeExitCode(report), line: JSON.stringify(report) };
+  } catch (error) {
+    return {
+      exitCode: 1,
+      line: JSON.stringify({
+        code: 'UNEXPECTED',
+        message: error instanceof Error ? error.name : 'Error',
+        status: 'failed',
+      }),
+    };
+  }
 }

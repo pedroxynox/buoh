@@ -189,16 +189,17 @@ Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de
 | `catalog` | número de entradas y `content_sha256` del catálogo |
 | `frames` | frames de texto durables (`raw`), ticks normalizados, frames inválidos y respuestas pedidas por `msg_type` |
 | `incidents` | frames inválidos por motivo (reglas 2.0.0), respuestas pedidas inválidas por motivo y registro operativo por tipo |
-| `delivery_delay_ms` y `tick_interval_ms` | `received_at_utc` menos la hora del tick, y tiempo entre las horas de ticks consecutivos: mínimo, p50, p90, p99 y máximo, por rango más cercano |
+| `first_tick_delay_ms` | retraso del primer tick de la suscripción. Va aparte porque puede ser un tick que Deriv ya tenía al suscribirse, así que puede incluir su antigüedad |
+| `delivery_delay_ms` y `tick_interval_ms` | `received_at_utc` menos la hora del tick, sin el primero, y tiempo entre las horas de ticks consecutivos: mínimo, p50, p90, p99 y máximo, por rango más cercano. Con menos de 100 valores, p99 es el máximo |
 | `server_time_offset_ms` | recepción local menos la hora del servidor (`time`), o `null` |
 | `end` y `closure` | resultado del adaptador y su cierre (tabla de «Adaptador público de Deriv») |
-| `source_time_resolution_ms` y `note` | Deriv da la hora en segundos enteros, así que el retraso puede incluir hasta 999 ms de redondeo |
+| `source_time_resolution_ms` y `note` | Deriv da sus horas en segundos enteros, así que el retraso y el desfase medidos pueden superar a los reales hasta en 999 ms |
 
 | Salida | Significado |
 |---:|---|
 | 0 | `passed` |
-| 1 | `failed`: esquemas, catálogo inválido, símbolo ausente, sin ticks, límites o desconexión (ver `end`); o `code: UNEXPECTED` |
-| 2 | error de uso (`code: UsageError`), por ejemplo sin `--live` |
+| 1 | `failed`: esquemas, catálogo inválido, símbolo ausente del catálogo, sin ticks normalizados, límites o desconexión (ver `end`); o `code: UNEXPECTED` |
+| 2 | error de uso: `code: UsageError`, por ejemplo sin `--live`, o un símbolo que el esquema de la petición `ticks` no admite (`end.reason: request_invalid`) |
 
 Una salida distinta de 0 sin línea JSON significa que falló la compilación o que se interrumpió el proceso; el detalle está en stderr. Sus números sirven para fijar después los umbrales live de retraso y de hueco, que el perfil de medición no lleva (ADR-0012 §8).
 

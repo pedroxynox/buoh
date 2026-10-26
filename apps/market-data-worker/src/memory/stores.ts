@@ -1,10 +1,12 @@
 import {
+  sourceCatalogSnapshotSchema,
   type DataQualityIncident,
   type OperationalConditionEvent,
   type SourceCatalogSnapshot,
 } from '@buoh/contracts';
 
 import {
+  parseRequestedResponseIncident,
   type CatalogStore,
   type CatalogVersion,
   type RequestedResponseIncidentStore,
@@ -20,7 +22,8 @@ import {
 } from '../source-log/ports.js';
 
 /**
- * Almacenes en memoria con las mismas reglas que PostgreSQL y el almacenamiento de objetos. Los usa
+ * Almacenes en memoria con las mismas reglas que los de PostgreSQL y almacenamiento de objetos:
+ * triggers de `0002` y `0003`, claves únicas y validación de lo que se guarda. Los usa
  * `data:smoke`, que no escribe nada fuera de su proceso (ADR-0012 §10): todo se borra al terminar.
  * Las pruebas les añaden fallos inyectables en `test/support/memory-stores.ts`.
  */
@@ -171,21 +174,25 @@ export class InMemoryCatalogStore implements CatalogStore {
     return Promise.resolve(this.#latest(source, catalogFormat));
   }
 
-  record(snapshot: SourceCatalogSnapshot): Promise<{
+  record(input: SourceCatalogSnapshot): Promise<{
     readonly status: 'created' | 'unchanged';
     readonly version: number;
   }> {
-    const last = this.#latest(snapshot.source, snapshot.catalog_format);
-    if (last !== null && last.snapshot.content_sha256 === snapshot.content_sha256) {
-      return Promise.resolve({ status: 'unchanged', version: last.version });
-    }
-    // Como `snapshot_id` único en `source_catalog_versions`.
-    if (this.versions.some((item) => item.snapshot.snapshot_id === snapshot.snapshot_id)) {
-      return Promise.reject(Object.assign(new Error('Snapshot ya guardado'), { code: '23505' }));
-    }
-    const version = (last?.version ?? 0) + 1;
-    this.versions.push({ snapshot, version });
-    return Promise.resolve({ status: 'created', version });
+    return Promise.resolve().then(() => {
+      // Como `PostgresCatalogStore`: solo guarda un snapshot que cumple su contrato.
+      const snapshot = sourceCatalogSnapshotSchema.parse(input);
+      const last = this.#latest(snapshot.source, snapshot.catalog_format);
+      if (last !== null && last.snapshot.content_sha256 === snapshot.content_sha256) {
+        return { status: 'unchanged' as const, version: last.version };
+      }
+      // Como `snapshot_id` único en `source_catalog_versions`.
+      if (this.versions.some((item) => item.snapshot.snapshot_id === snapshot.snapshot_id)) {
+        throw Object.assign(new Error('Snapshot ya guardado'), { code: '23505' });
+      }
+      const version = (last?.version ?? 0) + 1;
+      this.versions.push({ snapshot, version });
+      return { status: 'created' as const, version };
+    });
   }
 }
 
@@ -193,10 +200,13 @@ export class InMemoryCatalogStore implements CatalogStore {
 export class InMemoryRequestedResponseIncidentStore implements RequestedResponseIncidentStore {
   readonly incidents: DataQualityIncident[] = [];
 
-  append(incident: DataQualityIncident): Promise<void> {
-    if (!this.incidents.some((item) => item.incident_id === incident.incident_id)) {
-      this.incidents.push(incident);
-    }
-    return Promise.resolve();
+  append(input: DataQualityIncident): Promise<void> {
+    return Promise.resolve().then(() => {
+      // Como `PostgresRequestedResponseIncidentStore`: solo la forma de ADR-0012 §6.
+      const incident = parseRequestedResponseIncident(input);
+      if (!this.incidents.some((item) => item.incident_id === incident.incident_id)) {
+        this.incidents.push(incident);
+      }
+    });
   }
 }

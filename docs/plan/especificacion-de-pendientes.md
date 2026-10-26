@@ -39,66 +39,37 @@ Tipos de pendiente:
 ### P-F1-01. Catálogo público versionado (`F1-CATALOG-001`) — resuelto
 
 - **Objetivo:** guardar versiones inmutables de la lista oficial de símbolos de Deriv.
-- **Fuente:** plan de Fase 1 §6 (`F1-CATALOG-001`), ADR-0004 §6 y `PROJECT_STATUS.md` (siguiente tarea `F1.4b`).
-- **Estado (verificado):**
-  - los contratos de dominio describen el snapshot desde ADR-0012, `packages/contracts` lo implementa (`sourceCatalogSnapshotSchema`, PR 2 de F1.4b) y `packages/domain` convierte la respuesta de Deriv en snapshot (`deriveCatalogSnapshot`, PR 3);
-  - desde el PR 5, el adaptador del worker pide `active_symbols`, crea el snapshot desde el frame durable y lo guarda con la regla de versiones a través del puerto `CatalogStore` (`apps/market-data-worker/src/deriv/`). Un catálogo inválido deja su incidencia y no reemplaza la última versión válida. En las pruebas, el almacén es un doble en memoria;
-  - desde el PR 6, `PostgresCatalogStore` guarda las versiones en `source_catalog_versions` y el JCS de cada snapshot en el almacenamiento de objetos (migración `0003`);
-  - desde el PR 7, `pnpm run data:smoke` consulta el catálogo en vivo y lo guarda en memoria (ADR-0012 §10). Ningún comando escribe todavía estas tablas con datos vivos: las cubren las pruebas de integración.
-- **Esperado:** el worker consulta `active_symbols` por el canal público. Guarda un snapshot con fecha de recepción UTC, versión del conector, versión del esquema de fuente, hash de contenido y la lista sin reinterpretar los nombres oficiales. Los snapshots son inmutables en almacenamiento de objetos, con índice en PostgreSQL.
-- **Componentes:** `packages/contracts` (el esquema `SourceCatalogSnapshot`, ya hecho), `packages/domain` (la conversión de la respuesta de Deriv) y `apps/market-data-worker` (adaptador, almacenamiento y migración).
-- **Aceptación (plan §6):**
-  - dos snapshots se guardan como versiones distintas si cambia el contenido;
-  - un payload inválido no reemplaza el último snapshot válido y genera una incidencia.
-- **Decidido en ADR-0012** (§1, §7 y contratos de dominio, `SourceCatalogSnapshot`):
-  - la forma del snapshot, sus versiones y la incidencia de un catálogo inválido (`invalid_source_frame`, registrada por quien pidió el catálogo);
-  - el símbolo del primer smoke: el propietario fijó un solo índice sintético con el nombre exacto del catálogo, y ADR-0012 elige `R_100`, «Volatility 100 Index».
-- **Abierto:**
-  - el catálogo no decide el universo comercial: es una decisión pendiente en `PROJECT_STATUS.md`;
-  - el primer proceso que ingiera de forma continua, y que guarde así el catálogo vivo en PostgreSQL, todavía no existe (P-F1-04 y P-F1-06).
+- **Fuente:** plan de Fase 1 §6 (`F1-CATALOG-001`), ADR-0004 §6 y [ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §1 y §7.
+- **Antes:** no había consulta, almacén, migración ni tabla de catálogo en el worker.
+- **Decisión del propietario:** el primer smoke usa un solo índice sintético, con el nombre exacto del catálogo oficial. ADR-0012 eligió `R_100`, «Volatility 100 Index».
+- **Resolución (F1.4b):**
+  - `packages/contracts` define `SourceCatalogSnapshot`, y `packages/domain` convierte la respuesta de `active_symbols` en snapshot (`deriveCatalogSnapshot`), con los seis motivos de un catálogo inválido;
+  - el adaptador del worker pide `active_symbols`, crea el snapshot desde el frame durable y lo guarda con la regla de versiones. Un catálogo inválido deja su incidencia y no reemplaza la última versión válida;
+  - `PostgresCatalogStore` guarda las versiones en `source_catalog_versions` y el JCS de cada snapshot en el almacenamiento de objetos (migración `0003`). Las pruebas de integración cubren las dos condiciones de aceptación;
+  - `pnpm run data:smoke` lo consulta en vivo (`PROJECT_STATUS.md`, «Evidencia de F1.4b»).
+- **Límite:** el smoke guarda el catálogo en memoria (ADR-0012 §10), así que ningún comando guarda todavía el catálogo vivo en PostgreSQL; llegará con el primer proceso que ingiera de forma continua (P-F1-04 y P-F1-06). El catálogo tampoco decide el universo comercial, que sigue pendiente en `PROJECT_STATUS.md`.
 
 ### P-F1-02. Adaptador público de Deriv (`F1-SOURCE-001`) — resuelto
 
 - **Objetivo:** recibir el flujo público de Deriv, sin credenciales, dentro de los límites de ADR-0004.
-- **Fuente:** plan de Fase 1 §6, ADR-0004 §2 y §7, y `PROJECT_STATUS.md` («Puntos de partida ya comprobados para F1.4b»).
-- **Estado (verificado):**
-  - ya existen, desde F1.4a: las reglas de calidad 2.0.0, `non_tick_msg_types`, la atribución por `echo_req`, el límite de frame en `RawFirstIngestor.receiveFrame` y la evaluación de límites de cola en `packages/domain/src/health.ts`;
-  - desde el PR 3 de F1.4b, `packages/domain` elige el validador por el dialecto del esquema (Ajv 2020 o `ajv-draft-04`), tiene un perfil de medición que nunca deriva ni publica, y hace las comprobaciones puras de las respuestas pedidas y su incidencia;
-  - desde el PR 4, el worker descarga `schemas.zip` con su SHA-256 y sus límites de ZIP;
-  - desde el PR 5, el worker tiene el adaptador (`apps/market-data-worker/src/deriv/`): transporte `ws`, cola en memoria con sus límites, correlación por `req_id` y `msg_type`, keepalive, tiempos de espera y pausa del ingestor desde el transporte. Lo prueban un socket, un reloj y un temporizador falsos, y `test:integration` comprueba el corte de `ws` con un servidor local;
-  - el normalizador sigue siendo uno por versión de reglas; el 2.0.0 ya lee las rutas de Deriv (ADR-0012 §2);
-  - desde el PR 6, las incidencias de respuestas pedidas van a `requested_response_incidents`, y `fixture:publish`, el único proceso que hoy escribe el log de una fuente en PostgreSQL, toma antes su bloqueo (`SourceLock`, ADR-0012 §9). Lo que falta para un escritor continuo está en el pendiente 6 de F1.3 (`PROJECT_STATUS.md`);
-  - desde el PR 7, `pnpm run data:smoke` lo ejecuta contra el canal público. La evidencia del smoke vivo está en `PROJECT_STATUS.md` («Evidencia de F1.4b»).
-- **Esperado:**
-  - endpoint público documentado, sin OAuth, PAT ni OTP;
-  - respuestas validadas contra la release de esquemas fijada;
-  - límites de bytes y tiempos de ADR-0004 §7, y keepalive dentro del intervalo recomendado;
-  - solicitudes y respuestas correlacionadas;
-  - frames entregados al `RawFirstIngestor` con el perfil de reglas 2.0.0, sin publicar datos vivos.
-- **Componentes:** `apps/market-data-worker`, `packages/domain` (elegir perfil, normalizador y validador según la fuente) y nuevas dependencias.
-- **Aceptación (plan §6):** pruebas del adaptador con fixtures y transporte y reloj falsos, más `pnpm run data:smoke` opt-in (P-F1-03).
-- **Decidido en ADR-0012:**
-  - validador `ajv-draft-04`, elegido por el dialecto del esquema (§2);
-  - transporte `ws`, porque el `WebSocket` global no limita el tamaño (§3);
-  - errores en respuestas pedidas, en `requested_response_incidents` (§6);
-  - bloqueo por fuente en PostgreSQL (§9);
-  - frames cortados por el cliente: tamaño declarado y pausa desde el transporte (§3 y §4).
-- **Abierto:** nada para F1.4b. Las tres dependencias nuevas (`ajv-draft-04`, `fflate` y `ws`) se justificaron en sus PR. La reconexión es P-F1-04.
+- **Fuente:** plan de Fase 1 §6, ADR-0004 §2 y §7, y ADR-0012 §2 a §6 y §9.
+- **Antes:** desde F1.4a existían las reglas de calidad 2.0.0, `non_tick_msg_types`, la atribución por `echo_req`, el límite de frame del ingestor y la evaluación de los límites de cola. No había transporte, keepalive, tiempos de espera, correlación ni descarga de `schemas.zip`.
+- **Resolución (F1.4b):**
+  - `packages/domain` elige el validador por el dialecto del esquema (Ajv 2020 o `ajv-draft-04`) y tiene un perfil de medición que nunca deriva ni publica;
+  - el worker descarga `schemas.zip` con su SHA-256, sus límites y las huellas de sus 14 entradas (`fflate`);
+  - el adaptador (`apps/market-data-worker/src/deriv/`) usa `ws` con el tamaño declarado de un frame cortado, una cola en memoria con sus límites, correlación por `req_id` y `msg_type` después de que el frame sea durable, keepalive, tiempos de espera y pausa del ingestor desde el transporte. Las respuestas pedidas inválidas van a `requested_response_incidents`;
+  - quien escribe el log de una fuente en PostgreSQL toma antes su bloqueo (`SourceLock`);
+  - la aceptación del plan se cumple con las pruebas del adaptador, con socket, reloj y temporizador falsos, y con `pnpm run data:smoke` (`PROJECT_STATUS.md`, «Evidencia de F1.4b»).
+- **Límite:** el adaptador no reconecta (P-F1-04), y el primer escritor continuo debe cerrar el pendiente 6 de F1.3 (`PROJECT_STATUS.md`).
 
 ### P-F1-03. `pnpm run data:smoke` — resuelto
 
 - **Objetivo:** una prueba viva opt-in contra Deriv que mida retrasos reales.
-- **Fuente:** plan de Fase 1 §5 y §7, `PROJECT_STATUS.md` (`F1.4b`) y ADR-0004 §13.
-- **Estado (verificado):** desde el PR 7 de F1.4b, `pnpm run data:smoke -- --live` corre `scripts/data-smoke.mjs`, que deja en stdout una sola línea JSON saneada. Sin `--live` responde con un error de uso y no abre conexiones. Guarda todo en memoria y lo borra al terminar. Su uso y su resultado están en el runbook («Smoke público de Deriv»), y el primer smoke vivo, en `PROJECT_STATUS.md` («Evidencia de F1.4b»).
-- **Esperado:**
-  - opt-in, nunca el único criterio de fusión;
-  - su evidencia es la fecha, la release de esquemas y un resultado sanitizado;
-  - los datos vivos se borran en 24 horas y no se publican como dataset;
-  - los umbrales de retraso y hueco se fijan después, con lo que mida.
-- **Componentes:** `package.json` raíz y `apps/market-data-worker`.
-- **Aceptación:** la del plan §7.
-- **Decidido en ADR-0012** (§10): el smoke guarda todo en memoria y lo borra al terminar, así que el borrado en 24 horas se cumple sin tablas ni objetos que limpiar.
-- **Abierto:** el plan §5 lo sitúa en «F1.4» y `PROJECT_STATUS.md` en `F1.4b` (ver §5 de este documento).
+- **Fuente:** plan de Fase 1 §5 y §7, ADR-0004 §13 y ADR-0012 §10.
+- **Antes:** el comando no existía en `package.json`.
+- **Decisión del propietario:** los umbrales live de retraso y hueco se fijan con lo que mida el smoke, y mientras tanto los datos live no se publican como dataset.
+- **Resolución (F1.4b):** `pnpm run data:smoke -- --live` corre `scripts/data-smoke.mjs`, que deja en stdout una sola línea JSON saneada. Sin `--live` responde con un error de uso y no abre conexiones. Guarda todo en memoria y lo borra al terminar, así que el borrado en 24 horas se cumple sin tablas ni objetos que limpiar. Su uso y su resultado están en el runbook («Smoke público de Deriv»), y el primer smoke vivo, en `PROJECT_STATUS.md` («Evidencia de F1.4b»).
+- **Límite:** nunca es el único criterio de fusión, y los umbrales live siguen sin fijar (`PROJECT_STATUS.md`).
 
 ### P-F1-04. Reconexión y recuperación de historia (`F1-RECONNECT-001`) — parcial
 
@@ -243,7 +214,7 @@ La línea terminó el 2026-10-25 (P-V1-01). Los demás pendientes de esta secci�
 - **Estado (verificado):**
   - el instalador no está firmado;
   - `window.open` queda bloqueado solo porque la app no define quién recibe la ventana nueva;
-  - `scripts/data-replay.mjs` no se ejecuta en Windows en CI.
+  - `scripts/data-replay.mjs` y `scripts/data-smoke.mjs` no se ejecutan en Windows en CI.
 - **Esperado:** firmar el instalador antes de distribuirlo. La app real tendrá ventanas separables y un manejador explícito de `window.open`.
 - **Componentes:** `apps/desktop` y el flujo de CI de Windows en `.github/workflows/verify.yml`.
 - **Aceptación:** no indicados.
