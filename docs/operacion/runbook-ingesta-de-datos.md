@@ -52,7 +52,7 @@ Desde F1.3b, `SourceEventLog.open` cubre la parte de los pasos 3–4 que toca al
 
 ### Desconexión de WebSocket
 
-1. Persistir `ConnectionClosed` con `closure_type`, símbolos afectados y motivo.
+1. Persistir `ConnectionClosed` con `closure_type`, símbolos afectados y motivo. Desde F1.4b lo hace el adaptador de Deriv (ver «Adaptador público de Deriv»); los pasos 2 a 9 llegan con la reconexión (F1.5).
 2. Leer y conservar `IngestionCursor` durable por símbolo; no incrustarlo en el evento de cierre.
 3. Si no fue solicitado, crear `connection_lost` y `OperationalConditionEvent.opened`; cambiar a `recovering`.
 4. Reconectar con espera exponencial y jitter inyectable; no crear bucle agresivo.
@@ -89,11 +89,13 @@ Con reglas 2.0.0 (Deriv), los mensajes cuyo `msg_type` declara el perfil en `non
 
 Desde F1.4b, los límites de `schemas.zip` se aplican al cargar los esquemas de Deriv (ver «Carga de los esquemas de Deriv»).
 
-Desde F1.3b, un frame de más de 1 048 576 bytes se rechaza antes de crear el `RawSourceFrame`. Queda una incidencia `source_limit_exceeded` con severidad `error` y una condición abierta en el registro operativo, y la entrada se cierra; solo se admite después el `ConnectionClosed` del cierre. Un `ConnectionOpened` durable resuelve la condición (`input_reopened`) y reabre la entrada. En F1.3b esa reapertura no verifica todavía la continuidad del paso 5: la verificación llega con la reconexión (F1.5). Los límites de la cola en memoria llegan con el transporte real (F1.4/F1.5).
+Desde F1.3b, un frame de más de 1 048 576 bytes se rechaza antes de crear el `RawSourceFrame`. Queda una incidencia `source_limit_exceeded` con severidad `error` y una condición abierta en el registro operativo, y la entrada se cierra; solo se admite después el `ConnectionClosed` del cierre. Un `ConnectionOpened` durable resuelve la condición (`input_reopened`) y reabre la entrada. En F1.3b esa reapertura no verifica todavía la continuidad del paso 5: la verificación llega con la reconexión (F1.5).
+
+Desde F1.4b, el transporte de Deriv aplica dos límites antes del ingestor: el de frame, que `ws` corta con su tamaño declarado, y el de la cola en memoria. Los dos dejan la misma incidencia y la misma condición con `RawFirstIngestor.pauseForSourceLimit`, que solo escribe en el registro operativo, y cierran la entrada con `transport_error` (ver «Adaptador público de Deriv»).
 
 ### Carga de los esquemas de Deriv
 
-Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §2), el worker sabe cargar el `schemas.zip` de la release fijada en ADR-0004 §2 (`apps/market-data-worker/src/deriv/schema-archive.ts`). Lo descarga de su release en GitHub, porque buoh no guarda esos esquemas en Git. El adaptador que lo usa al arrancar, antes de abrir el WebSocket, llega con el transporte (ADR-0012 §12, PR 5). Ese llamador aplica el tiempo máximo de 30 000 ms con su reloj inyectado, y no se conecta si la carga falla. La carga comprueba, en este orden:
+Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §2), el worker sabe cargar el `schemas.zip` de la release fijada en ADR-0004 §2 (`apps/market-data-worker/src/deriv/schema-archive.ts`). Lo descarga de su release en GitHub, porque buoh no guarda esos esquemas en Git. El adaptador lo carga al arrancar, antes de abrir el WebSocket: aplica el tiempo máximo de 30 000 ms con su temporizador inyectado y no se conecta si la carga falla. La carga comprueba, en este orden:
 
 1. la descarga: como mucho 5 242 880 bytes. Un `Content-Length` mayor se rechaza sin leer el cuerpo, y una descarga sin él se corta en cuanto lo supera;
 2. el SHA-256 del archivo, antes de abrirlo;
@@ -114,6 +116,42 @@ Cualquier fallo deja la salud en `failed`. No se reintenta con contenido no conf
 | `download_status` (`detail` da el código HTTP), `download_failed` o `download_timeout` | GitHub no respondió bien, no se pudo conectar o venció el tiempo | reintentar más tarde. No hay incidencia, porque no se recibió contenido |
 
 La condición de un límite de esquema se resuelve con el primer `ConnectionOpened` durable de una ejecución posterior que sí cargó los esquemas.
+
+### Adaptador público de Deriv
+
+Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §3 a §7), el worker tiene el adaptador del canal público (`apps/market-data-worker/src/deriv/`), con la fuente `deriv_options` y el conector `deriv-options-ws-1.0.0`. Todavía no hay un comando que lo ejecute: `pnpm run data:smoke` llega con el PR 7, y el catálogo y las incidencias de respuestas pedidas en PostgreSQL, con el PR 6. Una conexión sigue estos pasos:
+
+1. Carga los esquemas (sección anterior) y comprueba que sus cinco peticiones (`active_symbols`, `ticks`, `ping`, `time` y `forget_all`) cumplen su esquema de petición. Si algo falla, no se conecta.
+2. Abre el WebSocket con `ws` 8.22.0: sin compresión, mensajes de hasta 1 048 576 bytes, sin seguir redirecciones y con 10 000 ms para abrir. Al abrir persiste `ConnectionOpened`. Si después sigue abierta una condición del registro operativo, cierra sin suscribirse.
+3. Pide `active_symbols` (`brief`). Un snapshot válido se guarda como versión nueva solo si cambia su contenido. Un catálogo inválido deja su incidencia y no crea versión, y sigue vigente la última versión válida.
+4. Se suscribe a `ticks` solo si el símbolo está en ese snapshot. El primer tick confirma la suscripción, y el adaptador guarda su `subscription.id`.
+5. Envía un `ping` cada 45 000 ms. Cada petición lleva un `req_id` creciente por conexión, desde 1, y espera su respuesta 15 000 ms.
+6. Al cumplirse la duración pedida, pide `forget_all` y cierra con `requested`.
+
+Cada mensaje de texto recibe su `observation_id` y su `received_at_utc` al llegar, y pasa por la cola en memoria hacia el `RawFirstIngestor`. Una respuesta se interpreta solo después de que su frame quede durable, y se empareja por `req_id` y por el `msg_type` que espera su petición. Una respuesta que no empareja se conserva raw y no cambia nada; su petición vence a los 15 000 ms.
+
+**Respuestas pedidas.** Si la respuesta a `active_symbols`, `ping`, `time` o `forget_all` trae `error` o no cumple su esquema, queda una incidencia `invalid_source_frame` sin símbolo en el almacén de respuestas pedidas, fuera de los datasets y del registro operativo (ADR-0012 §6). Si ese almacén no responde, queda la alerta JSON `requested_response_incident_unavailable` en stderr, y la incidencia se puede volver a derivar del frame durable. Una suscripción rechazada (`ticks` con `error`) ya la registran las reglas 2.0.0. Una respuesta que queda durable después de decidir el cierre ya no cambia el flujo, pero deja igual su incidencia o, si es un catálogo válido, su versión; si entonces el almacén del catálogo no responde, queda la alerta `catalog_store_unavailable`.
+
+**Cola en memoria.** Admite 1000 frames y 33 554 432 bytes, y se aplica el primer límite que se alcance. Un frame cuenta desde que llega hasta que el ingestor termina con él. Si un frame no cabe, el adaptador deja de aceptar, vacía la cola y corta el socket. Después registra `source_limit_exceeded` (`in_memory_queue_events` o `in_memory_queue_bytes`) con el `observation_id` del frame que no cupo, y persiste el `ConnectionClosed`. Los frames que esperaban no se persisten: la pérdida queda en la incidencia, en el cierre y en la continuidad pendiente. Un frame cortado por `ws` sigue el mismo camino con `websocket_frame` y su tamaño declarado.
+
+**Cierres.** Ninguno reconecta todavía (F1.5). El adaptador termina con un resultado: `completed`, `disconnected`, `paused` o `failed`, con un motivo (`reason`) y un dato saneado (`detail`): el código de error o de cierre, la etapa, la operación vencida o el motivo de la incidencia. El motivo del resultado puede no ser el del `ConnectionClosed`:
+
+| Causa | `closure_type` | Motivo del `ConnectionClosed` | Resultado y su motivo |
+|---|---|---|---|
+| los esquemas no cargan, o una petición propia no cumple su esquema | no conecta | ninguno | `failed`: el motivo de la carga, o `request_invalid` |
+| no abre en 10 000 ms, o falla al conectar | no hay `ConnectionOpened` | ninguno | `disconnected`: `connect_timeout` o `connect_failed` |
+| cierre previsto, tras la respuesta a `forget_all` (con error o sin él) | `requested` | `requested` | `completed` |
+| sin snapshot válido, símbolo ausente del catálogo o suscripción rechazada | `requested` | `catalog_invalid`, `symbol_not_in_catalog` o `subscription_failed` | `failed`, con el mismo motivo |
+| el almacén del catálogo no responde, o una condición operativa sigue abierta tras la apertura | `requested` | `catalog_store_unavailable` o `input_closed` | `paused`, con el mismo motivo |
+| frame cortado por `ws` o cola llena | `transport_error` | `websocket_frame`, `in_memory_queue_events` o `in_memory_queue_bytes` | `paused`, con el mismo motivo. Si `ws` no dio el tamaño declarado: `failed` con `frame_size_unavailable`, sin incidencia |
+| el log no confirma un evento | `transport_error`, que no se persiste porque el log fallido no lo admite | `persistence_unavailable` | `paused`: `persistence_unavailable` |
+| mensaje binario | `transport_error` | `binary_frame` | `disconnected`: `binary_frame` |
+| error del transporte | `transport_error` | el código saneado del error | `disconnected`: `transport_error` |
+| cierre del servidor | `remote`; `transport_error` si se cortó sin cierre ordenado (1006) | `close_code_<código>` | `disconnected`: `remote_closed`, o `transport_error` con 1006 |
+| una petición sin respuesta en 15 000 ms | `timeout` | `<operación>_timeout` | `disconnected`: `request_timeout` |
+| una respuesta a `ping` con error o que no cumple su esquema | `timeout` | `ping_invalid` | `disconnected`: `ping_invalid` |
+
+Los cierres `requested` no pierden datos: o no hubo suscripción, o se pidió `forget_all`. Los demás abren `connection_lost` en las reglas y dejan pendiente la continuidad del símbolo suscrito. Si el `ConnectionClosed` no queda durable, el log falló: un resultado `completed` o `disconnected` pasa a `paused` con `persistence_unavailable`.
 
 ### Almacenamiento no disponible o backlog lleno por conteo/bytes
 
