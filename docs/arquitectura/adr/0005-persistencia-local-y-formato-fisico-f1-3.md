@@ -5,6 +5,7 @@
 - **Ámbito:** Fase 1, incremento F1.3
 - **Decisores:** Propietario de buoh, a propuesta de la dirección técnica
 - **Complementa:** [ADR-0004](0004-pipeline-y-reproduccion-de-datos-fase-1.md) §6–§9; difiere temporalmente Parquet de §6
+- **Complementada por:** [ADR-0012](0012-catalogo-y-adaptador-publico-de-deriv.md), que añade el catálogo y las incidencias de respuestas pedidas al almacenamiento local, y el bloqueo por fuente
 
 ## Contexto
 

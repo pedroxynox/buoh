@@ -430,7 +430,16 @@ is_trading_suspended: 0 | 1
   - Un snapshot se guarda solo si su `content_sha256` difiere del de la última versión; volver a un contenido anterior también crea versión.
   - La versión la pone el índice y no forma parte del snapshot.
   - El documento es el JCS del snapshot, sin newline, en el almacenamiento de objetos con clave por contenido.
-- **Respuesta inválida.** Un `error`, no cumplir el esquema fijado, una lista vacía, códigos repetidos o un número con exponente no crean versión. El último snapshot válido sigue vigente, y quien pidió el catálogo registra la incidencia de [respuestas pedidas](#incidencias-de-respuestas-pedidas) con el motivo `source_error_response`, `schema_validation_failed`, `catalog_empty`, `catalog_duplicate_symbol` o `catalog_exponent_not_supported`.
+- **Respuesta inválida.** Una respuesta que falla una de estas comprobaciones no crea versión, y el último snapshot válido sigue vigente. Se comprueban en este orden, y la primera que falla da el motivo:
+  1. trae `error`: `source_error_response`;
+  2. no cumple el esquema fijado: `schema_validation_failed`;
+  3. la lista falta o está vacía: `catalog_empty`;
+  4. un `pip_size` trae exponente: `catalog_exponent_not_supported`;
+  5. una entrada no cumple este contrato, por ejemplo un código vacío: `catalog_entry_invalid`;
+  6. un código se repite: `catalog_duplicate_symbol`.
+
+  Quien pidió el catálogo registra la incidencia de [respuestas pedidas](#incidencias-de-respuestas-pedidas) con ese motivo.
+- **Estado de mercado.** `exchange_is_open` e `is_trading_suspended` siguen el horario de cada mercado, así que habrá una versión nueva cuando un mercado abra, cierre o se suspenda.
 
 ## Replay de dataset
 
@@ -546,10 +555,10 @@ Implementado en F1.3b ([ADR-0005](adr/0005-persistencia-local-y-formato-fisico-f
 
 Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §3 y §4), el transporte también registra aquí dos límites que actúan antes del `RawFirstIngestor`:
 
-- el frame que el cliente WebSocket corta por superar 1 048 576 bytes. Su `observed_value` es el tamaño declarado en la cabecera, y su `observed_ref`, un UUIDv7 nuevo, porque el frame nunca llega;
+- el frame que el cliente WebSocket corta por superar 1 048 576 bytes. Su `observed_value` es la suma de las longitudes declaradas hasta el fragmento que supera el límite (en un mensaje sin fragmentar, su tamaño), y su `observed_ref`, un UUIDv7 nuevo, porque el frame nunca llega;
 - la cola en memoria llena (`in_memory_queue_events` o `in_memory_queue_bytes`), con el `observation_id` del frame que no cupo.
 
-En los dos casos el transporte pausa el ingestor y cierra la entrada con `ConnectionClosed` (`closure_type: requested`).
+En los dos casos el transporte pausa el ingestor y cierra la entrada con `ConnectionClosed` (`closure_type: transport_error`, con el recurso como motivo). No es un cierre pedido: se pierden datos, así que las reglas abren `connection_lost` y dejan pendiente la continuidad de los símbolos afectados.
 
 ### Incidencias de respuestas pedidas
 
@@ -562,7 +571,7 @@ Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §6).
 | `severity` | `error` |
 | `observed_ref` y `observed_at_utc` | `observation_id` y `received_at_utc` del frame |
 | `related_refs` | `[]` |
-| `symbol` | `echo_req.ticks` si el perfil lo permite; si no, `null` |
+| `symbol` | `null`: ninguna respuesta declarada es de un símbolo. Es una diferencia deliberada con la atribución de las reglas 2.0.0, que acabaría en el único símbolo del perfil |
 | `evidence` | `raw_payload_sha256` y el motivo: `source_error_response`, `schema_validation_failed` o uno de los del catálogo |
 
 Así, la incidencia se puede volver a derivar del frame durable. Vive en la tabla PostgreSQL append-only `requested_response_incidents`, fuera de los datasets y del registro operativo: no abre condiciones ni cambia la salud.

@@ -49,10 +49,10 @@ Tipos de pendiente:
 - **Aceptación (plan §6):**
   - dos snapshots se guardan como versiones distintas si cambia el contenido;
   - un payload inválido no reemplaza el último snapshot válido y genera una incidencia.
-- **Decidido en ADR-0012** (§7 y contratos de dominio, `SourceCatalogSnapshot`): la forma del snapshot, sus versiones y la incidencia de un catálogo inválido (`invalid_source_frame`, registrada por quien pidió el catálogo).
-- **Abierto:**
-  - el catálogo no decide el universo comercial: es una decisión pendiente en `PROJECT_STATUS.md`;
-  - el propietario fijó que el primer smoke use un solo índice sintético, con el nombre exacto del catálogo. ADR-0012 elige `R_100`, «Volatility 100 Index».
+- **Decidido en ADR-0012** (§1, §7 y contratos de dominio, `SourceCatalogSnapshot`):
+  - la forma del snapshot, sus versiones y la incidencia de un catálogo inválido (`invalid_source_frame`, registrada por quien pidió el catálogo);
+  - el símbolo del primer smoke: el propietario fijó un solo índice sintético con el nombre exacto del catálogo, y ADR-0012 elige `R_100`, «Volatility 100 Index».
+- **Abierto:** el catálogo no decide el universo comercial: es una decisión pendiente en `PROJECT_STATUS.md`.
 
 ### P-F1-02. Adaptador público de Deriv (`F1-SOURCE-001`) — parcial
 
