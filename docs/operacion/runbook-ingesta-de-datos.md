@@ -87,7 +87,31 @@ Con reglas 2.0.0 (Deriv), los mensajes cuyo `msg_type` declara el perfil en `non
 4. No truncar ni interpretar parcialmente un frame o archivo como válido.
 5. Reabrir solo con configuración versionada y continuidad verificada.
 
+Desde F1.4b, los límites de `schemas.zip` se aplican al cargar los esquemas de Deriv (ver «Carga de los esquemas de Deriv»).
+
 Desde F1.3b, un frame de más de 1 048 576 bytes se rechaza antes de crear el `RawSourceFrame`. Queda una incidencia `source_limit_exceeded` con severidad `error` y una condición abierta en el registro operativo, y la entrada se cierra; solo se admite después el `ConnectionClosed` del cierre. Un `ConnectionOpened` durable resuelve la condición (`input_reopened`) y reabre la entrada. En F1.3b esa reapertura no verifica todavía la continuidad del paso 5: la verificación llega con la reconexión (F1.5). Los límites de la cola en memoria llegan con el transporte real (F1.4/F1.5).
+
+### Carga de los esquemas de Deriv
+
+Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §2), el adaptador de Deriv carga al arrancar, antes de abrir el WebSocket, el `schemas.zip` de la release fijada en ADR-0004 §2 (`apps/market-data-worker/src/deriv/schema-archive.ts`). Lo descarga de su release en GitHub, porque buoh no guarda esos esquemas en Git. Comprueba, en este orden:
+
+1. la descarga: como mucho 5 242 880 bytes y 30 000 ms. Un `Content-Length` mayor se rechaza sin leer el cuerpo, y una descarga sin él se corta en cuanto lo supera;
+2. el SHA-256 del archivo, antes de abrirlo;
+3. el directorio del ZIP, sin descomprimir: como mucho 1000 entradas, 10 485 760 bytes declarados por entrada y 52 428 800 en total;
+4. que estén las 14 entradas que usa buoh (petición y respuesta de `active_symbols`, `forget`, `forget_all`, `ping`, `ticks`, `ticks_history` y `time`), que cada una mida lo que declara y que compile con su validador estricto.
+
+Cualquier fallo deja la salud en `failed` y el adaptador no se conecta. No se reintenta con contenido no confiable (ADR-0004 §12). El resultado da un motivo y un dato saneado (`detail`):
+
+| Motivo | Qué indica | Qué hacer |
+|---|---|---|
+| `source_limit_exceeded` | se superó un límite (`detail` dice cuál) | queda una incidencia `critical` y una condición abierta en el registro operativo. Revisar si la release cambió; nunca subir el límite sin configuración versionada y revisión |
+| `archive_sha256_mismatch` | el archivo no es el fijado (`detail` da el hash recibido) | no usarlo. Comprobar la release en GitHub. Cambiar de release exige un PR con pruebas del adaptador (ADR-0004 §2), nunca seguir `latest` |
+| `archive_invalid` | el ZIP está roto, o una entrada no mide lo que declara | igual que un hash distinto: no se usa |
+| `schema_entry_missing` | faltan entradas (`detail` las nombra) | la release no es la esperada; no se usa |
+| `schema_entry_invalid` | una entrada no es JSON, tiene otro `$schema` o no compila en modo estricto (`detail` la nombra) | igual |
+| `download_status`, `download_failed` o `download_timeout` | GitHub no respondió bien (`detail` da el código HTTP) | reintentar más tarde. No hay incidencia, porque no se recibió contenido |
+
+La condición de un límite de esquema se resuelve con el primer `ConnectionOpened` durable de una ejecución posterior que sí cargó los esquemas.
 
 ### Almacenamiento no disponible o backlog lleno por conteo/bytes
 
