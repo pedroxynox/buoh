@@ -124,8 +124,12 @@ afterAll(async () => {
 });
 
 describe('integración del log raw-first y el registro operativo', () => {
-  it('aplica las dos migraciones', () => {
-    expect(applied).toEqual(['0001_publicaciones.sql', '0002_log_raw_first.sql']);
+  it('aplica las tres migraciones', () => {
+    expect(applied).toEqual([
+      '0001_publicaciones.sql',
+      '0002_log_raw_first.sql',
+      '0003_catalogo_y_respuestas_pedidas.sql',
+    ]);
   });
 
   it('los vectores pasan por el log real y se publican con sus dataset_id', async () => {

@@ -7,6 +7,7 @@ import { DEFAULT_VECTOR_ROOT, loadSyntheticFixture } from '../fixture.js';
 import { createUuidV7Generator } from '../ids.js';
 import { RawFirstIngestor } from '../ingestion/raw-first-ingestor.js';
 import { OperationalRegistry } from '../operational/registry.js';
+import { lockedSourceLogStore, SourceLock } from '../postgres/source-lock.js';
 import { openStores } from '../runtime.js';
 import { publishFromLog } from '../source-log/publish-from-log.js';
 import { SourceEventLog } from '../source-log/source-event-log.js';
@@ -31,14 +32,21 @@ async function main(): Promise<number> {
   }
   const fixture = await loadSyntheticFixture(fileURLToPath(DEFAULT_VECTOR_ROOT));
   const nextId = createUuidV7Generator({ now: () => Date.now(), randomBytes });
-  const stores = openStores(config);
   const source = fixture.profile.source;
+  // Una sola instancia escribe el log de la fuente (ADR-0012 §9): si otra lo tiene, no arranca.
+  const lock = await SourceLock.acquire({ postgres: config.postgres, source });
+  if (lock === null) {
+    console.error(`Otro proceso escribe el log de "${source}"; no se arranca.`);
+    return 1;
+  }
+  const stores = openStores(config);
   try {
+    const sourceLog = lockedSourceLogStore(stores.sourceLog, lock);
     const openLog = () =>
       SourceEventLog.open({
         objects: stores.objects,
         source,
-        store: stores.sourceLog,
+        store: sourceLog,
         zlibVersion: process.versions.zlib,
       });
     let log = await openLog();
@@ -109,6 +117,7 @@ async function main(): Promise<number> {
     console.log(JSON.stringify({ deployment_environment: config.environment, results }));
     return 0;
   } finally {
+    await lock.release();
     await stores.close();
   }
 }

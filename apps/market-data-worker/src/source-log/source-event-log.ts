@@ -72,7 +72,11 @@ function joinLines(lines: readonly Uint8Array[]): Uint8Array {
   return bytes;
 }
 
-async function writeVerified(
+/**
+ * Escribe un objeto content-addressed y lo relee: solo cuenta como escrito si los bytes guardados
+ * tienen el tamaño y el SHA-256 esperados. Lo usan el log y el catálogo.
+ */
+export async function writeVerified(
   objects: ObjectStore,
   key: string,
   bytes: Uint8Array,

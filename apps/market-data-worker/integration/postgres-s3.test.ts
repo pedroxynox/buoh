@@ -109,7 +109,11 @@ afterAll(async () => {
 
 describe('integración PostgreSQL + S3-compatible local', () => {
   it('aplica migraciones de forma idempotente y verificada', async () => {
-    expect(firstMigration.applied).toEqual(['0001_publicaciones.sql', '0002_log_raw_first.sql']);
+    expect(firstMigration.applied).toEqual([
+      '0001_publicaciones.sql',
+      '0002_log_raw_first.sql',
+      '0003_catalogo_y_respuestas_pedidas.sql',
+    ]);
     expect((await migrate(stores.pool)).applied).toEqual([]);
   });
 

@@ -33,7 +33,15 @@ export {
   type PersistenceStage,
   type RecordResult,
 } from './operational/registry.js';
+export { PostgresCatalogStore } from './postgres/catalog-store.js';
 export { PostgresOperationalStore } from './postgres/operational-store.js';
+export { PostgresRequestedResponseIncidentStore } from './postgres/requested-response-store.js';
+export {
+  lockedSourceLogStore,
+  SOURCE_LOCK_LOST,
+  SourceLock,
+  sourceLockKey,
+} from './postgres/source-lock.js';
 export { PostgresSourceLogStore } from './postgres/source-log-store.js';
 export {
   type ClosedSourceSegment,
