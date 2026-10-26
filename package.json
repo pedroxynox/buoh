@@ -18,6 +18,7 @@
   "scripts": {
     "build": "turbo run build",
     "data:replay": "node scripts/data-replay.mjs",
+    "data:smoke": "node scripts/data-smoke.mjs",
     "docs:check": "node scripts/check-doc-impact.mjs",
     "docs:check:pr": "node scripts/check-doc-impact.mjs --require-base",
     "format": "prettier --write .",

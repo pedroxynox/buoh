@@ -36,7 +36,7 @@ Tipos de pendiente:
 
 ## 1. Fase 1 — Fundación de datos
 
-### P-F1-01. Catálogo público versionado (`F1-CATALOG-001`) — parcial
+### P-F1-01. Catálogo público versionado (`F1-CATALOG-001`) — resuelto
 
 - **Objetivo:** guardar versiones inmutables de la lista oficial de símbolos de Deriv.
 - **Fuente:** plan de Fase 1 §6 (`F1-CATALOG-001`), ADR-0004 §6 y `PROJECT_STATUS.md` (siguiente tarea `F1.4b`).
@@ -44,7 +44,7 @@ Tipos de pendiente:
   - los contratos de dominio describen el snapshot desde ADR-0012, `packages/contracts` lo implementa (`sourceCatalogSnapshotSchema`, PR 2 de F1.4b) y `packages/domain` convierte la respuesta de Deriv en snapshot (`deriveCatalogSnapshot`, PR 3);
   - desde el PR 5, el adaptador del worker pide `active_symbols`, crea el snapshot desde el frame durable y lo guarda con la regla de versiones a través del puerto `CatalogStore` (`apps/market-data-worker/src/deriv/`). Un catálogo inválido deja su incidencia y no reemplaza la última versión válida. En las pruebas, el almacén es un doble en memoria;
   - desde el PR 6, `PostgresCatalogStore` guarda las versiones en `source_catalog_versions` y el JCS de cada snapshot en el almacenamiento de objetos (migración `0003`);
-  - falta el comando (PR 7). Su smoke guarda todo en memoria (ADR-0012 §10), así que ningún comando escribe todavía estas tablas: las prueban las pruebas de integración.
+  - desde el PR 7, `pnpm run data:smoke` consulta el catálogo en vivo y lo guarda en memoria (ADR-0012 §10). Ningún comando escribe todavía estas tablas con datos vivos: las cubren las pruebas de integración.
 - **Esperado:** el worker consulta `active_symbols` por el canal público. Guarda un snapshot con fecha de recepción UTC, versión del conector, versión del esquema de fuente, hash de contenido y la lista sin reinterpretar los nombres oficiales. Los snapshots son inmutables en almacenamiento de objetos, con índice en PostgreSQL.
 - **Componentes:** `packages/contracts` (el esquema `SourceCatalogSnapshot`, ya hecho), `packages/domain` (la conversión de la respuesta de Deriv) y `apps/market-data-worker` (adaptador, almacenamiento y migración).
 - **Aceptación (plan §6):**
@@ -53,9 +53,11 @@ Tipos de pendiente:
 - **Decidido en ADR-0012** (§1, §7 y contratos de dominio, `SourceCatalogSnapshot`):
   - la forma del snapshot, sus versiones y la incidencia de un catálogo inválido (`invalid_source_frame`, registrada por quien pidió el catálogo);
   - el símbolo del primer smoke: el propietario fijó un solo índice sintético con el nombre exacto del catálogo, y ADR-0012 elige `R_100`, «Volatility 100 Index».
-- **Abierto:** el catálogo no decide el universo comercial: es una decisión pendiente en `PROJECT_STATUS.md`.
+- **Abierto:**
+  - el catálogo no decide el universo comercial: es una decisión pendiente en `PROJECT_STATUS.md`;
+  - el primer proceso que ingiera de forma continua, y que guarde así el catálogo vivo en PostgreSQL, todavía no existe (P-F1-04 y P-F1-06).
 
-### P-F1-02. Adaptador público de Deriv (`F1-SOURCE-001`) — parcial
+### P-F1-02. Adaptador público de Deriv (`F1-SOURCE-001`) — resuelto
 
 - **Objetivo:** recibir el flujo público de Deriv, sin credenciales, dentro de los límites de ADR-0004.
 - **Fuente:** plan de Fase 1 §6, ADR-0004 §2 y §7, y `PROJECT_STATUS.md` («Puntos de partida ya comprobados para F1.4b»).
@@ -66,7 +68,7 @@ Tipos de pendiente:
   - desde el PR 5, el worker tiene el adaptador (`apps/market-data-worker/src/deriv/`): transporte `ws`, cola en memoria con sus límites, correlación por `req_id` y `msg_type`, keepalive, tiempos de espera y pausa del ingestor desde el transporte. Lo prueban un socket, un reloj y un temporizador falsos, y `test:integration` comprueba el corte de `ws` con un servidor local;
   - el normalizador sigue siendo uno por versión de reglas; el 2.0.0 ya lee las rutas de Deriv (ADR-0012 §2);
   - desde el PR 6, las incidencias de respuestas pedidas van a `requested_response_incidents`, y `fixture:publish`, el único proceso que hoy escribe el log de una fuente en PostgreSQL, toma antes su bloqueo (`SourceLock`, ADR-0012 §9). Lo que falta para un escritor continuo está en el pendiente 6 de F1.3 (`PROJECT_STATUS.md`);
-  - falta `pnpm run data:smoke` (PR 7).
+  - desde el PR 7, `pnpm run data:smoke` lo ejecuta contra el canal público. La evidencia del smoke vivo está en `PROJECT_STATUS.md` («Evidencia de F1.4b»).
 - **Esperado:**
   - endpoint público documentado, sin OAuth, PAT ni OTP;
   - respuestas validadas contra la release de esquemas fijada;
@@ -81,13 +83,13 @@ Tipos de pendiente:
   - errores en respuestas pedidas, en `requested_response_incidents` (§6);
   - bloqueo por fuente en PostgreSQL (§9);
   - frames cortados por el cliente: tamaño declarado y pausa desde el transporte (§3 y §4).
-- **Abierto:** cada PR de implementación justifica su dependencia nueva.
+- **Abierto:** nada para F1.4b. Las tres dependencias nuevas (`ajv-draft-04`, `fflate` y `ws`) se justificaron en sus PR. La reconexión es P-F1-04.
 
-### P-F1-03. `pnpm run data:smoke` — sin empezar
+### P-F1-03. `pnpm run data:smoke` — resuelto
 
 - **Objetivo:** una prueba viva opt-in contra Deriv que mida retrasos reales.
 - **Fuente:** plan de Fase 1 §5 y §7, `PROJECT_STATUS.md` (`F1.4b`) y ADR-0004 §13.
-- **Estado (verificado):** el comando no existe en `package.json`.
+- **Estado (verificado):** desde el PR 7 de F1.4b, `pnpm run data:smoke -- --live` corre `scripts/data-smoke.mjs`, que deja en stdout una sola línea JSON saneada. Sin `--live` responde con un error de uso y no abre conexiones. Guarda todo en memoria y lo borra al terminar. Su uso y su resultado están en el runbook («Smoke público de Deriv»), y el primer smoke vivo, en `PROJECT_STATUS.md` («Evidencia de F1.4b»).
 - **Esperado:**
   - opt-in, nunca el único criterio de fusión;
   - su evidencia es la fecha, la release de esquemas y un resultado sanitizado;
@@ -104,7 +106,7 @@ Tipos de pendiente:
 - **Fuente:** plan de Fase 1 §6, runbook («Inicio», «Desconexión de WebSocket», «Almacenamiento no disponible») y ADR-0005.
 - **Estado (verificado):**
   - los contratos (`HistoryRecoveryResult`, `IngestionCursor`) y la derivación de continuidad en `packages/domain/src/quality.ts` existen;
-  - en el worker no hay reconexión, espera exponencial ni consulta de historia;
+  - en el worker no hay reconexión, espera exponencial ni consulta de historia. Desde F1.4b, el adaptador de Deriv termina en cada pérdida de conexión con su `ConnectionClosed`, y la tabla de cierres del runbook dice cuáles pierden datos. Los esquemas de `ticks_history` y `forget` ya se cargan con la release fijada, pero el adaptador no los pide;
   - `IngestionCursor` tiene esquema, pero no tabla ni almacén.
 - **Esperado:** ante un `ConnectionClosed` no pedido, el worker:
   - pasa a `recovering`;
@@ -140,7 +142,7 @@ Tipos de pendiente:
 
 - **Objetivo:** reunir la evidencia que permite marcar la Fase 1 como `done`.
 - **Fuente:** plan de Fase 1 §9, runbook («Verificación periódica» y «Puerta de salida de Fase 1») y `PROJECT_STATUS.md` («Evidencia requerida para cambiar de fase»).
-- **Estado (verificado):** no hay evidencia de captura pública sin credenciales ni ensayos de reinicio y de fallo de almacenamiento.
+- **Estado (verificado):** desde F1.4b, `pnpm run data:smoke` recibe el flujo público sin credenciales, en memoria (evidencia en `PROJECT_STATUS.md`). No hay todavía captura persistida de datos vivos ni ensayos de reinicio y de fallo de almacenamiento.
 - **Esperado:**
   - capturar el flujo público sin credenciales;
   - que reinicio, desconexión y fallo de persistencia no oculten pérdida;

@@ -25,7 +25,7 @@ export const TAGLINE = 'Observa con calma. Decide con evidencia.';
  * Entrega siguiente de PROJECT_STATUS.md para la que se escribió el texto sobre lo que existe hoy.
  * Una prueba falla cuando cambia, para obligar a revisar el sitio.
  */
-export const WRITTEN_FOR_NEXT_DELIVERY = 'F1.4b';
+export const WRITTEN_FOR_NEXT_DELIVERY = 'F1.5';
 
 /** Aviso corto que va en el pie de todas las páginas. */
 export const RISK_SHORT =
@@ -250,7 +250,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
     id: '1',
     title: 'Fundación de datos',
     state: 'en curso',
-    text: 'Ya existen los contratos de datos, la normalización, las reglas de calidad y la publicación de datasets reproducibles. Falta conectar con Deriv y recuperar datos tras una desconexión.',
+    text: 'Ya existen los contratos de datos, la normalización, las reglas de calidad, la publicación de datasets reproducibles y la conexión de solo lectura con el canal público de Deriv. Falta recuperar datos tras una desconexión y mostrar la salud del servicio.',
   },
   {
     id: '1B',
