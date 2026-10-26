@@ -124,7 +124,7 @@ Se descarta el `WebSocket` global de Node porque reúne el mensaje entero antes 
   | Petición | `msg_type` esperado | Si la respuesta trae `error` o no cumple su esquema |
   |---|---|---|
   | `active_symbols` | `active_symbols` | §7: no crea versión; sin snapshot válido, salud `failed` |
-  | `ticks` con `subscribe` | `tick`; si falla, `ticks` con `error` | la ingesta termina con salud `failed`; el cierre es `requested`, porque sin suscripción no hay datos que perder |
+  | `ticks` con `subscribe` | `tick`; si falla, `ticks` con `error` | solo para la respuesta `ticks` con `error`: la ingesta termina con salud `failed` y el cierre es `requested`, porque sin suscripción no hay datos que perder. Un `tick` que no cumple el esquema sigue las reglas 2.0.0 |
   | `ping` | `ping` | como un keepalive sin respuesta: cierre `timeout` |
   | `time` | `time` | solo lo pide el smoke, que da el desfase como no disponible |
   | `forget_all` | `forget_all` | se registra y el cierre previsto sigue (`requested`) |
@@ -186,7 +186,7 @@ Así se cumple la aceptación de `F1-CATALOG-001`. El catálogo no decide el uni
 ### 9. Una sola instancia por fuente
 
 - El adaptador entrega los frames de uno en uno, desde una cola con un solo consumidor.
-- Todo proceso que escriba el log de una fuente en PostgreSQL toma antes un bloqueo de sesión `pg_try_advisory_lock` derivado del nombre de la fuente. Lo toma en un cliente dedicado que no vuelve al pool, porque el pool cierra los clientes inactivos y el bloqueo se iría con ellos, y lo mantiene mientras ingiere. Si otro proceso lo tiene, no arranca; si esa conexión se pierde, la ingesta se pausa. Esto resuelve el pendiente 6 de F1.3.
+- Todo proceso que escriba el log de una fuente en PostgreSQL toma antes un bloqueo de sesión `pg_try_advisory_lock` derivado del nombre de la fuente. Lo toma en un cliente dedicado que no vuelve al pool, porque el pool cierra los clientes inactivos y el bloqueo se iría con ellos, y lo mantiene mientras ingiere. Si otro proceso lo tiene, no arranca. Si esa conexión se pierde, deja de escribir y no reabre la entrada hasta volver a tomar el bloqueo; si para entonces lo tiene otro proceso, termina. Esto resuelve el pendiente 6 de F1.3.
 - El smoke usa almacenamiento en memoria de su propio proceso, así que no comparte log.
 
 ### 10. Smoke opt-in
@@ -230,7 +230,7 @@ Cada PR es pequeño, con su revisión semántica:
 
 - buoh escucha Deriv con los mismos contratos, log y reglas que los vectores sintéticos. Solo se añaden el validador draft-04, el transporte y el catálogo.
 - Entran tres dependencias pequeñas y sin dependencias propias (`ws`, `ajv-draft-04` y `fflate`). Cada PR justifica la suya.
-- El corte de `ws` depende de una propiedad interna; queda fijada y probada, y sin ella el adaptador falla cerrado.
+- El corte de `ws` depende de dos propiedades internas; quedan fijadas y probadas, y sin ellas el adaptador falla cerrado.
 - El catálogo deja de ser un dato suelto: cada versión tiene procedencia, y un catálogo roto no borra el anterior.
 - Las comprobaciones de las respuestas pedidas quedan fuera de los datasets: un dataset publicado no muestra un error de `active_symbols`, pero la tabla `requested_response_incidents` sí.
 - El smoke en memoria no prueba la persistencia real con datos vivos; eso lo cubren las pruebas de integración con datos sintéticos.
