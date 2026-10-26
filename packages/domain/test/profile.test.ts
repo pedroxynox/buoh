@@ -137,6 +137,14 @@ describe('validador del esquema de fuente por dialecto', () => {
     expect(() => profileWith(draft04TickSchema({ x_buoh: 1 }))).toThrow(/x_buoh/u);
   });
 
+  it('en 2020-12 también es estricto y no admite las anotaciones de Deriv', () => {
+    const base = { $schema: DRAFT_2020_12, type: 'object' };
+
+    expect(() => compileSourceSchema(base)).not.toThrow();
+    expect(() => compileSourceSchema({ ...base, x_buoh: 1 })).toThrow(/x_buoh/u);
+    expect(() => compileSourceSchema({ ...base, auth_required: 0 })).toThrow(/auth_required/u);
+  });
+
   it('el esquema de los vectores (2020-12) sigue igual, con su hash', () => {
     const profile = createPipelineProfile({
       connector_version: 'fixture-v1',

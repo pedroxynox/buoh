@@ -4,7 +4,7 @@
 - **Fecha:** 2026-10-25
 - **Ámbito:** Fase 1, entrega F1.4b (`F1-CATALOG-001`, `F1-SOURCE-001` y `pnpm run data:smoke`)
 - **Decisores:** Dirección técnica de buoh, dentro de las decisiones del propietario para F1.4b registradas en `PROJECT_STATUS.md`
-- **Complementa:** [ADR-0004](0004-pipeline-y-reproduccion-de-datos-fase-1.md) §2, §6, §7, §12 y §13, [ADR-0005](0005-persistencia-local-y-formato-fisico-f1-3.md) y [ADR-0007](0007-varias-fuentes-y-metatrader-5.md) §2. No cambia el alcance ni la puerta de salida de Fase 1.
+- **Complementa:** [ADR-0003](0003-lenguajes-y-limites.md) (bibliotecas de la fuente Deriv), [ADR-0004](0004-pipeline-y-reproduccion-de-datos-fase-1.md) §2, §6, §7, §12 y §13, [ADR-0005](0005-persistencia-local-y-formato-fisico-f1-3.md) y [ADR-0007](0007-varias-fuentes-y-metatrader-5.md) §2. No cambia el alcance ni la puerta de salida de Fase 1.
 
 ## Contexto
 

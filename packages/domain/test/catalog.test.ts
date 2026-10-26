@@ -222,9 +222,12 @@ describe('deriveCatalogSnapshot', () => {
 
   it('da el motivo de la primera comprobación que falla, en el orden del contrato', () => {
     const error = ',"error":{"code":"SyntheticError","message":"x"}';
-    const cases: readonly (readonly [string, RequestedResponseInvalidReason, string])[] = [
+    const cases: readonly (readonly [string, RequestedResponseInvalidReason | 'ok', string])[] = [
       // 1. Un objeto `error`, aunque el resto también falle.
       ['error', 'source_error_response', response([entry('SYNTH_A')], error)],
+      // Solo cuenta un objeto `error`, como en las reglas 2.0.0: un texto no es un error de la
+      // fuente, y el esquema admite campos extra en la raíz.
+      ['error que no es objeto', 'ok', response([entry('SYNTH_A')], ',"error":"boom"')],
       [
         'error y otro msg_type',
         'source_error_response',
@@ -254,6 +257,11 @@ describe('deriveCatalogSnapshot', () => {
         'catalog_exponent_not_supported',
         response([entry('SYNTH_A', { pip_size: '1e-3' }), entry('SYNTH_A')]),
       ],
+      [
+        'exponente en mayúscula',
+        'catalog_exponent_not_supported',
+        response([entry('SYNTH_A', { pip_size: '1E-3' })]),
+      ],
       // 5. Una entrada que no cumple el contrato: un código vacío.
       [
         'código vacío y repetido',
@@ -267,6 +275,24 @@ describe('deriveCatalogSnapshot', () => {
     for (const [label, reason, payload] of cases) {
       expect(reasonOf(payload), label).toBe(reason);
     }
+  });
+
+  it('una lista que no es lista cuenta como catálogo vacío, aunque el esquema no la tipe', () => {
+    // El esquema fijado tipa la lista; este esquema laxo permite probar la comprobación 3 sola.
+    const lax = createCatalogResponseSchema({
+      source_schema_bytes: Buffer.from(
+        JSON.stringify({ $schema: 'http://json-schema.org/draft-04/schema#', type: 'object' }),
+      ),
+      source_schema_release: 'lax',
+    });
+    const result = deriveCatalogSnapshot(
+      frame(
+        '{"active_symbols":{},"echo_req":{"active_symbols":"brief","req_id":1},"msg_type":"active_symbols","req_id":1}',
+      ),
+      lax,
+    );
+
+    expect(result).toEqual({ ok: false, reason: 'catalog_empty' });
   });
 
   it('lanza si el frame no es JSON: solo convierte respuestas ya correlacionadas', () => {
