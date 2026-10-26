@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "Respuesta sintética de active_symbols (pruebas de buoh)",
+  "type": "object",
+  "required": ["echo_req", "msg_type"],
+  "properties": {
+    "active_symbols": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "exchange_is_open",
+          "is_trading_suspended",
+          "market",
+          "pip_size",
+          "subgroup",
+          "submarket",
+          "trade_count",
+          "underlying_symbol",
+          "underlying_symbol_name",
+          "underlying_symbol_type"
+        ],
+        "properties": {
+          "exchange_is_open": {
+            "type": "integer",
+            "enum": [0, 1]
+          },
+          "is_trading_suspended": {
+            "type": "integer",
+            "enum": [0, 1]
+          },
+          "market": {
+            "type": "string"
+          },
+          "pip_size": {
+            "type": "number"
+          },
+          "subgroup": {
+            "type": "string"
+          },
+          "submarket": {
+            "type": "string"
+          },
+          "trade_count": {
+            "type": "integer"
+          },
+          "underlying_symbol": {
+            "type": "string"
+          },
+          "underlying_symbol_name": {
+            "type": "string"
+          },
+          "underlying_symbol_type": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "echo_req": {
+      "type": "object"
+    },
+    "msg_type": {
+      "type": "string",
+      "enum": ["active_symbols"]
+    },
+    "req_id": {
+      "type": "integer"
+    }
+  }
+}

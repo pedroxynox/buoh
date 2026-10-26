@@ -3,6 +3,12 @@
  * Normaliza frames crudos, aplica las reglas de calidad, arma la publicación de un dataset y deriva
  * la salud. El worker (apps/market-data-worker) le pasa los datos y guarda lo que devuelve.
  */
+export {
+  createCatalogResponseSchema,
+  deriveCatalogSnapshot,
+  type CatalogConversionResult,
+  type CatalogResponseSchema,
+} from './catalog.js';
 export { CONDITION_HEALTH, deriveHealthReport, type HealthInput } from './health.js';
 export {
   JsonLexemeError,
@@ -22,6 +28,7 @@ export {
   CONTRACT_SCHEMA_VERSION,
   createPipelineProfile,
   NORMALIZER_VERSION,
+  publicationThresholds,
   QUALITY_RULE_VERSION,
   qualityProfileSchema,
   RULE_SETS,
@@ -29,6 +36,7 @@ export {
   SEGMENT_POLICY_VERSION,
   type PipelineProfile,
   type PipelineProfileInput,
+  type ProfilePurpose,
   type QualityProfile,
   type RuleSet,
 } from './profile.js';
@@ -56,7 +64,19 @@ export {
   type SegmentCloseReason,
   type SegmentStats,
 } from './segment-policy.js';
+export {
+  checkRequestedResponse,
+  deriveRequestedResponseIncident,
+  type RequestedResponseInvalidReason,
+} from './requested-response.js';
 export { canonicalJsonBytes, ndjsonBytes, prettyCanonicalJson, utf8 } from './serialization.js';
+export {
+  compileSourceSchema,
+  DRAFT_04_ANNOTATIONS,
+  SOURCE_SCHEMA_DIALECTS,
+  sourceSchemaDialect,
+  type SourceSchemaDialect,
+} from './source-schema.js';
 export {
   evaluateSourceLimit,
   SOURCE_LIMITS,

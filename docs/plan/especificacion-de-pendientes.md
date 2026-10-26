@@ -42,7 +42,7 @@ Tipos de pendiente:
 - **Fuente:** plan de Fase 1 §6 (`F1-CATALOG-001`), ADR-0004 §6 y `PROJECT_STATUS.md` (siguiente tarea `F1.4b`).
 - **Estado (verificado):**
   - no hay módulo, comando, migración ni tabla de catálogo en `apps/market-data-worker`;
-  - los contratos de dominio describen el snapshot desde ADR-0012, y `packages/contracts` lo implementa (`sourceCatalogSnapshotSchema`, PR 2 de F1.4b); faltan la conversión desde la respuesta de Deriv, el almacenamiento y el comando;
+  - los contratos de dominio describen el snapshot desde ADR-0012, `packages/contracts` lo implementa (`sourceCatalogSnapshotSchema`, PR 2 de F1.4b) y `packages/domain` convierte la respuesta de Deriv en snapshot (`deriveCatalogSnapshot`, PR 3); faltan la consulta, el almacenamiento con sus versiones y el comando;
   - `PROJECT_STATUS.md` confirma que no hay integración con Deriv.
 - **Esperado:** el worker consulta `active_symbols` por el canal público. Guarda un snapshot con fecha de recepción UTC, versión del conector, versión del esquema de fuente, hash de contenido y la lista sin reinterpretar los nombres oficiales. Los snapshots son inmutables en almacenamiento de objetos, con índice en PostgreSQL.
 - **Componentes:** `packages/contracts` (el esquema `SourceCatalogSnapshot`, ya hecho), `packages/domain` (la conversión de la respuesta de Deriv) y `apps/market-data-worker` (adaptador, almacenamiento y migración).
@@ -62,9 +62,8 @@ Tipos de pendiente:
   - ya existen, desde F1.4a: las reglas de calidad 2.0.0, `non_tick_msg_types`, la atribución por `echo_req`, el límite de frame en `RawFirstIngestor.receiveFrame` y la evaluación de límites de cola en `packages/domain/src/health.ts`;
   - no hay transporte WebSocket, keepalive ni tiempos de espera;
   - no hay correlación de solicitudes y respuestas, ni descarga de `schemas.zip` con su SHA-256 y sus límites de ZIP;
-  - no hay validador draft-04: el único es Ajv 2020, en `packages/domain/src/profile.ts`;
-  - la elección de normalizador y validador no depende de la fuente;
-  - no hay perfil «de medición» que nunca pueda publicar.
+  - desde el PR 3 de F1.4b, `packages/domain` elige el validador por el dialecto del esquema (Ajv 2020 o `ajv-draft-04`), tiene un perfil de medición que nunca deriva ni publica, y hace las comprobaciones puras de las respuestas pedidas y su incidencia;
+  - el normalizador sigue siendo uno por versión de reglas; el 2.0.0 ya lee las rutas de Deriv (ADR-0012 §2).
 - **Esperado:**
   - endpoint público documentado, sin OAuth, PAT ni OTP;
   - respuestas validadas contra la release de esquemas fijada;

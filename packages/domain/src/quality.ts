@@ -17,7 +17,7 @@ import {
 } from '@buoh/contracts';
 
 import { normalizeRawFrame, type UnflaggedTick } from './normalizer.js';
-import { CONTRACT_SCHEMA_VERSION, type PipelineProfile } from './profile.js';
+import { CONTRACT_SCHEMA_VERSION, publicationThresholds, type PipelineProfile } from './profile.js';
 
 type IncidentType = DataQualityIncident['incident_type'];
 type Severity = DataQualityIncident['severity'];
@@ -121,10 +121,11 @@ export function deriveMarketData(
   segments: readonly (readonly unknown[])[],
   profile: PipelineProfile,
 ): DerivedMarketData {
+  // Un perfil de medición falla aquí, antes de leer nada: nunca deriva ni publica (ADR-0012 §8).
+  const { maximum_delivery_delay_ms: maximumDelay, maximum_event_gap_ms: maximumGap } =
+    publicationThresholds(profile);
   const events: SourceEvent[] = segments.flat().map((event) => sourceEventSchema.parse(event));
   const source = profile.source;
-  const maximumDelay = profile.quality_profile.maximum_delivery_delay_ms;
-  const maximumGap = profile.quality_profile.maximum_event_gap_ms;
 
   const incidents: DataQualityIncident[] = [];
   const conditions: OperationalConditionEvent[] = [];

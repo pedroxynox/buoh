@@ -52,6 +52,7 @@ Fase 1 usa `execution_mode = disabled`. Un servicio pausado no cambia de entorno
 - Ticks de dataset se ordenan por `event_time_utc`, `tick_fingerprint_sha256`, `observation_id`.
 - Incidencias se ordenan por `observed_at_utc`, `incident_type`, `incident_id`.
 - Implementación: `packages/domain/src/quality.ts` produce este orden y `packages/contracts/src/dataset-consistency.ts` lo valida, cada uno con sus propios comparadores por unidades UTF-16. Deben cambiar a la vez ([estado del código](estado-del-codigo.md) D-06).
+- Las entradas de `SourceCatalogSnapshot` se ordenan por `underlying_symbol` en unidades UTF-16: `deriveCatalogSnapshot` (`packages/domain/src/catalog.ts`) las ordena y `isSortedUnique` (`packages/contracts`) lo valida, los dos con el operador `<` de JavaScript.
 - El orden de las condiciones operativas (`occurred_at_utc`, `condition_event_id`; ver `OperationalConditionEvent`) está implementado tres veces: `compareConditions` en `packages/domain/src/quality.ts`, por unidades UTF-16, y `validateConditionCausality` y `reduceOpenConditions` en `packages/contracts/src/conditions.ts`, con `localeCompare`. Coinciden porque los dos campos tienen formato fijo ([estado del código](estado-del-codigo.md) D-13).
 - IDs de source events se obtienen de un generador UUIDv7 inyectable y se reutilizan en replay.
 - `incident_id` y `condition_event_id` son `DerivedEventId`: se calculan después de ordenar referencias sobre todos los campos del evento excepto el propio ID; luego se inserta el ID sin recalcularlo.
@@ -433,14 +434,15 @@ is_trading_suspended: 0 | 1
   - La versión la pone el índice y no forma parte del snapshot.
   - El documento es el JCS del snapshot, sin newline, en el almacenamiento de objetos con clave por contenido.
 - **Respuesta inválida.** Una respuesta que falla una de estas comprobaciones no crea versión, y el último snapshot válido sigue vigente. Se comprueban en este orden, y la primera que falla da el motivo:
-  1. trae `error`: `source_error_response`;
+  1. trae un objeto `error`, como en las reglas 2.0.0: `source_error_response`;
   2. no cumple el esquema fijado: `schema_validation_failed`;
-  3. la lista falta o está vacía: `catalog_empty`;
+  3. la lista falta, no es una lista o está vacía: `catalog_empty`;
   4. un `pip_size` trae exponente: `catalog_exponent_not_supported`;
   5. una entrada no cumple este contrato, por ejemplo un código vacío: `catalog_entry_invalid`;
   6. un código se repite: `catalog_duplicate_symbol`.
 
   Quien pidió el catálogo registra la incidencia de [respuestas pedidas](#incidencias-de-respuestas-pedidas) con ese motivo.
+- **Conversión.** `deriveCatalogSnapshot` (`packages/domain`) aplica las seis comprobaciones a un frame durable y, si pasan, arma el snapshot: proyecta los nueve campos, ordena las entradas y calcula los hashes con las funciones del contrato. Es pura, así que el snapshot o la incidencia se pueden volver a derivar del frame. El frame tiene que ser JSON: quien lo correlaciona tiene que leerlo con el mismo lector estricto (`parseJsonPreservingNumbers`), así que un frame que no lo es, o que repite una clave, nunca llega a la conversión, y ya deja la incidencia `payload_not_json` de las reglas 2.0.0. Si llegara, la conversión lanza un error.
 - **Estado de mercado.** `exchange_is_open` e `is_trading_suspended` siguen el horario de cada mercado, así que habrá una versión nueva cuando un mercado abra, cierre o se suspenda.
 
 ## Replay de dataset
@@ -527,7 +529,7 @@ Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §2),
 - draft-04: `ajv` con `ajv-draft-04`, como en Deriv;
 - cualquier otro: crear el perfil falla.
 
-Los dos validan en modo estricto. En draft-04 solo se admiten como anotación, sin validar, las palabras clave `auth_required` y `examples` de la release fijada de Deriv. El replay obtiene el mismo validador del esquema que el dataset publica.
+Los dos validan en modo estricto. En draft-04 solo se admiten como anotación, sin validar, las palabras clave `auth_required` y `examples` de la release fijada de Deriv. El `$schema` tiene que coincidir exactamente con `https://json-schema.org/draft/2020-12/schema` o con `http://json-schema.org/draft-04/schema#`, y un documento sin `$schema` también se rechaza. El replay obtiene el mismo validador del esquema que el dataset publica. Implementado en `packages/domain` (`compileSourceSchema`), que usan el perfil del pipeline y el esquema del catálogo.
 
 ### Perfil de medición
 
@@ -536,6 +538,8 @@ Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §8),
 - Sin ese campo, el perfil es de publicación, como hasta ahora; los perfiles existentes conservan sus bytes y sus hashes.
 - Un perfil de medición usa las reglas 2.0.0, declara `non_tick_msg_types` y no lleva `maximum_delivery_delay_ms` ni `maximum_event_gap_ms`. Los umbrales live se fijan después con lo que mida el smoke.
 - La derivación de un dataset y su publicación lo rechazan, así que nunca publica. El ingestor y el normalizador lo aceptan.
+- Un perfil con `purpose: "measurement"` y algún umbral, o con `purpose` de otro valor, se rechaza.
+- Implementado en `packages/domain`: `createPipelineProfile` expone `purpose`, y `publicationThresholds` falla con un perfil de medición antes de que `deriveMarketData` lea nada.
 
 ### Registro operativo de persistencia y límites
 
@@ -577,6 +581,8 @@ Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §6).
 | `evidence` | `raw_payload_sha256` y el motivo: `source_error_response`, `schema_validation_failed` o uno de los del catálogo |
 
 Así, la incidencia se puede volver a derivar del frame durable. Vive en la tabla PostgreSQL append-only `requested_response_incidents`, fuera de los datasets y del registro operativo: no abre condiciones ni cambia la salud.
+
+En `packages/domain`, `checkRequestedResponse` hace las dos comprobaciones comunes en orden (un objeto `error` y después el esquema de la operación), y `deriveRequestedResponseIncident` arma la incidencia de esta tabla. La tabla llega con el almacenamiento del worker ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §12, PR 6).
 
 El perfil de Deriv no declara `ticks` ni `error`. Una suscripción fallida (`msg_type` `ticks`) y la respuesta a un método desconocido (`msg_type` `error`) llegan con un objeto `error`, y las reglas 2.0.0 ya las registran como `source_error_response`.
 
