@@ -117,8 +117,11 @@ async function main(): Promise<number> {
     console.log(JSON.stringify({ deployment_environment: config.environment, results }));
     return 0;
   } finally {
-    await lock.release();
-    await stores.close();
+    try {
+      await lock.release();
+    } finally {
+      await stores.close();
+    }
   }
 }
 

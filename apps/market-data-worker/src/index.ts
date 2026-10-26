@@ -38,7 +38,9 @@ export { PostgresOperationalStore } from './postgres/operational-store.js';
 export { PostgresRequestedResponseIncidentStore } from './postgres/requested-response-store.js';
 export {
   lockedSourceLogStore,
+  SOURCE_LOCK_HEARTBEAT_MS,
   SOURCE_LOCK_LOST,
+  SOURCE_LOCK_QUERY_TIMEOUT_MS,
   SourceLock,
   sourceLockKey,
 } from './postgres/source-lock.js';

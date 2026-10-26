@@ -12,6 +12,10 @@ import {
   deriveRequestedResponseIncident,
   type PipelineProfile,
 } from '@buoh/domain';
+import { spawnSync } from 'node:child_process';
+import { connect, createServer, type AddressInfo, type Socket } from 'node:net';
+import { resolve } from 'node:path';
+
 import { type Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -26,7 +30,9 @@ import {
   migrate,
   openStores,
   PostgresCatalogStore,
+  SOURCE_LOCK_HEARTBEAT_MS,
   SOURCE_LOCK_LOST,
+  SOURCE_LOCK_QUERY_TIMEOUT_MS,
   SourceLock,
   sourceLockKey,
   type ObjectStore,
@@ -45,6 +51,7 @@ import {
  * PostgreSQL y S3-compatible locales. Esquema PostgreSQL propio, recreado en cada ejecución.
  */
 const SCHEMA = 'buoh_integration_catalog';
+const publishFixtureCli = resolve(import.meta.dirname, '../dist/cli/publish-fixture.js');
 const environment = {
   ...process.env,
   BUOH_DEPLOYMENT_ENVIRONMENT: 'test',
@@ -214,6 +221,68 @@ describe('PostgresCatalogStore (ADR-0012 §7)', () => {
     expect(await errorCode(stores.pool.query('DELETE FROM source_catalog_versions'))).toBe('23001');
     expect(await errorCode(stores.pool.query('TRUNCATE source_catalog_versions'))).toBe('23001');
   });
+
+  it('un snapshot ya guardado como versión anterior no se guarda otra vez', async () => {
+    // deriv_options: v1 = frame 10, v2 = frame 12 y v3 = frame 13. El mismo frame 12 da el mismo
+    // snapshot que la v2, con otro contenido que la v3.
+    const again = snapshot([SYNTH_100, { ...SYNTH_50, exchange_is_open: 0 }], 12);
+    expect(await errorCode(stores.catalog.record(again))).toBe('23505');
+    expect((await stores.catalog.latest(DERIV_SOURCE, 'deriv_active_symbols'))?.version).toBe(3);
+  });
+
+  describe('latest comprueba que el documento corresponde a su fila', () => {
+    /** Versión 1 de `source` con los campos de `row` y, como documento, `bytes`. */
+    async function plant(source: string, row: SourceCatalogSnapshot, bytes: Uint8Array) {
+      const digest = sha256Hex(bytes);
+      await stores.objects.putIfAbsent(contentKey(digest), bytes, 'application/json');
+      await stores.pool.query(
+        `INSERT INTO source_catalog_versions
+           (source, catalog_format, version, snapshot_id, content_sha256, entry_count,
+            observation_id, received_at_utc, document_sha256, document_byte_length)
+         VALUES ($1, 'deriv_active_symbols', 1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          source,
+          row.snapshot_id,
+          row.content_sha256,
+          row.entry_count,
+          row.observation_id,
+          row.received_at_utc,
+          digest,
+          bytes.byteLength,
+        ],
+      );
+    }
+    const jcs = (item: SourceCatalogSnapshot) => new TextEncoder().encode(canonicalJson(item));
+    const latestOf = (source: string) => stores.catalog.latest(source, 'deriv_active_symbols');
+
+    it('un documento que no es JCS, aunque sea el mismo snapshot', async () => {
+      const item = snapshot([SYNTH_100], 60, 'tamper_jcs');
+      await plant('tamper_jcs', item, new TextEncoder().encode(JSON.stringify(item, null, 2)));
+      await expect(latestOf('tamper_jcs')).rejects.toThrow(/no corresponde a su índice/u);
+    });
+
+    it('otro snapshot con el mismo contenido', async () => {
+      const indexed = snapshot([SYNTH_100], 61, 'tamper_id');
+      const stored = snapshot([SYNTH_100], 62, 'tamper_id');
+      expect(stored.content_sha256).toBe(indexed.content_sha256);
+      expect(stored.snapshot_id).not.toBe(indexed.snapshot_id);
+      await plant('tamper_id', indexed, jcs(stored));
+      await expect(latestOf('tamper_id')).rejects.toThrow(/no corresponde a su índice/u);
+    });
+
+    it('un content_sha256 de la fila que no es el del documento', async () => {
+      const item = snapshot([SYNTH_100], 63, 'tamper_content');
+      const other = snapshot([SYNTH_50], 64, 'tamper_content');
+      await plant('tamper_content', { ...item, content_sha256: other.content_sha256 }, jcs(item));
+      await expect(latestOf('tamper_content')).rejects.toThrow(/no corresponde a su índice/u);
+    });
+
+    it('un documento de otra fuente', async () => {
+      const item = snapshot([SYNTH_100], 65, 'tamper_doc');
+      await plant('tamper_row', item, jcs(item));
+      await expect(latestOf('tamper_row')).rejects.toThrow(/no corresponde a su índice/u);
+    });
+  });
 });
 
 describe('PostgresRequestedResponseIncidentStore (ADR-0012 §6)', () => {
@@ -263,6 +332,46 @@ describe('PostgresRequestedResponseIncidentStore (ADR-0012 §6)', () => {
     expect(await errorCode(stores.pool.query('DELETE FROM requested_response_incidents'))).toBe(
       '23001',
     );
+    expect(await errorCode(stores.pool.query('TRUNCATE requested_response_incidents'))).toBe(
+      '23001',
+    );
+  });
+
+  it('rechaza una invalid_source_frame que no tiene la forma de una respuesta pedida', async () => {
+    const base = deriveRequestedResponseIncident(frame([], 42), 'catalog_empty');
+    const variant = (changes: Record<string, JsonValue>) => {
+      const body = { ...base, ...changes } as unknown as Record<string, JsonValue>;
+      delete body['incident_id'];
+      return dataQualityIncidentSchema.parse({ ...body, incident_id: deriveEventId(body) });
+    };
+    for (const changes of [
+      { symbol: 'SYNTH_100' },
+      { quality_rule_version: '1.0.0', schema_version: '1.0.0', symbol: 'SYNTH_100' },
+      { severity: 'warning' },
+      { related_refs: [uuid(43)] },
+    ]) {
+      await expect(stores.requestedResponses.append(variant(changes))).rejects.toThrow(
+        /solo deja invalid_source_frame/u,
+      );
+    }
+    const { rowCount } = await stores.pool.query(
+      'SELECT 1 FROM requested_response_incidents WHERE observed_ref = $1',
+      [uuid(42)],
+    );
+    expect(rowCount).toBe(0);
+  });
+
+  it('la tabla solo admite los seis motivos de una respuesta pedida', async () => {
+    expect(
+      await errorCode(
+        stores.pool.query(
+          `INSERT INTO requested_response_incidents
+             (incident_id, incident_type, source, observed_ref, observed_at_utc, reason, incident_jcs)
+           VALUES ($1, 'invalid_source_frame', $2, $3, '2026-03-02T10:00:00.000Z', 'otro', '{}')`,
+          [`sha256:${'2'.repeat(64)}`, DERIV_SOURCE, uuid(44)],
+        ),
+      ),
+    ).toBe('23514');
   });
 });
 
@@ -337,5 +446,78 @@ describe('SourceLock (ADR-0012 §9)', () => {
     expect(next?.held).toBe(true);
     await next?.release();
     await lock.release();
+  });
+
+  it('nota en segundos una sesión que deja de responder sin cerrarse, y release no se cuelga', async () => {
+    // Un proxy que deja de reenviar sin cerrar nada, como una red partida: TCP sigue vivo y solo
+    // el latido del bloqueo puede notarlo.
+    let blackhole = false;
+    const sockets: Socket[] = [];
+    const proxy = createServer((client) => {
+      const upstream = connect(config.postgres.port, config.postgres.host);
+      sockets.push(client, upstream);
+      client.on('data', (chunk) => {
+        if (!blackhole) {
+          upstream.write(chunk);
+        }
+      });
+      upstream.on('data', (chunk) => {
+        if (!blackhole) {
+          client.write(chunk);
+        }
+      });
+      client.on('error', () => undefined);
+      upstream.on('error', () => undefined);
+    });
+    await new Promise<void>((resolve) => {
+      proxy.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = proxy.address() as AddressInfo;
+    try {
+      const lock = await SourceLock.acquire({
+        postgres: { ...config.postgres, host: '127.0.0.1', port },
+        source: 'probe_silent',
+      });
+      if (lock === null) {
+        throw new TypeError('No se tomó el bloqueo.');
+      }
+      blackhole = true;
+      const started = performance.now();
+      while (lock.held && performance.now() - started < 20_000) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(lock.held).toBe(false);
+      expect(performance.now() - started).toBeLessThan(
+        SOURCE_LOCK_HEARTBEAT_MS + SOURCE_LOCK_QUERY_TIMEOUT_MS + 2000,
+      );
+
+      const releasing = performance.now();
+      await lock.release();
+      expect(performance.now() - releasing).toBeLessThan(2000);
+    } finally {
+      for (const socket of sockets) {
+        socket.destroy();
+      }
+      await new Promise<void>((resolve) => {
+        proxy.close(() => {
+          resolve();
+        });
+      });
+    }
+  });
+
+  it('fixture:publish no arranca si otro proceso tiene el bloqueo de su fuente', async () => {
+    const lock = await SourceLock.acquire({ postgres: config.postgres, source: 'synthetic' });
+    try {
+      const run = spawnSync(process.execPath, [publishFixtureCli], {
+        encoding: 'utf8',
+        env: environment,
+      });
+      expect(run.status).toBe(1);
+      expect(run.stdout).toBe('');
+      expect(run.stderr).toBe('Otro proceso escribe el log de "synthetic"; no se arranca.\n');
+    } finally {
+      await lock?.release();
+    }
   });
 });

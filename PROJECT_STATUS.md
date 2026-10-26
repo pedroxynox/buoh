@@ -162,9 +162,7 @@ Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la li
 3. Los nombres de `PublicationStep` no coinciden con `PersistenceStage`; los fallos de publicación todavía no entran en el registro operativo.
 4. El worker usa un único rol PostgreSQL dueño de las tablas. Antes de desplegar (ADR-0006) hace falta un rol de ejecución que solo pueda insertar y leer.
 5. SeaweedFS `mini` arranca componentes internos que no se usan (Iceberg, Lance, servidor de administración).
-
-El antiguo pendiente 6 (un solo escritor por fuente) quedó resuelto en F1.4b: el transporte entrega una llamada a la vez, y todo proceso que escribe el log de una fuente en PostgreSQL toma antes su bloqueo (ADR-0012 §9).
-
+6. Un solo escritor por fuente: resuelto en parte en F1.4b. El transporte entrega una llamada a la vez, y `fixture:publish`, el único proceso que hoy escribe el log en PostgreSQL, toma antes el bloqueo de su fuente, que nota una sesión perdida en unos 10 s (ADR-0012 §9). El primer proceso que escriba el log de forma continua debe además usar el log protegido (`lockedSourceLogStore`), porque `openStores()` entrega el log sin proteger, y volver a tomar el bloqueo tras perderlo o terminar si ya lo tiene otro proceso.
 7. Tras un fallo de persistencia, el `ConnectionClosed` del cierre no se guarda en el log, así que un dataset que abarque la caída no lleva marca de la interrupción. Un índice que confirma pero informa error se trata como no durable y se adopta al reabrir sin reconciliar el tick.
 
 ## Pendientes registrados de F1.2

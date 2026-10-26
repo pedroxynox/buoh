@@ -19,7 +19,8 @@ CREATE TABLE source_catalog_versions (
 );
 
 -- Versiones contiguas, y una versión nueva solo si cambia el contenido respecto de la última.
--- Dos escritores a la vez no pueden repetir versión: la clave primaria rechaza al segundo.
+-- Dos escritores a la vez no pueden repetir versión: el trigger o la clave primaria rechazan al
+-- segundo. Un snapshot (un frame) es como mucho una versión: snapshot_id es único.
 CREATE FUNCTION buoh_check_source_catalog_version() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -47,8 +48,9 @@ CREATE TRIGGER source_catalog_versions_contiguous
   BEFORE INSERT ON source_catalog_versions
   FOR EACH ROW EXECUTE FUNCTION buoh_check_source_catalog_version();
 
--- Respuesta pedida inválida: siempre invalid_source_frame, sin símbolo y con el observation_id del
--- frame. Fuera de los datasets y del registro operativo: no abre condiciones ni cambia la salud.
+-- Respuesta pedida inválida: siempre invalid_source_frame, con el observation_id del frame. El
+-- resto de su forma (sin símbolo, severidad error, reglas 2.0.0) lo exige el almacén del worker.
+-- Fuera de los datasets y del registro operativo: no abre condiciones ni cambia la salud.
 CREATE TABLE requested_response_incidents (
   incident_id text PRIMARY KEY CHECK (incident_id ~ '^sha256:[0-9a-f]{64}$'),
   incident_type text NOT NULL CHECK (incident_type = 'invalid_source_frame'),

@@ -8,10 +8,20 @@ import { type SourceLogStore } from '../source-log/ports.js';
 /** Código del error de una escritura del log sin el bloqueo de su fuente. */
 export const SOURCE_LOCK_LOST = 'source_lock_lost';
 
+/** Cada cuánto el bloqueo comprueba que su sesión sigue viva. */
+export const SOURCE_LOCK_HEARTBEAT_MS = 5_000;
+/**
+ * Tiempo máximo de cada consulta y de la conexión del bloqueo. Una sesión que no responde en este
+ * tiempo cuenta como perdida.
+ */
+export const SOURCE_LOCK_QUERY_TIMEOUT_MS = 5_000;
+
 /**
  * Clave de `pg_try_advisory_lock` de una fuente: los 8 primeros bytes del SHA-256 de
  * `buoh:source-log:<fuente>`, como entero de 64 bits con signo. No depende de funciones internas
- * de PostgreSQL, así que la misma fuente da la misma clave en cualquier versión.
+ * de PostgreSQL, así que la misma fuente da la misma clave en cualquier versión. La clave vale para
+ * toda la base de datos, no para un esquema: bloquea también la misma fuente en otro
+ * `BUOH_POSTGRES_SCHEMA` de la misma base.
  */
 export function sourceLockKey(source: string): string {
   const digest = createHash('sha256').update(`buoh:source-log:${source}`, 'utf8').digest();
@@ -23,14 +33,20 @@ export function sourceLockKey(source: string): string {
  * log de una fuente en PostgreSQL lo toma antes y lo mantiene mientras ingiere. Vive en un cliente
  * propio, fuera del pool: el pool cierra los clientes inactivos y el bloqueo se iría con ellos.
  *
- * Si la sesión se pierde, `held` pasa a `false` y el log protegido con `lockedSourceLogStore` deja de
- * escribir. Para volver a escribir hay que tomar un bloqueo nuevo.
+ * Cada `SOURCE_LOCK_HEARTBEAT_MS` consulta su propia sesión. Si la sesión se cierra, da un error o
+ * no responde en `SOURCE_LOCK_QUERY_TIMEOUT_MS`, `held` pasa a `false` y el log protegido con
+ * `lockedSourceLogStore` deja de escribir. Así una conexión que muere sin aviso se nota en unos
+ * 10 s. Mientras tanto, otro proceso podría tomar el bloqueo, pero los triggers de `0002` siguen
+ * aceptando cada posición para un solo escritor. Para volver a escribir hay que tomar un bloqueo
+ * nuevo.
  */
 export class SourceLock {
   readonly source: string;
   readonly #client: pg.Client;
   readonly #key: string;
   #held = true;
+  #heartbeat: ReturnType<typeof setInterval> | null = null;
+  #beating = false;
 
   private constructor(source: string, client: pg.Client, key: string) {
     this.source = source;
@@ -45,12 +61,16 @@ export class SourceLock {
   }): Promise<SourceLock | null> {
     const key = sourceLockKey(input.source);
     const client = new pg.Client({
+      connectionTimeoutMillis: SOURCE_LOCK_QUERY_TIMEOUT_MS,
       database: input.postgres.database,
       host: input.postgres.host,
-      // Detecta una conexión muerta aunque no haya consultas.
+      // Además del latido: el sistema avisa de una conexión cortada sin esperar las 2 horas por
+      // defecto del keepalive de TCP.
       keepAlive: true,
+      keepAliveInitialDelayMillis: 10_000,
       password: input.postgres.password,
       port: input.postgres.port,
+      query_timeout: SOURCE_LOCK_QUERY_TIMEOUT_MS,
       user: input.postgres.user,
     });
     let lock: SourceLock | null = null;
@@ -81,6 +101,11 @@ export class SourceLock {
     client.on('end', () => {
       acquired.#markLost();
     });
+    acquired.#heartbeat = setInterval(() => {
+      void acquired.#beat();
+    }, SOURCE_LOCK_HEARTBEAT_MS);
+    // El latido no mantiene vivo el proceso por sí solo.
+    acquired.#heartbeat.unref();
     return acquired;
   }
 
@@ -89,21 +114,43 @@ export class SourceLock {
     return this.#held;
   }
 
-  #markLost(): void {
-    this.#held = false;
+  async #beat(): Promise<void> {
+    if (!this.#held || this.#beating) {
+      return;
+    }
+    this.#beating = true;
+    try {
+      await this.#client.query('SELECT 1');
+    } catch {
+      this.#markLost();
+    } finally {
+      this.#beating = false;
+    }
   }
 
-  /** Suelta el bloqueo y cierra su cliente. Si la sesión ya se perdió, solo cierra. */
+  #markLost(): void {
+    this.#held = false;
+    if (this.#heartbeat !== null) {
+      clearInterval(this.#heartbeat);
+      this.#heartbeat = null;
+    }
+  }
+
+  /**
+   * Suelta el bloqueo y cierra su cliente. Nunca falla ni espera más de
+   * `SOURCE_LOCK_QUERY_TIMEOUT_MS`: cerrar la sesión ya suelta un bloqueo de sesión, así que soltarlo
+   * antes es solo cortesía.
+   */
   async release(): Promise<void> {
     const held = this.#held;
-    this.#held = false;
-    try {
-      if (held) {
-        await this.#client.query('SELECT pg_advisory_unlock($1::bigint)', [this.#key]);
-      }
-    } finally {
-      await this.#client.end().catch(() => undefined);
+    this.#markLost();
+    if (held) {
+      await this.#client
+        .query('SELECT pg_advisory_unlock($1::bigint)', [this.#key])
+        .catch(() => undefined);
     }
+    // Con una consulta vencida en curso, `end` corta el socket en lugar de esperar.
+    await this.#client.end().catch(() => undefined);
   }
 }
 
