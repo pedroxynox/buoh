@@ -199,6 +199,8 @@ export class DerivConnection {
     number,
     { readonly cancel: () => void; readonly request: DerivRequest }
   >();
+  /** Peticiones declaradas que esperaban respuesta cuando se decidió el cierre. */
+  readonly #pendingAtClose = new Map<number, DerivRequest>();
   readonly #done = Promise.withResolvers<DerivConnectionResult>();
   #socket: DerivSocket | null = null;
   #socketClosed = false;
@@ -397,6 +399,12 @@ export class DerivConnection {
       return;
     }
     this.#closing = plan;
+    // Su respuesta, si llega durable, ya no cambia el flujo, pero deja su incidencia o su versión.
+    for (const [reqId, { request }] of this.#pending) {
+      if (request.operation !== 'ticks') {
+        this.#pendingAtClose.set(reqId, request);
+      }
+    }
     this.#cancelTimers();
     if (plan.drop_waiting) {
       this.#queue.dropWaitingFrames();
@@ -549,9 +557,7 @@ export class DerivConnection {
     const outcome = await this.#input.ingestor.receiveFrame(frame);
     switch (outcome.status) {
       case 'durable':
-        if (this.#closing === null) {
-          await this.#interpret(frame);
-        }
+        await (this.#closing === null ? this.#interpret(frame) : this.#auditAfterClose(frame));
         return;
       case 'limit_exceeded':
         // Segunda barrera: el ingestor ya pausó la entrada y registró el límite.
@@ -647,6 +653,40 @@ export class DerivConnection {
     }
   }
 
+  /**
+   * Respuesta durable que llega después de decidir el cierre. Ya no suscribe, no cierra y no mide la
+   * hora, pero deja lo que exigen ADR-0012 §6 y §7: la incidencia de una respuesta inválida o, en el
+   * catálogo, su versión.
+   */
+  async #auditAfterClose(frame: FrameInput): Promise<void> {
+    const root = parseObject(frame.payload_utf8);
+    const reqId = root === null ? null : positiveIntegerMember(root, 'req_id');
+    const request = reqId === null ? undefined : this.#pendingAtClose.get(reqId);
+    if (
+      root === null ||
+      reqId === null ||
+      request === undefined ||
+      request.operation === 'ticks' ||
+      stringMember(root, 'msg_type') !== EXPECTED_MSG_TYPE[request.operation]
+    ) {
+      return;
+    }
+    this.#pendingAtClose.delete(reqId);
+    const raw = buildRawSourceFrame(frame, this.#input.profile);
+    if (request.operation !== 'active_symbols') {
+      await this.#checkResponse(raw, root, request.operation);
+      return;
+    }
+    const stored = await this.#storeCatalog(raw);
+    if (stored.status === 'store_failed') {
+      this.#input.alert({
+        event: 'catalog_store_unavailable',
+        observed_ref: raw.observation_id,
+        reason: stored.code,
+      });
+    }
+  }
+
   #settle(reqId: number): void {
     this.#pending.get(reqId)?.cancel();
     this.#pending.delete(reqId);
@@ -690,39 +730,69 @@ export class DerivConnection {
     }
   }
 
-  /** Respuesta a `active_symbols` (ADR-0012 §7): versión nueva, o el último snapshot válido. */
-  async #onCatalog(raw: RawSourceFrame): Promise<void> {
-    const { catalog, symbol } = this.#input;
+  /**
+   * Guarda la respuesta a `active_symbols` (ADR-0012 §7): un snapshot válido va al almacén, que crea
+   * versión solo si cambió el contenido; uno inválido deja su incidencia y sigue vigente la última
+   * versión válida, si existe.
+   */
+  async #storeCatalog(raw: RawSourceFrame): Promise<
+    | {
+        readonly current: DerivConnectionResult['catalog'];
+        readonly invalid: RequestedResponseInvalidReason | null;
+        readonly status: 'stored';
+      }
+    | { readonly code: string; readonly status: 'store_failed' }
+  > {
+    const { catalog } = this.#input;
     const conversion = deriveCatalogSnapshot(raw, this.#input.catalogSchema);
-    let current: DerivConnectionResult['catalog'];
     try {
       if (conversion.ok) {
         const stored = await catalog.record(conversion.snapshot);
-        current = { snapshot: conversion.snapshot, status: stored.status, version: stored.version };
-      } else {
-        await this.#recordIncident(raw, conversion.reason);
-        const previous = await catalog.latest(raw.source, 'deriv_active_symbols');
-        current = previous === null ? null : { ...previous, status: 'previous' };
+        this.#catalog = {
+          snapshot: conversion.snapshot,
+          status: stored.status,
+          version: stored.version,
+        };
+        return { current: this.#catalog, invalid: null, status: 'stored' };
       }
+      await this.#recordIncident(raw, conversion.reason);
+      const previous = await catalog.latest(raw.source, 'deriv_active_symbols');
+      if (previous !== null) {
+        this.#catalog = { ...previous, status: 'previous' };
+      }
+      return {
+        current: previous === null ? null : this.#catalog,
+        invalid: conversion.reason,
+        status: 'stored',
+      };
     } catch (error) {
+      return { code: failureReason(error), status: 'store_failed' };
+    }
+  }
+
+  /** Respuesta a `active_symbols`: se suscribe solo si el símbolo está en el snapshot vigente. */
+  async #onCatalog(raw: RawSourceFrame): Promise<void> {
+    const { symbol } = this.#input;
+    const stored = await this.#storeCatalog(raw);
+    if (stored.status === 'store_failed') {
       this.#close({
         closure_type: 'requested',
         drop_waiting: false,
-        end: paused('catalog_store_unavailable', failureReason(error)),
+        end: paused('catalog_store_unavailable', stored.code),
         reason: 'catalog_store_unavailable',
       });
       return;
     }
+    const { current } = stored;
     if (current === null) {
       this.#close({
         closure_type: 'requested',
         drop_waiting: false,
-        end: failed('catalog_invalid', conversion.ok ? null : conversion.reason),
+        end: failed('catalog_invalid', stored.invalid),
         reason: 'catalog_invalid',
       });
       return;
     }
-    this.#catalog = current;
     if (!current.snapshot.entries.some((entry) => entry.underlying_symbol === symbol)) {
       this.#close({
         closure_type: 'requested',

@@ -97,6 +97,10 @@ async function settle(): Promise<void> {
 
 interface HarnessOptions {
   readonly catalog?: MemoryCatalogStore;
+  /** El socket falso avisa del cierre solo con `finishClose`, como `ws`. */
+  readonly deferClose?: boolean;
+  /** `connect` lanza este error en lugar de devolver un socket. */
+  readonly connectError?: Error;
   readonly durationMs?: number;
   readonly expectedSha256?: string;
   readonly fetch?: typeof fetch;
@@ -136,7 +140,10 @@ async function harness(options: HarnessOptions = {}) {
     alert: (payload) => alerts.push(payload),
     catalog,
     connect: (input) => {
-      const socket = new FakeDerivSocket(input);
+      if (options.connectError !== undefined) {
+        throw options.connectError;
+      }
+      const socket = new FakeDerivSocket({ ...input, deferClose: options.deferClose ?? false });
       sockets.push(socket);
       return socket;
     },
@@ -1154,7 +1161,7 @@ describe('perfil de medición de Deriv (ADR-0012 §8)', () => {
       allowed_symbols: ['SYNTH_100'],
       gap_detection: 'after_reconnection',
       non_tick_msg_types: ['active_symbols', 'forget_all', 'ping', 'time'],
-      profile_id: 'deriv_options-measurement-SYNTH_100',
+      profile_id: 'deriv_options-measurement-v1-SYNTH_100',
       purpose: 'measurement',
       quality_rule_version: '2.0.0',
       source: 'deriv_options',
@@ -1184,5 +1191,192 @@ describe('declaredMessageLength', () => {
     expect(declaredMessageLength({ _receiver: { _totalPayloadLength: '2000000' } })).toBeNull();
     expect(declaredMessageLength({ _receiver: { _totalPayloadLength: 2 ** 53 } })).toBeNull();
     expect(declaredMessageLength({ _receiver: { _totalPayloadLength: MIB + 1 } })).toBe(MIB + 1);
+  });
+});
+
+describe('runDerivAdapter: después de decidir el cierre', () => {
+  it('una respuesta pedida que queda durable tras el cierre deja su incidencia (ADR-0012 §6)', async () => {
+    const run = await harness();
+    const socket = run.socket();
+    socket.open();
+    await settle();
+    // La respuesta y el cierre del servidor llegan en la misma vuelta: el frame sigue en la cola.
+    socket.text(derivMessages.error(1, 'active_symbols', { active_symbols: 'brief' }));
+    socket.emit({ code: 1000, kind: 'closed' });
+    const result = await run.run;
+
+    const [catalogFrame] = await run.frames();
+    expect(result.end).toEqual({ detail: '1000', reason: 'remote_closed', status: 'disconnected' });
+    expect(run.requested.incidents).toEqual([
+      expect.objectContaining({
+        evidence: {
+          raw_payload_sha256: catalogFrame?.raw_payload_sha256,
+          reason: 'source_error_response',
+        },
+        observed_ref: catalogFrame?.observation_id,
+      }),
+    ]);
+    // Ya no se suscribe.
+    expect(socket.requests()).toHaveLength(1);
+  });
+
+  it('un catálogo válido que queda durable tras el cierre guarda su versión, sin suscribirse', async () => {
+    const run = await harness();
+    const socket = run.socket();
+    socket.open();
+    await settle();
+    socket.text(derivMessages.catalog(1));
+    socket.emit({ code: 1001, kind: 'closed' });
+    const result = await run.run;
+
+    expect(run.catalog.versions).toHaveLength(1);
+    expect(result.catalog?.status).toBe('created');
+    expect(socket.requests()).toHaveLength(1);
+    expect(await run.lastClosed()).toMatchObject({ affected_symbols: [], closure_type: 'remote' });
+  });
+
+  it('con el aviso de cierre de ws más tarde, termina cuando llega, con el cierre ya durable', async () => {
+    const run = await harness({ deferClose: true });
+    const socket = run.socket();
+    await run.openAndListCatalog();
+    socket.text(derivMessages.tick(2, START_EPOCH));
+    await settle();
+    await run.clock.advance(30_000);
+    socket.text(derivMessages.forgetAll(3));
+    let settled = false;
+    void run.run.then(() => {
+      settled = true;
+    });
+    await settle();
+
+    expect(socket.ended).toBe('close');
+    expect(await run.lastClosed()).toMatchObject({ closure_type: 'requested' });
+    expect(settled).toBe(false);
+    socket.finishClose();
+    const result = await run.run;
+    expect(result.end).toEqual({ status: 'completed' });
+    expect(result.closure?.persisted).toBe(true);
+  });
+
+  it('si el servidor cierra tras pedir la suscripción y antes del primer tick, el símbolo queda afectado', async () => {
+    const run = await harness();
+    await run.openAndListCatalog();
+    run.socket().emit({ code: 1001, kind: 'closed' });
+    await run.run;
+
+    expect(await run.lastClosed()).toMatchObject({
+      affected_symbols: ['SYNTH_100'],
+      closure_type: 'remote',
+    });
+  });
+});
+
+describe('runDerivAdapter: ramas del ingestor y del transporte', () => {
+  it('segunda barrera: un frame de más de 1 MiB que llega entero pausa y descarta lo que espera', async () => {
+    const run = await harness();
+    const socket = run.socket();
+    socket.open();
+    await settle();
+    const hold = holdObjectWrites(run.objects);
+    socket.text('{"msg_type":"tick","n":1}');
+    socket.text('x'.repeat(MIB + 1));
+    socket.text('{"msg_type":"tick","n":2}');
+    hold.release();
+    const result = await run.run;
+
+    expect((await run.frames()).map((frame) => frame.payload_utf8)).toEqual([
+      '{"msg_type":"tick","n":1}',
+    ]);
+    // IDs: 1 conexión, 2 apertura, 3 el primer frame y 4 el de más de 1 MiB.
+    expect(run.operational.incidents).toEqual([
+      expect.objectContaining({
+        evidence: {
+          maximum_value: MIB,
+          observed_value: MIB + 1,
+          resource: 'websocket_frame',
+          unit: 'bytes',
+        },
+        observed_ref: uuid(4),
+      }),
+    ]);
+    expect(run.socket().ended).toBe('terminate');
+    expect(await run.lastClosed()).toMatchObject({
+      closure_type: 'transport_error',
+      reason: 'websocket_frame',
+    });
+    expect(result.end).toEqual({ detail: null, reason: 'websocket_frame', status: 'paused' });
+  });
+
+  it('si ConnectionOpened no queda durable, no pide nada y pausa', async () => {
+    const run = await harness();
+    run.objects.armNextPutFailure('synthetic_put_failure');
+    run.socket().open();
+    const result = await run.run;
+
+    expect(run.socket().requests()).toEqual([]);
+    expect(run.socket().ended).toBe('terminate');
+    expect(result.end).toEqual({
+      detail: 'raw_object_write',
+      reason: 'persistence_unavailable',
+      status: 'paused',
+    });
+    expect(result.closure).toEqual({
+      closure_type: 'transport_error',
+      persisted: false,
+      reason: 'persistence_unavailable',
+    });
+  });
+
+  it('un mensaje ticks sin error no responde a la suscripción: vence a los 15 s', async () => {
+    const run = await harness();
+    const socket = run.socket();
+    await run.openAndListCatalog();
+    socket.text(
+      '{"echo_req":{"req_id":2,"subscribe":1,"ticks":"SYNTH_100"},"msg_type":"ticks","req_id":2}',
+    );
+    await settle();
+    expect(socket.ended).toBeNull();
+    await run.clock.advance(REQUEST_TIMEOUT_MS);
+    const result = await run.run;
+
+    expect(result.end).toEqual({
+      detail: 'ticks',
+      reason: 'request_timeout',
+      status: 'disconnected',
+    });
+    expect(await run.lastClosed()).toMatchObject({
+      closure_type: 'timeout',
+      reason: 'ticks_timeout',
+    });
+  });
+
+  it('un ping que no cumple su esquema también cierra como ping_invalid', async () => {
+    const run = await harness({ durationMs: 600_000 });
+    const socket = run.socket();
+    await run.openAndListCatalog();
+    socket.text(derivMessages.tick(2, START_EPOCH));
+    await settle();
+    await run.clock.advance(KEEPALIVE_INTERVAL_MS);
+    socket.text('{"echo_req":{"ping":1,"req_id":3},"msg_type":"ping","ping":"no","req_id":3}');
+    const result = await run.run;
+
+    expect(result.end).toEqual({ detail: null, reason: 'ping_invalid', status: 'disconnected' });
+    expect(run.requested.incidents.map((incident) => incident.evidence)).toEqual([
+      expect.objectContaining({ reason: 'schema_validation_failed' }),
+    ]);
+  });
+
+  it('si connect lanza, termina sin socket ni eventos, con connect_failed', async () => {
+    const run = await harness({
+      connectError: Object.assign(new Error('sintético'), { code: 'ERR_INVALID_URL' }),
+    });
+    const result = await run.run;
+
+    expect(run.sockets).toEqual([]);
+    expect(run.sourceLog.rows).toEqual([]);
+    expect(result).toMatchObject({
+      closure: null,
+      end: { detail: 'ERR_INVALID_URL', reason: 'connect_failed', status: 'disconnected' },
+    });
   });
 });

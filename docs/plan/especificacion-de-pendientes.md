@@ -64,7 +64,7 @@ Tipos de pendiente:
   - desde el PR 4, el worker descarga `schemas.zip` con su SHA-256 y sus límites de ZIP;
   - desde el PR 5, el worker tiene el adaptador (`apps/market-data-worker/src/deriv/`): transporte `ws`, cola en memoria con sus límites, correlación por `req_id` y `msg_type`, keepalive, tiempos de espera y pausa del ingestor desde el transporte. Lo prueban un socket, un reloj y un temporizador falsos, y `test:integration` comprueba el corte de `ws` con un servidor local;
   - el normalizador sigue siendo uno por versión de reglas; el 2.0.0 ya lee las rutas de Deriv (ADR-0012 §2);
-  - faltan el almacén de las incidencias de respuestas pedidas en PostgreSQL (PR 6) y `pnpm run data:smoke` (PR 7).
+  - faltan el almacén de las incidencias de respuestas pedidas en PostgreSQL y el bloqueo por fuente (PR 6, ADR-0012 §9), y `pnpm run data:smoke` (PR 7).
 - **Esperado:**
   - endpoint público documentado, sin OAuth, PAT ni OTP;
   - respuestas validadas contra la release de esquemas fijada;

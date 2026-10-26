@@ -6,7 +6,20 @@ import { type AddressInfo, type Socket } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 
+import { runDerivAdapter } from '../src/deriv/adapter.js';
+import { type Scheduler } from '../src/deriv/ports.js';
+import { DERIV_PUBLIC_ENDPOINT, DERIV_SOURCE } from '../src/deriv/profile.js';
 import { openWsSocket, WS_CLIENT_OPTIONS, type SocketSignal } from '../src/deriv/socket.js';
+import { OperationalRegistry } from '../src/operational/registry.js';
+import { SourceEventLog } from '../src/source-log/source-event-log.js';
+import { derivMessages, syntheticSchemaArchive } from '../test/support/deriv-fixtures.js';
+import {
+  MemoryCatalogStore,
+  MemoryObjectStore,
+  MemoryOperationalStore,
+  MemoryRequestedResponseIncidentStore,
+  MemorySourceLogStore,
+} from '../test/support/memory-stores.js';
 
 // Corte de `ws` (ADR-0012 §3 y §11): un servidor local en el mismo proceso comprueba que las
 // propiedades internas que lee el adaptador existen en ws 8.22.0 y valen lo declarado, con un
@@ -170,5 +183,81 @@ describe('openWsSocket con ws 8.22.0', () => {
 
     expect(kinds(signals)).toEqual(['error', 'closed']);
     expect(redirected).toBe(false);
+  });
+});
+
+describe('runDerivAdapter sobre ws real', () => {
+  it('completa un cierre previsto: ws avisa del cierre después de persistir el ConnectionClosed', async () => {
+    // Servidor que responde como el canal público, con mensajes sintéticos.
+    const url = await wsServer((socket) => {
+      socket.on('message', (data: Buffer) => {
+        const request = JSON.parse(data.toString('utf8')) as Record<string, unknown>;
+        const id = Number(request['req_id']);
+        if ('active_symbols' in request) {
+          socket.send(derivMessages.catalog(id));
+        } else if ('ticks' in request) {
+          socket.send(derivMessages.tick(id, 1_772_445_600));
+        } else if ('forget_all' in request) {
+          socket.send(derivMessages.forgetAll(id));
+        }
+      });
+    });
+    const scheduler: Scheduler = {
+      schedule: (ms, callback) => {
+        const timer = setTimeout(callback, ms);
+        return () => {
+          clearTimeout(timer);
+        };
+      },
+    };
+    const objects = new MemoryObjectStore();
+    const sourceLog = new MemorySourceLogStore();
+    const catalog = new MemoryCatalogStore();
+    const openLog = () =>
+      SourceEventLog.open({ objects, source: DERIV_SOURCE, store: sourceLog, zlibVersion: 'test' });
+    const fixture = syntheticSchemaArchive();
+    let sequence = 0;
+    const requestedUrls: string[] = [];
+
+    const result = await runDerivAdapter({
+      catalog,
+      // El adaptador siempre pide el canal fijado; la prueba lo desvía al servidor local.
+      connect: ({ onSignal, url: requested }) => {
+        requestedUrls.push(requested);
+        return openWsSocket({ onSignal, url });
+      },
+      durationMs: 50,
+      expected: fixture.expected,
+      fetch: () => Promise.resolve(new Response(fixture.archive)),
+      log: await openLog(),
+      nextId: () => `019b76da-a800-7000-8000-${(sequence += 1).toString().padStart(12, '0')}`,
+      now: () => new Date().toISOString(),
+      registry: await OperationalRegistry.open({
+        source: DERIV_SOURCE,
+        store: new MemoryOperationalStore(),
+      }),
+      reopenLog: openLog,
+      requestedResponses: new MemoryRequestedResponseIncidentStore(),
+      scheduler,
+      serverTime: false,
+      sink: { invalidFrame: () => undefined, tick: () => undefined },
+      symbol: 'SYNTH_100',
+    });
+
+    expect(requestedUrls).toEqual([DERIV_PUBLIC_ENDPOINT]);
+    expect(result.end).toEqual({ status: 'completed' });
+    expect(result.closure).toEqual({
+      closure_type: 'requested',
+      persisted: true,
+      reason: 'requested',
+    });
+    expect(sourceLog.rows.map((row) => row.kind)).toEqual([
+      'connection_opened',
+      'raw_source_frame',
+      'raw_source_frame',
+      'raw_source_frame',
+      'connection_closed',
+    ]);
+    expect(catalog.versions).toHaveLength(1);
   });
 });

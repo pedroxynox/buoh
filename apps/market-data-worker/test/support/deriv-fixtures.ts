@@ -272,18 +272,33 @@ export class ManualClock {
 }
 
 /**
- * Socket falso: la prueba emite lo que «llega» y lee lo enviado. `close` y `terminate` avisan del
- * cierre enseguida, como lo haría `ws` más tarde.
+ * Socket falso: la prueba emite lo que «llega» y lee lo enviado. Por defecto, `close` y `terminate`
+ * avisan del cierre enseguida. Con `deferClose`, el aviso espera a `finishClose`, como en `ws`, que
+ * lo da más tarde.
  */
 export class FakeDerivSocket implements DerivSocket {
   readonly sent: string[] = [];
   ended: 'close' | 'terminate' | null = null;
   readonly url: string;
+  readonly #deferClose: boolean;
   readonly #onSignal: (signal: SocketSignal) => void;
 
-  constructor(input: { readonly onSignal: (signal: SocketSignal) => void; readonly url: string }) {
+  constructor(input: {
+    readonly deferClose?: boolean;
+    readonly onSignal: (signal: SocketSignal) => void;
+    readonly url: string;
+  }) {
+    this.#deferClose = input.deferClose ?? false;
     this.#onSignal = input.onSignal;
     this.url = input.url;
+  }
+
+  /** Con `deferClose`: entrega el aviso de cierre pendiente. */
+  finishClose(): void {
+    if (this.ended === null) {
+      throw new TypeError('El adaptador no cerró el socket.');
+    }
+    this.emit({ code: this.ended === 'close' ? 1000 : 1006, kind: 'closed' });
   }
 
   emit(signal: SocketSignal): void {
@@ -305,7 +320,9 @@ export class FakeDerivSocket implements DerivSocket {
 
   close(): void {
     this.ended ??= 'close';
-    this.emit({ code: 1000, kind: 'closed' });
+    if (!this.#deferClose) {
+      this.emit({ code: 1000, kind: 'closed' });
+    }
   }
 
   send(text: string): void {
@@ -314,6 +331,8 @@ export class FakeDerivSocket implements DerivSocket {
 
   terminate(): void {
     this.ended ??= 'terminate';
-    this.emit({ code: 1006, kind: 'closed' });
+    if (!this.#deferClose) {
+      this.emit({ code: 1006, kind: 'closed' });
+    }
   }
 }

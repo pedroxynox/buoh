@@ -26,8 +26,6 @@ export interface DerivAdapterInput {
   readonly connect: SocketFactory;
   /** Tiempo de escucha desde el primer tick hasta pedir `forget_all`, en milisegundos. */
   readonly durationMs: number;
-  /** Por defecto, el canal público fijado en ADR-0004 §2. */
-  readonly endpoint?: string;
   /** Archivo de esquemas esperado; por defecto, la release fijada. */
   readonly expected?: ExpectedSchemaArchive;
   readonly fetch: typeof fetch;
@@ -149,7 +147,8 @@ export async function runDerivAdapter(input: DerivAdapterInput): Promise<DerivAd
     }),
     connect: input.connect,
     durationMs: input.durationMs,
-    endpoint: input.endpoint ?? DERIV_PUBLIC_ENDPOINT,
+    // Siempre el canal público fijado en ADR-0004 §2: no hay forma de apuntar a otro host.
+    endpoint: DERIV_PUBLIC_ENDPOINT,
     ingestor,
     nextId: input.nextId,
     now: input.now,

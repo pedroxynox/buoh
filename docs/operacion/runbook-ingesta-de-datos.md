@@ -130,23 +130,26 @@ Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de
 
 Cada mensaje de texto recibe su `observation_id` y su `received_at_utc` al llegar, y pasa por la cola en memoria hacia el `RawFirstIngestor`. Una respuesta se interpreta solo después de que su frame quede durable, y se empareja por `req_id` y por el `msg_type` que espera su petición. Una respuesta que no empareja se conserva raw y no cambia nada; su petición vence a los 15 000 ms.
 
-**Respuestas pedidas.** Si la respuesta a `active_symbols`, `ping`, `time` o `forget_all` trae `error` o no cumple su esquema, queda una incidencia `invalid_source_frame` sin símbolo en el almacén de respuestas pedidas, fuera de los datasets y del registro operativo (ADR-0012 §6). Si ese almacén no responde, queda la alerta JSON `requested_response_incident_unavailable` en stderr, y la incidencia se puede volver a derivar del frame durable. Una suscripción rechazada (`ticks` con `error`) ya la registran las reglas 2.0.0.
+**Respuestas pedidas.** Si la respuesta a `active_symbols`, `ping`, `time` o `forget_all` trae `error` o no cumple su esquema, queda una incidencia `invalid_source_frame` sin símbolo en el almacén de respuestas pedidas, fuera de los datasets y del registro operativo (ADR-0012 §6). Si ese almacén no responde, queda la alerta JSON `requested_response_incident_unavailable` en stderr, y la incidencia se puede volver a derivar del frame durable. Una suscripción rechazada (`ticks` con `error`) ya la registran las reglas 2.0.0. Una respuesta que queda durable después de decidir el cierre ya no cambia el flujo, pero deja igual su incidencia o, si es un catálogo válido, su versión; si entonces el almacén del catálogo no responde, queda la alerta `catalog_store_unavailable`.
 
 **Cola en memoria.** Admite 1000 frames y 33 554 432 bytes, y se aplica el primer límite que se alcance. Un frame cuenta desde que llega hasta que el ingestor termina con él. Si un frame no cabe, el adaptador deja de aceptar, vacía la cola y corta el socket. Después registra `source_limit_exceeded` (`in_memory_queue_events` o `in_memory_queue_bytes`) con el `observation_id` del frame que no cupo, y persiste el `ConnectionClosed`. Los frames que esperaban no se persisten: la pérdida queda en la incidencia, en el cierre y en la continuidad pendiente. Un frame cortado por `ws` sigue el mismo camino con `websocket_frame` y su tamaño declarado.
 
-**Cierres.** Ninguno reconecta todavía (F1.5). El adaptador termina con `completed`, `disconnected`, `paused` o `failed` y un motivo:
+**Cierres.** Ninguno reconecta todavía (F1.5). El adaptador termina con un resultado: `completed`, `disconnected`, `paused` o `failed`, con un motivo (`reason`) y un dato saneado (`detail`): el código de error o de cierre, la etapa, la operación vencida o el motivo de la incidencia. El motivo del resultado puede no ser el del `ConnectionClosed`:
 
-| Causa | `closure_type` | Motivo del cierre | Resultado |
+| Causa | `closure_type` | Motivo del `ConnectionClosed` | Resultado y su motivo |
 |---|---|---|---|
+| los esquemas no cargan, o una petición propia no cumple su esquema | no conecta | ninguno | `failed`: el motivo de la carga, o `request_invalid` |
+| no abre en 10 000 ms, o falla al conectar | no hay `ConnectionOpened` | ninguno | `disconnected`: `connect_timeout` o `connect_failed` |
 | cierre previsto, tras la respuesta a `forget_all` (con error o sin él) | `requested` | `requested` | `completed` |
-| sin snapshot válido, símbolo ausente del catálogo o suscripción rechazada | `requested` | `catalog_invalid`, `symbol_not_in_catalog` o `subscription_failed` | `failed` |
-| el almacén del catálogo no responde, o una condición operativa sigue abierta tras la apertura | `requested` | `catalog_store_unavailable` o `input_closed` | `paused` |
-| frame cortado por `ws` o cola llena | `transport_error` | `websocket_frame`, `in_memory_queue_events` o `in_memory_queue_bytes` | `paused`; `failed` si `ws` no dio el tamaño declarado, sin incidencia |
-| el log no confirma un evento | `transport_error`, que no se persiste porque el log fallido no lo admite | `persistence_unavailable` | `paused` |
-| mensaje binario | `transport_error` | `binary_frame` | `disconnected` |
-| error del transporte | `transport_error` | el código saneado del error | `disconnected` |
-| cierre del servidor | `remote`; `transport_error` si se cortó sin cierre ordenado (1006) | `close_code_<código>` | `disconnected` |
-| una petición sin respuesta en 15 000 ms, o una respuesta a `ping` con error | `timeout` | `<operación>_timeout` o `ping_invalid` | `disconnected` |
+| sin snapshot válido, símbolo ausente del catálogo o suscripción rechazada | `requested` | `catalog_invalid`, `symbol_not_in_catalog` o `subscription_failed` | `failed`, con el mismo motivo |
+| el almacén del catálogo no responde, o una condición operativa sigue abierta tras la apertura | `requested` | `catalog_store_unavailable` o `input_closed` | `paused`, con el mismo motivo |
+| frame cortado por `ws` o cola llena | `transport_error` | `websocket_frame`, `in_memory_queue_events` o `in_memory_queue_bytes` | `paused`, con el mismo motivo. Si `ws` no dio el tamaño declarado: `failed` con `frame_size_unavailable`, sin incidencia |
+| el log no confirma un evento | `transport_error`, que no se persiste porque el log fallido no lo admite | `persistence_unavailable` | `paused`: `persistence_unavailable` |
+| mensaje binario | `transport_error` | `binary_frame` | `disconnected`: `binary_frame` |
+| error del transporte | `transport_error` | el código saneado del error | `disconnected`: `transport_error` |
+| cierre del servidor | `remote`; `transport_error` si se cortó sin cierre ordenado (1006) | `close_code_<código>` | `disconnected`: `remote_closed`, o `transport_error` con 1006 |
+| una petición sin respuesta en 15 000 ms | `timeout` | `<operación>_timeout` | `disconnected`: `request_timeout` |
+| una respuesta a `ping` con error o que no cumple su esquema | `timeout` | `ping_invalid` | `disconnected`: `ping_invalid` |
 
 Los cierres `requested` no pierden datos: o no hubo suscripción, o se pidió `forget_all`. Los demás abren `connection_lost` en las reglas y dejan pendiente la continuidad del símbolo suscrito. Si el `ConnectionClosed` no queda durable, el log falló: un resultado `completed` o `disconnected` pasa a `paused` con `persistence_unavailable`.
 

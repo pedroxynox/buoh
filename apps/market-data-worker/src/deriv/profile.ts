@@ -35,7 +35,9 @@ export function createDerivMeasurementProfile(input: {
     allowed_symbols: [input.symbol],
     gap_detection: 'after_reconnection',
     non_tick_msg_types: [...DERIV_NON_TICK_MSG_TYPES],
-    profile_id: `${DERIV_SOURCE}-measurement-${input.symbol}`,
+    // Versionado como `synthetic-v1`: si cambian las respuestas declaradas (F1.5 añade el historial),
+    // el perfil cambia de identificador.
+    profile_id: `${DERIV_SOURCE}-measurement-v1-${input.symbol}`,
     purpose: 'measurement',
     quality_rule_version: RULE_SETS['2.0.0'].quality_rule_version,
     source: DERIV_SOURCE,
