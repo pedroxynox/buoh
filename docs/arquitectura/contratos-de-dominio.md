@@ -433,6 +433,7 @@ is_trading_suspended: 0 | 1
   - Un snapshot se guarda solo si su `content_sha256` difiere del de la última versión; volver a un contenido anterior también crea versión.
   - La versión la pone el índice y no forma parte del snapshot.
   - El documento es el JCS del snapshot, sin newline, en el almacenamiento de objetos con clave por contenido.
+  - Implementado desde el PR 6 de F1.4b en la tabla `source_catalog_versions` (migración `0003`, `PostgresCatalogStore` en el worker).
 - **Respuesta inválida.** Una respuesta que falla una de estas comprobaciones no crea versión, y el último snapshot válido sigue vigente. Se comprueban en este orden, y la primera que falla da el motivo:
   1. trae un objeto `error`, como en las reglas 2.0.0: `source_error_response`;
   2. no cumple el esquema fijado: `schema_validation_failed`;
@@ -582,7 +583,7 @@ Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §6).
 
 Así, la incidencia se puede volver a derivar del frame durable. Vive en la tabla PostgreSQL append-only `requested_response_incidents`, fuera de los datasets y del registro operativo: no abre condiciones ni cambia la salud.
 
-En `packages/domain`, `checkRequestedResponse` hace las dos comprobaciones comunes en orden (un objeto `error` y después el esquema de la operación), y `deriveRequestedResponseIncident` arma la incidencia de esta tabla. La tabla llega con el almacenamiento del worker ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §12, PR 6).
+En `packages/domain`, `checkRequestedResponse` hace las dos comprobaciones comunes en orden (un objeto `error` y después el esquema de la operación), y `deriveRequestedResponseIncident` arma la incidencia de esta tabla. Desde el PR 6 de F1.4b, el worker la guarda con `PostgresRequestedResponseIncidentStore` (migración `0003`); la misma incidencia, con el mismo `incident_id`, no añade fila.
 
 El perfil de Deriv no declara `ticks` ni `error`. Una suscripción fallida (`msg_type` `ticks`) y la respuesta a un método desconocido (`msg_type` `error`) llegan con un objeto `error`, y las reglas 2.0.0 ya las registran como `source_error_response`.
 

@@ -276,6 +276,10 @@ export class MemoryCatalogStore implements CatalogStore {
     if (last !== null && last.snapshot.content_sha256 === snapshot.content_sha256) {
       return { status: 'unchanged', version: last.version };
     }
+    // Como `snapshot_id` único en `source_catalog_versions`: un snapshot es como mucho una versión.
+    if (this.versions.some((item) => item.snapshot.snapshot_id === snapshot.snapshot_id)) {
+      throw Object.assign(new Error('Snapshot ya guardado'), { code: '23505' });
+    }
     const version = (last?.version ?? 0) + 1;
     this.versions.push({ snapshot, version });
     return { status: 'created', version };

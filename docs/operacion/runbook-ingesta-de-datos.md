@@ -50,6 +50,24 @@ Los umbrales live pertenecen a un perfil versionado por fuente/símbolo. El perf
 
 Desde F1.3b, `SourceEventLog.open` cubre la parte de los pasos 3–4 que toca al segmento no finalizado: lo continúa y relee y verifica el objeto de cada uno de sus eventos; si alguno falta o no coincide con su hash, el arranque aborta. El cursor y el high-watermark del paso 3 llegan con la reconexión (F1.5). Si el registro operativo tiene una condición abierta de la ejecución anterior, la entrada sigue cerrada hasta el `ConnectionOpened` que la resuelve.
 
+Desde F1.4b, antes de abrir el log de una fuente en PostgreSQL se toma su bloqueo (ver «Una sola instancia por fuente»).
+
+### Una sola instancia por fuente
+
+Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §9), todo proceso que escribe el log de una fuente en PostgreSQL toma antes un bloqueo de sesión (`pg_try_advisory_lock`, `SourceLock`). Su clave son los 8 primeros bytes del SHA-256 de `buoh:source-log:<fuente>`, como entero de 64 bits con signo. La clave vale para toda la base de datos: también bloquea la misma fuente en otro `BUOH_POSTGRES_SCHEMA` de la misma base. Lo toma en un cliente propio, fuera del pool, porque el pool cierra los clientes inactivos y el bloqueo se iría con ellos, y lo mantiene mientras escribe. Hoy lo hace `fixture:publish`; el `data:smoke` del PR 7 no lo necesita, porque guarda todo en memoria.
+
+- **Si otro proceso lo tiene**, el comando no arranca. `fixture:publish` termina con código 1 y el mensaje «Otro proceso escribe el log de "<fuente>"; no se arranca». Para ver qué sesión lo tiene, con la fuente en lugar de `deriv_options`:
+
+  ```sql
+  SELECT pid FROM pg_locks
+   WHERE locktype = 'advisory' AND granted AND objsubid = 1
+     AND ((classid::bigint << 32) | objid::bigint) =
+         ('x' || left(encode(sha256(convert_to('buoh:source-log:deriv_options', 'UTF8')), 'hex'), 16))::bit(64)::bigint;
+  ```
+
+- **Si la sesión del bloqueo se pierde**, las escrituras siguientes del log fallan con el código `source_lock_lost`. El evento no es durable, queda `persistence_unavailable` con ese motivo y la entrada se pausa. Un `ConnectionOpened` no la reabre mientras falte el bloqueo. `SourceLock` lo nota en unos 10 s: cada 5 s consulta su sesión, y la da por perdida si se cierra, falla o no responde en 5 s. La conexión también usa el keepalive de TCP desde los 10 s de inactividad. Para volver a escribir hace falta un bloqueo nuevo (`SourceLock.acquire`), que devuelve `null` si ya lo tomó otro proceso. `fixture:publish` no lo intenta: termina con error.
+- En esos segundos otro proceso podría tomar el bloqueo, y los dos escribirían a la vez. Los triggers de `0002` siguen exigiendo posiciones contiguas, así que el log no queda incoherente: cada posición se acepta para un solo escritor, y el otro falla y pausa su entrada.
+
 ### Desconexión de WebSocket
 
 1. Persistir `ConnectionClosed` con `closure_type`, símbolos afectados y motivo. Desde F1.4b lo hace el adaptador de Deriv (ver «Adaptador público de Deriv»); los pasos 2 a 9 llegan con la reconexión (F1.5).
@@ -119,7 +137,7 @@ La condición de un límite de esquema se resuelve con el primer `ConnectionOpen
 
 ### Adaptador público de Deriv
 
-Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §3 a §7), el worker tiene el adaptador del canal público (`apps/market-data-worker/src/deriv/`), con la fuente `deriv_options` y el conector `deriv-options-ws-1.0.0`. Todavía no hay un comando que lo ejecute: `pnpm run data:smoke` llega con el PR 7, y el catálogo y las incidencias de respuestas pedidas en PostgreSQL, con el PR 6. Una conexión sigue estos pasos:
+Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §3 a §7), el worker tiene el adaptador del canal público (`apps/market-data-worker/src/deriv/`), con la fuente `deriv_options` y el conector `deriv-options-ws-1.0.0`. Todavía no hay un comando que lo ejecute: `pnpm run data:smoke` llega con el PR 7. El catálogo y las incidencias de respuestas pedidas se guardan en PostgreSQL desde el PR 6 (`PostgresCatalogStore` y `PostgresRequestedResponseIncidentStore`, migración `0003`). Una conexión sigue estos pasos:
 
 1. Carga los esquemas (sección anterior) y comprueba que sus cinco peticiones (`active_symbols`, `ticks`, `ping`, `time` y `forget_all`) cumplen su esquema de petición. Si algo falla, no se conecta.
 2. Abre el WebSocket con `ws` 8.22.0: sin compresión, mensajes de hasta 1 048 576 bytes, sin seguir redirecciones y con 10 000 ms para abrir. Al abrir persiste `ConnectionOpened`. Si después sigue abierta una condición del registro operativo, cierra sin suscribirse.
@@ -195,7 +213,7 @@ Servicios de [`infra/compose.yaml`](../../infra/compose.yaml): PostgreSQL 18 y S
 2. Levantar servicios: `docker compose -f infra/compose.yaml --env-file infra/.env up -d --wait`.
 3. Exportar las mismas variables al shell (`set -a; . infra/.env; set +a`) y compilar: `pnpm run build`.
 4. Aplicar migraciones: `pnpm --filter @buoh/market-data-worker run db:migrate`.
-5. Opcional, para ensayar: `pnpm --filter @buoh/market-data-worker run fixture:publish` pasa los dos escenarios sintéticos de `test-vectors/market-data/v1` por el log raw-first (fuente `synthetic`) y publica cada uno desde sus segmentos cerrados. Es idempotente: un escenario ya activo se informa como `already_published`. Requiere que el log de `synthetic` esté vacío o tenga exactamente la forma del fixture.
+5. Opcional, para ensayar: `pnpm --filter @buoh/market-data-worker run fixture:publish` pasa los dos escenarios sintéticos de `test-vectors/market-data/v1` por el log raw-first (fuente `synthetic`) y publica cada uno desde sus segmentos cerrados. Es idempotente: un escenario ya activo se informa como `already_published`. Requiere que el log de `synthetic` esté vacío o tenga exactamente la forma del fixture, y que ningún otro proceso tenga su bloqueo (ver «Una sola instancia por fuente»).
 6. Reproducir: `pnpm run data:replay -- --dataset <dataset_id>` (recomputación) o añadir `--verify-only` (solo integridad).
 
 `data:replay` no contacta a Deriv, no escribe nada y emite una línea JSON en stdout. Antes compila el worker, y esos mensajes van a stderr (`scripts/data-replay.mjs`). Una salida distinta de 0 sin línea JSON significa que falló esa compilación o que se interrumpió el proceso; el detalle está en stderr:
@@ -216,6 +234,11 @@ Tablas append-only del log y del registro (migración `0002_log_raw_first`):
 - `source_event_index`: una fila por source event durable, con la clave de su objeto;
 - `closed_source_segments`: el segmento cerrado, su objeto gzip y el motivo de cierre (`bytes`, `raw_frames`, `window` o `requested`);
 - `operational_incidents` y `operational_conditions`: el registro operativo.
+
+Desde F1.4b, la migración `0003_catalogo_y_respuestas_pedidas` añade dos tablas append-only más:
+
+- `source_catalog_versions`: una versión del catálogo por fila, contigua desde 1 por fuente y formato. Su trigger rechaza una versión que no siga a la última o que no cambie el contenido. El documento JCS del snapshot vive en el objeto `sha256/<document_sha256>`, y al leer se comprueba su hash y que corresponda a su fila;
+- `requested_response_incidents`: las incidencias de respuestas pedidas (siempre `invalid_source_frame`, con el `observation_id` del frame). Guardar otra vez la misma incidencia no añade fila.
 
 ## Reporte y evidencia
 

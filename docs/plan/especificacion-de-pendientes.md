@@ -43,7 +43,8 @@ Tipos de pendiente:
 - **Estado (verificado):**
   - los contratos de dominio describen el snapshot desde ADR-0012, `packages/contracts` lo implementa (`sourceCatalogSnapshotSchema`, PR 2 de F1.4b) y `packages/domain` convierte la respuesta de Deriv en snapshot (`deriveCatalogSnapshot`, PR 3);
   - desde el PR 5, el adaptador del worker pide `active_symbols`, crea el snapshot desde el frame durable y lo guarda con la regla de versiones a través del puerto `CatalogStore` (`apps/market-data-worker/src/deriv/`). Un catálogo inválido deja su incidencia y no reemplaza la última versión válida. En las pruebas, el almacén es un doble en memoria;
-  - faltan el almacén en PostgreSQL y almacenamiento de objetos, con su migración (PR 6), y el comando (PR 7).
+  - desde el PR 6, `PostgresCatalogStore` guarda las versiones en `source_catalog_versions` y el JCS de cada snapshot en el almacenamiento de objetos (migración `0003`);
+  - falta el comando (PR 7). Su smoke guarda todo en memoria (ADR-0012 §10), así que ningún comando escribe todavía estas tablas: las prueban las pruebas de integración.
 - **Esperado:** el worker consulta `active_symbols` por el canal público. Guarda un snapshot con fecha de recepción UTC, versión del conector, versión del esquema de fuente, hash de contenido y la lista sin reinterpretar los nombres oficiales. Los snapshots son inmutables en almacenamiento de objetos, con índice en PostgreSQL.
 - **Componentes:** `packages/contracts` (el esquema `SourceCatalogSnapshot`, ya hecho), `packages/domain` (la conversión de la respuesta de Deriv) y `apps/market-data-worker` (adaptador, almacenamiento y migración).
 - **Aceptación (plan §6):**
@@ -64,7 +65,8 @@ Tipos de pendiente:
   - desde el PR 4, el worker descarga `schemas.zip` con su SHA-256 y sus límites de ZIP;
   - desde el PR 5, el worker tiene el adaptador (`apps/market-data-worker/src/deriv/`): transporte `ws`, cola en memoria con sus límites, correlación por `req_id` y `msg_type`, keepalive, tiempos de espera y pausa del ingestor desde el transporte. Lo prueban un socket, un reloj y un temporizador falsos, y `test:integration` comprueba el corte de `ws` con un servidor local;
   - el normalizador sigue siendo uno por versión de reglas; el 2.0.0 ya lee las rutas de Deriv (ADR-0012 §2);
-  - faltan el almacén de las incidencias de respuestas pedidas en PostgreSQL y el bloqueo por fuente (PR 6, ADR-0012 §9), y `pnpm run data:smoke` (PR 7).
+  - desde el PR 6, las incidencias de respuestas pedidas van a `requested_response_incidents`, y `fixture:publish`, el único proceso que hoy escribe el log de una fuente en PostgreSQL, toma antes su bloqueo (`SourceLock`, ADR-0012 §9). Lo que falta para un escritor continuo está en el pendiente 6 de F1.3 (`PROJECT_STATUS.md`);
+  - falta `pnpm run data:smoke` (PR 7).
 - **Esperado:**
   - endpoint público documentado, sin OAuth, PAT ni OTP;
   - respuestas validadas contra la release de esquemas fijada;
