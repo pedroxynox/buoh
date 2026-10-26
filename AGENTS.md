@@ -88,13 +88,18 @@ El modelo revisor contrasta el diff con fuentes canónicas y vectores independie
 
 ### Fusión
 
-Desde el 2026-10-26, por decisión del propietario, el agente fusiona sus propios PR sin esperar al propietario, cuando se cumplen las tres condiciones:
+El propietario decidió el 2026-10-26 que el agente fusione sus propios PR («siempre haces merge tú»). El agente fusiona sin esperarlo solo si se cumplen estas condiciones:
 
-- la revisión semántica terminó sin hallazgos bloqueantes;
-- los checks de CI están en verde sobre el último commit del PR;
-- el agente deja antes en el PR un comentario que dice que fusiona por esta decisión y qué condiciones se cumplieron.
+- la revisión semántica terminó sin hallazgos bloqueantes, y los commits posteriores a ella solo corrigen sus hallazgos; cualquier otro cambio va en un PR nuevo;
+- CI está en verde sobre el último commit del PR, y la fusión se pide para ese commit;
+- antes de fusionar, deja en el PR un comentario que dice que fusiona por esta decisión, qué condiciones se cumplieron, qué commit se revisó y cuál se fusiona.
 
-Si el PR necesita una decisión del propietario sobre riesgo, dinero, producto o seguridad, el agente la pide primero y fusiona solo después de que la tome. El propietario puede pedir cambios, revertir un PR fusionado o retirar esta delegación cuando quiera. Nadie sube cambios directamente a `main`.
+Dos casos esperan al propietario:
+
+- si el PR marca en la plantilla «Seguridad, secretos o permisos» o «Riesgo, señales o ejecución», el agente le explica el cambio en palabras simples y fusiona solo con su visto bueno, porque la seguridad y el riesgo conservan revisión humana (`CONTRIBUTING.md`);
+- si el PR necesita una decisión del propietario sobre producto, dinero, riesgo o seguridad, el agente la pide primero («Protocolo ante conflictos o vacíos») y fusiona solo después.
+
+El propietario puede pedir cambios, revertir un PR fusionado o volver a fusionar él mismo cuando quiera. Nadie sube cambios directamente a `main`.
 
 ## Desarrollo por fases
 
