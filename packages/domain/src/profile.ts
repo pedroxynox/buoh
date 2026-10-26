@@ -1,6 +1,7 @@
-import { Ajv2020 } from 'ajv/dist/2020.js';
-import { canonicalJson, sha256Hex, type JsonValue } from '@buoh/contracts';
+import { canonicalJson, sha256Hex } from '@buoh/contracts';
 import { z } from 'zod';
+
+import { compileSourceSchema, parseJsonDocument } from './source-schema.js';
 
 /**
  * Conjuntos de reglas implementados. El perfil elige uno con `quality_rule_version`; cada conjunto
@@ -42,13 +43,11 @@ export const SEGMENT_POLICY_VERSION = '1.0.0';
 export const CONTRACT_SCHEMA_VERSION = '1.0.0';
 export const CANONICALIZATION_VERSION = 'RFC8785';
 
-// Hay una copia de este esquema en packages/contracts/src/vector-integrity.ts para verificar los
-// vectores; mantenerlas iguales es el pendiente 4 de F1.2 (PROJECT_STATUS.md).
-export const qualityProfileSchema = z.strictObject({
+const thresholdSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+
+const qualityProfileFields = {
   allowed_symbols: z.array(z.string().min(1)).min(1),
   gap_detection: z.literal('after_reconnection'),
-  maximum_delivery_delay_ms: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-  maximum_event_gap_ms: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   /**
    * Reglas 2.0.0 (obligatorio en ellas, prohibido en 1.0.0): tipos de respuesta de la fuente que no
    * son ticks y se conservan raw sin incidencia. Cualquier otro `msg_type` sigue siendo candidato a
@@ -58,16 +57,35 @@ export const qualityProfileSchema = z.strictObject({
   profile_id: z.string().min(1),
   quality_rule_version: z.string().min(1),
   source: z.string().min(1),
-});
+};
+
+/**
+ * Perfil de calidad (contratos de dominio, «Perfil de medición»; ADR-0012 §8). Sin `purpose`, es un
+ * perfil de publicación, con sus dos umbrales, y conserva los bytes y el hash de siempre. Con
+ * `purpose: "measurement"`, no lleva umbrales y nunca deriva ni publica un dataset: sirve para que
+ * el smoke normalice y mida antes de fijar los umbrales live.
+ *
+ * Hay una copia de la forma de publicación en packages/contracts/src/vector-integrity.ts para
+ * verificar los vectores; mantenerlas iguales es el pendiente 4 de F1.2 (PROJECT_STATUS.md).
+ */
+export const qualityProfileSchema = z.union([
+  z.strictObject({
+    ...qualityProfileFields,
+    maximum_delivery_delay_ms: thresholdSchema,
+    maximum_event_gap_ms: thresholdSchema,
+  }),
+  z.strictObject({ ...qualityProfileFields, purpose: z.literal('measurement') }),
+]);
 
 export type QualityProfile = z.infer<typeof qualityProfileSchema>;
+export type ProfilePurpose = 'measurement' | 'publication';
 
 export interface PipelineProfileInput {
   /** Versión del conector que produjo/produce los source events. */
   connector_version: string;
   /** Release fijada del esquema de fuente. */
   source_schema_release: string;
-  /** Bytes exactos del esquema de fuente (JSON Schema 2020-12). */
+  /** Bytes exactos del esquema de fuente (JSON Schema 2020-12 o draft-04, según su `$schema`). */
   source_schema_bytes: Uint8Array;
   /** Bytes exactos del perfil de calidad firmado. */
   quality_profile_bytes: Uint8Array;
@@ -77,6 +95,8 @@ export interface PipelineProfile {
   readonly connector_version: string;
   /** Tipos de mensaje que no son ticks (reglas 2.0.0); vacío con reglas 1.0.0. */
   readonly nonTickMsgTypes: ReadonlySet<string>;
+  /** `measurement` si el perfil declara `purpose: "measurement"`; si no, `publication`. */
+  readonly purpose: ProfilePurpose;
   /** Conjunto de reglas elegido por `quality_profile.quality_rule_version`. */
   readonly rules: RuleSet;
   readonly quality_profile: QualityProfile;
@@ -87,16 +107,6 @@ export interface PipelineProfile {
   readonly source_schema_release: string;
   readonly source_schema_sha256: string;
   readonly validateSourcePayload: (value: unknown) => boolean;
-}
-
-const decoder = new TextDecoder('utf-8', { fatal: true });
-
-function parseJsonDocument(bytes: Uint8Array, label: string): JsonValue {
-  try {
-    return JSON.parse(decoder.decode(bytes)) as JsonValue;
-  } catch (error) {
-    throw new TypeError(`${label} no es JSON UTF-8 válido.`, { cause: error });
-  }
 }
 
 /**
@@ -127,24 +137,50 @@ export function createPipelineProfile(input: PipelineProfileInput): PipelineProf
   ) {
     throw new TypeError('non_tick_msg_types debe ser único, ordenado y no incluir "tick".');
   }
+  const purpose: ProfilePurpose = 'purpose' in qualityProfile ? 'measurement' : 'publication';
+  if (purpose === 'measurement' && rules !== RULE_SETS['2.0.0']) {
+    throw new TypeError(
+      `Un perfil de medición usa las reglas ${RULE_SETS['2.0.0'].quality_rule_version}; el perfil declara ${qualityProfile.quality_rule_version}.`,
+    );
+  }
   if (input.connector_version.length === 0 || input.source_schema_release.length === 0) {
     throw new TypeError('connector_version y source_schema_release son obligatorios.');
   }
 
-  const ajv = new Ajv2020({ allErrors: false, strict: true });
-  const validate = ajv.compile(schemaDocument as object);
+  const validate = compileSourceSchema(schemaDocument);
 
   return {
     connector_version: input.connector_version,
     quality_profile: qualityProfile,
     quality_profile_bytes: input.quality_profile_bytes,
     nonTickMsgTypes: new Set(nonTick ?? []),
+    purpose,
     quality_profile_sha256: sha256Hex(canonicalJson(profileDocument)),
     rules,
     source: qualityProfile.source,
     source_schema_bytes: input.source_schema_bytes,
     source_schema_release: input.source_schema_release,
     source_schema_sha256: sha256Hex(canonicalJson(schemaDocument)),
-    validateSourcePayload: (value) => validate(value),
+    validateSourcePayload: validate,
+  };
+}
+
+/**
+ * Umbrales de un perfil de publicación. Un perfil de medición no los tiene y nunca deriva ni
+ * publica un dataset (ADR-0004 §13, ADR-0012 §8), así que aquí falla cerrado.
+ */
+export function publicationThresholds(profile: PipelineProfile): {
+  readonly maximum_delivery_delay_ms: number;
+  readonly maximum_event_gap_ms: number;
+} {
+  const quality = profile.quality_profile;
+  if ('purpose' in quality) {
+    throw new TypeError(
+      `El perfil ${quality.profile_id} es de medición: no deriva ni publica datasets.`,
+    );
+  }
+  return {
+    maximum_delivery_delay_ms: quality.maximum_delivery_delay_ms,
+    maximum_event_gap_ms: quality.maximum_event_gap_ms,
   };
 }

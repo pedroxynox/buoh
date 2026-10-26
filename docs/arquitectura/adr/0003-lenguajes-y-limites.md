@@ -1,6 +1,6 @@
 # ADR-0003: Lenguajes y límites de responsabilidad técnica
 
-- **Estado:** Aceptada; complementada por [ADR-0007](0007-varias-fuentes-y-metatrader-5.md) (MQL5 limitado al puente de MetaTrader 5) y [ADR-0010](0010-prototipo-de-escritorio.md) (Rust en el contenedor Tauri del prototipo de escritorio)
+- **Estado:** Aceptada; complementada por [ADR-0007](0007-varias-fuentes-y-metatrader-5.md) (MQL5 limitado al puente de MetaTrader 5), [ADR-0010](0010-prototipo-de-escritorio.md) (Rust en el contenedor Tauri del prototipo de escritorio) y [ADR-0012](0012-catalogo-y-adaptador-publico-de-deriv.md) (bibliotecas de la fuente Deriv)
 - **Fecha:** 2026-10-17
 - **Decisores:** Dirección técnica de buoh
 
@@ -36,6 +36,12 @@ Desde 2026-10-25, pnpm ejecuta los scripts con su emulador de shell (`shellEmula
 - pnpm permite scripts de instalación únicamente para `esbuild`, dependencia transitiva necesaria para el toolchain; cualquier permiso adicional requiere revisión explícita.
 
 `package.json`, `pnpm-lock.yaml` y `pnpm-workspace.yaml` son canónicos para versiones y permisos exactos. Este ADR registra motivos, no duplica el inventario mutable.
+
+### Bibliotecas de la fuente Deriv (F1.4b)
+
+Motivos completos en [ADR-0012](0012-catalogo-y-adaptador-publico-de-deriv.md):
+
+- Ajv valida los esquemas de fuentes externas según su dialecto: `Ajv2020` para 2020-12, como los vectores, y `ajv-draft-04` para draft-04, el de la release fijada de Deriv (§2). `ajv-draft-04` es del equipo de Ajv, no tiene dependencias propias y usa el `ajv` que ya está en el repositorio.
 
 ### Python — investigación cuantitativa aislada
 
