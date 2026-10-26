@@ -1,6 +1,6 @@
 # Estado del código
 
-Radiografía del repositorio el 2026-10-25 (commit `869ba4e`), para que otra persona o una IA entienda qué hay, cómo se conecta y dónde se repite lógica. Es un documento de análisis: no decide nada ni autoriza trabajo. El estado del proyecto lo manda [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md), y lo que falta está en la [especificación de pendientes](../plan/especificacion-de-pendientes.md).
+Radiografía del repositorio el 2026-10-25 (commit `869ba4e`; la fila del worker y la de `scripts/` se actualizaron el 2026-10-26, al cerrar F1.4b), para que otra persona o una IA entienda qué hay, cómo se conecta y dónde se repite lógica. Es un documento de análisis: no decide nada ni autoriza trabajo. El estado del proyecto lo manda [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md), y lo que falta está en la [especificación de pendientes](../plan/especificacion-de-pendientes.md).
 
 ## 1. Qué hay
 
@@ -8,14 +8,14 @@ Radiografía del repositorio el 2026-10-25 (commit `869ba4e`), para que otra per
 |---|---|---|---|
 | `packages/contracts` | Esquemas runtime (Zod), identidades canónicas (JCS y SHA-256) y validaciones entre artefactos de un dataset. De sus esquemas `…Structural` salen los JSON Schema de `generated/`. | — | [Contratos de dominio](contratos-de-dominio.md), ADR-0004 |
 | `packages/domain` | Lógica pura de Fase 1: normalizar frames, reglas de calidad, publicación de datasets y derivación de la salud. Sin red, reloj ni almacenamiento. | contracts | Plan de Fase 1, ADR-0004 |
-| `apps/market-data-worker` | Log raw-first, publicación y replay sobre PostgreSQL y S3-compatible. CLI: `db:migrate`, `fixture:publish` y `replay`. Todavía no conecta con Deriv. | contracts, domain | Runbook de ingesta, ADR-0004, ADR-0005 |
+| `apps/market-data-worker` | Log raw-first, publicación y replay sobre PostgreSQL y S3-compatible, y el adaptador público de Deriv con su catálogo versionado (`src/deriv/`). CLI: `db:migrate`, `fixture:publish`, `replay` y `smoke`. Todavía no reconecta. | contracts, domain | Runbook de ingesta, ADR-0004, ADR-0005, ADR-0012 |
 | `packages/design-system` | Tokens de marca, CSS generado, iconos, logotipo vectorizado y componentes React web. | contracts | [Guía de marca](../diseno/marca-buoh.md), ADR-0008, ADR-0011 |
 | `packages/prototype-data` | Datos ficticios fijos compartidos por los prototipos, más formatos de fecha y `worstDrawdown`. | design-system | ADR-0009 §2 |
 | `apps/web` | Prototipo navegable, exportación estática de Next.js. | design-system, prototype-data | [Concepto de interfaz](../diseno/concepto-de-interfaz.md), ADR-0008 |
 | `apps/site` | Sitio oficial estático, sin publicar. | design-system | [Sitio oficial](../diseno/sitio-oficial.md), ADR-0008 |
 | `apps/mobile` | Prototipo Expo con cinco pestañas. | design-system (solo la entrada raíz), prototype-data | ADR-0009 |
 | `apps/desktop` | Ventana Tauri 2 que muestra `apps/web/out`, con su instalador de Windows. | web (para compilar) | ADR-0010 |
-| `scripts/` | Guardia documental (`check-doc-impact.mjs`), comprobación del runtime y envoltorio de `data:replay`. | — | CONTRIBUTING.md |
+| `scripts/` | Guardia documental (`check-doc-impact.mjs`), comprobación del runtime y envoltorios de `data:replay` y `data:smoke`. | — | CONTRIBUTING.md |
 
 ```mermaid
 graph BT

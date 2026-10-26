@@ -17,7 +17,7 @@ Cualquier persona o motor de IA debe leer, en orden:
 
 ## Desarrollo actual
 
-Fase 1 tiene contratos runtime (F1.1), normalización y calidad puras (F1.2), log raw-first, publicación y replay sobre PostgreSQL y almacenamiento S3-compatible locales (F1.3), y las reglas de calidad 2.0.0 para fuentes como Deriv (F1.4a). Todavía no conecta con Deriv ni ejecuta operaciones. En paralelo, la línea visual V1 dejó la marca, el sistema de diseño, prototipos web, móvil y de escritorio con datos ficticios, y el sitio oficial sin publicar. El [estado del código](docs/arquitectura/estado-del-codigo.md) resume cómo se conectan las piezas, y la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md), lo que falta.
+Fase 1 tiene contratos runtime (F1.1), normalización y calidad puras (F1.2), log raw-first, publicación y replay sobre PostgreSQL y almacenamiento S3-compatible locales (F1.3), las reglas de calidad 2.0.0 para fuentes como Deriv (F1.4a), y el catálogo y el adaptador público de Deriv, solo para escuchar, con su prueba en vivo (F1.4b). Todavía no reconecta tras una desconexión ni ejecuta operaciones. En paralelo, la línea visual V1 dejó la marca, el sistema de diseño, prototipos web, móvil y de escritorio con datos ficticios, y el sitio oficial sin publicar. El [estado del código](docs/arquitectura/estado-del-codigo.md) resume cómo se conectan las piezas, y la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md), lo que falta.
 
 ```text
 pnpm install
@@ -25,6 +25,7 @@ pnpm run verify
 pnpm run test:vectors
 pnpm run test:integration                       # requiere infra/compose.yaml
 pnpm run data:replay -- --dataset <dataset_id>  # añade --verify-only para solo integridad
+pnpm run data:smoke -- --live                   # prueba viva opt-in contra Deriv; no guarda nada
 ```
 
 pnpm usa el runtime Node fijado por el proyecto. Consulta [`packages/contracts`](packages/contracts/) para los esquemas ejecutables, [`packages/domain`](packages/domain/) para la normalización y las reglas de calidad puras y [`apps/market-data-worker`](apps/market-data-worker/) para publicación y replay. El entorno local está en el [runbook](docs/operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13).

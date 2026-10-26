@@ -6,37 +6,32 @@ import {
   type SourceCatalogSnapshot,
 } from '@buoh/contracts';
 
+import { type CatalogVersion } from '../../src/deriv/ports.js';
+import { PublicationConflictError, PublicationError } from '../../src/errors.js';
 import {
-  type CatalogStore,
-  type CatalogVersion,
-  type RequestedResponseIncidentStore,
-} from '../../src/deriv/ports.js';
-import { ObjectReadError, PublicationConflictError, PublicationError } from '../../src/errors.js';
-import { type OperationalStore } from '../../src/operational/registry.js';
-import {
-  type CommitPublicationInput,
-  type MetadataStore,
-  type ObjectStore,
-} from '../../src/ports.js';
-import {
-  type ClosedSourceSegment,
-  type SourceEventIndexRow,
-  type SourceLogState,
-  type SourceLogStore,
-} from '../../src/source-log/ports.js';
+  InMemoryCatalogStore,
+  InMemoryObjectStore,
+  InMemoryOperationalStore,
+  InMemoryRequestedResponseIncidentStore,
+  InMemorySourceLogStore,
+} from '../../src/memory/stores.js';
+import { type CommitPublicationInput, type MetadataStore } from '../../src/ports.js';
+import { type ClosedSourceSegment, type SourceEventIndexRow } from '../../src/source-log/ports.js';
+
+/**
+ * Dobles de prueba: los almacenes en memoria de `src/memory/stores.ts`, con las mismas reglas que
+ * PostgreSQL y el almacenamiento de objetos, más puntos de fallo inyectables.
+ */
 
 /** Almacenamiento de objetos en memoria con puntos de fallo inyectables. */
-export class MemoryObjectStore implements ObjectStore {
-  readonly bucket: string;
-  readonly objects: Map<string, Uint8Array>;
+export class MemoryObjectStore extends InMemoryObjectStore {
   /** Devuelve true para hacer fallar la escritura de esa clave. */
   failPut: (key: string) => boolean = () => false;
   /** Permite alterar los bytes leídos (simula almacenamiento corrupto o incoherente). */
   onRead: (key: string, bytes: Uint8Array) => Uint8Array = (_key, bytes) => bytes;
 
   constructor(bucket = 'buoh-test', objects = new Map<string, Uint8Array>()) {
-    this.bucket = bucket;
-    this.objects = objects;
+    super(bucket, objects);
   }
 
   #armedFailure: string | null = null;
@@ -53,7 +48,7 @@ export class MemoryObjectStore implements ObjectStore {
     return this.#armedFailure !== null;
   }
 
-  putIfAbsent(key: string, bytes: Uint8Array): Promise<'created' | 'exists'> {
+  override putIfAbsent(key: string, bytes: Uint8Array): Promise<'created' | 'exists'> {
     const armed = this.#armedFailure;
     if (armed !== null) {
       this.#armedFailure = null;
@@ -62,22 +57,11 @@ export class MemoryObjectStore implements ObjectStore {
     if (this.failPut(key)) {
       return Promise.reject(new Error(`Fallo inyectado al escribir ${key}`));
     }
-    if (this.objects.has(key)) {
-      return Promise.resolve('exists');
-    }
-    this.objects.set(key, Uint8Array.from(bytes));
-    return Promise.resolve('created');
+    return super.putIfAbsent(key, bytes);
   }
 
-  get(key: string, maxBytes: number): Promise<Uint8Array> {
-    const stored = this.objects.get(key);
-    if (stored === undefined) {
-      return Promise.reject(new ObjectReadError('not_found', key));
-    }
-    if (stored.byteLength > maxBytes) {
-      return Promise.reject(new ObjectReadError('too_large', key));
-    }
-    return Promise.resolve(this.onRead(key, Uint8Array.from(stored)));
+  override async get(key: string, maxBytes: number): Promise<Uint8Array> {
+    return this.onRead(key, await super.get(key, maxBytes));
   }
 }
 
@@ -125,119 +109,48 @@ export class MemoryMetadataStore implements MetadataStore {
   }
 }
 
-/** Log raw-first en memoria con las mismas invariantes que los triggers de `0002_log_raw_first`. */
-export class MemorySourceLogStore implements SourceLogStore {
-  readonly rows: SourceEventIndexRow[] = [];
-  readonly closed: ClosedSourceSegment[] = [];
+/** Log raw-first en memoria con las invariantes de `0002_log_raw_first` y fallos inyectables. */
+export class MemorySourceLogStore extends InMemorySourceLogStore {
   /** Devuelve true para hacer fallar la inserción de esa fila de índice. */
   failIndex: (row: SourceEventIndexRow) => boolean = () => false;
   failClose = false;
 
-  readLogState(source: string): Promise<SourceLogState> {
-    const closed = this.closed.filter((segment) => segment.source === source);
-    const lastClosed = closed.at(-1) ?? null;
-    const openIndex = lastClosed === null ? 0 : lastClosed.segment_index + 1;
-    const rows = this.rows.filter((row) => row.source === source);
-    return Promise.resolve({
-      lastClosed,
-      lastEventId: rows.at(-1)?.event_id ?? null,
-      lastRawObservationId:
-        rows.filter((row) => row.kind === 'raw_source_frame').at(-1)?.event_id ?? null,
-      openRows: rows.filter((row) => row.segment_index === openIndex),
-      totalEventCount: rows.length,
-    });
-  }
-
-  insertIndexRow(row: SourceEventIndexRow): Promise<void> {
+  override insertIndexRow(row: SourceEventIndexRow): Promise<void> {
     if (this.failIndex(row)) {
       return Promise.reject(
         Object.assign(new Error('Fallo inyectado'), { code: 'synthetic_index_failure' }),
       );
     }
-    const inSegment = this.rows.filter(
-      (item) => item.source === row.source && item.segment_index === row.segment_index,
-    );
-    const closedHere = this.closed.some(
-      (item) => item.source === row.source && item.segment_index === row.segment_index,
-    );
-    const previousClosed =
-      row.segment_index === 0 ||
-      this.closed.some(
-        (item) => item.source === row.source && item.segment_index === row.segment_index - 1,
-      );
-    if (
-      closedHere ||
-      row.position !== inSegment.length ||
-      (row.position === 0 && !previousClosed) ||
-      this.rows.some((item) => item.event_id === row.event_id)
-    ) {
-      return Promise.reject(new Error('Fila de índice inválida.'));
-    }
-    this.rows.push(row);
-    return Promise.resolve();
+    return super.insertIndexRow(row);
   }
 
-  insertClosedSegment(segment: ClosedSourceSegment): Promise<void> {
+  override insertClosedSegment(segment: ClosedSourceSegment): Promise<void> {
     if (this.failClose) {
       return Promise.reject(
         Object.assign(new Error('Fallo inyectado'), { code: 'synthetic_close_failure' }),
       );
     }
-    const rows = this.rows.filter(
-      (item) => item.source === segment.source && item.segment_index === segment.segment_index,
-    );
-    if (
-      rows.length !== segment.event_count ||
-      rows.filter((row) => row.kind === 'raw_source_frame').length !== segment.raw_frame_count
-    ) {
-      return Promise.reject(new Error('Conteos del segmento inválidos.'));
-    }
-    this.closed.push(segment);
-    return Promise.resolve();
-  }
-
-  listClosedSegments(source: string, from: number, to: number): Promise<ClosedSourceSegment[]> {
-    return Promise.resolve(
-      this.closed.filter(
-        (segment) =>
-          segment.source === source && segment.segment_index >= from && segment.segment_index <= to,
-      ),
-    );
+    return super.insertClosedSegment(segment);
   }
 }
 
 /** Registro operativo en memoria; `failAppend` simula PostgreSQL no disponible. */
-export class MemoryOperationalStore implements OperationalStore {
-  readonly incidents: DataQualityIncident[] = [];
-  readonly conditions: OperationalConditionEvent[] = [];
+export class MemoryOperationalStore extends InMemoryOperationalStore {
   failAppend = false;
 
-  load(source: string) {
-    return Promise.resolve({
-      conditions: this.conditions.filter((item) => item.source === source),
-      incidents: this.incidents.filter((item) => item.source === source),
-    });
-  }
-
-  append(input: {
+  override append(input: {
     conditions: readonly OperationalConditionEvent[];
     incidents: readonly DataQualityIncident[];
   }): Promise<void> {
     if (this.failAppend) {
       return Promise.reject(Object.assign(new Error('Fallo inyectado'), { code: 'ECONNREFUSED' }));
     }
-    this.incidents.push(...input.incidents);
-    this.conditions.push(...input.conditions);
-    return Promise.resolve();
+    return super.append(input);
   }
 }
 
-/**
- * Versiones del catálogo en memoria con la regla de ADR-0012 §7: versión nueva solo si cambia el
- * `content_sha256` respecto de la última. `failNext` simula PostgreSQL no disponible una vez.
- */
-export class MemoryCatalogStore implements CatalogStore {
-  readonly versions: CatalogVersion[] = [];
+/** Versiones del catálogo en memoria; `failNext` simula PostgreSQL no disponible una vez. */
+export class MemoryCatalogStore extends InMemoryCatalogStore {
   failNext = false;
 
   #maybeFail(): Promise<void> {
@@ -248,54 +161,31 @@ export class MemoryCatalogStore implements CatalogStore {
     return Promise.reject(Object.assign(new Error('Fallo inyectado'), { code: 'ECONNREFUSED' }));
   }
 
-  #latest(source: string, catalogFormat: string): CatalogVersion | null {
-    return (
-      this.versions
-        .filter(
-          (item) =>
-            item.snapshot.source === source && item.snapshot.catalog_format === catalogFormat,
-        )
-        .at(-1) ?? null
-    );
-  }
-
-  async latest(
+  override async latest(
     source: string,
     catalogFormat: SourceCatalogSnapshot['catalog_format'],
   ): Promise<CatalogVersion | null> {
     await this.#maybeFail();
-    return this.#latest(source, catalogFormat);
+    return super.latest(source, catalogFormat);
   }
 
-  async record(snapshot: SourceCatalogSnapshot): Promise<{
+  override async record(snapshot: SourceCatalogSnapshot): Promise<{
     readonly status: 'created' | 'unchanged';
     readonly version: number;
   }> {
     await this.#maybeFail();
-    const last = this.#latest(snapshot.source, snapshot.catalog_format);
-    if (last !== null && last.snapshot.content_sha256 === snapshot.content_sha256) {
-      return { status: 'unchanged', version: last.version };
-    }
-    // Como `snapshot_id` único en `source_catalog_versions`: un snapshot es como mucho una versión.
-    if (this.versions.some((item) => item.snapshot.snapshot_id === snapshot.snapshot_id)) {
-      throw Object.assign(new Error('Snapshot ya guardado'), { code: '23505' });
-    }
-    const version = (last?.version ?? 0) + 1;
-    this.versions.push({ snapshot, version });
-    return { status: 'created', version };
+    return super.record(snapshot);
   }
 }
 
 /** Incidencias de respuestas pedidas en memoria; `failAppend` simula PostgreSQL no disponible. */
-export class MemoryRequestedResponseIncidentStore implements RequestedResponseIncidentStore {
-  readonly incidents: DataQualityIncident[] = [];
+export class MemoryRequestedResponseIncidentStore extends InMemoryRequestedResponseIncidentStore {
   failAppend = false;
 
-  append(incident: DataQualityIncident): Promise<void> {
+  override append(incident: DataQualityIncident): Promise<void> {
     if (this.failAppend) {
       return Promise.reject(Object.assign(new Error('Fallo inyectado'), { code: 'ECONNREFUSED' }));
     }
-    this.incidents.push(incident);
-    return Promise.resolve();
+    return super.append(incident);
   }
 }

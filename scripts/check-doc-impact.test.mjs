@@ -112,6 +112,7 @@ test('fija las reglas productivas y sus rutas críticas', () => {
     ['scripts/check-runtime.mjs', 'docs/arquitectura/adr/0003-lenguajes-y-limites.md'],
     ['apps/market-data-worker/src/index.ts', 'docs/operacion/runbook-ingesta-de-datos.md'],
     ['scripts/data-replay.mjs', 'docs/operacion/runbook-ingesta-de-datos.md'],
+    ['scripts/data-smoke.mjs', 'docs/operacion/runbook-ingesta-de-datos.md'],
     ['infra/compose.yaml', 'docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md'],
     ['test-vectors/market-data/v1/manifest.json', 'docs/arquitectura/contratos-de-dominio.md'],
     ['packages/design-system/src/tokens.ts', 'docs/diseno/marca-buoh.md'],

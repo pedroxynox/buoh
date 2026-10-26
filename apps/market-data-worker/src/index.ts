@@ -74,5 +74,31 @@ export {
   type ReplayReport,
 } from './replay.js';
 export { parseReplayArgs, REPLAY_USAGE, UsageError } from './replay-args.js';
+export {
+  InMemoryCatalogStore,
+  InMemoryObjectStore,
+  InMemoryOperationalStore,
+  InMemoryRequestedResponseIncidentStore,
+  InMemorySourceLogStore,
+} from './memory/stores.js';
+export {
+  DERIV_TIME_RESOLUTION_MS,
+  distribution,
+  runSmoke,
+  smokeCommand,
+  smokeExitCode,
+  SMOKE_NOTE,
+  type Distribution,
+  type SmokeInput,
+  type SmokeReport,
+} from './smoke.js';
+export {
+  parseSmokeArgs,
+  SMOKE_DEFAULT_DURATION_SECONDS,
+  SMOKE_DEFAULT_SYMBOL,
+  SMOKE_MAX_DURATION_SECONDS,
+  SMOKE_USAGE,
+  type SmokeOptions,
+} from './smoke-args.js';
 export { openStores } from './runtime.js';
 export { S3ObjectStore } from './s3/object-store.js';

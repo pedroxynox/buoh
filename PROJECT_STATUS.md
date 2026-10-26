@@ -1,14 +1,14 @@
 ---
 schema_version: "1.0.0"
-status_version: 21
-updated_at_utc: "2026-10-26T07:30:00.000Z"
+status_version: 22
+updated_at_utc: "2026-10-26T14:40:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
-next_delivery: "F1.4b"
+next_delivery: "F1.5"
 next_requirements:
-  - "F1-CATALOG-001"
-  - "F1-SOURCE-001"
+  - "F1-RECONNECT-001"
+  - "F1-HEALTH-001"
 plan: "docs/plan/fase-1-fundacion-de-datos.md"
 parallel_plans: []
 ---
@@ -30,7 +30,8 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
   - F1.3a: `infra/compose.yaml` (PostgreSQL 18 y SeaweedFS S3-compatible), `apps/market-data-worker` con publicación atómica y `pnpm run data:replay` en modos recomputación y `--verify-only` (`F1-DATASET-001`);
   - F1.3b: log raw-first durable con rotación `segment_policy_version = 1.0.0`, registro operativo de `persistence_unavailable`/`source_limit_exceeded` y publicación desde segmentos cerrados del log (`F1-STREAM-001`).
 - F1.4 se entrega en dos partes. F1.4a añade las reglas de calidad 2.0.0 para fuentes que mezclan varios tipos de mensaje, como Deriv: mensajes que no son ticks, errores de la fuente, atribución por `echo_req` e incidencia sin símbolo con el esquema de incidencias 2.0.0 ([contratos de dominio](docs/arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-200)).
-- F1.4b está en curso según la secuencia de ADR-0012 §12. El worker ya carga los esquemas de Deriv, tiene el adaptador público, con su transporte, su cola en memoria y su correlación, y guarda en PostgreSQL las versiones del catálogo y las incidencias de respuestas pedidas, con un bloqueo por fuente. Todavía no hay un comando que ejecute el adaptador. No existe todavía persistencia del `IngestionCursor` ni despliegue.
+- F1.4b entregó el catálogo versionado de Deriv (`F1-CATALOG-001`) y el adaptador público, solo para escuchar (`F1-SOURCE-001`), con el smoke opt-in `pnpm run data:smoke` ([ADR-0012](docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md)): esquemas fijados, transporte `ws` con sus límites, cola en memoria, correlación, keepalive, versiones del catálogo e incidencias de respuestas pedidas en PostgreSQL, y bloqueo por fuente. El adaptador todavía no reconecta: toda pérdida de conexión termina la ejecución.
+- No existe todavía persistencia del `IngestionCursor`, un proceso que ingiera de forma continua ni despliegue.
 - MetaTrader 5 (Deriv MT5 y Vantage) queda decidido como segunda integración ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)): sus datos llegan en una Fase 1B posterior a Fase 1, y operar en MT5 empieza en Fase 4 (demo). No existe código de MT5.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
 - La [línea visual V1](docs/plan/linea-visual-v1.md) ([ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)) corrió en paralelo a Fase 1 y terminó el 2026-10-25. V1.1 entregó la [guía de marca](docs/diseno/marca-buoh.md), el [catálogo de funciones](docs/producto/funciones-y-disponibilidad.md), el [concepto de interfaz](docs/diseno/concepto-de-interfaz.md) y `packages/design-system`. V1.2 entregó el prototipo navegable en `apps/web`, con datos ficticios (`V1-UI-001`). V1.3 entregó el [sitio oficial](docs/diseno/sitio-oficial.md) en `apps/site`, sin publicar (`V1-SITE-001`). V1.4 entregó el prototipo móvil en `apps/mobile` y compartió los datos ficticios en `packages/prototype-data` (`V1-MOBILE-001`, [ADR-0009](docs/arquitectura/adr/0009-prototipo-movil.md)). V1.5 entregó el prototipo de escritorio en `apps/desktop`, con Tauri 2 y un instalador de Windows compilado en CI (`V1-DESKTOP-001`, [ADR-0010](docs/arquitectura/adr/0010-prototipo-de-escritorio.md)). V1.6 cambió la identidad al logo del propietario, vectorizado, con su paleta, la tipografía Sen y un estilo más técnico (`V1-BRAND-002`, [ADR-0011](docs/arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)). No cambió el alcance ni la puerta de salida de Fase 1.
@@ -43,42 +44,15 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 
 ## Siguiente tarea autorizada
 
-**`F1.4b` — Catálogo y streaming público de Deriv.**
+**`F1.5` — Reconexión, recuperación, salud y puerta de salida de Fase 1.**
 
-Implementar el catálogo versionado de `active_symbols` (`F1-CATALOG-001`) y el adaptador público de Deriv con esquemas fijados, límites, keepalive y correlación (`F1-SOURCE-001`), entregando sus frames al `RawFirstIngestor` con un perfil de reglas 2.0.0, más el smoke opt-in `pnpm run data:smoke`.
+Implementar la reconexión sin ocultar huecos (`F1-RECONNECT-001`) y la salud machine-readable con `pnpm run data:health -- --json` (`F1-HEALTH-001`), y reunir la evidencia de la puerta de salida de Fase 1 ([plan](docs/plan/fase-1-fundacion-de-datos.md) §8 y §9). Lo esperado y lo que falta de cada parte está en la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md), P-F1-04 a P-F1-06.
 
-Las decisiones técnicas están en [ADR-0012](docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md):
+Puntos de partida comprobados al cerrar F1.4b:
 
-- dependencias nuevas: el transporte `ws`, el validador `ajv-draft-04` (elegido por el dialecto del esquema) y `fflate` para leer `schemas.zip`;
-- la forma y las versiones del snapshot del catálogo;
-- las incidencias de respuestas pedidas;
-- el perfil de medición;
-- el bloqueo por fuente;
-- el smoke en memoria.
-
-La ADR fija también una secuencia de siete PR. Los puntos de partida de abajo se comprobaron antes de la ADR, que los concreta en dos cosas:
-
-- el correlador no relee el log, porque el transporte conserva el texto de cada frame que entrega (§5);
-- tras un límite de frame o de cola, el cierre es `transport_error`, para que la pérdida quede visible (§4).
-
-Decisiones del propietario para F1.4b:
-
-- el primer smoke usa un solo índice sintético de Deriv (por ejemplo Volatility 100), con el nombre exacto tomado del catálogo oficial;
-- los umbrales live de retraso y hueco no se inventan: el smoke mide primero los retrasos reales y los umbrales se fijan después con esos números;
-- mientras tanto, los datos live no se publican como dataset (ADR-0004 §13).
-
-El perfil 2.0.0 exige umbrales enteros de retraso y hueco. El smoke solo normaliza y mide, sin derivar ni publicar, así que esos umbrales no se aplican; F1.4b debe marcar ese perfil de medición para que nunca sirva para publicar, y declarar en `non_tick_msg_types` las respuestas de Deriv que pide.
-
-Puntos de partida ya comprobados para F1.4b:
-
-- **Preparación para varias fuentes** ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md) §2). El transporte con sus límites, el normalizador, el vocabulario del perfil (`non_tick_msg_types`) y el validador de esquemas propios de Deriv se eligen por fuente; hoy `normalizeRawFrame` y el validador Ajv 2020 están fijos. La elección se deriva del perfil y las versiones que el dataset ya publica, para que el replay la reproduzca sin configuración externa. El log y la publicación no cambian. Los vectores v1 siguen con su normalizador, y no se crea código, directorio ni dependencia de MT5.
-- **Esquemas de Deriv.** En la release fijada (ADR-0004 §2), los esquemas de las operaciones que usa buoh (`active_symbols`, `ticks`, `ticks_history`, `ping`, `time`, `forget` y `forget_all`) son JSON Schema draft-04, en archivos `<operación>_request.schema.json` y `<operación>_response.schema.json`. Las demás operaciones de la release, que buoh no usa, mezclan draft-04 y draft-07. Hace falta un validador compatible con draft-04; Ajv 8, que ya usa `@buoh/domain`, no lo admite, así que es una dependencia nueva que el PR de F1.4b debe justificar. Esas siete respuestas exigen `msg_type` y `echo_req`, y en `ticks_response` el objeto `tick` solo exige `pip_size`.
-- **Descarga de `schemas.zip`.** El adaptador la rechaza si el SHA-256 no coincide (ADR-0004 §2) y aplica los límites de descarga y de contenido expandido de ADR-0004 §7; superar cualquiera aborta la carga con salud `failed`.
-- **Perfil Deriv.** Declara en `non_tick_msg_types` solo las respuestas que el adaptador pide, nunca `tick`. En la release, `active_symbols`, `ping`, `time`, `forget` y `forget_all` responden con un `msg_type` del mismo nombre. `ticks_history` responde `history` (o `candles` si se pide `style: candles`), y con suscripción sigue con `tick`, que pasa por las reglas de ticks (u `ohlc` con `style: candles`).
-- **Errores en respuestas pedidas.** Las reglas 2.0.0 no registran un `error` dentro de una respuesta declarada: quien la pidió debe comprobarlo y registrarlo ([contratos de dominio](docs/arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-200)). Para eso el correlador de solicitudes y respuestas tiene que leer el raw (pendiente 3 de F1.4a), y F1.4b debe decidir cómo se registra.
-- **Transporte.** Espera cada llamada al `RawFirstIngestor` antes de entregar el siguiente frame, y garantiza una sola instancia por fuente o añade un bloqueo por fuente (pendiente 6 de F1.3). Los frames que esperan van a la cola en memoria, limitada a 1000 eventos o 33 554 432 bytes. Al superarse el límite se deja de aceptar, se cierra la entrada, se registra `source_limit_exceeded` (`in_memory_queue_events` o `in_memory_queue_bytes`) y la salud pasa a `paused`. La cola está antes de `RawFirstIngestor.receiveFrame`, así que F1.4b debe dar un camino hacia el registro operativo y la pausa del ingestor, igual que para el límite de frame. Conexión 10 000 ms, solicitud 15 000 ms y ping cada 45 s, con reloj inyectable (ADR-0004 §2 y §7).
-- **Límite de frame.** Un frame de más de 1 MiB se rechaza sin cargarlo, se cierra la entrada y la salud pasa a `paused` (ADR-0004 §7). Hoy esa comprobación y su `source_limit_exceeded` viven en `RawFirstIngestor.receiveFrame`, que recibe el frame ya completo. Un cliente WebSocket que corte el frame antes, como la opción `maxPayload` de la librería `ws`, no informa su tamaño y el frame nunca llega al ingestor. F1.4b debe dar un camino para registrar ese rechazo con su `observed_value`. Elegir `ws` sería otra dependencia nueva; Node 24 trae un `WebSocket` global.
-- **Red solo en el smoke.** Las pruebas del adaptador usan fixtures, transporte y reloj falsos, sin red ni aleatoriedad. `pnpm run data:smoke` es opt-in y nunca es el único criterio de merge. Sus datos live son efímeros y se eliminan en 24 horas (ADR-0004 §13); su evidencia es fecha, release de esquemas y resultado sanitizado (plan §7).
+- El adaptador de Deriv termina en cada pérdida de conexión con su `ConnectionClosed`. La tabla de cierres del [runbook](docs/operacion/runbook-ingesta-de-datos.md) («Adaptador público de Deriv») dice qué cierres pierden datos. Los esquemas de `ticks_history` y `forget` ya se cargan con la release fijada, pero el adaptador no los pide (ADR-0012 §1).
+- El primer proceso que ingiera de forma continua en PostgreSQL tiene que cerrar el pendiente 6 de F1.3: escribir con el log protegido por el bloqueo, volver a tomarlo tras perderlo y terminar si ya lo tiene otro proceso.
+- Los umbrales live de retraso y hueco siguen sin fijar. El smoke de F1.4b dio una primera medición («Evidencia de F1.4b»), y hasta fijarlos los datos live no se publican como dataset («Decisiones vigentes relevantes»).
 
 No crea todavía web, móvil, señales ni ejecución.
 
@@ -144,9 +118,27 @@ Reglas de calidad versionadas (`F1-QUALITY-001`) y preparación del adaptador de
   - la recomputación aborta ante un conjunto de reglas no implementado.
 - Los vectores v1 siguen reproduciéndose byte a byte con reglas 1.0.0.
 
+## Evidencia de F1.4b
+
+Catálogo versionado (`F1-CATALOG-001`) y adaptador público de Deriv (`F1-SOURCE-001`), en la secuencia de siete PR de ADR-0012 §12.
+
+- Pruebas offline, sin red, reloj real ni aleatoriedad:
+  - contratos (40 en total): `SourceCatalogSnapshot`, su JSON Schema, su orden y sus dos hashes;
+  - dominio (79 en total): validador por dialecto (Ajv 2020 o `ajv-draft-04`), perfil de medición que nunca publica, conversión del catálogo con sus seis motivos e incidencia de respuestas pedidas;
+  - worker (122 en total): carga de `schemas.zip` con su SHA-256, sus límites y las huellas de sus 14 entradas (18); adaptador con socket, reloj y temporizador falsos, que cubre catálogo, suscripción, keepalive, tiempos de espera, cola y sus límites, frame cortado, cierres y respuestas pedidas (41); bloqueo por fuente (4); y el smoke con su resultado saneado y sus salidas 0, 1 y 2 (12).
+- `pnpm run test:integration` (44 en total, 24 de F1.4b): el corte de `ws` con un servidor local, con un mensaje entero y uno fragmentado, y un cierre previsto sobre `ws` real; versiones del catálogo, incidencias de respuestas pedidas y bloqueo por fuente contra PostgreSQL 18 y almacenamiento S3-compatible.
+- Smoke vivo opt-in, `pnpm run data:smoke -- --live`, el 2026-10-26 de 14:34:24 a 14:36:24 UTC, con la release de esquemas `production_v20260901_0` (SHA-256 `adaab0ac…e7c3`). Resultado saneado:
+  - `passed`, salida 0, cierre `requested`;
+  - `R_100`, «Volatility 100 Index», en un catálogo de 89 entradas (`content_sha256` `cf5b1c49d668b2fe8388029455ba32e58ff26b2c27c443604def0c2a8ce15141`);
+  - 66 frames durables en memoria: 61 ticks, 2 `ping` y una respuesta a `active_symbols`, `time` y `forget_all`; ningún frame inválido ni incidencia;
+  - retraso de entrega de los 60 ticks posteriores al primero, en ms: mínimo 189, p50 263, p90 356, y p99 y máximo 454. El primero llegó con 917 ms; puede ser un tick que Deriv ya tenía al suscribirse, y por eso va aparte;
+  - 2000 ms entre las horas de ticks consecutivos en los 60 intervalos, y 931 ms de desfase medido con la hora del servidor;
+  - Deriv da sus horas en segundos enteros, así que el retraso y el desfase medidos pueden superar a los reales hasta en 999 ms;
+  - nada se escribió fuera del proceso (ADR-0004 §13).
+
 ## Pendientes registrados de F1.4a
 
-Detectados en la revisión semántica del PR #8; ninguno bloquea F1.4b:
+Detectados en la revisión semántica del PR #8; ninguno bloquea F1.5:
 
 1. El JSON Schema generado `data-quality-incident.schema.json` todavía acepta `symbol = null` en `invalid_source_frame` con el esquema de incidencias 1.0.0. El runtime sí lo rechaza. Falta la condición `if`/`then` en esa rama, añadida desde `packages/contracts/scripts/generate-json-schemas.ts` o la fuente Zod, nunca a mano en el archivo generado.
 2. Las pruebas que ligan versiones al manifiesto no fijan qué campo del manifiesto lee cada comprobación, porque en el vector v1 todas las versiones son 1.0.0. Falta un caso que mueva un campo y sus registros juntos a una versión sin usar.
@@ -155,7 +147,7 @@ El antiguo pendiente 3 (el sink `nonTickFrame` no deja ver un `error`) quedó re
 
 ## Pendientes registrados de F1.3
 
-Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la lista completa está en cada PR. Los más relevantes para F1.4 y el despliegue:
+Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la lista completa está en cada PR. Los más relevantes para F1.5 y el despliegue:
 
 1. Si la conexión cae durante el `COMMIT` de una publicación, se informa "no se confirmó" aunque pudo confirmarse.
 2. Publicar no aplica los límites de lectura del replay. `normalized_ticks` y `quality_incidents` son un único artefacto que crece con el dataset. Resolver antes de publicar datasets live largos.
@@ -184,7 +176,8 @@ El antiguo pendiente 1 (atribución de símbolo y mensajes que no son ticks) que
 - El adaptador inicial usará únicamente el WebSocket público de Deriv, sin autenticación.
 - Datos crudos y normalizados son artefactos distintos; una incidencia nunca reescribe el dato crudo.
 - JSON Schema representa estructura interoperable; las invariantes criptográficas y relacionales requieren validación runtime.
-- Las pruebas offline sintéticas son bloqueantes. El smoke público de Deriv aparece en F1.4 y nunca constituye el único criterio de merge.
+- Las pruebas offline sintéticas son bloqueantes. El smoke público de Deriv (`pnpm run data:smoke`) existe desde F1.4b y nunca constituye el único criterio de merge.
+- Los umbrales live de retraso y hueco no se inventan: se fijan con mediciones reales de los retrasos, y mientras tanto los datos live no se publican como dataset (decisión del propietario para F1.4b; ADR-0004 §13 y ADR-0012 §8).
 - Hasta incorporar un writer Parquet, ticks e incidencias se publican como NDJSON sin compresión; `dataset_id` no depende del formato físico.
 - Alojamiento productivo en Render para PostgreSQL, API y web; el despliegue sigue diferido ([ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)).
 - MetaTrader 5 entra por un puente MQL5 dentro de la terminal; cada servidor MT5 es una fuente propia; las contraseñas MT5, solo de cuentas propias, las guarda la terminal y los servicios de buoh nunca las reciben ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
@@ -192,7 +185,7 @@ El antiguo pendiente 1 (atribución de símbolo y mensajes que no son ticks) que
 
 ## Bloqueos
 
-Ninguno para iniciar `F1.4b`.
+Ninguno para iniciar `F1.5`.
 
 ## Decisiones pendientes que no bloquean Fase 1
 

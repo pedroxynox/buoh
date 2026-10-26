@@ -54,7 +54,7 @@ Desde F1.4b, antes de abrir el log de una fuente en PostgreSQL se toma su bloque
 
 ### Una sola instancia por fuente
 
-Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §9), todo proceso que escribe el log de una fuente en PostgreSQL toma antes un bloqueo de sesión (`pg_try_advisory_lock`, `SourceLock`). Su clave son los 8 primeros bytes del SHA-256 de `buoh:source-log:<fuente>`, como entero de 64 bits con signo. La clave vale para toda la base de datos: también bloquea la misma fuente en otro `BUOH_POSTGRES_SCHEMA` de la misma base. Lo toma en un cliente propio, fuera del pool, porque el pool cierra los clientes inactivos y el bloqueo se iría con ellos, y lo mantiene mientras escribe. Hoy lo hace `fixture:publish`; el `data:smoke` del PR 7 no lo necesita, porque guarda todo en memoria.
+Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §9), todo proceso que escribe el log de una fuente en PostgreSQL toma antes un bloqueo de sesión (`pg_try_advisory_lock`, `SourceLock`). Su clave son los 8 primeros bytes del SHA-256 de `buoh:source-log:<fuente>`, como entero de 64 bits con signo. La clave vale para toda la base de datos: también bloquea la misma fuente en otro `BUOH_POSTGRES_SCHEMA` de la misma base. Lo toma en un cliente propio, fuera del pool, porque el pool cierra los clientes inactivos y el bloqueo se iría con ellos, y lo mantiene mientras escribe. Hoy lo hace `fixture:publish`; `data:smoke` no lo necesita, porque guarda todo en memoria.
 
 - **Si otro proceso lo tiene**, el comando no arranca. `fixture:publish` termina con código 1 y el mensaje «Otro proceso escribe el log de "<fuente>"; no se arranca». Para ver qué sesión lo tiene, con la fuente en lugar de `deriv_options`:
 
@@ -137,7 +137,7 @@ La condición de un límite de esquema se resuelve con el primer `ConnectionOpen
 
 ### Adaptador público de Deriv
 
-Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §3 a §7), el worker tiene el adaptador del canal público (`apps/market-data-worker/src/deriv/`), con la fuente `deriv_options` y el conector `deriv-options-ws-1.0.0`. Todavía no hay un comando que lo ejecute: `pnpm run data:smoke` llega con el PR 7. El catálogo y las incidencias de respuestas pedidas se guardan en PostgreSQL desde el PR 6 (`PostgresCatalogStore` y `PostgresRequestedResponseIncidentStore`, migración `0003`). Una conexión sigue estos pasos:
+Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §3 a §7), el worker tiene el adaptador del canal público (`apps/market-data-worker/src/deriv/`), con la fuente `deriv_options` y el conector `deriv-options-ws-1.0.0`. `pnpm run data:smoke` lo ejecuta una vez, en memoria (ver «Smoke público de Deriv»); todavía no hay un proceso que ingiera de forma continua. El catálogo y las incidencias de respuestas pedidas se guardan en PostgreSQL desde el PR 6 (`PostgresCatalogStore` y `PostgresRequestedResponseIncidentStore`, migración `0003`). Una conexión sigue estos pasos:
 
 1. Carga los esquemas (sección anterior) y comprueba que sus cinco peticiones (`active_symbols`, `ticks`, `ping`, `time` y `forget_all`) cumplen su esquema de petición. Si algo falla, no se conecta.
 2. Abre el WebSocket con `ws` 8.22.0: sin compresión, mensajes de hasta 1 048 576 bytes, sin seguir redirecciones y con 10 000 ms para abrir. Al abrir persiste `ConnectionOpened`. Si después sigue abierta una condición del registro operativo, cierra sin suscribirse.
@@ -170,6 +170,38 @@ Cada mensaje de texto recibe su `observation_id` y su `received_at_utc` al llega
 | una respuesta a `ping` con error o que no cumple su esquema | `timeout` | `ping_invalid` | `disconnected`: `ping_invalid` |
 
 Los cierres `requested` no pierden datos: o no hubo suscripción, o se pidió `forget_all`. Los demás abren `connection_lost` en las reglas y dejan pendiente la continuidad del símbolo suscrito. Si el `ConnectionClosed` no queda durable, el log falló: un resultado `completed` o `disconnected` pasa a `paused` con `persistence_unavailable`.
+
+### Smoke público de Deriv (`data:smoke`)
+
+Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §10), `pnpm run data:smoke -- --live` prueba el adaptador contra el canal público de Deriv. Es opt-in y nunca es el único criterio de fusión, porque la red y el mercado no son deterministas. Su evidencia es la fecha, la release de esquemas y el resultado saneado (plan de Fase 1 §7); la de F1.4b está en `PROJECT_STATUS.md`.
+
+- **Uso:** `pnpm run data:smoke -- --live [--symbol R_100] [--duration-seconds 120]`. La duración va de 1 a 3600 s y cuenta desde el primer tick. Sin `--live` no abre ninguna conexión y responde con un error de uso.
+- **Recorrido:** el de «Adaptador público de Deriv», con una sola conexión, el perfil de medición y una petición `time` después del primer tick. No necesita variables `BUOH_*` ni servicios.
+- **Retención (ADR-0004 §13):** todo queda en la memoria del proceso (log, registro operativo, objetos, catálogo e incidencias) y se borra al terminar. Nada se escribe en disco, PostgreSQL ni almacenamiento de objetos, y nada se publica.
+- **Salida:** antes compila el worker, con sus mensajes en stderr (`scripts/data-smoke.mjs`). stdout lleva una sola línea JSON saneada, sin payloads ni precios:
+
+| Campo | Contenido |
+|---|---|
+| `status` | `passed` si la conexión terminó con el cierre previsto y llegó al menos un tick; si no, `failed` |
+| `started_at_utc`, `finished_at_utc` y `duration_seconds` | inicio, fin y duración pedida |
+| `schemas` | release y SHA-256 de `schemas.zip`, o `null` si no cargaron |
+| `source`, `connector_version`, `symbol` y `symbol_name` | fuente, conector, código y nombre oficial del símbolo en el catálogo recibido |
+| `catalog` | número de entradas y `content_sha256` del catálogo |
+| `frames` | frames de texto durables (`raw`), ticks normalizados, frames inválidos y respuestas pedidas por `msg_type` |
+| `incidents` | frames inválidos por motivo (reglas 2.0.0), respuestas pedidas inválidas por motivo y registro operativo por tipo |
+| `first_tick_delay_ms` | retraso del primer tick de la suscripción. Va aparte porque puede ser un tick que Deriv ya tenía al suscribirse, así que puede incluir su antigüedad |
+| `delivery_delay_ms` y `tick_interval_ms` | `received_at_utc` menos la hora del tick, sin el primero, y tiempo entre las horas de ticks consecutivos: mínimo, p50, p90, p99 y máximo, por rango más cercano. Con menos de 100 valores, p99 es el máximo |
+| `server_time_offset_ms` | recepción local menos la hora del servidor (`time`), o `null` |
+| `end` y `closure` | resultado del adaptador y su cierre (tabla de «Adaptador público de Deriv») |
+| `source_time_resolution_ms` y `note` | Deriv da sus horas en segundos enteros, así que el retraso y el desfase medidos pueden superar a los reales hasta en 999 ms |
+
+| Salida | Significado |
+|---:|---|
+| 0 | `passed` |
+| 1 | `failed`: esquemas, catálogo inválido, símbolo ausente del catálogo, sin ticks normalizados, límites o desconexión (ver `end`); o `code: UNEXPECTED` |
+| 2 | error de uso: `code: UsageError`, por ejemplo sin `--live`, o un símbolo que el esquema de la petición `ticks` no admite (`end.reason: request_invalid`) |
+
+Una salida distinta de 0 sin línea JSON significa que falló la compilación o que se interrumpió el proceso; el detalle está en stderr. Sus números sirven para fijar después los umbrales live de retraso y de hueco, que el perfil de medición no lleva (ADR-0012 §8).
 
 ### Almacenamiento no disponible o backlog lleno por conteo/bytes
 
@@ -257,7 +289,7 @@ No se registran payloads completos, secretos ni datos personales en logs operati
 ## Verificación periódica
 
 - Pruebas offline y vectores en cada cambio relevante.
-- Smoke público de Deriv opt-in, con resultado sanitizado y fecha.
+- Smoke público de Deriv opt-in (`pnpm run data:smoke -- --live`), con resultado saneado y fecha; nunca es el único criterio de fusión.
 - Ensayo de reinicio y fallo de almacenamiento antes de cerrar Fase 1.
 - Verificación de replay y `dataset_id` en la puerta de salida.
 

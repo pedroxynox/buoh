@@ -2,7 +2,7 @@
 
 Log raw-first de source events, registro operativo, publicación atómica y replay de datasets (F1.3: `F1-STREAM-001`, `F1-DATASET-001`). Decisiones en [ADR-0004](../../docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md) §7–§12 y [ADR-0005](../../docs/arquitectura/adr/0005-persistencia-local-y-formato-fisico-f1-3.md); operación en el [runbook](../../docs/operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13).
 
-Todavía no conecta con Deriv (F1.4).
+Desde F1.4b tiene el adaptador público de Deriv, solo para escuchar, y su catálogo versionado ([ADR-0012](../../docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md)); `pnpm run data:smoke` lo ejecuta una vez, en memoria. Todavía no reconecta (F1.5).
 
 ## Flujo
 
@@ -24,6 +24,6 @@ dataset_id ─ replayDataset ─▶ verify-only: record, documento, hashes físi
 
 ## Comandos
 
-Desde la raíz: `pnpm run test` (offline), `pnpm run test:integration` (requiere `infra/compose.yaml`) y `pnpm run data:replay -- --dataset <id> [--verify-only]`.
+Desde la raíz: `pnpm run test` (offline), `pnpm run test:integration` (requiere `infra/compose.yaml`), `pnpm run data:replay -- --dataset <id> [--verify-only]` y `pnpm run data:smoke -- --live` (prueba viva opt-in contra Deriv; no guarda nada).
 
 En el paquete, tras `pnpm run build`: `db:migrate` y `fixture:publish` (pasa los vectores sintéticos por el log y los publica en el stack local).
