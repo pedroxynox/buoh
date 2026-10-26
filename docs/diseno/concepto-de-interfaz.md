@@ -91,7 +91,7 @@ pnpm --filter @buoh/web run test               # comprueba cada página exportad
 pnpm --filter @buoh/prototype-data run test    # comprueba la coherencia de los datos ficticios
 ```
 
-`apps/web/out` es un sitio estático: se puede abrir con cualquier servidor de archivos local. No se publica en internet (ADR-0008 §3).
+`apps/web/out` es un sitio estático: se puede abrir con cualquier servidor de archivos local. No se publica en internet: `render.yaml` solo publica el sitio oficial (ADR-0013).
 
 ## 7. Hacia móvil y escritorio
 

@@ -68,6 +68,10 @@ export default function AvisoDeRiesgoPage() {
             No tiene formularios, no usa cookies, no recoge datos personales y no carga recursos de
             terceros: las tipografías se sirven desde el propio sitio.
           </p>
+          <p>
+            Lo aloja Render. Como en cualquier sitio web, sus servidores reciben la dirección IP de
+            cada visita para poder entregar las páginas. buoh no recibe esos datos.
+          </p>
         </div>
       </Section>
     </>

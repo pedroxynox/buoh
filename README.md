@@ -17,7 +17,7 @@ Cualquier persona o motor de IA debe leer, en orden:
 
 ## Desarrollo actual
 
-Fase 1 tiene contratos runtime (F1.1), normalización y calidad puras (F1.2), log raw-first, publicación y replay sobre PostgreSQL y almacenamiento S3-compatible locales (F1.3), las reglas de calidad 2.0.0 para fuentes como Deriv (F1.4a), y el catálogo y el adaptador público de Deriv, solo para escuchar, con su prueba en vivo (F1.4b). Todavía no reconecta tras una desconexión ni ejecuta operaciones. En paralelo, la línea visual V1 dejó la marca, el sistema de diseño, prototipos web, móvil y de escritorio con datos ficticios, y el sitio oficial sin publicar. El [estado del código](docs/arquitectura/estado-del-codigo.md) resume cómo se conectan las piezas, y la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md), lo que falta.
+Fase 1 tiene contratos runtime (F1.1), normalización y calidad puras (F1.2), log raw-first, publicación y replay sobre PostgreSQL y almacenamiento S3-compatible locales (F1.3), las reglas de calidad 2.0.0 para fuentes como Deriv (F1.4a), y el catálogo y el adaptador público de Deriv, solo para escuchar, con su prueba en vivo (F1.4b). Todavía no reconecta tras una desconexión ni ejecuta operaciones. En paralelo, la línea visual V1 dejó la marca, el sistema de diseño, prototipos web, móvil y de escritorio con datos ficticios, y el sitio oficial, que `render.yaml` publica en Render sin indexar. El [estado del código](docs/arquitectura/estado-del-codigo.md) resume cómo se conectan las piezas, y la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md), lo que falta.
 
 ```text
 pnpm install
@@ -94,6 +94,7 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 - [ADR-0010: prototipo de escritorio](docs/arquitectura/adr/0010-prototipo-de-escritorio.md)
 - [ADR-0011: identidad desde el logo del propietario](docs/arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)
 - [ADR-0012: catálogo y adaptador público de Deriv (F1.4b)](docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md)
+- [ADR-0013: publicación del sitio oficial en Render](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)
 - [Plan de la línea visual V1](docs/plan/linea-visual-v1.md)
 - [Guía de marca](docs/diseno/marca-buoh.md)
 - [Concepto de interfaz](docs/diseno/concepto-de-interfaz.md)

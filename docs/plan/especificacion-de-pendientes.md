@@ -220,15 +220,15 @@ La línea terminó el 2026-10-25 (P-V1-01). Los demás pendientes de esta secci�
 - **Aceptación:** no indicados.
 - **Abierto:** firmar exige un certificado, y cómo distribuir la app es una decisión del propietario (`PROJECT_STATUS.md`).
 
-### P-V1-07. Sitio: publicación — decisión humana
+### P-V1-07. Sitio: publicación — parcial
 
 - **Objetivo:** publicar el sitio oficial.
-- **Fuente:** ADR-0008 («Pendientes») y sitio oficial §4.
-- **Estado (verificado):** el sitio lleva `noindex` y no tiene dominio ni alojamiento.
-- **Esperado:** dominio, alojamiento, revisión legal del aviso de riesgo y de la nota de marcas, y quitar `noindex` en el mismo PR que lo publique.
-- **Componentes:** `apps/site` y su alojamiento, todavía sin elegir.
-- **Aceptación (sitio oficial §4):** además de lo anterior, comprobar que el alojamiento no pone cookies y cuánto guarda sus registros de acceso; si no se cumple, cambiar la frase de privacidad del pie en el mismo PR.
-- **Abierto:** dominio, alojamiento y revisión legal son decisiones del propietario.
+- **Fuente:** ADR-0008 («Pendientes»), ADR-0013 y sitio oficial §4.
+- **Estado (verificado):** desde ADR-0013 (decisión del propietario del 2026-10-26), `render.yaml` publica el sitio en Render como sitio estático gratuito, en una dirección `onrender.com` y sin indexar. Queda en internet cuando el propietario conecta el repositorio en Render ([despliegue en Render](../operacion/despliegue-en-render.md)). Los sitios estáticos de Render no ponen cookies, y Render no entrega sus registros de acceso; el aviso de riesgo dice quién aloja el sitio.
+- **Esperado:** dominio propio, revisión legal del aviso de riesgo, de la nota de marcas y de la frase de privacidad, y quitar el `noindex` de la página y de la cabecera en el mismo PR.
+- **Componentes:** `apps/site` y `render.yaml`.
+- **Aceptación (sitio oficial §4):** la de arriba, y comprobar tras el primer despliegue que la dirección del sitio no pone cookies.
+- **Abierto:** el dominio propio y la revisión legal son decisiones del propietario.
 
 ## 3. Proceso del repositorio
 
@@ -274,7 +274,7 @@ Solo se listan; sus planes no existen todavía y el roadmap describe el destino.
 
 ### Sin corregir
 
-- **ADR-0006**: «no autoriza a desplegar ni a crear `apps/api`, `apps/web`, `apps/mobile` o `render.yaml` en Fase 1». `apps/web` y `apps/mobile` ya existen como prototipos, que llegaron por ADR-0008 y ADR-0009. Sigue siendo cierto para despliegue y producción. Se deja como está porque es el texto de una decisión aceptada; una ADR posterior podría aclararlo.
+- **ADR-0006**: «no autoriza a desplegar ni a crear `apps/api`, `apps/web`, `apps/mobile` o `render.yaml` en Fase 1». `apps/web` y `apps/mobile` ya existen como prototipos, que llegaron por ADR-0008 y ADR-0009. ADR-0013 la aclaró para `render.yaml`, que ahora solo publica el sitio oficial. Para la API, el worker, PostgreSQL y la producción sigue siendo cierta.
 
 ## 6. Decisiones humanas abiertas
 
@@ -285,7 +285,7 @@ P-V1-01, P-V1-03 y P-GOV-01 ya no figuran aquí, ni lo que el propietario llama 
 | Qué cuenta como reautenticación en un teléfono (se define en la revisión de amenazas de la Fase 5) | P-V1-05 | `PROJECT_STATUS.md` y roadmap (Fase 5) |
 | Probar en un teléfono real y cómo distribuir la app | P-V1-05 | `PROJECT_STATUS.md` |
 | Firmar el instalador de escritorio | P-V1-06 | `PROJECT_STATUS.md` |
-| Dominio, alojamiento y revisión legal del sitio | P-V1-07 | `PROJECT_STATUS.md` |
+| Dominio propio y revisión legal del sitio | P-V1-07 | `PROJECT_STATUS.md` |
 | Universo de índices y tipos de contrato | P-F1-01 | `PROJECT_STATUS.md` |
 | Orden entre la Fase 1B y la Fase 2 | P-F1-06 | `PROJECT_STATUS.md` |
 | Equipo de la terminal MT5 y revisión de términos | §4 | `PROJECT_STATUS.md` |

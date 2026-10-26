@@ -26,13 +26,20 @@ Todas las páginas comparten cabecera con menú y un pie con el aviso de riesgo 
 - Sin cookies ni recogida de datos personales.
 - Deriv, MetaTrader 5, MetaQuotes y Vantage aparecen solo como integraciones previstas, con la nota de que buoh no está afiliado a ellos.
 - El estado de cada fase coincide con el roadmap y con `PROJECT_STATUS.md`: «hecha» si el roadmap la marca completada, «en curso» si es la fase actual y «prevista» si viene después. La línea visual V1 figura como «hecha» desde su cierre del 2026-10-25 (plan V1, §7).
-- Mientras no se publique, todas las páginas llevan `noindex, nofollow`.
+- Hasta la revisión legal y el dominio propio, todas las páginas llevan `noindex, nofollow`, en la página y en la cabecera `X-Robots-Tag` que envía Render ([ADR-0013](../arquitectura/adr/0013-publicacion-del-sitio-en-render.md) §3).
 
 Las pruebas de `apps/site/test` comprueban estas reglas en las páginas exportadas y en su JavaScript, y comparan las fases, modos, plataformas e integraciones con el roadmap, el catálogo de funciones y ADR-0007. El texto sobre lo que existe hoy se escribió para la entrega `F1.5`; una prueba falla cuando `PROJECT_STATUS.md` cambia de entrega, para obligar a revisarlo. La comprobación de «sin métricas» es aproximada: busca porcentajes y cifras con signo en el contenido. Además de las frases prohibidas de la guía de marca §3, las pruebas rechazan «regístrate», «suscríbete» y «compra ahora», por la regla de no tener registro ni compras ([estado del código](../arquitectura/estado-del-codigo.md) D-04).
 
-## 4. Pendiente antes de publicar
+## 4. Publicación
 
-- Dominio y alojamiento (ADR-0008).
-- Revisión legal del aviso de riesgo y de la nota de marcas.
-- Comprobar que el alojamiento elegido no pone cookies y saber cuánto guarda sus registros de acceso; si no se cumple, cambiar la frase de privacidad del pie en el mismo PR.
-- Quitar `noindex` en el mismo PR que publique el sitio.
+Desde el 2026-10-26, por decisión del propietario, el sitio se publica en Render como sitio estático gratuito, en la dirección `onrender.com` que asigne Render, sin indexar y sin anunciar ([ADR-0013](../arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). Lo define `render.yaml`; la primera conexión y las comprobaciones están en [despliegue en Render](../operacion/despliegue-en-render.md).
+
+Comprobado el 2026-10-26:
+
+- dos sitios estáticos de ejemplo de Render no ponen cookies. Tras el primer despliegue, se comprueba lo mismo en la dirección del sitio;
+- Render no entrega registros de acceso de los sitios estáticos, y no publica cuánto guarda internamente. Por eso el aviso de riesgo dice quién aloja el sitio y que sus servidores reciben la dirección IP de cada visita para entregar las páginas.
+
+Antes de comprar un dominio, quitar el `noindex` o anunciar el sitio:
+
+- revisión legal del aviso de riesgo, de la nota de marcas y de la frase de privacidad;
+- quitar el `noindex` de la página y de la cabecera en el mismo PR.

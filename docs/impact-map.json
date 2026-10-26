@@ -37,10 +37,11 @@
     {
       "id": "infrastructure",
       "description": "Persistencia y despliegue requieren revisar arquitectura u operación.",
-      "includes": ["infra/**", "render.yaml"],
+      "includes": ["infra/**", "render.yaml", "scripts/render-blueprint.*"],
       "requires_any": [
         "docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md",
-        "docs/operacion/runbook-ingesta-de-datos.md"
+        "docs/operacion/runbook-ingesta-de-datos.md",
+        "docs/operacion/despliegue-en-render.md"
       ]
     },
     {

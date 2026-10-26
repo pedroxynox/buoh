@@ -1,6 +1,6 @@
 # ADR-0006: Alojamiento productivo en Render
 
-- **Estado:** Aceptada
+- **Estado:** Aceptada; complementada por [ADR-0013](0013-publicacion-del-sitio-en-render.md) (publicación del sitio oficial)
 - **Fecha:** 2026-10-23
 - **Ámbito:** Despliegue posterior a Fase 1
 - **Decisores:** Propietario de buoh
@@ -22,7 +22,7 @@ Siguen pendientes, sin decidir en esta ADR:
 - el proveedor S3-compatible productivo, que Render no cubre, y su región;
 - la compilación y distribución de la app móvil.
 
-Esta ADR no autoriza a desplegar ni a crear `apps/api`, `apps/web`, `apps/mobile` o `render.yaml` en Fase 1: siguen diferidos por el plan.
+Esta ADR no autoriza a desplegar ni a crear `apps/api`, `apps/web`, `apps/mobile` o `render.yaml` en Fase 1: siguen diferidos por el plan. Desde el 2026-10-26, [ADR-0013](0013-publicacion-del-sitio-en-render.md) autoriza `render.yaml` solo para publicar el sitio oficial como sitio estático gratuito; para todo lo demás, esta frase sigue valiendo.
 
 ## Consecuencias
 

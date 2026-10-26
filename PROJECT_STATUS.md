@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 22
-updated_at_utc: "2026-10-26T14:40:00.000Z"
+status_version: 23
+updated_at_utc: "2026-10-26T23:30:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -34,13 +34,14 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
 - No existe todavía persistencia del `IngestionCursor`, un proceso que ingiera de forma continua ni despliegue.
 - MetaTrader 5 (Deriv MT5 y Vantage) queda decidido como segunda integración ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)): sus datos llegan en una Fase 1B posterior a Fase 1, y operar en MT5 empieza en Fase 4 (demo). No existe código de MT5.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
+- El sitio oficial se publica en Render como sitio estático gratuito, en una dirección `onrender.com` y sin indexar ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). Queda en internet cuando el propietario conecta el repositorio en Render ([despliegue en Render](docs/operacion/despliegue-en-render.md)). Ningún otro servicio está desplegado.
 - La [línea visual V1](docs/plan/linea-visual-v1.md) ([ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)) corrió en paralelo a Fase 1 y terminó el 2026-10-25. V1.1 entregó la [guía de marca](docs/diseno/marca-buoh.md), el [catálogo de funciones](docs/producto/funciones-y-disponibilidad.md), el [concepto de interfaz](docs/diseno/concepto-de-interfaz.md) y `packages/design-system`. V1.2 entregó el prototipo navegable en `apps/web`, con datos ficticios (`V1-UI-001`). V1.3 entregó el [sitio oficial](docs/diseno/sitio-oficial.md) en `apps/site`, sin publicar (`V1-SITE-001`). V1.4 entregó el prototipo móvil en `apps/mobile` y compartió los datos ficticios en `packages/prototype-data` (`V1-MOBILE-001`, [ADR-0009](docs/arquitectura/adr/0009-prototipo-movil.md)). V1.5 entregó el prototipo de escritorio en `apps/desktop`, con Tauri 2 y un instalador de Windows compilado en CI (`V1-DESKTOP-001`, [ADR-0010](docs/arquitectura/adr/0010-prototipo-de-escritorio.md)). V1.6 cambió la identidad al logo del propietario, vectorizado, con su paleta, la tipografía Sen y un estilo más técnico (`V1-BRAND-002`, [ADR-0011](docs/arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)). No cambió el alcance ni la puerta de salida de Fase 1.
 
 ## Trabajo en paralelo autorizado
 
 Ninguno. La línea visual V1 terminó el 2026-10-25 (plan V1, §7): sus requisitos tienen evidencia fusionada, y el propietario decidió que sus aprobaciones ya registradas (ADR-0010 §4 y ADR-0011, «Contexto») cuentan como la revisión de capturas de los prototipos y del sitio. Sus piezas siguen en el repositorio; los directorios y dependencias nuevos necesitan un plan activo (AGENTS.md, «Desarrollo por fases»).
 
-Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja para cuando esté validado el núcleo web y móvil, y el roadmap la sitúa en la Fase 7. El prototipo de escritorio no la adelanta.
+Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja para cuando esté validado el núcleo web y móvil, y el roadmap la sitúa en la Fase 7. El prototipo de escritorio no la adelanta. La prioridad del propietario del 2026-10-26 por una app de escritorio con datos reales («Decisiones vigentes relevantes») tampoco lo autoriza todavía: antes hacen falta su plan y la decisión del costo del alojamiento, y entonces se revisará esa decisión de ADR-0001.
 
 ## Siguiente tarea autorizada
 
@@ -179,8 +180,9 @@ El antiguo pendiente 1 (atribución de símbolo y mensajes que no son ticks) que
 - Las pruebas offline sintéticas son bloqueantes. El smoke público de Deriv (`pnpm run data:smoke`) existe desde F1.4b y nunca constituye el único criterio de merge.
 - Los umbrales live de retraso y hueco no se inventan: se fijan con mediciones reales de los retrasos, y mientras tanto los datos live no se publican como dataset (decisión del propietario para F1.4b; ADR-0004 §13 y ADR-0012 §8).
 - Hasta incorporar un writer Parquet, ticks e incidencias se publican como NDJSON sin compresión; `dataset_id` no depende del formato físico.
-- Alojamiento productivo en Render para PostgreSQL, API y web; el despliegue sigue diferido ([ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)).
+- Alojamiento productivo en Render para PostgreSQL, API y web; el despliegue sigue diferido ([ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)), salvo el sitio oficial, que se publica como sitio estático gratuito ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)).
 - MetaTrader 5 entra por un puente MQL5 dentro de la terminal; cada servidor MT5 es una fuente propia; las contraseñas MT5, solo de cuentas propias, las guarda la terminal y los servicios de buoh nunca las reciben ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
+- Prioridad del propietario (2026-10-26): consolidar el sitio oficial y la app de escritorio. El sitio se publica en Render (ADR-0013). La app de escritorio debe mostrar datos reales de Deriv; eso necesita el servidor de datos funcionando todo el día, así que la reconexión y la salud de F1.5 van primero. El plan de esa línea (alojamiento, API y pantallas con datos reales) se escribe cuando el propietario decida el costo del alojamiento.
 - Desde el móvil se pueden encender y apagar estrategias del bot, también con dinero real, como con un control remoto. Ningún cliente abre operaciones a mano ni se comunica con el bróker para ejecutar: todo pasa por el servidor, `execution-gateway` y su política de riesgo ([catálogo de funciones](docs/producto/funciones-y-disponibilidad.md) §1; decisión del propietario del 2026-10-25).
 
 ## Bloqueos
@@ -191,12 +193,11 @@ Ninguno para iniciar `F1.5`.
 
 - Jurisdicción inicial del producto comercial.
 - Universo definitivo de índices y tipos de contrato.
-- Proveedor de almacenamiento de objetos en producción; Render no lo ofrece (ADR-0006).
-- Alojamiento de `market-data-worker` en producción.
+- Costo y proveedor del alojamiento del sistema de datos: worker, PostgreSQL, API y almacenamiento de objetos, que Render no ofrece (ADR-0006). Hace falta para que la app de escritorio muestre datos reales.
 - Equipo de la terminal MT5 (PC dedicado del propietario o servidor Windows o Linux con Wine) y su protección. Se decide en el primer incremento de Fase 1B (ADR-0007).
 - Revisión de términos de Deriv MT5, Vantage y MetaQuotes, y entidad de Vantage aplicable. Se completa en el primer incremento de Fase 1B.
 - Orden entre Fase 1B (datos MT5) y Fase 2 (bot shadow). Se decide al cerrar Fase 1.
-- Dominio y alojamiento del sitio oficial, y revisión legal de su texto antes de publicarlo (ADR-0008).
+- Dominio propio del sitio oficial y revisión legal de su texto, antes de comprar el dominio, quitar el `noindex` o anunciarlo (ADR-0013).
 - Firmar el instalador de escritorio antes de distribuirlo (ADR-0010). El propietario ya lo instaló y probó en su PC el 2026-10-25.
 - Probar la app móvil en un teléfono real (Expo Go para el SDK 58 aún no está en las tiendas, o una compilación nativa), y cómo compilarla y distribuirla (ADR-0009).
 - Qué cuenta como reautenticación en un teléfono para pedir el modo `real` o volver a encender una estrategia en `real` desde el móvil. Se define en la revisión de amenazas de la Fase 5 (P-V1-05 de la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md)).

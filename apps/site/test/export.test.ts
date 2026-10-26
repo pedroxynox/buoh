@@ -166,9 +166,16 @@ describe('sitio exportado (V1-SITE-001)', () => {
     }
   });
 
-  it('el sitio no se indexa hasta que se decida publicarlo', () => {
+  it('el sitio no se indexa hasta la revisión legal y el dominio propio (ADR-0013 §3)', () => {
     for (const [page] of named) {
       expect(read(page), page).toMatch(/<meta name="robots" content="noindex, nofollow"/);
     }
+  });
+
+  it('el aviso de riesgo dice quién aloja el sitio y qué recibe (ADR-0013 §5)', () => {
+    const text = textOf(read(pageOf('/aviso-de-riesgo/')));
+    expect(text).toContain('Lo aloja Render.');
+    expect(text).toContain('reciben la dirección IP de cada visita');
+    expect(text).toContain('buoh no recibe esos datos.');
   });
 });
