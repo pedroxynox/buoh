@@ -104,4 +104,4 @@ El propietario puede pedir cambios, revertir un PR fusionado o volver a fusionar
 
 ## Desarrollo por fases
 
-Solo crea directorios y dependencias requeridos por un plan activo (`plan` o `parallel_plans` de `PROJECT_STATUS.md`). La arquitectura objetivo describe el destino, no autoriza implementar todo el destino en una fase temprana. La configuración del agente en `.kiro/` (steering e instalador de skills) no es un componente del producto y sigue ADR-0014.
+Solo crea directorios y dependencias requeridos por un plan activo (`plan` o `parallel_plans` de `PROJECT_STATUS.md`). La arquitectura objetivo describe el destino, no autoriza implementar todo el destino en una fase temprana. El instalador de skills del agente (`.kiro/instalar-skills.mjs`) y su steering no son componentes del producto y siguen ADR-0014.

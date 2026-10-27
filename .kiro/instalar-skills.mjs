@@ -2,15 +2,19 @@
 // commit fijado abajo, fuera del repositorio, y copia las skills elegidas, cada una con la licencia
 // de su proyecto, a la carpeta donde Kiro Web las encuentra. Nada de esto entra en Git.
 //
-// Uso: `node .kiro/instalar-skills.mjs`. Salidas: 0 todo instalado; 1 algún origen no se instaló
-// (los demás sí); 2 una de las carpetas de trabajo está dentro del repositorio.
+// Uso: `node .kiro/instalar-skills.mjs`. Salidas: 0 todo instalado; 1 faltó algún origen, o todos,
+// y los que se instalaron quedan; 2 una de las carpetas de trabajo está dentro del repositorio, y no
+// se escribe nada.
 //
-// Actualizar un origen es un PR propio que cambia su commit. El diff del origen entre ambos commits
-// se revisa como el de una dependencia, y `.kiro/steering/skills-de-kiro.md` tiene que seguir
-// valiendo.
+// Actualizar un origen es un PR propio que cambia su commit:
+// - el commit nuevo tiene que estar en la rama principal del origen: con
+//   `gh api repos/<dueño>/<repo>/compare/<commit>...main --jq .status`, `identical` o `ahead`. Un
+//   commit que solo existe en un fork también se descarga por la URL del origen;
+// - el diff del origen entre ambos commits se revisa como el de una dependencia;
+// - `.kiro/steering/skills-de-kiro.md` tiene que seguir valiendo.
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { cpSync, existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ORIGENES = [
@@ -73,21 +77,40 @@ const ORIGENES = [
 // Envía órdenes a un bróker (ADR-0014 §5). No se instala, y se borra si una sesión la dejó.
 const PROHIBIDAS = ['trader-broker'];
 
+// Para cada llamada a git; descargar un commit suelto tarda segundos.
+const ESPERA_GIT_MS = 120_000;
+
 const repositorio = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const destino = resolve(process.env['KIRO_SKILLS_DIR'] ?? '/projects/sandbox/.kiro/skills');
+const destino = resolve(process.env['BUOH_SKILLS_DIR'] ?? '/projects/sandbox/.kiro/skills');
 const descargas = resolve(
   process.env['BUOH_SKILLS_SRC_DIR'] ?? '/projects/sandbox/.buoh-local/skills-src',
 );
 
+/** Ruta sin enlaces simbólicos: resuelve la parte que ya existe y le añade el resto. */
+function rutaReal(ruta) {
+  let existente = resolve(ruta);
+  const resto = [];
+  while (!existsSync(existente) && dirname(existente) !== existente) {
+    resto.unshift(basename(existente));
+    existente = dirname(existente);
+  }
+  return join(realpathSync(existente), ...resto);
+}
+
 function estaDentro(base, ruta) {
-  const camino = relative(base, ruta);
+  const camino = relative(rutaReal(base), rutaReal(ruta));
   return camino !== '..' && !camino.startsWith(`..${sep}`) && !isAbsolute(camino);
+}
+
+function motivo(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function git(...argumentos) {
   return execFileSync('git', argumentos, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
+    timeout: ESPERA_GIT_MS,
   }).trim();
 }
 
@@ -107,9 +130,11 @@ function descargar({ nombre, url, commit }) {
 
 function instalar(origen) {
   const copia = descargar(origen);
-  const faltan = origen.skills.filter(
-    (skill) => !existsSync(join(copia, origen.carpeta, skill, 'SKILL.md')),
-  );
+  // Antes de tocar el destino, para no dejar un origen a medias.
+  const faltan = [
+    ...origen.skills.map((skill) => join(origen.carpeta, skill, 'SKILL.md')),
+    ...origen.licencias,
+  ].filter((archivo) => !existsSync(join(copia, archivo)));
   if (faltan.length > 0) {
     throw new Error(`el commit no tiene ${faltan.join(', ')}`);
   }
@@ -125,7 +150,7 @@ function instalar(origen) {
   }
 }
 
-function main() {
+function instalarTodo() {
   for (const carpeta of [destino, descargas]) {
     if (estaDentro(repositorio, carpeta)) {
       console.error(
@@ -147,14 +172,23 @@ function main() {
       instalar(origen);
       instaladas += origen.skills.length;
     } catch (error) {
-      const motivo = error instanceof Error ? error.message : String(error);
-      console.error(`No se instaló ${origen.nombre}: ${motivo}`);
+      console.error(`No se instaló ${origen.nombre}: ${motivo(error)}`);
       salida = 1;
     }
   }
 
   console.log(`Skills instaladas en ${destino}: ${String(instaladas)}`);
   return salida;
+}
+
+function main() {
+  try {
+    return instalarTodo();
+  } catch (error) {
+    // Solo llegan aquí los fallos anteriores a los orígenes: no se instaló ninguno.
+    console.error(`No se instaló ninguna skill: ${motivo(error)}`);
+    return 1;
+  }
 }
 
 process.exitCode = main();

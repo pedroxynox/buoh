@@ -2,7 +2,7 @@
 
 - **Estado:** Aceptada
 - **Fecha:** 2026-10-27
-- **Ámbito:** configuración del agente de Kiro: `.kiro/instalar-skills.mjs` y `.kiro/steering/`. No cambia el producto.
+- **Ámbito:** skills de terceros del agente de Kiro: `.kiro/instalar-skills.mjs`, `.kiro/steering/skills-de-kiro.md` y el «Arranque de sesión» de `.kiro/steering/entorno-sandbox-kiro.md`. No cambia el producto.
 - **Decisores:** Propietario de buoh (instalar caveman, superpowers y day-trader-skill, y hablar con caveman en todas las sesiones), con la dirección técnica (cómo se instalan y cómo se aplican en buoh).
 
 ## Contexto
@@ -17,7 +17,7 @@ Una skill es una carpeta con un `SKILL.md`: instrucciones que el agente carga cu
 - **caveman** ([JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman), Apache-2.0). La skill `caveman` cambia solo la forma de escribir en el chat: la respuesta va primero, sin relleno, y todo dato técnico queda literal. La propia skill vuelve a la prosa normal en los avisos de seguridad, en las preguntas y en todo lo que queda fuera del chat, como código, commits, PR o documentos.
 - **superpowers** ([obra/superpowers](https://github.com/obra/superpowers), MIT). 15 skills de método de trabajo: diseño previo, planes, desarrollo guiado por pruebas, depuración sistemática, revisión y verificación antes de dar algo por terminado. Están escritas para un «human partner» que aprueba diseños y elige opciones, y guardan diseños y planes en `docs/superpowers/`.
 - **day-trader-skill** ([Jakeschincariol/day-trader-skill](https://github.com/Jakeschincariol/day-trader-skill), MIT). 11 skills para operar acciones de EE. UU. dentro del día:
-  - Usan datos gratuitos de Yahoo Finance, Nasdaq Trader, SEC EDGAR y la Cámara de Representantes, con la hora de Nueva York. Ninguna conoce Deriv ni sus índices.
+  - Usan datos gratuitos de Yahoo Finance, Stooq, Nasdaq Trader, SEC EDGAR y la Cámara de Representantes, con la hora de Nueva York. Ninguna conoce Deriv ni sus índices.
   - Escriben sus archivos en `trader/`, dentro de la carpeta desde la que se ejecutan. Las herramientas de la SEC piden el nombre y el correo de quien las usa.
   - Su texto y sus ejemplos traen datos reales de mercado: precios de TSLA del 2026-10-19, cifras publicadas por Apple y los cinco mayores pesos de la cartera 13F de Berkshire Hathaway.
   - `trader-broker` envía órdenes a Alpaca. Las otras diez no envían órdenes.
@@ -34,12 +34,17 @@ Una skill es una carpeta con un `SKILL.md`: instrucciones que el agente carga cu
 
 `.kiro/instalar-skills.mjs` descarga cada origen en un commit fijado y copia esas skills a `/projects/sandbox/.kiro/skills/`, la carpeta donde Kiro Web las encuentra. Cada skill va con la licencia de su proyecto. Git comprueba que lo descargado corresponde al hash del commit.
 
-Las descargas y las copias quedan fuera del repositorio, y el instalador se niega a escribir dentro de él. Ninguna skill de terceros entra en Git:
+Las descargas y las copias quedan fuera del repositorio. El instalador se niega a escribir dentro de él, también a través de enlaces simbólicos, y `.gitignore` excluye `/.kiro/skills/` por si alguien las copia allí. Ninguna skill de terceros entra en Git:
 
 - las de trading no pueden, porque traen datos reales de mercado (`AGENTS.md`, «Invariantes no negociables»);
 - con las demás, buoh hace lo mismo que con sus dependencias: fija la versión y no guarda una copia (ADR-0003, «Baseline de toolchain»).
 
-El instalador es la fuente canónica de los commits. Actualizar uno es un PR propio que revisa el diff del origen entre ambos commits como el de una dependencia. Si se toca el instalador, la guardia documental pide revisar el steering de skills o esta ADR.
+El instalador es la fuente canónica de los commits. Actualizar uno es un PR propio:
+
+- comprueba que el commit nuevo está en la rama principal del origen, porque GitHub también entrega por la URL del origen un commit que solo existe en un fork;
+- revisa el diff del origen entre ambos commits como el de una dependencia.
+
+Si se toca el instalador, la guardia documental pide revisar el steering de skills o esta ADR.
 
 ### 3. Arranque de sesión
 
@@ -73,7 +78,8 @@ El texto de las skills no se adapta: la adaptación a buoh vive en el steering.
 
 ## Consecuencias
 
-- El agente sigue instrucciones escritas por terceros, y tiene permiso para escribir en el repositorio. El commit fijado impide que cambien sin un PR. Una instrucción de una skill que choque con las reglas de buoh no se sigue (§4).
+- El agente sigue instrucciones escritas por terceros, y tiene permiso para escribir en el repositorio. Una instrucción de una skill que choque con las reglas de buoh no se sigue (§4).
+- Las skills solo cambian si cambia un commit del instalador, y en `main` eso solo entra con un PR. Una sesión abierta en otra rama ejecuta el instalador de esa rama: por eso el arranque avisa al propietario si difiere del de `main`.
 - Cada sesión necesita internet para instalarlas. Si falta un origen, o desaparece su commit, el instalador avisa y deja instalados los demás. Las skills que Kiro ya ofrecía al empezar, como caveman y superpowers el 2026-10-27, siguen disponibles en la versión que Kiro tenga.
 - El propietario guarda una vez un texto corto en su configuración de Kiro. Sin él, o si Kiro no lo carga, cada sesión necesita un primer mensaje que pida seguir el arranque.
 - El propietario solo puede llamar con `/` a las skills que Kiro ofrece al empezar la sesión. Las de trading las pide con palabras.

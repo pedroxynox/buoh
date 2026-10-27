@@ -10,7 +10,7 @@ Notas prácticas para sesiones de Kiro. No deciden nada: el proceso está en [`A
 
 Kiro Web abre el espacio de trabajo en `/projects/sandbox`, con el repositorio en `/projects/sandbox/buoh`. El 2026-10-27 el agente no recibió ni este steering ni el `AGENTS.md` del repositorio ([ADR-0014](../../docs/arquitectura/adr/0014-skills-de-terceros-para-el-agente.md), «Contexto»). Antes de la primera respuesta de cada sesión:
 
-1. Instalar las skills: `node /projects/sandbox/buoh/.kiro/instalar-skills.mjs`. Si termina con 1, decir al propietario en una línea qué origen faltó y seguir con las demás.
+1. Instalar las skills: `node /projects/sandbox/buoh/.kiro/instalar-skills.mjs`. Si termina con 1, decir al propietario en una línea qué origen faltó y seguir con las demás. Si el instalador de la rama de la sesión no es el de `main` (`git -C /projects/sandbox/buoh diff --quiet origin/main -- .kiro/instalar-skills.mjs` falla), no ejecutarlo sin preguntar antes al propietario: puede traer skills que nadie ha revisado (ADR-0014, «Consecuencias»).
 2. Activar la skill `caveman` («Comunicación con el propietario»).
 3. Leer, en orden: `AGENTS.md`, `PROJECT_STATUS.md`, `.kiro/steering/fundamentos-buoh.md`, este archivo, [`skills-de-kiro.md`](skills-de-kiro.md), el plan activo y lo que toque la tarea.
 4. Comprobar el estado real: `git fetch`, la rama actual y `gh api "repos/pedroxynox/buoh/pulls?state=all&per_page=5"`. Cada incremento empieza en una rama nueva desde `main` actualizado; una rama ya fusionada no se reutiliza.
@@ -45,7 +45,7 @@ Si una sesión empieza sin seguir estos pasos, el propietario puede pedirlo en s
 ## Comandos y GitHub
 
 - El Node global del sandbox puede no ser el fijado, y dentro del repositorio `npm` y `npx` fallan con `EBADDEVENGINES`. Ejecutar todo con `pnpm`, que descarga y usa el Node de `devEngines` en `package.json`.
-- Si una herramienta larga se corta, por ejemplo la revisión semántica, volver a lanzarla y avisar al propietario en una línea.
+- Si una herramienta larga se corta, por ejemplo la revisión semántica, volver a lanzarla y avisar al propietario en una línea. Relanzar una revisión que se cortó no cuenta como una segunda revisión semántica.
 - Antes de cada commit, ejecutar `DOCS_BASE_REF=origin/main pnpm run verify:pr` y confirmar que el código de salida es 0. El final del log no basta: un fallo de tipos puede quedar más arriba.
 - Los subcomandos `gh pr` y `gh issue` no funcionan aquí, y `gh run list` tampoco. Crear el PR con `gh api repos/pedroxynox/buoh/pulls -f title=… -F body=@<archivo> -f head=<rama> -f base=main` y revisar CI con `gh api repos/pedroxynox/buoh/commits/<sha>/check-runs`.
 - Para fusionar: primero el comentario con `gh api repos/pedroxynox/buoh/issues/<n>/comments -f body=…`, y después `gh api -X PUT repos/pedroxynox/buoh/pulls/<n>/merge -f merge_method=merge -f sha=<commit con CI en verde>`. Con `sha`, GitHub rechaza la fusión (409) si el PR cambió entretanto.

@@ -57,7 +57,8 @@ ios/build/
 **/src-tauri/target/
 **/src-tauri/gen/
 
-# Archivos que escriben las skills del agente (ADR-0014)
+# Skills de terceros del agente y lo que escriben (ADR-0014): se instalan fuera del repositorio
+/.kiro/skills/
 /trader/
 /.superpowers/
 
