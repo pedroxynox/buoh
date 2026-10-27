@@ -4,7 +4,7 @@
 - **Fecha:** 2026-10-24
 - **Ámbito:** trabajo en paralelo a Fase 1, sin cambiar su alcance ni su puerta de salida
 - **Decisores:** Propietario de buoh, a propuesta de la dirección técnica
-- **Complementada por:** [ADR-0009](0009-prototipo-movil.md) (prototipo móvil) y [ADR-0010](0010-prototipo-de-escritorio.md) (prototipo de escritorio)
+- **Complementada por:** [ADR-0009](0009-prototipo-movil.md) (prototipo móvil), [ADR-0010](0010-prototipo-de-escritorio.md) (prototipo de escritorio) y [ADR-0013](0013-publicacion-del-sitio-en-render.md) (publicación del sitio oficial)
 - **Sustituida parcialmente por:** [ADR-0011](0011-identidad-desde-el-logo-del-propietario.md) en la tipografía de §4 (Sen en lugar de Manrope)
 - **Complementa:** [ADR-0001](0001-plataforma-y-stack.md) y [ADR-0003](0003-lenguajes-y-limites.md) (web con Next.js y React) y la [arquitectura objetivo](../arquitectura-objetivo.md) (`packages/design-system` y `apps/web`); añade `apps/site`.
 
@@ -48,9 +48,9 @@ Móvil (`apps/mobile`) y escritorio (`apps/desktop`) quedaban diferidos, cada un
 ### 3. Reglas del sitio oficial
 
 - Describe qué es buoh, sus principios, sus planos, su estado y su hoja de ruta, en el mismo tono de evidencia.
-- No promete ganancias, no publica resultados, no capta usuarios, no vende señales y no recoge datos personales.
+- No promete ganancias, no publica resultados, no capta usuarios ni vende señales, y buoh no recoge datos personales a través de él ([ADR-0013](0013-publicacion-del-sitio-en-render.md) §5).
 - Incluye una advertencia de riesgo sobre opciones y CFD, y nombra a Deriv, MetaTrader 5 y Vantage solo como integraciones previstas, con una nota de marcas de terceros y sin afirmar afiliación.
-- No se publica en internet hasta que el propietario decida dominio y alojamiento. Esa decisión queda pendiente.
+- No se publica en internet hasta que el propietario decida dominio y alojamiento. El propietario lo decidió el 2026-10-26 ([ADR-0013](0013-publicacion-del-sitio-en-render.md)): se publica en Render, en una dirección gratuita y sin indexar. El dominio propio y la revisión legal siguen pendientes.
 
 ### 4. Stack
 
@@ -83,9 +83,9 @@ Los tokens de `packages/design-system` no dependen de React ni del navegador, pa
 
 ## Pendientes
 
-- Dominio y alojamiento del sitio oficial.
+- Dominio propio del sitio oficial. El alojamiento lo decidió ADR-0013.
 - ~~Incremento de móvil (React Native) y de escritorio (Tauri 2).~~ Entregados en V1.4 (ADR-0009) y V1.5 (ADR-0010).
-- Revisión legal del texto del sitio antes de publicarlo.
+- Revisión legal del texto del sitio antes de comprar un dominio, quitar el `noindex` o anunciarlo (ADR-0013).
 
 ## Referencias verificadas
 

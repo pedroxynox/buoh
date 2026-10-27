@@ -65,8 +65,13 @@ export default function AvisoDeRiesgoPage() {
       <Section title="Este sitio">
         <div className="s-prose">
           <p>
-            No tiene formularios, no usa cookies, no recoge datos personales y no carga recursos de
-            terceros: las tipografías se sirven desde el propio sitio.
+            No tiene formularios, no usa cookies y no carga recursos de terceros: las tipografías se
+            sirven desde el propio sitio. buoh no recoge datos personales.
+          </p>
+          <p>
+            Lo aloja Render, que lo entrega a través de la red de Cloudflare. Como en cualquier
+            sitio web, esos servidores reciben la dirección IP de cada visita para poder entregar
+            las páginas. buoh no recibe esos datos.
           </p>
         </div>
       </Section>

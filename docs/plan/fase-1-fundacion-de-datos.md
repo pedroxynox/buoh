@@ -53,7 +53,7 @@ test-vectors/market-data/v1/
 
 ### Diferido explícitamente
 
-`apps/api`, `apps/web`, `apps/mobile` y el escritorio (salvo los prototipos visuales de la [línea visual V1](linea-visual-v1.md)), `signal-engine`, `execution-gateway`, Python, backtests, estrategias, señales, OAuth, cuentas, pagos, suscripciones, Redis, TimescaleDB, despliegue productivo de Render y fuentes MetaTrader 5 (Fase 1B, ADR-0007).
+`apps/api`, `apps/web`, `apps/mobile` y el escritorio (salvo los prototipos visuales de la [línea visual V1](linea-visual-v1.md)), `signal-engine`, `execution-gateway`, Python, backtests, estrategias, señales, OAuth, cuentas, pagos, suscripciones, Redis, TimescaleDB, despliegue productivo de Render (salvo el sitio oficial como sitio estático gratuito, [ADR-0013](../arquitectura/adr/0013-publicacion-del-sitio-en-render.md)) y fuentes MetaTrader 5 (Fase 1B, ADR-0007).
 
 No se crean directorios vacíos para estos componentes.
 

@@ -44,7 +44,7 @@ export function SiteFooter() {
           </p>
           <p className="b-muted s-small">{TRADEMARK_NOTE}</p>
           <p className="b-muted s-small">
-            Este sitio no tiene formularios, no usa cookies y no recoge datos personales.
+            Este sitio no tiene formularios ni usa cookies, y buoh no recoge datos personales.
           </p>
         </div>
         <nav aria-label="Mapa del sitio" className="s-footer__nav">

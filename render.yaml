@@ -1,0 +1,61 @@
+# Blueprint de Render (ADR-0013; pasos en docs/operacion/despliegue-en-render.md).
+#
+# Por ahora solo define el sitio oficial (apps/site): un sitio estático gratuito, en la dirección
+# onrender.com que asigne Render y sin indexar. El resto del sistema (API, worker y PostgreSQL)
+# no está aquí: se añade cuando el propietario apruebe su costo y su plan.
+services:
+  - type: web
+    runtime: static
+    name: buoh-sitio
+    # Node 24.22.0 sale de .node-version. pnpm 12.14.0 se fija aquí, igual que packageManager. Se
+    # instalan el sitio, sus paquetes y las herramientas de la raíz, no las demás apps.
+    buildCommand: >-
+      npx --yes pnpm@12.14.0 install --frozen-lockfile --filter "@buoh/site..." &&
+      npx --yes pnpm@12.14.0 --filter "@buoh/site..." run build
+    staticPublishPath: apps/site/out
+    # Sin esta variable, Render intenta instalar antes por su cuenta con npm o yarn. Aquí instala
+    # buildCommand, con pnpm.
+    envVars:
+      - key: SKIP_INSTALL_DEPS
+        value: 'true'
+    # Solo despliega un commit de main cuyos checks de CI pasaron.
+    autoDeployTrigger: checksPass
+    # Sin vistas previas de los PR: cada una sería otra copia pública del sitio.
+    previews:
+      generation: off
+    buildFilter:
+      paths:
+        - apps/site/**
+        - packages/design-system/**
+        - package.json
+        - pnpm-lock.yaml
+        - pnpm-workspace.yaml
+        - .npmrc
+        - .node-version
+        - tsconfig.base.json
+        - render.yaml
+      ignoredPaths:
+        - apps/site/test/**
+        - packages/design-system/test/**
+        - '**/*.md'
+    # Render conserva las reglas que se quitan de aquí: quitar una exige borrarla también en su
+    # panel (ADR-0013, «Consecuencias»).
+    headers:
+      # Sin indexar hasta la revisión legal y el dominio propio (ADR-0013 §3).
+      - path: /*
+        name: X-Robots-Tag
+        value: noindex, nofollow
+      # Solo recursos del propio sitio. 'unsafe-inline' en scripts es para los tres scripts en línea
+      # que genera Next.js en cada página; el sitio no tiene formularios ni contenido de terceros.
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), geolocation=(), microphone=(), payment=(), usb=()

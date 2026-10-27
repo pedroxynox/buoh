@@ -166,9 +166,25 @@ describe('sitio exportado (V1-SITE-001)', () => {
     }
   });
 
-  it('el sitio no se indexa hasta que se decida publicarlo', () => {
+  it('el sitio no se indexa hasta la revisión legal y el dominio propio (ADR-0013 §3)', () => {
     for (const [page] of named) {
       expect(read(page), page).toMatch(/<meta name="robots" content="noindex, nofollow"/);
     }
+  });
+
+  it('el aviso de riesgo dice quién aloja el sitio y qué reciben sus servidores (ADR-0013 §5)', () => {
+    const text = textOf(read(pageOf('/aviso-de-riesgo/')));
+    expect(text).toContain('Lo aloja Render, que lo entrega a través de la red de Cloudflare.');
+    expect(text).toContain('esos servidores reciben la dirección IP de cada visita');
+    expect(text).toContain('buoh no recibe esos datos.');
+  });
+
+  // El pie no puede decir que el sitio no recoge datos: los servidores que lo entregan reciben la IP.
+  it.each(named)('%s dice en el pie que es buoh quien no recoge datos (ADR-0013 §5)', (page) => {
+    const text = textOf(read(page));
+    expect(text).toContain(
+      'Este sitio no tiene formularios ni usa cookies, y buoh no recoge datos personales.',
+    );
+    expect(text).not.toContain('no usa cookies y no recoge datos personales');
   });
 });
