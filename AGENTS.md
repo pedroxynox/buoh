@@ -28,7 +28,7 @@ No uses conversaciones anteriores como fuente de verdad si contradicen el reposi
 | Visión y modelo comercial | `docs/producto/` |
 | Resumen de navegación | `README.md`; nunca prevalece sobre una fuente especializada |
 
-`.kiro/steering/` es un adaptador de contexto para Kiro y debe apuntar a estas fuentes, no convertirse en una especificación paralela.
+`.kiro/steering/` es un adaptador de contexto para Kiro y debe apuntar a estas fuentes, no convertirse en una especificación paralela. Las skills de terceros que usa el agente ceden ante estas fuentes ([ADR-0014](docs/arquitectura/adr/0014-skills-de-terceros-para-el-agente.md)).
 
 ## Protocolo ante conflictos o vacíos
 
@@ -104,4 +104,4 @@ El propietario puede pedir cambios, revertir un PR fusionado o volver a fusionar
 
 ## Desarrollo por fases
 
-Solo crea directorios y dependencias requeridos por un plan activo (`plan` o `parallel_plans` de `PROJECT_STATUS.md`). La arquitectura objetivo describe el destino, no autoriza implementar todo el destino en una fase temprana.
+Solo crea directorios y dependencias requeridos por un plan activo (`plan` o `parallel_plans` de `PROJECT_STATUS.md`). La arquitectura objetivo describe el destino, no autoriza implementar todo el destino en una fase temprana. El instalador de skills del agente (`.kiro/instalar-skills.mjs`) y su steering no son componentes del producto y siguen ADR-0014.

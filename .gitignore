@@ -57,6 +57,11 @@ ios/build/
 **/src-tauri/target/
 **/src-tauri/gen/
 
+# Skills de terceros del agente y lo que escriben (ADR-0014): se instalan fuera del repositorio
+/.kiro/skills/
+/trader/
+/.superpowers/
+
 # Sistema operativo y editor
 .DS_Store
 Thumbs.db
