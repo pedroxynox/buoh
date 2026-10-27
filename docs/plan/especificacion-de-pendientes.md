@@ -224,8 +224,8 @@ La línea terminó el 2026-10-25 (P-V1-01). Los demás pendientes de esta secci�
 
 - **Objetivo:** publicar el sitio oficial.
 - **Fuente:** ADR-0008 («Pendientes»), ADR-0013 y sitio oficial §4.
-- **Estado (verificado):** desde ADR-0013 (decisión del propietario del 2026-10-26), `render.yaml` publica el sitio en Render como sitio estático gratuito, en una dirección `onrender.com` y sin indexar. Queda en internet cuando el propietario conecta el repositorio en Render ([despliegue en Render](../operacion/despliegue-en-render.md)). Los sitios estáticos de Render no ponen cookies, y Render no entrega sus registros de acceso; el aviso de riesgo dice quién aloja el sitio.
-- **Esperado:** dominio propio, revisión legal del aviso de riesgo, de la nota de marcas y de la frase de privacidad, y quitar el `noindex` de la página y de la cabecera en el mismo PR.
+- **Estado (verificado):** desde ADR-0013 (decisión del propietario del 2026-10-26), `render.yaml` define el sitio para Render como sitio estático gratuito, en una dirección `onrender.com` y sin indexar. Queda en internet cuando el propietario conecta el repositorio en Render ([despliegue en Render](../operacion/despliegue-en-render.md)). Dos sitios estáticos de ejemplo de Render no ponen cookies; falta comprobarlo en el propio tras el primer despliegue. Render no entrega sus registros de acceso, y el aviso de riesgo dice que Render y Cloudflare reciben la dirección IP de cada visita.
+- **Esperado:** dominio propio, revisión legal del aviso de riesgo, de la nota de marcas y de la frase de privacidad del pie, y quitar el `noindex` de la página y de `render.yaml` en el mismo PR, borrando después la regla también en el panel de Render.
 - **Componentes:** `apps/site` y `render.yaml`.
 - **Aceptación (sitio oficial §4):** la de arriba, y comprobar tras el primer despliegue que la dirección del sitio no pone cookies.
 - **Abierto:** el dominio propio y la revisión legal son decisiones del propietario.
@@ -254,9 +254,8 @@ Solo se listan; sus planes no existen todavía y el roadmap describe el destino.
 
   No existe código MT5, como manda el plan.
 - **Fases 2 a 7.** Roadmap. No están autorizadas.
-- **Despliegue.** ADR-0006 y arquitectura objetivo. Siguen pendientes:
-  - el alojamiento del worker;
-  - el proveedor S3 productivo; el único marcador en código es un comentario en `apps/market-data-worker/src/s3/object-store.ts`;
+- **Despliegue.** ADR-0006, ADR-0013 y arquitectura objetivo. Solo el sitio oficial tiene `render.yaml` (ADR-0013). Siguen pendientes:
+  - el costo del alojamiento del sistema de datos (PostgreSQL y API en Render, ADR-0006), dónde se aloja el worker y el proveedor S3 productivo, que Render no ofrece; el único marcador en código es un comentario en `apps/market-data-worker/src/s3/object-store.ts`;
   - la distribución de la app móvil.
 
 ## 5. Documentos desactualizados
@@ -271,6 +270,10 @@ Solo se listan; sus planes no existen todavía y el roadmap describe el destino.
 - Plan V1 §1: el objetivo no nombraba el escritorio.
 - README de `packages/design-system`: faltaba `logo:write`.
 - CONTRIBUTING.md: no decía que en CI no se pueden justificar excepciones de la guardia.
+
+### Corregidos con ADR-0013 (2026-10-26)
+
+- Plan de Fase 1 §4 y arquitectura objetivo («Despliegue y fiabilidad»): diferían todo despliegue de Render, sin la excepción del sitio oficial, que ADR-0013 publica como sitio estático gratuito.
 
 ### Sin corregir
 
@@ -289,4 +292,4 @@ P-V1-01, P-V1-03 y P-GOV-01 ya no figuran aquí, ni lo que el propietario llama 
 | Universo de índices y tipos de contrato | P-F1-01 | `PROJECT_STATUS.md` |
 | Orden entre la Fase 1B y la Fase 2 | P-F1-06 | `PROJECT_STATUS.md` |
 | Equipo de la terminal MT5 y revisión de términos | §4 | `PROJECT_STATUS.md` |
-| Proveedor S3 productivo y alojamiento del worker | §4 | `PROJECT_STATUS.md` |
+| Costo del alojamiento del sistema de datos, alojamiento del worker y proveedor S3 productivo | §4 | `PROJECT_STATUS.md` |

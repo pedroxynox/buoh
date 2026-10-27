@@ -12,7 +12,7 @@ Radiografía del repositorio el 2026-10-25 (commit `869ba4e`; las filas del work
 | `packages/design-system` | Tokens de marca, CSS generado, iconos, logotipo vectorizado y componentes React web. | contracts | [Guía de marca](../diseno/marca-buoh.md), ADR-0008, ADR-0011 |
 | `packages/prototype-data` | Datos ficticios fijos compartidos por los prototipos, más formatos de fecha y `worstDrawdown`. | design-system | ADR-0009 §2 |
 | `apps/web` | Prototipo navegable, exportación estática de Next.js. | design-system, prototype-data | [Concepto de interfaz](../diseno/concepto-de-interfaz.md), ADR-0008 |
-| `apps/site` | Sitio oficial estático; `render.yaml` lo publica en Render sin indexar. | design-system | [Sitio oficial](../diseno/sitio-oficial.md), ADR-0008, ADR-0013 |
+| `apps/site` | Sitio oficial estático; `render.yaml` lo define para Render, sin indexar. | design-system | [Sitio oficial](../diseno/sitio-oficial.md), ADR-0008, ADR-0013 |
 | `apps/mobile` | Prototipo Expo con cinco pestañas. | design-system (solo la entrada raíz), prototype-data | ADR-0009 |
 | `apps/desktop` | Ventana Tauri 2 que muestra `apps/web/out`, con su instalador de Windows. | web (para compilar) | ADR-0010 |
 | `scripts/` | Guardia documental (`check-doc-impact.mjs`), comprobación del runtime, envoltorios de `data:replay` y `data:smoke`, y la prueba de `render.yaml`. | — | CONTRIBUTING.md |

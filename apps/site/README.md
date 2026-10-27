@@ -2,7 +2,7 @@
 
 Sitio público de buoh (`V1-SITE-001`): qué es, cómo funciona, sus principios, plataformas, hoja de ruta y aviso de riesgo. Diseño y reglas de contenido en [`docs/diseno/sitio-oficial.md`](../../docs/diseno/sitio-oficial.md).
 
-No tiene formularios, cookies ni recursos de terceros. Se publica en Render como sitio estático gratuito y lleva `noindex` hasta la revisión legal y el dominio propio ([ADR-0013](../../docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md); pasos en [despliegue en Render](../../docs/operacion/despliegue-en-render.md)).
+No tiene formularios, cookies ni recursos de terceros. `render.yaml` lo publica en Render como sitio estático gratuito cuando el propietario conecta el repositorio, y lleva `noindex` hasta la revisión legal y el dominio propio ([ADR-0013](../../docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md); pasos en [despliegue en Render](../../docs/operacion/despliegue-en-render.md)).
 
 ## Comandos
 

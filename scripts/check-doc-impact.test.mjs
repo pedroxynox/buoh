@@ -96,6 +96,7 @@ test('fija las reglas productivas y sus rutas críticas', () => {
       'toolchain',
       'market-data-worker',
       'infrastructure',
+      'render',
       'test-vectors',
       'design-system',
       'web-clients',
@@ -115,6 +116,7 @@ test('fija las reglas productivas y sus rutas críticas', () => {
     ['scripts/data-smoke.mjs', 'docs/operacion/runbook-ingesta-de-datos.md'],
     ['infra/compose.yaml', 'docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md'],
     ['render.yaml', 'docs/operacion/despliegue-en-render.md'],
+    ['render.yaml', 'docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md'],
     ['scripts/render-blueprint.test.mjs', 'docs/operacion/despliegue-en-render.md'],
     ['test-vectors/market-data/v1/manifest.json', 'docs/arquitectura/contratos-de-dominio.md'],
     ['packages/design-system/src/tokens.ts', 'docs/diseno/marca-buoh.md'],
@@ -136,5 +138,14 @@ test('fija las reglas productivas y sus rutas críticas', () => {
 
     const satisfied = evaluateDocumentationImpact([changed, documentation], actualMap);
     assert.equal(satisfied.violations.length, 0, changed);
+  }
+
+  // Las reglas de infraestructura local y de Render no se cubren con la fuente de la otra.
+  for (const [changed, documentation] of [
+    ['infra/compose.yaml', 'docs/operacion/despliegue-en-render.md'],
+    ['render.yaml', 'docs/operacion/runbook-ingesta-de-datos.md'],
+  ]) {
+    const unrelated = evaluateDocumentationImpact([changed, documentation], actualMap);
+    assert.equal(unrelated.violations.length, 1, `${changed} con ${documentation}`);
   }
 });

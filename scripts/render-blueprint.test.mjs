@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 // Blueprint de Render (ADR-0013): un solo sitio estático gratuito, sin indexar y con sus cabeceras.
 // El repositorio no tiene un lector de YAML, así que se comprueba el texto de `render.yaml` con el
-// formato fijo que deja Prettier.
+// formato fijo que deja Prettier. Prettier no ordena las claves: por eso las pruebas cuentan los
+// elementos de cada lista y comparan las claves con listas cerradas, en lugar de fiarse del orden.
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const blueprint = readFileSync(join(root, 'render.yaml'), 'utf8')
   .split('\n')
@@ -17,13 +18,24 @@ const sitePackage = JSON.parse(readFileSync(join(root, 'apps', 'site', 'package.
 
 /** Valor de una clave del servicio, escrita como `    clave: valor`. */
 function serviceValue(key) {
-  return new RegExp(`^    ${key}: (.+)$`, 'm').exec(blueprint)?.[1];
+  return new RegExp(`^ {4}${key}: (.+)$`, 'm').exec(blueprint)?.[1];
 }
 
-/** Elementos de una lista del servicio, por ejemplo los de `buildFilter.paths`. */
+/** Líneas que cuelgan de una clave del servicio (`    clave:`), con su sangría. */
+function serviceBlock(key) {
+  return new RegExp(`^ {4}${key}:\\n((?: {6}.*\\n?)+)`, 'm').exec(blueprint)?.[1] ?? '';
+}
+
+/** Claves con una sangría exacta dentro de un texto, en orden alfabético y con sus repeticiones. */
+function keysAt(text, indent) {
+  const pattern = new RegExp(`^ {${String(indent)}}([^\\s#-][^:\\n]*):`, 'gm');
+  return [...text.matchAll(pattern)].map((match) => match[1]).sort();
+}
+
+/** Elementos de una lista de un bloque del servicio, por ejemplo los de `buildFilter.paths`. */
 function listUnder(parent, key) {
-  const block = new RegExp(`^    ${parent}:\\n((?:      .*\\n?)+)`, 'm').exec(blueprint)?.[1] ?? '';
-  const list = new RegExp(`^      ${key}:\\n((?:        - .*\\n?)+)`, 'm').exec(block)?.[1] ?? '';
+  const pattern = new RegExp(`^ {6}${key}:\\n((?: {8}- .*\\n?)+)`, 'm');
+  const list = pattern.exec(serviceBlock(parent))?.[1] ?? '';
   return [...list.matchAll(/^ {8}- (.+)$/gm)].map((match) => match[1].replace(/^'(.*)'$/, '$1'));
 }
 
@@ -45,19 +57,29 @@ function header(name) {
 }
 
 test('solo define el sitio oficial, como sitio estático gratuito (ADR-0013 §1 y §8)', () => {
-  assert.deepEqual(
-    [...blueprint.matchAll(/^(\S[^:]*):/gm)].map((match) => match[1]),
-    ['services'],
-  );
-  assert.equal([...blueprint.matchAll(/^ {2}- type: /gm)].length, 1);
+  assert.deepEqual(keysAt(blueprint, 0), ['services']);
+  // Cualquier otro servicio sería un elemento más de `services`, escriba primero la clave que sea.
+  assert.equal([...blueprint.matchAll(/^ {2}- /gm)].length, 1, 'un solo servicio');
   assert.match(blueprint, /^ {2}- type: web$/m);
   assert.equal(serviceValue('runtime'), 'static');
   assert.equal(serviceValue('name'), 'buoh-sitio');
-  // Un sitio estático no tiene plan de cómputo: cualquier `plan` sería un servicio de pago.
+  // Lista cerrada: un `plan` haría el servicio de pago, y `domains` o `branch` cambiarían la
+  // dirección o lo que se publica (ADR-0013 §2).
+  assert.deepEqual(keysAt(blueprint, 4), [
+    'autoDeployTrigger',
+    'buildCommand',
+    'buildFilter',
+    'envVars',
+    'headers',
+    'name',
+    'previews',
+    'runtime',
+    'staticPublishPath',
+  ]);
   assert.doesNotMatch(blueprint, /^\s+plan:/m);
 });
 
-test('compila con el Node y el pnpm fijados, instalando solo el sitio', () => {
+test('compila con el Node y el pnpm fijados, sin la instalación automática de Render', () => {
   const pnpm = rootPackage.packageManager;
   assert.match(pnpm, /^pnpm@\d+\.\d+\.\d+$/);
   assert.equal(readFileSync(join(root, '.node-version'), 'utf8').trim(), rootPackage.engines.node);
@@ -72,38 +94,65 @@ test('compila con el Node y el pnpm fijados, instalando solo el sitio', () => {
       `npx --yes ${pnpm} --filter "@buoh/site..." run build`,
   );
   assert.equal(serviceValue('staticPublishPath'), 'apps/site/out');
+  // La única variable es la que impide que Render instale antes por su cuenta con npm o yarn.
+  assert.equal(serviceBlock('envVars'), "      - key: SKIP_INSTALL_DEPS\n        value: 'true'\n");
 });
 
 test('despliega solo commits con CI en verde y sin vistas previas públicas', () => {
   assert.equal(serviceValue('autoDeployTrigger'), 'checksPass');
-  assert.match(blueprint, /^ {4}previews:\n {6}generation: off$/m);
+  assert.equal(serviceBlock('previews'), '      generation: off\n');
 });
 
 test('recompila cuando cambia el sitio o un paquete del que depende', () => {
+  assert.deepEqual(keysAt(serviceBlock('buildFilter'), 6), ['ignoredPaths', 'paths']);
   const paths = listUnder('buildFilter', 'paths');
+  assert.deepEqual(paths, [
+    'apps/site/**',
+    'packages/design-system/**',
+    'package.json',
+    'pnpm-lock.yaml',
+    'pnpm-workspace.yaml',
+    '.npmrc',
+    '.node-version',
+    'tsconfig.base.json',
+    'render.yaml',
+  ]);
+  // Un paquete nuevo de buoh en las dependencias del sitio también tiene que recompilarlo.
   const dependencies = Object.keys(sitePackage.dependencies).filter((name) =>
     name.startsWith('@buoh/'),
   );
   assert.ok(dependencies.length > 0);
-  for (const expected of [
-    'apps/site/**',
-    ...dependencies.map((name) => `packages/${name.slice('@buoh/'.length)}/**`),
-    'package.json',
-    'pnpm-lock.yaml',
-    'pnpm-workspace.yaml',
-    '.node-version',
-    'render.yaml',
-  ]) {
-    assert.ok(paths.includes(expected), `buildFilter.paths incluye ${expected}`);
+  for (const name of dependencies) {
+    const path = `packages/${name.slice('@buoh/'.length)}/**`;
+    assert.ok(paths.includes(path), `buildFilter.paths incluye ${path}`);
   }
-  assert.ok(listUnder('buildFilter', 'ignoredPaths').includes('apps/site/test/**'));
+  assert.deepEqual(listUnder('buildFilter', 'ignoredPaths'), [
+    'apps/site/test/**',
+    'packages/design-system/test/**',
+    '**/*.md',
+  ]);
 });
 
 test('no se indexa y solo carga recursos del propio sitio (ADR-0013 §3 y §6)', () => {
+  // Una regla escrita en otro orden no la vería headers(): se cuentan todas las de la lista.
+  const items = [...serviceBlock('headers').matchAll(/^ {6}- /gm)].length;
+  assert.equal(items, headers().length, 'cada cabecera escrita como path, name y value');
+  const names = headers().map((item) => item.name);
+  assert.deepEqual(names.sort(), [
+    'Content-Security-Policy',
+    'Permissions-Policy',
+    'Referrer-Policy',
+    'X-Content-Type-Options',
+    'X-Robots-Tag',
+  ]);
+
   assert.equal(header('X-Robots-Tag'), 'noindex, nofollow');
   assert.equal(header('Referrer-Policy'), 'no-referrer');
   assert.equal(header('X-Content-Type-Options'), 'nosniff');
-  assert.match(header('Permissions-Policy'), /camera=\(\).*geolocation=\(\).*microphone=\(\)/);
+  assert.equal(
+    header('Permissions-Policy'),
+    'camera=(), geolocation=(), microphone=(), payment=(), usb=()',
+  );
 
   const directives = new Map(
     header('Content-Security-Policy')
@@ -113,6 +162,7 @@ test('no se indexa y solo carga recursos del propio sitio (ADR-0013 §3 y §6)',
   );
   for (const [name, expected] of [
     ['default-src', ["'self'"]],
+    ['img-src', ["'self'"]],
     ['object-src', ["'none'"]],
     ['base-uri', ["'self'"]],
     ['form-action', ["'none'"]],
@@ -124,8 +174,7 @@ test('no se indexa y solo carga recursos del propio sitio (ADR-0013 §3 y §6)',
     for (const source of sources) {
       const allowed =
         ["'self'", "'none'"].includes(source) ||
-        (source === "'unsafe-inline'" && name === 'script-src') ||
-        (source === 'data:' && name === 'img-src');
+        (source === "'unsafe-inline'" && name === 'script-src');
       assert.ok(allowed, `${name} no admite ${source}`);
     }
   }

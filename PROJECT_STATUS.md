@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
 status_version: 23
-updated_at_utc: "2026-10-26T23:30:00.000Z"
+updated_at_utc: "2026-10-27T00:30:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -34,7 +34,7 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
 - No existe todavía persistencia del `IngestionCursor`, un proceso que ingiera de forma continua ni despliegue.
 - MetaTrader 5 (Deriv MT5 y Vantage) queda decidido como segunda integración ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)): sus datos llegan en una Fase 1B posterior a Fase 1, y operar en MT5 empieza en Fase 4 (demo). No existe código de MT5.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
-- El sitio oficial se publica en Render como sitio estático gratuito, en una dirección `onrender.com` y sin indexar ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). Queda en internet cuando el propietario conecta el repositorio en Render ([despliegue en Render](docs/operacion/despliegue-en-render.md)). Ningún otro servicio está desplegado.
+- El sitio oficial se publica en Render como sitio estático gratuito, en una dirección `onrender.com` y sin indexar ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). Queda en internet cuando el propietario conecta el repositorio en Render ([despliegue en Render](docs/operacion/despliegue-en-render.md)). Hasta entonces no hay nada desplegado; después, solo el sitio.
 - La [línea visual V1](docs/plan/linea-visual-v1.md) ([ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)) corrió en paralelo a Fase 1 y terminó el 2026-10-25. V1.1 entregó la [guía de marca](docs/diseno/marca-buoh.md), el [catálogo de funciones](docs/producto/funciones-y-disponibilidad.md), el [concepto de interfaz](docs/diseno/concepto-de-interfaz.md) y `packages/design-system`. V1.2 entregó el prototipo navegable en `apps/web`, con datos ficticios (`V1-UI-001`). V1.3 entregó el [sitio oficial](docs/diseno/sitio-oficial.md) en `apps/site`, sin publicar (`V1-SITE-001`). V1.4 entregó el prototipo móvil en `apps/mobile` y compartió los datos ficticios en `packages/prototype-data` (`V1-MOBILE-001`, [ADR-0009](docs/arquitectura/adr/0009-prototipo-movil.md)). V1.5 entregó el prototipo de escritorio en `apps/desktop`, con Tauri 2 y un instalador de Windows compilado en CI (`V1-DESKTOP-001`, [ADR-0010](docs/arquitectura/adr/0010-prototipo-de-escritorio.md)). V1.6 cambió la identidad al logo del propietario, vectorizado, con su paleta, la tipografía Sen y un estilo más técnico (`V1-BRAND-002`, [ADR-0011](docs/arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)). No cambió el alcance ni la puerta de salida de Fase 1.
 
 ## Trabajo en paralelo autorizado
@@ -182,7 +182,7 @@ El antiguo pendiente 1 (atribución de símbolo y mensajes que no son ticks) que
 - Hasta incorporar un writer Parquet, ticks e incidencias se publican como NDJSON sin compresión; `dataset_id` no depende del formato físico.
 - Alojamiento productivo en Render para PostgreSQL, API y web; el despliegue sigue diferido ([ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)), salvo el sitio oficial, que se publica como sitio estático gratuito ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)).
 - MetaTrader 5 entra por un puente MQL5 dentro de la terminal; cada servidor MT5 es una fuente propia; las contraseñas MT5, solo de cuentas propias, las guarda la terminal y los servicios de buoh nunca las reciben ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
-- Prioridad del propietario (2026-10-26): consolidar el sitio oficial y la app de escritorio. El sitio se publica en Render (ADR-0013). La app de escritorio debe mostrar datos reales de Deriv; eso necesita el servidor de datos funcionando todo el día, así que la reconexión y la salud de F1.5 van primero. El plan de esa línea (alojamiento, API y pantallas con datos reales) se escribe cuando el propietario decida el costo del alojamiento.
+- Prioridad del propietario (2026-10-26): el sitio oficial y la app de escritorio, que debe mostrar datos reales de Deriv. Consecuencia técnica: esos datos llegan por la API de buoh ([arquitectura objetivo](docs/arquitectura/arquitectura-objetivo.md), «Windows (futuro)»), y para eso el sistema de datos tiene que funcionar todo el día en un servidor. Por eso van antes la reconexión y la salud de F1.5 y la decisión del costo del alojamiento; el plan de esa línea (alojamiento, API y pantallas con datos reales) se escribe después.
 - Desde el móvil se pueden encender y apagar estrategias del bot, también con dinero real, como con un control remoto. Ningún cliente abre operaciones a mano ni se comunica con el bróker para ejecutar: todo pasa por el servidor, `execution-gateway` y su política de riesgo ([catálogo de funciones](docs/producto/funciones-y-disponibilidad.md) §1; decisión del propietario del 2026-10-25).
 
 ## Bloqueos
@@ -193,7 +193,7 @@ Ninguno para iniciar `F1.5`.
 
 - Jurisdicción inicial del producto comercial.
 - Universo definitivo de índices y tipos de contrato.
-- Costo y proveedor del alojamiento del sistema de datos: worker, PostgreSQL, API y almacenamiento de objetos, que Render no ofrece (ADR-0006). Hace falta para que la app de escritorio muestre datos reales.
+- Costo del alojamiento del sistema de datos (PostgreSQL y API en Render, [ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)), dónde se aloja el worker y el proveedor de almacenamiento de objetos, que Render no ofrece. Hace falta para que la app de escritorio muestre datos reales.
 - Equipo de la terminal MT5 (PC dedicado del propietario o servidor Windows o Linux con Wine) y su protección. Se decide en el primer incremento de Fase 1B (ADR-0007).
 - Revisión de términos de Deriv MT5, Vantage y MetaQuotes, y entidad de Vantage aplicable. Se completa en el primer incremento de Fase 1B.
 - Orden entre Fase 1B (datos MT5) y Fase 2 (bot shadow). Se decide al cerrar Fase 1.

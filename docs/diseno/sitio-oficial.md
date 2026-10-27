@@ -32,14 +32,16 @@ Las pruebas de `apps/site/test` comprueban estas reglas en las páginas exportad
 
 ## 4. Publicación
 
-Desde el 2026-10-26, por decisión del propietario, el sitio se publica en Render como sitio estático gratuito, en la dirección `onrender.com` que asigne Render, sin indexar y sin anunciar ([ADR-0013](../arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). Lo define `render.yaml`; la primera conexión y las comprobaciones están en [despliegue en Render](../operacion/despliegue-en-render.md).
+Desde el 2026-10-26, por decisión del propietario, el sitio se publica en Render como sitio estático gratuito, en la dirección `onrender.com` que asigne Render, sin indexar y sin anunciar ([ADR-0013](../arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). Lo define `render.yaml`, y queda en internet cuando el propietario conecta el repositorio; la primera conexión y las comprobaciones están en [despliegue en Render](../operacion/despliegue-en-render.md).
 
 Comprobado el 2026-10-26:
 
 - dos sitios estáticos de ejemplo de Render no ponen cookies. Tras el primer despliegue, se comprueba lo mismo en la dirección del sitio;
-- Render no entrega registros de acceso de los sitios estáticos, y no publica cuánto guarda internamente. Por eso el aviso de riesgo dice quién aloja el sitio y que sus servidores reciben la dirección IP de cada visita para entregar las páginas.
+- Render entrega los sitios a través de la red de Cloudflare, no da registros de acceso de los sitios estáticos y no publica cuánto guarda internamente.
+
+La regla anterior de esta sección pedía cambiar la frase de privacidad del pie si no se sabía cuánto guarda el alojamiento sus registros de acceso. No se sabe, y además los servidores de Render y de Cloudflare reciben la dirección IP de cada visita. Por eso el pie dice que el sitio no tiene formularios ni usa cookies y que buoh no recoge datos personales, y el aviso de riesgo dice quién aloja el sitio y qué reciben sus servidores.
 
 Antes de comprar un dominio, quitar el `noindex` o anunciar el sitio:
 
-- revisión legal del aviso de riesgo, de la nota de marcas y de la frase de privacidad;
-- quitar el `noindex` de la página y de la cabecera en el mismo PR.
+- revisión legal del aviso de riesgo, también de su párrafo sobre quién aloja el sitio, de la nota de marcas y de la frase de privacidad del pie;
+- quitar el `noindex` de la página y la regla `X-Robots-Tag` de `render.yaml` en el mismo PR, borrar después esa regla en el panel de Render, que conserva las reglas de cabecera que ya no están en el Blueprint, y comprobar con `curl -sI` que ya no sale.

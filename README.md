@@ -17,7 +17,7 @@ Cualquier persona o motor de IA debe leer, en orden:
 
 ## Desarrollo actual
 
-Fase 1 tiene contratos runtime (F1.1), normalización y calidad puras (F1.2), log raw-first, publicación y replay sobre PostgreSQL y almacenamiento S3-compatible locales (F1.3), las reglas de calidad 2.0.0 para fuentes como Deriv (F1.4a), y el catálogo y el adaptador público de Deriv, solo para escuchar, con su prueba en vivo (F1.4b). Todavía no reconecta tras una desconexión ni ejecuta operaciones. En paralelo, la línea visual V1 dejó la marca, el sistema de diseño, prototipos web, móvil y de escritorio con datos ficticios, y el sitio oficial, que `render.yaml` publica en Render sin indexar. El [estado del código](docs/arquitectura/estado-del-codigo.md) resume cómo se conectan las piezas, y la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md), lo que falta.
+Fase 1 tiene contratos runtime (F1.1), normalización y calidad puras (F1.2), log raw-first, publicación y replay sobre PostgreSQL y almacenamiento S3-compatible locales (F1.3), las reglas de calidad 2.0.0 para fuentes como Deriv (F1.4a), y el catálogo y el adaptador público de Deriv, solo para escuchar, con su prueba en vivo (F1.4b). Todavía no reconecta tras una desconexión ni ejecuta operaciones. En paralelo, la línea visual V1 dejó la marca, el sistema de diseño, prototipos web, móvil y de escritorio con datos ficticios, y el sitio oficial, que `render.yaml` deja listo para publicarse en Render sin indexar. El [estado del código](docs/arquitectura/estado-del-codigo.md) resume cómo se conectan las piezas, y la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md), lo que falta.
 
 ```text
 pnpm install

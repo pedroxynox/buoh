@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   title: { default: `buoh · ${TAGLINE}`, template: '%s · buoh' },
   description:
     'buoh es un sistema en desarrollo para investigar estrategias de trading, emitir señales trazables y, solo si se aprueba, ejecutar con control de riesgo. No promete ganancias.',
-  // Publicado en Render sin indexar hasta la revisión legal y el dominio propio (ADR-0013 §3).
+  // Sin indexar en Render hasta la revisión legal y el dominio propio (ADR-0013 §3).
   robots: { index: false, follow: false },
 };
 
