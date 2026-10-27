@@ -23,7 +23,7 @@ Todas las páginas comparten cabecera con menú y un pie con el aviso de riesgo 
 
 - Sin formularios, registro, botones de compra, pagos, suscripciones ni métricas de desempeño.
 - Sin recursos de terceros: tipografías y estilos se sirven desde el propio sitio.
-- Sin cookies ni recogida de datos personales.
+- Sin cookies, y buoh no recoge datos personales; los servidores que entregan el sitio sí reciben la IP de cada visita (§4).
 - Deriv, MetaTrader 5, MetaQuotes y Vantage aparecen solo como integraciones previstas, con la nota de que buoh no está afiliado a ellos.
 - El estado de cada fase coincide con el roadmap y con `PROJECT_STATUS.md`: «hecha» si el roadmap la marca completada, «en curso» si es la fase actual y «prevista» si viene después. La línea visual V1 figura como «hecha» desde su cierre del 2026-10-25 (plan V1, §7).
 - Hasta la revisión legal y el dominio propio, todas las páginas llevan `noindex, nofollow`, en la página y en la cabecera `X-Robots-Tag` que envía Render ([ADR-0013](../arquitectura/adr/0013-publicacion-del-sitio-en-render.md) §3).

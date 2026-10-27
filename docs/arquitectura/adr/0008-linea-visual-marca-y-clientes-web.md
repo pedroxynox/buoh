@@ -48,7 +48,7 @@ Móvil (`apps/mobile`) y escritorio (`apps/desktop`) quedaban diferidos, cada un
 ### 3. Reglas del sitio oficial
 
 - Describe qué es buoh, sus principios, sus planos, su estado y su hoja de ruta, en el mismo tono de evidencia.
-- No promete ganancias, no publica resultados, no capta usuarios, no vende señales y no recoge datos personales.
+- No promete ganancias, no publica resultados, no capta usuarios ni vende señales, y buoh no recoge datos personales a través de él ([ADR-0013](0013-publicacion-del-sitio-en-render.md) §5).
 - Incluye una advertencia de riesgo sobre opciones y CFD, y nombra a Deriv, MetaTrader 5 y Vantage solo como integraciones previstas, con una nota de marcas de terceros y sin afirmar afiliación.
 - No se publica en internet hasta que el propietario decida dominio y alojamiento. El propietario lo decidió el 2026-10-26 ([ADR-0013](0013-publicacion-del-sitio-en-render.md)): se publica en Render, en una dirección gratuita y sin indexar. El dominio propio y la revisión legal siguen pendientes.
 
