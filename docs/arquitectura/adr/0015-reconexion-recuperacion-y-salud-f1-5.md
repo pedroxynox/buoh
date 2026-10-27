@@ -76,7 +76,7 @@ Una sesión carga los esquemas una vez, mantiene un solo `RawFirstIngestor` y ab
 | `completed` (cierre pedido por la parada o por la duración del smoke) | termina, `completed` |
 | `failed` (esquemas, catálogo inválido, símbolo ausente, suscripción rechazada, frame sin tamaño) | termina, `failed`. No reintenta con contenido no confiable (ADR-0004 §12) |
 | `disconnected` (cualquier motivo) | reconecta tras la espera |
-| `paused` (persistencia, límites, almacén del catálogo, entrada cerrada) | reconecta tras la espera; el siguiente `ConnectionOpened` durable resuelve las condiciones operativas |
+| `paused` (persistencia, límites, almacén del catálogo, entrada cerrada) | reconecta tras la espera. El primer evento durable, que puede ser un cierre reparado, resuelve `persistence_unavailable`; el `ConnectionOpened` durable resuelve los límites y reabre la entrada (contratos de dominio, «Registro operativo») |
 
 - **Espera.** En el intento *n* (desde 1), *d* = mín(60 000, 1000 · 2^(n−1)) ms, y la sesión espera *d*/2 + `random()` · *d*/2, con `random` inyectado en [0, 1): entre 500 ms al principio y entre 30 000 y 60 000 ms con el tope. El contador vuelve a 1 solo después de 60 000 ms seguidos de conexión con ticks durables, para que una conexión que muere enseguida no reintente cada segundo.
 - **Conexión anterior.** Es la última conexión con `ConnectionOpened` durable en el log, nunca la de la memoria de la sesión. Un intento cuyo `ConnectionOpened` no quedó durable no existe para el log: no se supera ni se repara. La sesión la vuelve a leer del log al arrancar, después de cada reapertura del log y después de volver a tomar el bloqueo, porque en los segundos que tarda en notarse la pérdida del bloqueo otro proceso puede haber escrito.
@@ -113,9 +113,10 @@ La sesión no arranca, con `failed`, si:
 
 - el log se escribió con otro `connector_version` (`connector_version_mismatch`) o no se puede derivar (`log_not_derivable`);
 - el símbolo del log, el del último cursor o, si no hay cursor, el de sus ticks, no es el pedido (`symbol_mismatch`);
-- el último cursor apunta a un evento que no está en el índice (`cursor_ahead_of_log`): el log perdió datos confirmados.
+- el último cursor apunta a un evento que no está en el índice (`cursor_ahead_of_log`): el log perdió datos confirmados;
+- el evento durable más antiguo del log tiene 23 horas o más (`retention_expired`, §7).
 
-En los tres casos hace falta un log nuevo.
+En todos los casos hace falta un log nuevo.
 
 ### 6. Cursor y latido
 
@@ -130,13 +131,13 @@ En los tres casos hace falta un log nuevo.
 
 - `pnpm --filter @buoh/market-data-worker run ingest -- --live [--symbol R_100]` ejecuta la sesión con PostgreSQL y almacenamiento de objetos. Es un script del paquete, como `fixture:publish` y `db:migrate`, fuera del contrato de comandos raíz del plan §5. Es opt-in, como el smoke: sin `--live` responde con un error de uso y no abre conexiones. Ingiere un solo símbolo.
 - Rechaza `BUOH_DEPLOYMENT_ENVIRONMENT` `staging` y `production`: desplegar no está autorizado en Fase 1 (ADR-0006).
-- **Retención (ADR-0004 §13).** Es la primera vez que buoh guarda datos reales fuera de la memoria, así que la retención de 24 horas se impone, no se pide:
+- **Retención (ADR-0004 §13).** Es la primera vez que buoh guarda datos reales fuera de la memoria. La captura se limita sola, y el borrado queda como un paso del runbook con una hora de margen:
   - `ingest` rechaza el esquema `public` y el bucket `buoh-local` por defecto: la captura necesita un `BUOH_POSTGRES_SCHEMA` y un `BUOH_S3_BUCKET` propios, que no comparte con los datos sintéticos;
-  - no arranca si el evento durable más antiguo del log tiene más de 24 horas (`retention_expired`), y para con un cierre pedido cuando las alcanza;
-  - como las tablas no admiten borrados, al terminar se borran el esquema y el bucket enteros. El runbook dará los comandos con el PR 5;
+  - no arranca si el evento durable más antiguo del log tiene 23 horas o más (`retention_expired`, §5), y para con un cierre pedido cuando las alcanza;
+  - como las tablas no admiten borrados, se borran el esquema y el bucket enteros antes de que ese evento cumpla 24 horas. El runbook dará los comandos con el PR 5;
   - nada se publica. La retención en producción llegará con el plan de alojamiento.
 
-  El smoke sigue en memoria. ADR-0012 descartó un esquema y un bucket desechables para él porque el smoke no necesita persistir; la captura continua existe precisamente para persistir.
+  El smoke sigue en memoria. ADR-0012 descartó para él un esquema y un bucket desechables porque el propietario necesitaría Docker para cada prueba; la captura continua, en cambio, existe para persistir, y se ejecuta donde están los servicios.
 - Guarda en el almacenamiento de objetos el esquema `ticks_response.schema.json` de la release, con la clave de su SHA-256 fijado, para que `data:health` derive sin descargar nada.
 
 ### 8. `data:health`
@@ -147,16 +148,17 @@ En los tres casos hace falta un log nuevo.
   - el log durable, derivado con el perfil de medición y el esquema que guardó la ingesta;
   - el registro operativo;
   - el último latido y el último cursor;
-  - si hay escritor vivo: la sesión que tiene el bloqueo de la fuente según `pg_locks`, con el mismo PID que el último latido de este esquema;
+  - si hay escritor vivo, y si es el de este esquema (definición abajo);
   - el último dataset activo de la fuente en el entorno.
-- **Reglas:**
+- **Escritor vivo:** una sesión de PostgreSQL tiene el bloqueo de la fuente según `pg_locks`. Es el de este esquema si su PID es el del último latido.
+- **Reglas**, en orden. Las tres primeras deciden solas; de la 4 a la 6 se aplica una, que da la conexión, el backlog y un mínimo de salud, y la 7 completa el informe:
   1. argumentos o variables de entorno inválidos del propio comando: código 2 y un error saneado en stderr, sin informe, como `data:replay` y `data:smoke`;
   2. lo incompatible que se observa: otro conector en el log, un esquema guardado que falta o no coincide con su SHA-256 fijado con el log no vacío, otro símbolo o un log que no se puede derivar → `failed`, con el motivo saneado en stderr;
-  3. PostgreSQL o el almacenamiento de objetos no responden → `paused`;
-  4. sin escritor vivo: `connection_state` `disconnected`, backlog 0 y salud como mínimo `paused`, porque nada procesa la entrada. Si la última conexión no tiene cierre durable, se deriva como si ya tuviera el cierre `close_not_recorded` que registrará el próximo arranque (§3), así que muestra `connection_lost`;
-  5. con escritor vivo y un latido de hace 45 000 ms o menos: el backlog sale del latido, y la conexión también si el latido es posterior al último evento de conexión del log; si no, sale del log. Con una conexión que no es `connected`, la salud es como mínimo `recovering`;
-  6. con escritor vivo y un latido más viejo, o de otro PID: salud como mínimo `paused`, porque el proceso no avanza;
-  7. en los demás casos, la salud es la de la derivación (§2), con las condiciones del registro operativo sumadas, y nunca `healthy` sin raw durable (contrato `HealthReport`).
+  3. PostgreSQL o el almacenamiento de objetos no responden → `paused`, con `connection_state` `disconnected`, backlog 0 y los demás campos `null`, porque no se pudo observar nada; stderr lo dice;
+  4. sin escritor vivo: `connection_state` `disconnected`, backlog 0, porque no existe ninguna cola, y salud como mínimo `paused`, porque nada procesa la entrada. Si la última conexión no tiene cierre durable, se deriva como si ya tuviera el cierre `close_not_recorded` que registrará el próximo arranque (§3), así que muestra `connection_lost`;
+  5. con escritor vivo de este esquema y un latido de hace 45 000 ms o menos: el backlog sale del latido, y la conexión también si el latido es posterior al último evento de conexión del log; si no, sale del log. Con una conexión que no es `connected`, la salud nunca es `healthy`: pasa a `recovering`. El latido de arranque dice `connecting`, así que un log vacío sigue en `starting`;
+  6. con un escritor vivo que no es el de este esquema (otro PID, por ejemplo un proceso nuevo antes de su primer latido) o con un latido de más de 45 000 ms: la conexión sale del log, el backlog es el del último latido de ese PID o 0 si no hay ninguno, y la salud es como mínimo `paused`, porque el proceso no avanza o todavía no informa;
+  7. la salud es la de la derivación (§2), con las condiciones del registro operativo sumadas y el mínimo de la regla aplicada, y nunca `healthy` sin raw durable (contrato `HealthReport`).
 - **Salida:** una línea JSON con el `HealthReport`. Código 0 si la salud es `healthy`, 1 si es otra y 2 en la regla 1.
 
 ### 9. Smoke de reconexión
@@ -176,10 +178,12 @@ El runbook es la fuente canónica de la operación. Cada PR de §13 lo actualiza
 | «Despliegue o reinicio programado», paso 5 (confirmar la continuidad antes de `healthy`) | la parada cierra con `requested`, que no deja hueco pendiente: el intervalo parado queda visible en el log como un cierre pedido seguido de una apertura, y no se recupera. Un hueco que ya estaba pendiente sigue pendiente (§3). Rellenar la historia de una parada programada queda para el plan de alojamiento |
 | «Reporte y evidencia» (conservar la transición de salud) | la salud no se guarda: se deriva en cualquier momento de los eventos durables y del registro operativo con `data:health` |
 | «Adaptador público de Deriv» y «Una sola instancia por fuente» | reconexión, reparación de cierres, `ticks_history`, bloqueo vigente y comando `ingest` |
+| «Almacenamiento no disponible», nota de F1.3b (el siguiente `ConnectionOpened` reabre el log) | lo reabre la reparación de §3, si hace falta un cierre; si no, el `ConnectionOpened`, como hasta ahora |
+| «Smoke público de Deriv» (recorrido de una sola conexión, `passed` y salida 1 por desconexión) | el smoke corre la sesión: una desconexión no prevista se reconecta y se recupera, y el resultado la cuenta, pero el smoke solo pasa sin desconexiones no previstas, salvo la que provoca `--interrupt-after-seconds` (§9) |
 
 ### 11. Pruebas
 
-- Offline, sin red, reloj real ni azar: socket, reloj, temporizador, IDs y `random` falsos, y almacenes en memoria. Cubren la tabla de §3, la espera y su reinicio, la conexión anterior tras un `ConnectionOpened` no durable, la reparación con el log fallido y con el cierre adoptado, el bloqueo perdido, cada estado y motivo de §4 y las reglas de §8, incluida la ventana entre una reconexión y su latido.
+- Offline, sin red, reloj real ni azar: socket, reloj, temporizador, IDs y `random` falsos, y almacenes en memoria. Cubren la tabla de §3, la espera y su reinicio, la conexión anterior tras un `ConnectionOpened` no durable, la reparación con el log fallido y con el cierre adoptado, el bloqueo perdido, cada estado y motivo de §4 las comprobaciones al arrancar de §5 (`connector_version_mismatch`, `log_not_derivable`, `symbol_mismatch`, `cursor_ahead_of_log` y `retention_expired`), las de retención de §7 (valores por defecto rechazados y parada a las 23 horas), el smoke con corte de §9 y las reglas de §8, incluida la ventana entre una reconexión y su latido.
 - `pnpm run test:integration`: las tablas de la migración `0004`, el cursor contra el índice y `data:health` contra PostgreSQL y el almacenamiento S3-compatible locales. El endpoint de Deriv está fijado, así que la sesión se prueba con su fábrica de sockets inyectada.
 - Los vectores v1 no cambian.
 
@@ -191,12 +195,21 @@ Un último PR reúne la evidencia en un entorno desechable, con los servicios lo
 2. desconexión: el smoke de §9 y su recuperación `complete`;
 3. reinicio sin aviso: matar la ingesta y arrancarla otra vez: cierre `close_not_recorded`, recuperación y vuelta a `healthy`;
 4. reinicio programado: parar con `SIGTERM` y arrancar: cierre `requested`, apertura que lo supera y ningún hueco oculto;
-5. fallo de persistencia: parar unos segundos el almacenamiento de objetos y, aparte, PostgreSQL, durante la ingesta: `persistence_unavailable`, `paused`, reparación, reconexión, recuperación y `healthy`;
-6. ningún dato no durable emitido: los ticks entregados durante los ensayos son exactamente los de frames durables;
-7. incidencias visibles tras reiniciar: las incidencias y condiciones derivadas del log antes y después de cada reinicio, y `data:health` en cada paso;
-8. replay: los datasets sintéticos con el mismo `dataset_id`.
+5. fallo de persistencia del almacenamiento de objetos: pararlo unos segundos durante la ingesta: `persistence_unavailable`, `paused`, reparación, reconexión, recuperación y `healthy`;
+6. fallo de PostgreSQL: pararlo unos segundos durante la ingesta. El registro operativo no puede guardar nada, así que queda la alerta en stderr; `data:health` da `paused` por su regla 3; la sesión toma un bloqueo nuevo, con otro PID, repara el cierre, reconecta y recupera;
+7. ningún dato no durable emitido: cada tick entregado durante los ensayos viene de un frame durable. Al revés no hace falta: un evento que el índice confirmó aunque informó error se adopta al reabrir sin haberse entregado;
+8. incidencias visibles tras reiniciar: un script de la evidencia, fuera de los comandos del producto, deriva del log las incidencias y condiciones con el código del worker y las cuenta por tipo antes y después de cada reinicio; `data:health` se ejecuta en cada paso;
+9. replay: los datasets sintéticos con el mismo `dataset_id`.
 
 La Fase 1 pasa a `done` en `PROJECT_STATUS.md` solo con esa evidencia y con la decisión del propietario sobre el orden entre la Fase 1B y la Fase 2.
+
+### Relación con ADR-0005
+
+ADR-0015 no cambia ninguna decisión de ADR-0005:
+
+- §4 dejaba el `IngestionCursor` para F1.5, con la condición de no avanzar antes de la durabilidad, y §6 lo persiste así;
+- §4 calcula las incidencias derivables al publicar y deja diferida la calidad incremental en vivo. Los datasets se siguen derivando al publicar, y el estado vivo se vuelve a derivar entero cuando hace falta, sin calidad incremental y sin guardar lo derivado;
+- §3 hace append-only las tablas, y nada las modifica. Borrar el esquema y el bucket enteros de una captura al terminar su retención (§7) es el ciclo de vida que pide ADR-0004 §13, no una modificación de filas, como ya hacen las pruebas de integración con sus esquemas.
 
 ### 13. Secuencia de entrega
 
@@ -218,7 +231,7 @@ Cada PR es pequeño, con su revisión semántica:
 - Un hueco que la historia no cubre deja `degraded` hasta que una recuperación `complete` del mismo rango lo resuelva. F1.5 no la vuelve a intentar después de sus reintentos.
 - Los ticks recuperados existen solo como raw hasta la publicación de datasets vivos.
 - El arranque, cada recuperación y `data:health` leen todo el log, acotado por las 24 horas de retención. Antes de ingerir en producción durante semanas hará falta un punto de control.
-- La captura viva exige un esquema y un bucket propios y se detiene a las 24 horas.
+- La captura viva exige un esquema y un bucket propios, se detiene a las 23 horas y deja una hora para borrarla.
 - Entran dos tablas append-only más. El rol de solo inserción y lectura que pide el pendiente 4 de F1.3 antes de desplegar también las cubrirá.
 
 ## Alternativas descartadas
@@ -238,7 +251,7 @@ Cada PR es pequeño, con su revisión semántica:
 | Persistir el cursor con cada tick o con cada latido | Miles de filas por día y símbolo, sin ningún lector que las necesite. |
 | No reparar los cierres no registrados | Una caída o un fallo de persistencia ocultarían el hueco. |
 | Reconectar sin espera o con espera fija | ADR-0004 y el runbook piden no crear un bucle agresivo, y la espera exponencial reparte los reintentos. |
-| Pedir a quien captura que borre los datos a mano en 24 horas | Es la primera captura persistente de datos reales; la retención se impone. |
+| Dejar la duración de la captura en manos de quien la ejecuta | Es la primera captura persistente de datos reales: `ingest` para solo a las 23 horas, y el borrado tiene una hora de margen. |
 
 ## Referencias verificadas
 

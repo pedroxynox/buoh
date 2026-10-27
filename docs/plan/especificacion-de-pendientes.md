@@ -107,7 +107,7 @@ Tipos de pendiente:
   - nunca `healthy` sin datos persistidos.
 - **Abierto:**
   - en `recovering` por continuidad pendiente, `open_condition_types` queda vacío (pendiente 2 de F1.2);
-  - **decidido en [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §8:** un envoltorio en `scripts/` deja stdout limpio, como `data-replay.mjs`, porque el emulador de shell de pnpm no respeta `1>&2` (ADR-0003). La conexión y el backlog salen del latido que persiste la ingesta.
+  - **decidido en [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §8:** un envoltorio en `scripts/` deja stdout limpio, como `data-replay.mjs`, porque el emulador de shell de pnpm no respeta `1>&2` (ADR-0003). El backlog sale del latido que persiste la ingesta, y la conexión también si el latido es posterior al último evento de conexión del log; sin escritor vivo, la conexión es `disconnected` y el backlog, 0.
 
 ### P-F1-06. Puerta de salida de Fase 1 (`F1.5`) — sin empezar
 

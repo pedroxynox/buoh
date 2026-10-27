@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
 status_version: 24
-updated_at_utc: "2026-10-27T20:45:00.000Z"
+updated_at_utc: "2026-10-27T22:00:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -54,7 +54,7 @@ Las decisiones técnicas están en [ADR-0015](docs/arquitectura/adr/0015-reconex
 - la derivación del estado vivo con el perfil de medición, sin umbrales: tras un cierre no pedido, solo la historia demuestra la continuidad;
 - la sesión de ingesta: reconexión con espera exponencial y jitter, la conexión anterior leída del log, `supersedes_connection_id`, reparación de cierres no registrados, parada y bloqueo;
 - la recuperación con `ticks_history`, paginada, y sus resultados;
-- el cursor y el latido en PostgreSQL (migración `0004`), y la captura viva continua con su retención de 24 horas impuesta;
+- el cursor y el latido en PostgreSQL (migración `0004`), y la captura viva continua, que para sola a las 23 horas para borrarla antes de las 24;
 - `data:health`, el smoke de reconexión, los cambios del runbook que llegan con cada PR y la evidencia de la puerta de salida.
 
 La ADR fija también una secuencia de siete PR. Los puntos de partida de abajo se comprobaron antes de la ADR; donde difieran, manda la ADR.
