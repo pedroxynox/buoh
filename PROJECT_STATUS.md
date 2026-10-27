@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 23
-updated_at_utc: "2026-10-27T00:30:00.000Z"
+status_version: 24
+updated_at_utc: "2026-10-27T22:00:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -48,6 +48,16 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 **`F1.5` — Reconexión, recuperación, salud y puerta de salida de Fase 1.**
 
 Implementar la reconexión sin ocultar huecos (`F1-RECONNECT-001`) y la salud machine-readable con `pnpm run data:health -- --json` (`F1-HEALTH-001`), y reunir la evidencia de la puerta de salida de Fase 1 ([plan](docs/plan/fase-1-fundacion-de-datos.md) §8 y §9). Lo esperado y lo que falta de cada parte está en la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md), P-F1-04 a P-F1-06.
+
+Las decisiones técnicas están en [ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md):
+
+- la derivación del estado vivo con el perfil de medición, sin umbrales: tras un cierre no pedido, solo la historia demuestra la continuidad;
+- la sesión de ingesta: reconexión con espera exponencial y jitter, la conexión anterior leída del log, `supersedes_connection_id`, reparación de cierres no registrados, parada y bloqueo;
+- la recuperación con `ticks_history`, paginada, y sus resultados;
+- el cursor y el latido en PostgreSQL (migración `0004`), y la captura viva continua, que para sola a las 23 horas para borrarla antes de las 24;
+- `data:health`, el smoke de reconexión, los cambios del runbook que llegan con cada PR y la evidencia de la puerta de salida.
+
+La ADR fija también una secuencia de siete PR. Los puntos de partida de abajo se comprobaron antes de la ADR; donde difieran, manda la ADR.
 
 Puntos de partida comprobados al cerrar F1.4b:
 
@@ -179,6 +189,7 @@ El antiguo pendiente 1 (atribución de símbolo y mensajes que no son ticks) que
 - JSON Schema representa estructura interoperable; las invariantes criptográficas y relacionales requieren validación runtime.
 - Las pruebas offline sintéticas son bloqueantes. El smoke público de Deriv (`pnpm run data:smoke`) existe desde F1.4b y nunca constituye el único criterio de merge.
 - Los umbrales live de retraso y hueco no se inventan: se fijan con mediciones reales de los retrasos, y mientras tanto los datos live no se publican como dataset (decisión del propietario para F1.4b; ADR-0004 §13 y ADR-0012 §8).
+- Sin umbrales live, el estado vivo se derivará con el perfil de medición: tras un cierre no pedido, solo la historia demostrará la continuidad, y el estado vivo no mostrará retrasos ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §2, decisión de la dirección técnica).
 - Hasta incorporar un writer Parquet, ticks e incidencias se publican como NDJSON sin compresión; `dataset_id` no depende del formato físico.
 - Alojamiento productivo en Render para PostgreSQL, API y web; el despliegue sigue diferido ([ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)), salvo el sitio oficial, que se publica como sitio estático gratuito ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)).
 - MetaTrader 5 entra por un puente MQL5 dentro de la terminal; cada servidor MT5 es una fuente propia; las contraseñas MT5, solo de cuentas propias, las guarda la terminal y los servicios de buoh nunca las reciben ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).

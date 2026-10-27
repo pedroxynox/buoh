@@ -88,7 +88,7 @@ Tipos de pendiente:
   El cursor se actualiza en una transacción, después de confirmar durabilidad.
 - **Componentes:** `apps/market-data-worker`, una migración nueva y `packages/domain`.
 - **Aceptación (plan §6):** prueba con reloj y transporte falsos, y smoke vivo aparte.
-- **Abierto:** pendientes registrados 6 de F1.2 y 7 de F1.3, en `PROJECT_STATUS.md`.
+- **Abierto:** pendientes registrados 6 de F1.2 y 7 de F1.3, en `PROJECT_STATUS.md`. El diseño está en [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §2 a §6, que también cierra esos dos pendientes.
 
 ### P-F1-05. Reporte de salud y `pnpm run data:health -- --json` (`F1-HEALTH-001`) — parcial
 
@@ -107,7 +107,7 @@ Tipos de pendiente:
   - nunca `healthy` sin datos persistidos.
 - **Abierto:**
   - en `recovering` por continuidad pendiente, `open_condition_types` queda vacío (pendiente 2 de F1.2);
-  - **propuesta:** usar un envoltorio en `scripts/` que deje stdout limpio, como `data-replay.mjs`, porque el emulador de shell de pnpm no respeta `1>&2` (ADR-0003).
+  - **decidido en [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §8:** un envoltorio en `scripts/` deja stdout limpio, como `data-replay.mjs`, porque el emulador de shell de pnpm no respeta `1>&2` (ADR-0003). El backlog sale del latido que persiste la ingesta, y la conexión también si el latido es posterior al último evento de conexión del log; sin escritor vivo, la conexión es `disconnected` y el backlog, 0.
 
 ### P-F1-06. Puerta de salida de Fase 1 (`F1.5`) — sin empezar
 
@@ -121,7 +121,7 @@ Tipos de pendiente:
   - que los documentos reflejen el sistema real.
 - **Componentes:** todos los de P-F1-01 a P-F1-05, más `PROJECT_STATUS.md`, que cambia de fase en el PR de cierre.
 - **Aceptación (`PROJECT_STATUS.md`):** todos los requisitos de la fase tienen pruebas y evidencia, un dataset se reproduce con el mismo identificador y las incidencias de calidad siguen visibles tras reinicios.
-- **Abierto:** decisión humana al cerrar la fase sobre el orden entre la Fase 1B (datos MT5) y la Fase 2 (bot shadow).
+- **Abierto:** decisión humana al cerrar la fase sobre el orden entre la Fase 1B (datos MT5) y la Fase 2 (bot shadow). La evidencia se reúne como dice [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §12.
 
 ### P-F1-07. Pendientes menores ya registrados — menor registrado
 
