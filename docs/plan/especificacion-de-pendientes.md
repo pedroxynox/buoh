@@ -121,7 +121,7 @@ Tipos de pendiente:
   - que los documentos reflejen el sistema real.
 - **Componentes:** todos los de P-F1-01 a P-F1-05, más `PROJECT_STATUS.md`, que cambia de fase en el PR de cierre.
 - **Aceptación (`PROJECT_STATUS.md`):** todos los requisitos de la fase tienen pruebas y evidencia, un dataset se reproduce con el mismo identificador y las incidencias de calidad siguen visibles tras reinicios.
-- **Abierto:** decisión humana al cerrar la fase sobre el orden entre la Fase 1B (datos MT5) y la Fase 2 (bot shadow). La evidencia se reúne como dice [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §11.
+- **Abierto:** decisión humana al cerrar la fase sobre el orden entre la Fase 1B (datos MT5) y la Fase 2 (bot shadow). La evidencia se reúne como dice [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §12.
 
 ### P-F1-07. Pendientes menores ya registrados — menor registrado
 

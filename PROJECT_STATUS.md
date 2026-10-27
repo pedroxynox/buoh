@@ -52,10 +52,10 @@ Implementar la reconexión sin ocultar huecos (`F1-RECONNECT-001`) y la salud ma
 Las decisiones técnicas están en [ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md):
 
 - la derivación del estado vivo con el perfil de medición, sin umbrales: tras un cierre no pedido, solo la historia demuestra la continuidad;
-- la sesión de ingesta: reconexión con espera exponencial y jitter, `supersedes_connection_id`, reparación de cierres no registrados, parada y bloqueo;
+- la sesión de ingesta: reconexión con espera exponencial y jitter, la conexión anterior leída del log, `supersedes_connection_id`, reparación de cierres no registrados, parada y bloqueo;
 - la recuperación con `ticks_history`, paginada, y sus resultados;
-- el cursor y el latido en PostgreSQL (migración `0004`), y la captura viva continua con su retención;
-- `data:health`, el smoke de reconexión y la evidencia de la puerta de salida.
+- el cursor y el latido en PostgreSQL (migración `0004`), y la captura viva continua con su retención de 24 horas impuesta;
+- `data:health`, el smoke de reconexión, los cambios del runbook que llegan con cada PR y la evidencia de la puerta de salida.
 
 La ADR fija también una secuencia de siete PR. Los puntos de partida de abajo se comprobaron antes de la ADR; donde difieran, manda la ADR.
 
@@ -188,7 +188,8 @@ El antiguo pendiente 1 (atribución de símbolo y mensajes que no son ticks) que
 - Datos crudos y normalizados son artefactos distintos; una incidencia nunca reescribe el dato crudo.
 - JSON Schema representa estructura interoperable; las invariantes criptográficas y relacionales requieren validación runtime.
 - Las pruebas offline sintéticas son bloqueantes. El smoke público de Deriv (`pnpm run data:smoke`) existe desde F1.4b y nunca constituye el único criterio de merge.
-- Los umbrales live de retraso y hueco no se inventan: se fijan con mediciones reales de los retrasos, y mientras tanto los datos live no se publican como dataset (decisión del propietario para F1.4b; ADR-0004 §13 y ADR-0012 §8). Sin umbrales, el estado vivo se deriva con la política más estricta: tras un cierre no pedido, solo la historia demuestra la continuidad (ADR-0015 §2).
+- Los umbrales live de retraso y hueco no se inventan: se fijan con mediciones reales de los retrasos, y mientras tanto los datos live no se publican como dataset (decisión del propietario para F1.4b; ADR-0004 §13 y ADR-0012 §8).
+- Sin umbrales live, el estado vivo se derivará con el perfil de medición: tras un cierre no pedido, solo la historia demostrará la continuidad, y el estado vivo no mostrará retrasos ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §2, decisión de la dirección técnica).
 - Hasta incorporar un writer Parquet, ticks e incidencias se publican como NDJSON sin compresión; `dataset_id` no depende del formato físico.
 - Alojamiento productivo en Render para PostgreSQL, API y web; el despliegue sigue diferido ([ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)), salvo el sitio oficial, que se publica como sitio estático gratuito ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)).
 - MetaTrader 5 entra por un puente MQL5 dentro de la terminal; cada servidor MT5 es una fuente propia; las contraseñas MT5, solo de cuentas propias, las guarda la terminal y los servicios de buoh nunca las reciben ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
