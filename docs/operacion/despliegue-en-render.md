@@ -29,6 +29,8 @@ El agente no tiene acceso a Render. El propietario:
 6. Revisa que la lista muestre un solo servicio, `buoh-sitio`, y pulsa **Deploy Blueprint**.
 7. Espera a que termine el primer despliegue, unos minutos. La dirección aparece en la página del servicio, con la forma `https://buoh-sitio….onrender.com`. Se la pasa al agente.
 
+El 2026-10-27, el servicio `buoh-sitio` respondía en `https://buoh-sitio.onrender.com` y pasó la comprobación de abajo (detalle en P-V1-07 de la [especificación de pendientes](../plan/especificacion-de-pendientes.md)).
+
 ## Comprobar un despliegue
 
 Con la dirección del servicio en lugar de `<dirección>`:
@@ -39,6 +41,16 @@ curl -s -o /dev/null -w '%{http_code}\n' https://<dirección>/no-existe/
 ```
 
 Debe salir `x-robots-tag: noindex, nofollow` y la `content-security-policy`, ningún `set-cookie`, y `404` para la ruta que no existe. Las seis páginas del menú tienen que abrir.
+
+La comprobación completa, como la del primer despliegue, repite con GET (`curl -s -D - -o /dev/null`) en las seis páginas, con barra final y sin ella, y en una ruta que no existe:
+
+- las cinco cabeceras de `render.yaml` en todas las respuestas, y la `strict-transport-security` que añade Render;
+- ningún `set-cookie`;
+- la ruta que no existe responde `404` con la página propia del sitio;
+- `http://` redirige a `https://`;
+- lo que cargan las páginas (scripts, hoja de estilos, icono y fuentes) es del propio sitio y responde `200`.
+
+Con HEAD (`curl -sI`), una ruta que no existe recibe el `404` de texto de Render, que no lleva esas cabeceras: compruébalas siempre con GET. Buscadores y navegadores piden las páginas con GET.
 
 ## Volver atrás
 

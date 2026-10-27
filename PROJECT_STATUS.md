@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 24
-updated_at_utc: "2026-10-27T22:00:00.000Z"
+status_version: 25
+updated_at_utc: "2026-10-27T22:55:00.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -31,10 +31,10 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
   - F1.3b: log raw-first durable con rotación `segment_policy_version = 1.0.0`, registro operativo de `persistence_unavailable`/`source_limit_exceeded` y publicación desde segmentos cerrados del log (`F1-STREAM-001`).
 - F1.4 se entrega en dos partes. F1.4a añade las reglas de calidad 2.0.0 para fuentes que mezclan varios tipos de mensaje, como Deriv: mensajes que no son ticks, errores de la fuente, atribución por `echo_req` e incidencia sin símbolo con el esquema de incidencias 2.0.0 ([contratos de dominio](docs/arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-200)).
 - F1.4b entregó el catálogo versionado de Deriv (`F1-CATALOG-001`) y el adaptador público, solo para escuchar (`F1-SOURCE-001`), con el smoke opt-in `pnpm run data:smoke` ([ADR-0012](docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md)): esquemas fijados, transporte `ws` con sus límites, cola en memoria, correlación, keepalive, versiones del catálogo e incidencias de respuestas pedidas en PostgreSQL, y bloqueo por fuente. El adaptador todavía no reconecta: toda pérdida de conexión termina la ejecución.
-- No existe todavía persistencia del `IngestionCursor`, un proceso que ingiera de forma continua ni despliegue.
+- No existe todavía persistencia del `IngestionCursor`, un proceso que ingiera de forma continua ni despliegue del sistema de datos.
 - MetaTrader 5 (Deriv MT5 y Vantage) queda decidido como segunda integración ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)): sus datos llegan en una Fase 1B posterior a Fase 1, y operar en MT5 empieza en Fase 4 (demo). No existe código de MT5.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
-- El sitio oficial se publica en Render como sitio estático gratuito, en una dirección `onrender.com` y sin indexar ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). Queda en internet cuando el propietario conecta el repositorio en Render ([despliegue en Render](docs/operacion/despliegue-en-render.md)). Hasta entonces no hay nada desplegado; después, solo el sitio.
+- El sitio oficial está en internet desde el 2026-10-27, como sitio estático gratuito de Render, en `https://buoh-sitio.onrender.com` y sin indexar ni anunciar ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). Es lo único desplegado. El propietario conectó el repositorio, y la comprobación de [despliegue en Render](docs/operacion/despliegue-en-render.md) («Comprobar un despliegue») pasó ese día: cabeceras de seguridad y `noindex` en todas las respuestas, ninguna cookie, `404` propio y las seis páginas abren con el texto de `main` (detalle en P-V1-07 de la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md)).
 - La [línea visual V1](docs/plan/linea-visual-v1.md) ([ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)) corrió en paralelo a Fase 1 y terminó el 2026-10-25. V1.1 entregó la [guía de marca](docs/diseno/marca-buoh.md), el [catálogo de funciones](docs/producto/funciones-y-disponibilidad.md), el [concepto de interfaz](docs/diseno/concepto-de-interfaz.md) y `packages/design-system`. V1.2 entregó el prototipo navegable en `apps/web`, con datos ficticios (`V1-UI-001`). V1.3 entregó el [sitio oficial](docs/diseno/sitio-oficial.md) en `apps/site`, sin publicar (`V1-SITE-001`). V1.4 entregó el prototipo móvil en `apps/mobile` y compartió los datos ficticios en `packages/prototype-data` (`V1-MOBILE-001`, [ADR-0009](docs/arquitectura/adr/0009-prototipo-movil.md)). V1.5 entregó el prototipo de escritorio en `apps/desktop`, con Tauri 2 y un instalador de Windows compilado en CI (`V1-DESKTOP-001`, [ADR-0010](docs/arquitectura/adr/0010-prototipo-de-escritorio.md)). V1.6 cambió la identidad al logo del propietario, vectorizado, con su paleta, la tipografía Sen y un estilo más técnico (`V1-BRAND-002`, [ADR-0011](docs/arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)). No cambió el alcance ni la puerta de salida de Fase 1.
 
 ## Trabajo en paralelo autorizado
