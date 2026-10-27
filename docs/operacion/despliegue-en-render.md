@@ -29,6 +29,8 @@ El agente no tiene acceso a Render. El propietario:
 6. Revisa que la lista muestre un solo servicio, `buoh-sitio`, y pulsa **Deploy Blueprint**.
 7. Espera a que termine el primer despliegue, unos minutos. La dirección aparece en la página del servicio, con la forma `https://buoh-sitio….onrender.com`. Se la pasa al agente.
 
+Hecha el 2026-10-27: el servicio `buoh-sitio` responde en `https://buoh-sitio.onrender.com`, y la comprobación de abajo pasó ese día (`PROJECT_STATUS.md`).
+
 ## Comprobar un despliegue
 
 Con la dirección del servicio en lugar de `<dirección>`:
