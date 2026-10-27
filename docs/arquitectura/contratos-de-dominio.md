@@ -128,6 +128,12 @@ Restricciones por `status`:
 
 `from_event_time_utc <= to_event_time_utc`.
 
+Desde F1.5 ([ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §4), el worker de Deriv lo construye con `ticks_history` después del primer tick posterior al cierre:
+
+- `connection_id` es la conexión que recuperó; `from_event_time_utc` es el high-watermark del inicio del hueco + 1 ms, y `to_event_time_utc`, el primer tick posterior al último cierre − 1 ms. Es el rango que las reglas aceptan para decidir el hueco;
+- `complete`: las páginas son válidas, cubren el rango pedido y traen el tick del high-watermark y el primer tick posterior. `recovered_event_count` cuenta los ticks entre los dos, sin incluirlos;
+- `partial` y `unavailable` llevan uno de estos motivos: `history_page_limit`, `history_error_response`, `history_invalid`, `history_timeout` o `history_boundary_missing`. `unavailable` significa que falló la primera página.
+
 ## `IngestionCursor`
 
 Estado operativo PostgreSQL, actualizado transaccionalmente después de confirmar durabilidad; no forma parte de `ConnectionClosed`:
@@ -146,6 +152,8 @@ updated_at_utc: UtcTimestampMs
 ```
 
 El procedimiento de desconexión persiste primero `ConnectionClosed` y luego consulta/snapshot el cursor por símbolo. Un cursor nunca avanza por un evento no confirmado como durable.
+
+Desde F1.5 ([ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §6) se persiste en la tabla append-only `ingestion_cursors`, en versiones contiguas por fuente y símbolo, junto con un latido de la ejecución: cada 15 000 ms, después de cada `ConnectionClosed` durable y al parar. `active_segment_index`, `source_event_count`, `last_durable_source_event_id` y `last_durable_observation_id` son los del log de la fuente en ese momento: segmento abierto, eventos durables, último evento y último raw. `high_watermark_event_time_utc` es el del símbolo. Al arrancar, el último evento del cursor tiene que estar en el índice del log.
 
 ## `MarketTick`
 
@@ -384,6 +392,8 @@ open_condition_types: ("connection_lost" | "event_gap_unresolved" |
 
 `open_condition_types` se deriva del validador/reducer contextual, es único y ordenado. `healthy` exige conexión `connected`, ninguna condición abierta, último raw durable y backlog bajo límites; un reporte visiblemente contradictorio falla en runtime.
 
+Desde F1.5 ([ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §8), `pnpm run data:health -- --json` lo emite desde fuera del proceso que ingiere. Suma a las condiciones derivables del log las del registro operativo. La conexión y el backlog salen del último latido si hay un escritor vivo con el bloqueo de la fuente; sin escritor, la conexión es `disconnected`, el backlog es 0 y una conexión sin cierre durable se deriva como cerrada con `close_not_recorded`. Un latido de más de 45 000 ms con escritor vivo impone como mínimo `paused`. Una configuración, una versión o un contrato incompatibles dan `failed`, y el almacenamiento no disponible, `paused`.
+
 `persistence_unavailable` y `source_limit_exceeded` son incidencias operativas cuando impiden crear un source event durable; permanecen en el registro operativo PostgreSQL y no se insertan retroactivamente en un dataset publicado. Los artifacts `quality_incidents` y `operational_conditions` del dataset contienen únicamente eventos derivables de sus source events.
 
 ## `SourceCatalogSnapshot`
@@ -495,8 +505,8 @@ Desde F1.2, [`packages/domain`](../../packages/domain/) implementa estas reglas 
 - `evidence.reason` de `invalid_source_frame` en normalizador 1.0.0: `payload_not_json` (incluye claves duplicadas y JSON no estricto), `schema_validation_failed`, `symbol_not_allowed`, `event_time_out_of_range`, `quote_exponent_not_supported` y `quote_precision_exceeds_pip_size`.
 - `quote_decimal` sale del lexema numérico del payload: completar con ceros hasta `pip_size` es exacto; más decimales o exponente invalidan el frame en lugar de redondear.
 - `symbols` del manifiesto es la unión ordenada de símbolos de ticks, incidencias, recuperaciones y `affected_symbols`.
-- Continuidad tras `ConnectionClosed` no solicitado (`gap_detection = after_reconnection`): cada símbolo afectado con high-watermark queda pendiente desde ese high-watermark (inicio del hueco). Decide solo el primer tick estrictamente posterior al high-watermark vigente en el último cierre; uno igual o anterior no informa sobre el intervalo. Si su separación respecto del inicio no supera `maximum_event_gap_ms` y el hueco no se había declarado excedido, demuestra continuidad; si no, el hueco queda excedido y ese tick fija su fin. Un nuevo cierre de un símbolo pendiente conserva inicio y estado excedido y espera un nuevo fin, de modo que una sola recuperación debe cubrirlos todos. Solo decide un `HistoryRecoveryResult` del símbolo registrado después de fijado el fin y cuyo rango cubra desde el inicio + 1 ms hasta el fin − 1 ms (`complete` la demuestra; `partial`/`unavailable` crean `event_gap_unresolved`); uno anterior o que no cubre no decide y la salud permanece `recovering`. Pendiente no crea incidencia: la recuperación la solicita el worker (F1.5).
-- Salud derivada: cada causa impone un mínimo y gana el más severo: `connection_lost` → `recovering`, continuidad pendiente → `recovering`, `event_gap_unresolved` → `degraded`, `persistence_unavailable`, `source_limit_exceeded` o cola sobre su límite → `paused`. Sin causas: `starting` sin raw durable, `paused` si la última conexión se cerró a petición, `healthy` en otro caso. `last_event_time_utc` es el extremo final de los ticks canónicos. F1.2 solo recibe condiciones derivables del dataset; las operativas se incorporan con su registro.
+- Continuidad tras `ConnectionClosed` no solicitado (`gap_detection = after_reconnection`): cada símbolo afectado con high-watermark queda pendiente desde ese high-watermark (inicio del hueco). Decide solo el primer tick estrictamente posterior al high-watermark vigente en el último cierre; uno igual o anterior no informa sobre el intervalo. Si su separación respecto del inicio no supera `maximum_event_gap_ms` y el hueco no se había declarado excedido, demuestra continuidad (un perfil de medición no tiene ese umbral, así que nunca la demuestra así); si no, el hueco queda excedido y ese tick fija su fin. Un nuevo cierre de un símbolo pendiente conserva inicio y estado excedido y espera un nuevo fin, de modo que una sola recuperación debe cubrirlos todos. Solo decide un `HistoryRecoveryResult` del símbolo registrado después de fijado el fin y cuyo rango cubra desde el inicio + 1 ms hasta el fin − 1 ms (`complete` la demuestra; `partial`/`unavailable` crean `event_gap_unresolved`); uno anterior o que no cubre no decide y la salud permanece `recovering`. Pendiente no crea incidencia: la recuperación la solicita el worker (F1.5).
+- Salud derivada: cada causa impone un mínimo y gana el más severo: `connection_lost` → `recovering`, continuidad pendiente → `recovering`, `event_gap_unresolved` → `degraded`, `persistence_unavailable`, `source_limit_exceeded` o cola sobre su límite → `paused`. Sin causas: `starting` sin raw durable, `paused` si la última conexión se cerró a petición, `healthy` en otro caso. `last_event_time_utc` es el extremo final de los ticks canónicos. F1.2 solo recibe condiciones derivables del dataset; desde F1.5 se suman las del registro operativo ([ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §8).
 - Source events con `schema_version` distinta de la implementada abortan la derivación; no se migran.
 - `persistence_unavailable` y `source_limit_exceeded` no se derivan de un dataset: F1.2 fija su resultado fail-closed y su evidencia; su registro operativo se define en la sección siguiente.
 
@@ -538,9 +548,11 @@ Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §8),
 
 - Sin ese campo, el perfil es de publicación, como hasta ahora; los perfiles existentes conservan sus bytes y sus hashes.
 - Un perfil de medición usa las reglas 2.0.0, declara `non_tick_msg_types` y no lleva `maximum_delivery_delay_ms` ni `maximum_event_gap_ms`. Los umbrales live se fijan después con lo que mida el smoke.
-- La derivación de un dataset y su publicación lo rechazan, así que nunca publica. El ingestor y el normalizador lo aceptan.
+- La publicación lo rechaza, así que nunca publica. El ingestor y el normalizador lo aceptan.
 - Un perfil con `purpose: "measurement"` y algún umbral, o con `purpose` de otro valor, se rechaza.
 - Implementado en `packages/domain`: `createPipelineProfile` expone `purpose`, y `publicationThresholds` falla con un perfil de medición antes de que `deriveMarketData` lea nada.
+- Desde F1.5 ([ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §2), `deriveMarketData` acepta un perfil de medición para derivar el estado vivo (salud, condiciones y continuidad), nunca para publicar. Sin umbral de retraso no evalúa `delivery_delayed`. Sin umbral de hueco, la separación tras una reconexión nunca demuestra continuidad: el símbolo sigue pendiente hasta que lo decide un `HistoryRecoveryResult` que cubre su hueco. La derivación expone cada hueco pendiente con su inicio y, cuando se conoce, su fin.
+- El perfil de Deriv v2 (`deriv_options-measurement-v2-<símbolo>`) declara además `history`, la respuesta a `ticks_history`.
 
 ### Registro operativo de persistencia y límites
 
@@ -586,6 +598,8 @@ Así, la incidencia se puede volver a derivar del frame durable. Vive en la tabl
 En `packages/domain`, `checkRequestedResponse` hace las dos comprobaciones comunes en orden (un objeto `error` y después el esquema de la operación), y `deriveRequestedResponseIncident` arma la incidencia de esta tabla. Desde el PR 6 de F1.4b, el worker la guarda con `PostgresRequestedResponseIncidentStore` (migración `0003`); la misma incidencia, con el mismo `incident_id`, no añade fila.
 
 El perfil de Deriv no declara `ticks` ni `error`. Una suscripción fallida (`msg_type` `ticks`) y la respuesta a un método desconocido (`msg_type` `error`) llegan con un objeto `error`, y las reglas 2.0.0 ya las registran como `source_error_response`.
+
+Desde F1.5 ([ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §4), quien pide `ticks_history` comprueba su respuesta `history` igual, y además que `times` y `prices` tengan la misma longitud, que los tiempos sean enteros estrictamente crecientes y que caigan dentro del rango pedido; si no, el motivo es `history_inconsistent`. Una petición de historia rechazada llega con `msg_type` `ticks_history` y un objeto `error`; el perfil no lo declara, así que la registran las reglas 2.0.0.
 
 ## Contratos futuros
 

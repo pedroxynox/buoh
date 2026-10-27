@@ -96,6 +96,7 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 - [ADR-0012: catálogo y adaptador público de Deriv (F1.4b)](docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md)
 - [ADR-0013: publicación del sitio oficial en Render](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)
 - [ADR-0014: skills de terceros para el agente de Kiro](docs/arquitectura/adr/0014-skills-de-terceros-para-el-agente.md)
+- [ADR-0015: reconexión, recuperación de historia y salud (F1.5)](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md)
 - [Plan de la línea visual V1](docs/plan/linea-visual-v1.md)
 - [Guía de marca](docs/diseno/marca-buoh.md)
 - [Concepto de interfaz](docs/diseno/concepto-de-interfaz.md)
