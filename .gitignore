@@ -57,6 +57,10 @@ ios/build/
 **/src-tauri/target/
 **/src-tauri/gen/
 
+# Archivos que escriben las skills del agente (ADR-0014)
+/trader/
+/.superpowers/
+
 # Sistema operativo y editor
 .DS_Store
 Thumbs.db

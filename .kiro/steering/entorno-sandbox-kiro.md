@@ -6,16 +6,46 @@ inclusion: always
 
 Notas prácticas para sesiones de Kiro. No deciden nada: el proceso está en [`AGENTS.md`](../../AGENTS.md) y [`CONTRIBUTING.md`](../../CONTRIBUTING.md), el estado y la siguiente tarea en [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md) y el entorno local canónico en el [runbook](../../docs/operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13).
 
+## Arranque de sesión
+
+Kiro Web abre el espacio de trabajo en `/projects/sandbox`, con el repositorio en `/projects/sandbox/buoh`. El 2026-10-27 el agente no recibió ni este steering ni el `AGENTS.md` del repositorio ([ADR-0014](../../docs/arquitectura/adr/0014-skills-de-terceros-para-el-agente.md), «Contexto»). Antes de la primera respuesta de cada sesión:
+
+1. Instalar las skills: `node /projects/sandbox/buoh/.kiro/instalar-skills.mjs`. Si termina con 1, decir al propietario en una línea qué origen faltó y seguir con las demás.
+2. Activar la skill `caveman` («Comunicación con el propietario»).
+3. Leer, en orden: `AGENTS.md`, `PROJECT_STATUS.md`, `.kiro/steering/fundamentos-buoh.md`, este archivo, [`skills-de-kiro.md`](skills-de-kiro.md), el plan activo y lo que toque la tarea.
+4. Comprobar el estado real: `git fetch`, la rama actual y `gh api "repos/pedroxynox/buoh/pulls?state=all&per_page=5"`. Cada incremento empieza en una rama nueva desde `main` actualizado; una rama ya fusionada no se reutiliza.
+5. Poner título y descripción a la sesión de Kiro.
+
+El contexto que dura vive en `AGENTS.md`, `PROJECT_STATUS.md` y `.kiro/steering/`. No crear otros archivos de contexto o memoria en el repositorio, como `.claude/napkin.md`.
+
+Estos pasos los pone en marcha el steering personal del propietario: en app.kiro.dev, Agent Config → Steering, un archivo `buoh-arranque.md` con este texto.
+
+```markdown
+---
+inclusion: always
+---
+
+# buoh: arranque de sesión
+
+Si el espacio de trabajo contiene el repositorio pedroxynox/buoh, antes de tu primera respuesta lee su archivo .kiro/steering/entorno-sandbox-kiro.md y sigue su «Arranque de sesión».
+```
+
+Si una sesión empieza sin seguir estos pasos, el propietario puede pedirlo en su primer mensaje con la última frase de ese texto.
+
 ## Comunicación con el propietario
 
+- En el chat, hablar con la skill `caveman`, en español, desde la primera respuesta y durante toda la sesión, también después de un resumen de contexto. Solo se apaga si el propietario dice «stop caveman» o «normal mode».
+- Caveman es solo para el chat. Código, comentarios, commits, PR, ADR y documentos siguen el estilo normal del repositorio, y el PR se entiende sin la conversación (`AGENTS.md`, «Relevo entre modelos»). El detalle técnico va en el PR, no en el chat.
 - El propietario no es programador. Explicar en español sencillo, con frases cortas y sin jerga; si hace falta un término técnico, decir qué significa.
 - Ante conflicto o decisión ausente, seguir el protocolo de `AGENTS.md`. Los detalles técnicos que ese protocolo deja al agente se resuelven investigando, sin trasladarlos al propietario.
-- Cuando el protocolo pida una decisión humana, explicar al propietario las opciones y la recomendación en palabras simples.
+- Cuando el protocolo pida una decisión humana (producto, dinero, riesgo o seguridad), explicar al propietario las opciones y la recomendación en palabras simples. Las preguntas y los avisos de seguridad van en frases completas.
+- Actualizar el estado de la sesión de Kiro cada vez que cambie la tarea: el propietario lo mira para saber qué pasa.
 - Al terminar, fusionar el PR con las condiciones de `AGENTS.md` («Fusión») y dar al propietario el enlace del PR y un resumen corto. Si el PR espera su visto bueno, explicarle el cambio en palabras simples y preguntar.
 
 ## Comandos y GitHub
 
-- El Node global del sandbox puede no ser el fijado. Ejecutar todo con `pnpm`, que descarga y usa el Node de `devEngines` en `package.json`.
+- El Node global del sandbox puede no ser el fijado, y dentro del repositorio `npm` y `npx` fallan con `EBADDEVENGINES`. Ejecutar todo con `pnpm`, que descarga y usa el Node de `devEngines` en `package.json`.
+- Si una herramienta larga se corta, por ejemplo la revisión semántica, volver a lanzarla y avisar al propietario en una línea.
 - Antes de cada commit, ejecutar `DOCS_BASE_REF=origin/main pnpm run verify:pr` y confirmar que el código de salida es 0. El final del log no basta: un fallo de tipos puede quedar más arriba.
 - Los subcomandos `gh pr` y `gh issue` no funcionan aquí, y `gh run list` tampoco. Crear el PR con `gh api repos/pedroxynox/buoh/pulls -f title=… -F body=@<archivo> -f head=<rama> -f base=main` y revisar CI con `gh api repos/pedroxynox/buoh/commits/<sha>/check-runs`.
 - Para fusionar: primero el comentario con `gh api repos/pedroxynox/buoh/issues/<n>/comments -f body=…`, y después `gh api -X PUT repos/pedroxynox/buoh/pulls/<n>/merge -f merge_method=merge -f sha=<commit con CI en verde>`. Con `sha`, GitHub rechaza la fusión (409) si el PR cambió entretanto.

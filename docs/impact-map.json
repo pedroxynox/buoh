@@ -104,6 +104,15 @@
       ]
     },
     {
+      "id": "agent-skills",
+      "description": "Las skills de terceros del agente deben seguir su ADR y su steering.",
+      "includes": [".kiro/instalar-skills.mjs"],
+      "requires_any": [
+        ".kiro/steering/skills-de-kiro.md",
+        "docs/arquitectura/adr/0014-skills-de-terceros-para-el-agente.md"
+      ]
+    },
+    {
       "id": "documentation-guard",
       "description": "La política del guard debe permanecer explicada para contribuidores.",
       "includes": ["docs/impact-map.json", "scripts/check-doc-impact.*"],

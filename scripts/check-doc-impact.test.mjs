@@ -103,6 +103,7 @@ test('fija las reglas productivas y sus rutas críticas', () => {
       'mobile',
       'desktop',
       'site',
+      'agent-skills',
       'documentation-guard',
     ],
   );
@@ -129,6 +130,11 @@ test('fija las reglas productivas y sus rutas críticas', () => {
     ['.github/workflows/desktop.yml', 'docs/diseno/concepto-de-interfaz.md'],
     ['packages/prototype-data/src/fixtures.ts', 'docs/diseno/concepto-de-interfaz.md'],
     ['apps/site/app/page.tsx', 'docs/diseno/sitio-oficial.md'],
+    ['.kiro/instalar-skills.mjs', '.kiro/steering/skills-de-kiro.md'],
+    [
+      '.kiro/instalar-skills.mjs',
+      'docs/arquitectura/adr/0014-skills-de-terceros-para-el-agente.md',
+    ],
     ['scripts/check-doc-impact.mjs', 'CONTRIBUTING.md'],
   ];
 
