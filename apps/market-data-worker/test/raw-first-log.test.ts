@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
 import {
+  canonicalJson,
   connectionClosedSchema,
   connectionOpenedSchema,
   rawSourceFrameSchema,
@@ -31,6 +32,7 @@ import {
   failureReason,
   loadSyntheticFixture,
   LogIntegrityError,
+  LogReadError,
   OperationalRegistry,
   previousConnection,
   publishFromLog,
@@ -712,15 +714,137 @@ describe('log de source events: rotación 1.0.0 y reinicio', () => {
     expect(store.rows.map((row) => row.position)).toEqual([0, 1, 2, 3]);
   });
 
-  it('al reiniciar detecta el objeto alterado de un evento del segmento abierto', async () => {
-    const { log, objects, open, store } = await freshLog();
-    await log.append(raw(1, '2026-01-01T00:00:01.000Z'));
+  type Stores = Pick<Awaited<ReturnType<typeof freshLog>>, 'objects' | 'store'>;
+
+  /** Cambia la línea del primer evento del segmento abierto, con su objeto y su fila de acuerdo. */
+  function replaceFirstLine({ objects, store }: Stores, change: (text: string) => string): void {
+    const [row] = store.rows;
+    const stored =
+      row === undefined ? undefined : objects.objects.get(contentKey(row.object_sha256));
+    if (row === undefined || stored === undefined) {
+      throw new TypeError('El segmento abierto no tiene eventos.');
+    }
+    const bytes = new TextEncoder().encode(change(Buffer.from(stored).toString('utf8')));
+    objects.objects.set(contentKey(sha256Hex(bytes)), bytes);
+    store.rows[0] = { ...row, byte_length: bytes.byteLength, object_sha256: sha256Hex(bytes) };
+  }
+
+  /** Cambia los bytes guardados del objeto del primer evento del segmento abierto. */
+  function changeFirstObject(
+    { objects, store }: Stores,
+    change: (bytes: Uint8Array) => Uint8Array | null,
+  ): void {
     const key = contentKey(store.rows[0]?.object_sha256 ?? '');
-    const altered = Uint8Array.from(objects.objects.get(key) ?? new Uint8Array());
-    altered[2] = 0x41;
-    objects.objects.set(key, altered);
-    await expect(open()).rejects.toThrow(/alterado/u);
-  });
+    const changed = change(Uint8Array.from(objects.objects.get(key) ?? new Uint8Array()));
+    if (changed === null) {
+      objects.objects.delete(key);
+    } else {
+      objects.objects.set(key, changed);
+    }
+  }
+
+  it.each<[string, (stores: Stores) => void, RegExp | null]>([
+    [
+      'un objeto alterado',
+      (stores) => {
+        changeFirstObject(stores, (bytes) => {
+          bytes[2] = 0x41;
+          return bytes;
+        });
+      },
+      /alterado o incompleto/u,
+    ],
+    // El índice confirmó el evento: un objeto que falta o que crece no es un almacén que no
+    // responde, sino contenido confirmado que ya no está, como al leer un segmento cerrado.
+    [
+      'un objeto ausente',
+      (stores) => {
+        changeFirstObject(stores, () => null);
+      },
+      /ausente/u,
+    ],
+    [
+      'un objeto mayor que su fila',
+      (stores) => {
+        changeFirstObject(stores, (bytes) => Uint8Array.from([...bytes, 0x0a]));
+      },
+      /mayor que su fila/u,
+    ],
+    [
+      'una línea que no es JCS',
+      (stores) => {
+        replaceFirstLine(stores, (text) => ` ${text}`);
+      },
+      /no es JCS/u,
+    ],
+    [
+      'una línea que no es un source event',
+      (stores) => {
+        replaceFirstLine(stores, () => '{"kind":"otro"}');
+      },
+      null,
+    ],
+    [
+      'la línea de otro evento',
+      (stores) => {
+        replaceFirstLine(stores, () => canonicalJson(raw(9, '2026-01-01T00:00:09.000Z')));
+      },
+      /no corresponde/u,
+    ],
+    [
+      'una fila fuera de su posición',
+      ({ store }) => {
+        const [row] = store.rows;
+        if (row !== undefined) {
+          store.rows[0] = { ...row, position: 1 };
+        }
+      },
+      /no contiguo/u,
+    ],
+  ])(
+    'al reabrir, %s en el segmento abierto lanza LogIntegrityError: no se reintenta',
+    async (_label, corrupt, message) => {
+      const { log, objects, open, store } = await freshLog();
+      await log.append(raw(1, '2026-01-01T00:00:01.000Z'));
+      corrupt({ objects, store });
+
+      const reopening = open();
+      await expect(reopening).rejects.toThrow(LogIntegrityError);
+      if (message !== null) {
+        await expect(reopening).rejects.toThrow(message);
+      }
+    },
+  );
+
+  it.each<[string, (stores: Stores) => void]>([
+    [
+      'el índice',
+      ({ store }) => {
+        vi.spyOn(store, 'readLogState').mockRejectedValue(
+          Object.assign(new Error('sintético'), { code: 'ECONNREFUSED' }),
+        );
+      },
+    ],
+    [
+      'el almacenamiento de objetos',
+      ({ objects }) => {
+        objects.onRead = () => {
+          throw Object.assign(new Error('sintético'), { code: 'ECONNREFUSED' });
+        };
+      },
+    ],
+  ])(
+    'al reabrir, si %s no responde, lanza LogReadError con el motivo saneado',
+    async (_label, failReads) => {
+      const { log, objects, open, store } = await freshLog();
+      await log.append(raw(1, '2026-01-01T00:00:01.000Z'));
+      failReads({ objects, store });
+
+      const reopening = open();
+      await expect(reopening).rejects.toThrow(LogReadError);
+      await expect(reopening).rejects.toMatchObject({ reason: 'ECONNREFUSED' });
+    },
+  );
 
   it('tras un fallo la instancia queda inválida hasta reabrirla', async () => {
     const { log, objects, open } = await freshLog();
@@ -1194,5 +1318,113 @@ describe('RawFirstIngestor.repairUnrecordedClose: cierre no registrado (ADR-0015
     await run.ingestor.receiveEvent(openedEvent(CONNECTION_B, id(3), REOPENED_AT, CONNECTION_A));
     expect(run.registry.openConditionTypes()).toEqual([]);
     expect(run.ingestor.state).toBe('accepting');
+  });
+});
+
+// Reabrir el log que falló (runbook, «Almacenamiento no disponible»): un almacén que no responde se
+// reintenta, pero un contenido que no pasa sus comprobaciones no (ADR-0004 §12).
+describe('RawFirstIngestor: reabrir el log que falló', () => {
+  const OPENED_AT = '2026-01-01T00:00:01.000Z';
+  const REOPENED_AT = '2026-01-01T00:00:31.000Z';
+
+  const tickFrame = (observationId: string) => ({
+    connection_id: CONNECTION_A,
+    observation_id: observationId,
+    payload_utf8: tickPayload(1767225601),
+    received_at_utc: '2026-01-01T00:00:01.100Z',
+  });
+
+  /** La entrada falló: su apertura y un tick quedaron durables; el segundo tick, no. */
+  async function failedLog() {
+    let now = OPENED_AT;
+    const run = await harness({ now: () => now });
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+    await run.ingestor.receiveFrame(tickFrame(id(2)));
+    run.objects.armNextPutFailure('synthetic_injected_failure');
+    expect(await run.ingestor.receiveFrame(tickFrame(id(3)))).toEqual({
+      stage: 'raw_object_write',
+      status: 'not_durable',
+    });
+    now = REOPENED_AT;
+    return run;
+  }
+
+  type Run = Awaited<ReturnType<typeof failedLog>>;
+
+  /** Las dos operaciones que reabren el log fallido antes de escribir. */
+  const reopenWith = {
+    receiveEvent: (run: Run) =>
+      run.ingestor.receiveEvent(openedEvent(CONNECTION_B, id(4), REOPENED_AT, CONNECTION_A)),
+    repairUnrecordedClose: (run: Run) =>
+      run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] }),
+  };
+
+  /** Cambia el objeto del tick durable, `id(2)`, en el segmento abierto. */
+  function changeTickObject(run: Run, change: (bytes: Uint8Array) => Uint8Array | null): void {
+    const row = run.sourceLog.rows.find((item) => item.event_id === id(2));
+    const key = contentKey(row?.object_sha256 ?? '');
+    const changed = change(Uint8Array.from(run.objects.objects.get(key) ?? new Uint8Array()));
+    if (changed === null) {
+      run.objects.objects.delete(key);
+    } else {
+      run.objects.objects.set(key, changed);
+    }
+  }
+
+  const corruptions = {
+    alterado: (run: Run) => {
+      changeTickObject(run, (bytes) => {
+        bytes[2] = 0x41;
+        return bytes;
+      });
+    },
+    ausente: (run: Run) => {
+      changeTickObject(run, () => null);
+    },
+  };
+
+  it.each([
+    ['alterado', 'receiveEvent'],
+    ['alterado', 'repairUnrecordedClose'],
+    ['ausente', 'receiveEvent'],
+    ['ausente', 'repairUnrecordedClose'],
+  ] as const)(
+    'con el objeto de un evento del segmento abierto %s, %s se rechaza con LogIntegrityError sin registrar otro persistence_unavailable',
+    async (corruption, operation) => {
+      const run = await failedLog();
+      corruptions[corruption](run);
+
+      await expect(reopenWith[operation](run)).rejects.toThrow(LogIntegrityError);
+      // Solo la incidencia del fallo de escritura: el contenido no confiable no se reintenta.
+      expect(run.operational.incidents).toEqual([
+        expect.objectContaining({
+          evidence: { reason: 'synthetic_injected_failure', stage: 'raw_object_write' },
+          incident_type: 'persistence_unavailable',
+          observed_ref: id(3),
+        }),
+      ]);
+      expect(run.sourceLog.rows.map((row) => row.event_id)).toEqual([id(1), id(2)]);
+      expect(run.ingestor.state).toBe('paused');
+    },
+  );
+
+  // La reparación con un almacén que no responde al reabrir está en «si no puede reabrir el log».
+  it('si un almacén no responde al reabrir, receiveEvent registra persistence_unavailable y no queda durable', async () => {
+    const run = await failedLog();
+    run.objects.onRead = () => {
+      throw Object.assign(new Error('sintético'), { code: 'ECONNREFUSED' });
+    };
+
+    expect(await reopenWith.receiveEvent(run)).toEqual({
+      stage: 'source_event_index',
+      status: 'not_durable',
+    });
+    expect(run.operational.incidents.at(-1)).toMatchObject({
+      evidence: { reason: 'ECONNREFUSED', stage: 'source_event_index' },
+      incident_type: 'persistence_unavailable',
+      // La apertura que no quedó durable.
+      observed_ref: id(4),
+    });
+    expect(run.operational.incidents).toHaveLength(2);
   });
 });

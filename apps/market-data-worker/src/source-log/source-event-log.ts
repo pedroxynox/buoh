@@ -55,11 +55,11 @@ export function failureReason(error: unknown): string {
 }
 
 /**
- * Al leerlo, el contenido durable del log no pasa sus comprobaciones: un objeto alterado, que falta
- * o mayor que su fila, un hash o unos conteos que no cuadran, un segmento que no se descomprime,
- * una línea que no es un source event JCS o segmentos que no están todos cerrados. No se reintenta
- * con ese contenido (ADR-0004 §12). Es un `TypeError`, como esas comprobaciones antes, y conserva
- * sus mensajes.
+ * Al leer o reabrir el log, su contenido durable no pasa sus comprobaciones: un objeto alterado, que
+ * falta o mayor que su fila, un hash o unos conteos que no cuadran, un segmento que no se
+ * descomprime, una línea que no es el source event JCS de su fila, filas del segmento abierto fuera
+ * de su posición o segmentos que no están todos cerrados. No se reintenta con ese contenido
+ * (ADR-0004 §12). Es un `TypeError`, como esas comprobaciones antes, y conserva sus mensajes.
  */
 export class LogIntegrityError extends TypeError {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -69,8 +69,8 @@ export class LogIntegrityError extends TypeError {
 }
 
 /**
- * Al leer el log, no respondió un almacén: el de objetos o el índice. No dice nada del contenido,
- * así que se puede reintentar. `reason` es el motivo saneado (`failureReason`).
+ * Al leer o reabrir el log, no respondió un almacén: el de objetos o el índice. No dice nada del
+ * contenido, así que se puede reintentar. `reason` es el motivo saneado (`failureReason`).
  */
 export class LogReadError extends Error {
   readonly reason: string;
@@ -218,10 +218,14 @@ export class SourceEventLog {
 
   /**
    * Abre el log desde el estado durable: continúa el segmento no finalizado releyendo y
-   * verificando cada objeto de sus eventos (runbook, «Inicio», paso 3–4).
+   * verificando cada objeto de sus eventos (runbook, «Inicio», paso 3–4). Si un almacén no responde,
+   * lanza `LogReadError`, y se puede reintentar. Si el contenido del segmento abierto no pasa sus
+   * comprobaciones (una fila fuera de su posición, un objeto alterado, que falta o mayor que su
+   * fila, o una línea que no es el source event JCS de su fila), lanza `LogIntegrityError`: no se
+   * reintenta con ese contenido (ADR-0004 §12).
    */
   static async open(input: OpenSourceEventLogInput): Promise<SourceEventLog> {
-    const state = await input.store.readLogState(input.source);
+    const state = await fromStore(() => input.store.readLogState(input.source));
     const segmentIndex =
       state.openRows[0]?.segment_index ??
       (state.lastClosed === null ? 0 : state.lastClosed.segment_index + 1);
@@ -230,15 +234,22 @@ export class SourceEventLog {
     let lastEventTime: string | null = state.lastClosed?.last_event_time_utc ?? null;
     for (const [index, row] of state.openRows.entries()) {
       if (row.segment_index !== segmentIndex || row.position !== index) {
-        throw new TypeError(`Segmento abierto no contiguo en la posición ${String(index)}.`);
+        throw new LogIntegrityError(
+          `Segmento abierto no contiguo en la posición ${String(index)}.`,
+        );
       }
-      const bytes = await input.objects.get(contentKey(row.object_sha256), row.byte_length);
+      const bytes = await fromStore(
+        () => input.objects.get(contentKey(row.object_sha256), row.byte_length),
+        `del source event ${row.event_id}`,
+      );
       if (bytes.byteLength !== row.byte_length || sha256Hex(bytes) !== row.object_sha256) {
-        throw new TypeError(`Objeto del source event ${row.event_id} alterado o incompleto.`);
+        throw new LogIntegrityError(
+          `Objeto del source event ${row.event_id} alterado o incompleto.`,
+        );
       }
-      const event = parseLine(bytes);
+      const event = verified(() => parseLine(bytes));
       if (eventId(event) !== row.event_id || event.source !== input.source) {
-        throw new TypeError(`El objeto no corresponde al source event ${row.event_id}.`);
+        throw new LogIntegrityError(`El objeto no corresponde al source event ${row.event_id}.`);
       }
       lines.push(bytes);
       stats = appendSegmentStats(stats, event);

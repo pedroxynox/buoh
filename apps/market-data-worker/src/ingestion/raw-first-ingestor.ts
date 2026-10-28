@@ -22,6 +22,7 @@ import { type ClosedSourceSegment } from '../source-log/ports.js';
 import { previousConnection } from '../source-log/previous-connection.js';
 import {
   failureReason,
+  LogIntegrityError,
   LogPersistenceError,
   LogReadError,
   type SourceEventLog,
@@ -193,8 +194,11 @@ export class RawFirstIngestor {
   }
 
   /**
-   * Reabre desde los almacenes el log que falló. Si no se puede, registra `persistence_unavailable`
-   * (etapa `source_event_index`) con `observedRef` y devuelve el resultado no durable.
+   * Reabre desde los almacenes el log que falló. Si no se puede porque un almacén no responde (o
+   * por otro error), registra `persistence_unavailable` (etapa `source_event_index`) con
+   * `observedRef` y el motivo saneado, y devuelve el resultado no durable. Si el contenido del log no
+   * pasa sus comprobaciones (`LogIntegrityError`), lo relanza sin registrar nada: no se reintenta con
+   * contenido no confiable (ADR-0004 §12).
    */
   async #reopenLog(observedRef: string): Promise<NotDurable | null> {
     try {
@@ -202,8 +206,12 @@ export class RawFirstIngestor {
       this.#logFailed = false;
       return null;
     } catch (error) {
+      if (error instanceof LogIntegrityError) {
+        throw error;
+      }
+      const reason = error instanceof LogReadError ? error.reason : failureReason(error);
       return this.#onPersistenceFailure(
-        new LogPersistenceError('source_event_index', failureReason(error), { cause: error }),
+        new LogPersistenceError('source_event_index', reason, { cause: error }),
         observedRef,
       );
     }
@@ -289,7 +297,9 @@ export class RawFirstIngestor {
   /**
    * Evento de conexión o recuperación. Con la entrada pausada se rechazan recuperaciones; se admite
    * el `ConnectionClosed` del cierre de la entrada si el log sigue sano, y un `ConnectionOpened`,
-   * que reabre el log si había fallado y, al quedar durable, resuelve las condiciones operativas.
+   * que reabre el log si había fallado y, al quedar durable, resuelve las condiciones operativas. Si
+   * al reabrir el log su contenido no pasa sus comprobaciones, se rechaza con `LogIntegrityError`,
+   * sin registrar nada.
    */
   async receiveEvent(
     event: Exclude<SourceEvent, { kind: 'raw_source_frame' }>,
@@ -330,11 +340,12 @@ export class RawFirstIngestor {
    *    hora de la detección) sin reabrir la entrada: sigue como estaba hasta un `ConnectionOpened`
    *    durable. Como cualquier evento durable, el cierre resuelve `persistence_unavailable`.
    *
-   * Si el log no se puede reabrir, un almacén no responde al leerlo o el cierre no queda durable,
-   * registra `persistence_unavailable` como `receiveEvent`, con el ID del cierre como
-   * `observed_ref`, y devuelve `not_durable`: no se debe abrir otro socket. Si el contenido del log
-   * no pasa sus comprobaciones (`LogIntegrityError`), o ante cualquier otro error, rechaza sin
-   * registrar nada: no se reintenta con contenido no confiable (ADR-0004 §12).
+   * Si el log no se puede reabrir porque un almacén no responde, un almacén no responde al leerlo o
+   * el cierre no queda durable, registra `persistence_unavailable` como `receiveEvent`, con el ID
+   * del cierre como `observed_ref`, y devuelve `not_durable`: no se debe abrir otro socket. Si el
+   * contenido del log no pasa sus comprobaciones, al reabrirlo o al leerlo (`LogIntegrityError`), o
+   * ante cualquier otro error al leerlo, rechaza sin registrar nada: no se reintenta con contenido
+   * no confiable (ADR-0004 §12).
    */
   async repairUnrecordedClose(input: {
     /** Símbolos de la sesión, que el cierre da como afectados. */
