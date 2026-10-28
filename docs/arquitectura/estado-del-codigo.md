@@ -1,6 +1,6 @@
 # Estado del código
 
-Radiografía del repositorio el 2026-10-25 (commit `869ba4e`; las filas del worker, del sitio y de `scripts/` se actualizaron el 2026-10-26), para que otra persona o una IA entienda qué hay, cómo se conecta y dónde se repite lógica. Es un documento de análisis: no decide nada ni autoriza trabajo. El estado del proyecto lo manda [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md), y lo que falta está en la [especificación de pendientes](../plan/especificacion-de-pendientes.md).
+Radiografía del repositorio el 2026-10-25 (commit `869ba4e`; las filas del sitio y de `scripts/` se actualizaron el 2026-10-26, y la del worker, el 2026-10-28), para que otra persona o una IA entienda qué hay, cómo se conecta y dónde se repite lógica. Es un documento de análisis: no decide nada ni autoriza trabajo. El estado del proyecto lo manda [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md), y lo que falta está en la [especificación de pendientes](../plan/especificacion-de-pendientes.md).
 
 ## 1. Qué hay
 

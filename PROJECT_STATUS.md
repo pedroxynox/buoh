@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 25
-updated_at_utc: "2026-10-27T22:55:00.000Z"
+status_version: 26
+updated_at_utc: "2026-10-28T23:56:11.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null

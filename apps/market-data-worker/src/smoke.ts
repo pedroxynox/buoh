@@ -59,7 +59,10 @@ export interface SmokeRecovery {
  * hashes. Nunca lleva payloads ni precios.
  */
 export interface SmokeReport {
-  /** Catálogo vigente de la última conexión. */
+  /**
+   * Catálogo vigente del último intento, o `null` si ese intento no llegó a abrirse o no lo
+   * obtuvo.
+   */
   readonly catalog: { readonly content_sha256: string; readonly entry_count: number } | null;
   /** Cierre del último intento de conexión, o `null` si ese intento no llegó a abrirse. */
   readonly closure: {
@@ -121,8 +124,8 @@ export interface SmokeReport {
   readonly recovery: SmokeRecovery | null;
   readonly schemas: { readonly archive_sha256: string; readonly release: string } | null;
   /**
-   * Recepción local menos la hora del servidor (`time`) en la última conexión, o `null` si no se
-   * obtuvo.
+   * Recepción local menos la hora del servidor (`time`) en el último intento, o `null` si ese
+   * intento no llegó a abrirse o no la obtuvo.
    */
   readonly server_time_offset_ms: number | null;
   readonly source: string;
@@ -130,7 +133,10 @@ export interface SmokeReport {
   readonly started_at_utc: string;
   readonly status: 'failed' | 'passed';
   readonly symbol: string;
-  /** Nombre oficial del símbolo en el catálogo de la última conexión, sin traducir. */
+  /**
+   * Nombre oficial del símbolo en el catálogo del último intento, sin traducir; `null` si ese
+   * intento no llegó a abrirse o el símbolo no está en su catálogo.
+   */
   readonly symbol_name: string | null;
   /** Intervalo entre las horas de ticks consecutivos de una misma suscripción. */
   readonly tick_interval_ms: Distribution | null;

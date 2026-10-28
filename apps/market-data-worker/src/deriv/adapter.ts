@@ -66,8 +66,10 @@ export type DerivPreparationInput = Pick<
   'expected' | 'fetch' | 'nextId' | 'now' | 'registry' | 'scheduler' | 'schemaUrl' | 'symbol'
 > & {
   /**
-   * Último source event durable de la fuente, o `[]` si no se conoce: lo cita la incidencia de un
-   * límite de esquema.
+   * Último source event durable de la fuente, o `[]` si no existe: lo cita la incidencia de un
+   * límite de esquema. La sesión de ingesta prepara los esquemas antes de tomar el bloqueo y abrir
+   * el log, así que pasa `[]` (contratos de dominio, «Registro operativo de persistencia y
+   * límites»).
    */
   readonly related_refs: readonly string[];
 };

@@ -134,7 +134,10 @@ export interface DerivSessionConnection {
 }
 
 export interface DerivSessionResult {
-  /** Catálogo vigente de la última conexión, o `null`. */
+  /**
+   * Catálogo vigente del último intento, o `null` si ese intento no llegó a abrirse o no lo
+   * obtuvo.
+   */
   readonly catalog: DerivConnectionResult['catalog'];
   /** Las conexiones, en orden. */
   readonly connections: readonly DerivSessionConnection[];
@@ -152,9 +155,15 @@ export interface DerivSessionResult {
   readonly recoveries: readonly HistoryRecoveryOutcome[];
   /** Release y SHA-256 de los esquemas cargados, o `null` si la carga falló. */
   readonly schemas: DerivSchemaSummary | null;
-  /** Desfase con el servidor medido en la última conexión, o `null`. */
+  /**
+   * Desfase con el servidor medido en el último intento, o `null` si ese intento no llegó a abrirse
+   * o no lo midió.
+   */
   readonly server_time_offset_ms: number | null;
-  /** `subscription.id` de la última conexión, o `null`. */
+  /**
+   * `subscription.id` del último intento, o `null` si ese intento no llegó a abrirse o no recibió
+   * el primer tick de su suscripción.
+   */
   readonly subscription_id: string | null;
   /**
    * Las esperas antes de cada reintento, en milisegundos y en orden, también la que corta una
