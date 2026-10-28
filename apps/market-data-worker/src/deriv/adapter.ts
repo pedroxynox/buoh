@@ -21,7 +21,10 @@ import {
 import { type SocketFactory } from './socket.js';
 
 export interface DerivAdapterInput {
-  /** Alerta saneada si una incidencia de respuesta pedida no se puede guardar. */
+  /**
+   * Alerta saneada, en stderr por defecto: si una incidencia de respuesta pedida no se puede
+   * guardar, o si el reloj va por detrás del log (`clock_behind_log`).
+   */
   readonly alert?: OperationalAlert;
   readonly catalog: CatalogStore;
   readonly connect: SocketFactory;
@@ -97,7 +100,10 @@ export interface DerivPreparationFailure {
 
 /** Lo que necesita un intento: la preparación y el ingestor de la sesión, y los puertos de la conexión. */
 export interface DerivAttemptInput {
-  /** Alerta saneada, en stderr por defecto: la usa la conexión (ver `DerivConnectionInput`). */
+  /**
+   * Alerta saneada, en stderr por defecto: la del reloj por detrás del log, `{ event:
+   * 'clock_behind_log', now_utc, previous_close_utc }`, y las de la conexión.
+   */
   readonly alert?: OperationalAlert;
   readonly catalog: CatalogStore;
   readonly connect: SocketFactory;
@@ -227,24 +233,40 @@ export async function prepareDerivAdapter(
 }
 
 /**
+ * Lo más que se espera de una vez antes de volver a mirar el reloj: un hueco enorme nunca llega
+ * entero al temporizador (`setTimeout` admite hasta 2 147 483 647 ms), y un ajuste del reloj se nota
+ * en un minuto como mucho.
+ */
+const WAIT_STEP_MS = 60_000;
+
+/**
  * Espera, con el temporizador inyectado, a que el reloj pase de `instantUtc`, la hora del cierre de
  * la conexión anterior. El `ConnectionOpened` toma su hora al abrir el socket, así que queda
  * estrictamente después del cierre que supera: con la misma hora, las reglas podrían ordenar la
- * resolución de `connection_lost` antes de su apertura, y el log no se podría derivar. Si el reloj
- * retrocede durante la espera, vuelve a mirarlo y espera otra vez.
+ * resolución de `connection_lost` antes de su apertura, y el log no se podría derivar. Espera en
+ * tramos de 60 000 ms como mucho y vuelve a mirar el reloj después de cada uno: si saltó hacia
+ * delante, deja de esperar; si retrocedió, espera otra vez. Si falta más de 60 000 ms, el reloj va
+ * por detrás del log: avisa una vez con `clock_behind_log`, y sigue esperando.
  */
 async function waitPast(
-  input: Pick<DerivAttemptInput, 'now' | 'scheduler'>,
+  input: Pick<DerivAttemptInput, 'now' | 'scheduler'> & { readonly alert: OperationalAlert },
   instantUtc: string,
 ): Promise<void> {
   const instant = Date.parse(instantUtc);
+  let alerted = false;
   for (;;) {
-    const remaining = instant - Date.parse(input.now());
-    if (remaining < 0) {
+    const now = input.now();
+    // Hasta el primer milisegundo después del cierre.
+    const wait = instant - Date.parse(now) + 1;
+    if (wait <= 0) {
       return;
     }
+    if (wait > WAIT_STEP_MS && !alerted) {
+      alerted = true;
+      input.alert({ event: 'clock_behind_log', now_utc: now, previous_close_utc: instantUtc });
+    }
     await new Promise<void>((resolve) => {
-      input.scheduler.schedule(remaining + 1, resolve);
+      input.scheduler.schedule(Math.min(wait, WAIT_STEP_MS), resolve);
     });
   }
 }
@@ -259,6 +281,7 @@ async function waitPast(
 export async function startDerivAttempt(input: DerivAttemptInput): Promise<DerivAttempt> {
   const { ingestor, preparation } = input;
   const { profile, schemas, symbol } = preparation;
+  const alert = input.alert ?? stderrAlert;
   // Antes del socket: la conexión anterior sale del log, nunca de la memoria (ADR-0015 §3).
   const repair = await ingestor.repairUnrecordedClose({ affected_symbols: [symbol] });
   if (repair.status === 'not_durable') {
@@ -268,10 +291,10 @@ export async function startDerivAttempt(input: DerivAttemptInput): Promise<Deriv
     };
   }
   if (repair.closed_at_utc !== null) {
-    await waitPast(input, repair.closed_at_utc);
+    await waitPast({ alert, now: input.now, scheduler: input.scheduler }, repair.closed_at_utc);
   }
   const connection = new DerivConnection({
-    alert: input.alert ?? stderrAlert,
+    alert,
     catalog: input.catalog,
     catalogSchema: createCatalogResponseSchema({
       source_schema_bytes: schemas.schema('active_symbols', 'response').bytes,

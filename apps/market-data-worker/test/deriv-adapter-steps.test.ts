@@ -1,10 +1,11 @@
-import { type SourceEvent } from '@buoh/contracts';
+import { connectionClosedSchema, type SourceEvent } from '@buoh/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   prepareDerivAdapter,
   runDerivAdapter,
   startDerivAttempt,
+  type DerivAttempt,
   type DerivPreparation,
 } from '../src/deriv/adapter.js';
 import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
@@ -419,5 +420,87 @@ describe('startDerivAttempt: un intento de la sesión', () => {
     await expect(run.start()).rejects.toThrow(LogIntegrityError);
     expect(run.sockets).toEqual([]);
     expect(run.operational.incidents).toEqual([]);
+  });
+});
+
+/** La conexión anterior, con su cierre remoto a la hora `closedAtUtc`. */
+function previousClosedAt(closedAtUtc: string): SourceEvent[] {
+  return [
+    ...previousConnectionEvents().slice(0, 2),
+    connectionClosedSchema.parse({
+      affected_symbols: ['SYNTH_100'],
+      closure_type: 'remote',
+      connection_id: PREVIOUS,
+      event_id: uuid(9004),
+      kind: 'connection_closed',
+      occurred_at_utc: closedAtUtc,
+      reason: 'close_code_1001',
+      schema_version: '1.0.0',
+      source: DERIV_SOURCE,
+    }),
+  ];
+}
+
+/** Termina el intento: para su conexión, si arrancó, y espera su resultado. */
+async function stopAttempt(attempt: DerivAttempt): Promise<void> {
+  if (attempt.status === 'started') {
+    attempt.connection.stop();
+    await attempt.result;
+  }
+}
+
+describe('startDerivAttempt: la espera hasta pasar el cierre anterior', () => {
+  it.each<[string, string, number[], Record<string, string>[]]>([
+    ['de 60 000 ms es un solo tramo, sin aviso', '2026-03-02T10:00:59.999Z', [60_000], []],
+    [
+      'de más de 60 000 ms va en tramos de 60 000 como mucho y avisa una sola vez con clock_behind_log',
+      '2026-03-02T10:02:30.000Z',
+      [60_000, 60_000, 30_001],
+      [
+        {
+          event: 'clock_behind_log',
+          now_utc: START,
+          previous_close_utc: '2026-03-02T10:02:30.000Z',
+        },
+      ],
+    ],
+  ])('una espera %s', async (_label, closedAtUtc, steps, alerts) => {
+    // El cierre de la conexión anterior quedó por delante de este reloj.
+    const run = await attemptHarness({ events: previousClosedAt(closedAtUtc) });
+    const started = run.start();
+    await settle();
+
+    // Cada tramo es el único temporizador pendiente hasta que el intento abre el socket.
+    const scheduled: number[] = [];
+    while (run.sockets.length === 0) {
+      const pending = run.clock.pendingDelays();
+      expect(pending).toHaveLength(1);
+      const [step = 0] = pending;
+      scheduled.push(step);
+      await run.clock.advance(step);
+    }
+    expect(scheduled).toEqual(steps);
+    expect(run.alerts).toEqual(alerts);
+    await stopAttempt(await started);
+  });
+
+  it('después de cada tramo vuelve a mirar el reloj: si saltó por delante del cierre, abre el socket sin esperar el resto', async () => {
+    const run = await attemptHarness({ events: previousClosedAt('2026-03-02T10:02:30.000Z') });
+    const started = run.start();
+    await settle();
+    expect(run.clock.pendingDelays()).toEqual([60_000]);
+    // Un ajuste del reloj de cinco minutos hacia delante durante el primer tramo.
+    run.clock.jumpWallClock(300_000);
+    await run.clock.advance(60_000);
+
+    expect(run.sockets).toHaveLength(1);
+    run.socket().open();
+    await settle();
+    expect((await run.events()).at(-1)).toMatchObject({
+      kind: 'connection_opened',
+      occurred_at_utc: '2026-03-02T10:06:00.000Z',
+      supersedes_connection_id: PREVIOUS,
+    });
+    await stopAttempt(await started);
   });
 });
