@@ -1408,6 +1408,22 @@ describe('RawFirstIngestor: reabrir el log que falló', () => {
     },
   );
 
+  it.each(['receiveEvent', 'repairUnrecordedClose'] as const)(
+    'un error al reabrir que no viene de un almacén ni del contenido, como uno de programación, hace que %s se rechace sin registrar otro persistence_unavailable',
+    async (operation) => {
+      const run = await failedLog();
+      const bug = new TypeError('sintético');
+      vi.spyOn(SourceEventLog, 'open').mockRejectedValueOnce(bug);
+
+      // No dice que el almacenamiento no esté disponible: reintentarlo como una pausa ocultaría el
+      // error.
+      await expect(reopenWith[operation](run)).rejects.toBe(bug);
+      expect(run.operational.incidents).toEqual([expect.objectContaining({ observed_ref: id(3) })]);
+      expect(run.sourceLog.rows.map((row) => row.event_id)).toEqual([id(1), id(2)]);
+      expect(run.ingestor.state).toBe('paused');
+    },
+  );
+
   // La reparación con un almacén que no responde al reabrir está en «si no puede reabrir el log».
   it('si un almacén no responde al reabrir, receiveEvent registra persistence_unavailable y no queda durable', async () => {
     const run = await failedLog();

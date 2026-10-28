@@ -264,6 +264,8 @@ export class DerivConnection {
   #forgetAfterRecovery = false;
   /** Ya se pidió `forget_all`: el cierre previsto o la parada esperan su respuesta. */
   #forgetAllSent = false;
+  /** Se pidió `finish` o `stop`: ya no empieza ninguna recuperación de historia. */
+  #closeAsked = false;
 
   constructor(input: DerivConnectionInput) {
     this.#input = input;
@@ -320,8 +322,9 @@ export class DerivConnection {
    * tanto llega el cierre previsto (la duración o `finish`), `forget_all` espera a que la
    * recuperación termine; la parada (`stop`) no espera: la abandona.
    *
-   * Si la conexión no está suscrita, o se cierra antes de encolar el resultado, también durante la
-   * espera entre intentos, se resuelve como `abandoned` y no persiste nada; si falla por un error
+   * Si la conexión no está suscrita o ya se le pidió `finish` o `stop`, se resuelve enseguida como
+   * `abandoned`, sin pedir ninguna página. Si se cierra antes de encolar el resultado, también
+   * durante la espera entre intentos, se resuelve igual y no persiste nada; si falla por un error
    * inesperado o llega la parada, igual, aunque el resultado ya esté en la cola. Si el fallo o la
    * parada llegan mientras el resultado ya se escribe, esa escritura puede terminar aunque se
    * resuelva como `abandoned`: el log es la fuente de verdad. Un hueco con horas que no están en UTC
@@ -337,7 +340,7 @@ export class DerivConnection {
       throw new TypeError('La conexión ya tiene una recuperación de historia en curso.');
     }
     const connectionId = this.#connectionId;
-    if (!this.#subscribed || this.#closing !== null || connectionId === null) {
+    if (!this.#subscribed || this.#closeAsked || this.#closing !== null || connectionId === null) {
       return Promise.resolve({ status: 'abandoned' });
     }
     const recovery: HistoryRecovery = new HistoryRecovery({
@@ -375,13 +378,15 @@ export class DerivConnection {
    * suscrita, pide `forget_all` y cierra con `requested` cuando su respuesta queda durable, con fin
    * `completed`; si hay una recuperación de historia en curso, primero espera a que termine, con sus
    * reintentos (ADR-0015 §4). Sin suscripción no hay nada que olvidar: cierra enseguida con
-   * `requested` y motivo `requested`, también `completed`. Cancela la duración. No hace nada si el
-   * cierre ya está decidido o si el cierre previsto ya se pidió.
+   * `requested` y motivo `requested`, también `completed`. Cancela la duración, y desde entonces no
+   * empieza ninguna recuperación nueva. No hace nada si el cierre ya está decidido o si el cierre
+   * previsto ya se pidió.
    */
   finish(): void {
     if (this.#closing !== null) {
       return;
     }
+    this.#closeAsked = true;
     this.#cancelDuration?.();
     this.#cancelDuration = null;
     if (!this.#subscribed) {
@@ -396,17 +401,19 @@ export class DerivConnection {
 
   /**
    * La parada por señal (ADR-0015 §3, «Parada»). No espera a la recuperación de historia en curso:
-   * la abandona, y su resultado no se persiste aunque ya esté en la cola. Cancela la duración. Con la
-   * conexión suscrita, pide `forget_all`, si el cierre previsto no lo pidió ya, y cierra con
-   * `requested` cuando su respuesta queda durable, con fin `completed`; si no responde en 15 000 ms,
-   * cierra con `timeout`, como cualquier petición. Sin suscripción, cierra enseguida con `requested`
-   * y motivo `requested`, también `completed`; el `ConnectionClosed` se escribe solo si la conexión
-   * llegó a abrirse. No hace nada si el cierre ya está decidido.
+   * la abandona, y su resultado no se persiste aunque ya esté en la cola, salvo que ya se esté
+   * escribiendo (ver `recoverHistory`). Cancela la duración, y desde entonces no empieza ninguna
+   * recuperación nueva. Con la conexión suscrita, pide `forget_all`, si el cierre previsto no lo pidió
+   * ya, y cierra con `requested` cuando su respuesta queda durable, con fin `completed`; si no
+   * responde en 15 000 ms, cierra con `timeout`, como cualquier petición. Sin suscripción, cierra
+   * enseguida con `requested` y motivo `requested`, también `completed`; el `ConnectionClosed` se
+   * escribe solo si la conexión llegó a abrirse. No hace nada si el cierre ya está decidido.
    */
   stop(): void {
     if (this.#closing !== null) {
       return;
     }
+    this.#closeAsked = true;
     this.#cancelDuration?.();
     this.#cancelDuration = null;
     // Si el cierre previsto la esperaba, al abandonarla pide `forget_all` (`#afterRecovery`).

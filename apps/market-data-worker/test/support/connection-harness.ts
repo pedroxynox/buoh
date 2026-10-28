@@ -93,7 +93,7 @@ export interface ConnectionHarnessOptions {
   readonly deferClose?: boolean;
   /**
    * Tiempo de escucha hasta `forget_all`; por defecto, 600 000 ms, fuera de las pruebas. Con `null`,
-   * la conexión no lo tiene, como en la sesión: no se cierra sola.
+   * la conexión no lo tiene, como en la sesión: nunca pide el cierre previsto por su cuenta.
    */
   readonly durationMs?: number | null;
   /** Source events que el log ya tiene, de ejecuciones anteriores; por defecto, ninguno. */

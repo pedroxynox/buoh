@@ -121,14 +121,21 @@ export interface DerivAttemptInput {
   readonly scheduler: Scheduler;
   /** Pide `time` una vez, tras el primer tick, para medir el desfase con el servidor. */
   readonly serverTime: boolean;
+  /**
+   * La parada del intento antes de su conexión (ADR-0015 §3, «Parada»): si se aborta, la espera hasta
+   * pasar el cierre anterior se cancela y el intento termina sin abrir el socket. Una reparación en
+   * curso termina igual: el cierre reparado registra una pérdida real.
+   */
+  readonly signal?: AbortSignal;
 }
 
 /**
  * Cómo empezó un intento: no conectó, porque el cierre reparado no quedó durable o un almacén no
- * respondió al reabrir o leer el log (fin `paused` con `persistence_unavailable` y la etapa), o ya
- * corre su conexión. `connection` es la instancia que corre, para pedirle `recoverHistory` o
- * cerrarla con `finish`, `stop` o `interrupt`; `result` es su `run()`, que se resuelve cuando la
- * conexión termina y se rechaza solo con un error inesperado.
+ * respondió al reabrir o leer el log (fin `paused` con `persistence_unavailable` y la etapa) o
+ * porque se abortó su `signal` (fin `completed`, como una parada), o ya corre su conexión.
+ * `connection` es la instancia que corre, para pedirle `recoverHistory` o cerrarla con `finish`,
+ * `stop` o `interrupt`; `result` es su `run()`, que se resuelve cuando la conexión termina y se
+ * rechaza solo con un error inesperado.
  */
 export type DerivAttempt =
   | { readonly end: DerivSessionEnd; readonly status: 'not_connected' }
@@ -246,15 +253,22 @@ const WAIT_STEP_MS = 60_000;
  * resolución de `connection_lost` antes de su apertura, y el log no se podría derivar. Espera en
  * tramos de 60 000 ms como mucho y vuelve a mirar el reloj después de cada uno: si saltó hacia
  * delante, deja de esperar; si retrocedió, espera otra vez. Si falta más de 60 000 ms, el reloj va
- * por detrás del log: avisa una vez con `clock_behind_log`, y sigue esperando.
+ * por detrás del log: avisa una vez con `clock_behind_log`, y sigue esperando. Si se aborta
+ * `signal`, cancela el tramo en curso y termina enseguida.
  */
 async function waitPast(
-  input: Pick<DerivAttemptInput, 'now' | 'scheduler'> & { readonly alert: OperationalAlert },
+  input: Pick<DerivAttemptInput, 'now' | 'scheduler' | 'signal'> & {
+    readonly alert: OperationalAlert;
+  },
   instantUtc: string,
 ): Promise<void> {
+  const { signal } = input;
   const instant = Date.parse(instantUtc);
   let alerted = false;
   for (;;) {
+    if (signal?.aborted === true) {
+      return;
+    }
     const now = input.now();
     // Hasta el primer milisegundo después del cierre.
     const wait = instant - Date.parse(now) + 1;
@@ -266,8 +280,23 @@ async function waitPast(
       input.alert({ event: 'clock_behind_log', now_utc: now, previous_close_utc: instantUtc });
     }
     await new Promise<void>((resolve) => {
-      input.scheduler.schedule(Math.min(wait, WAIT_STEP_MS), resolve);
+      const onAbort = () => {
+        cancel();
+        resolve();
+      };
+      const cancel = input.scheduler.schedule(Math.min(wait, WAIT_STEP_MS), () => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      });
+      signal?.addEventListener('abort', onAbort, { once: true });
     });
+  }
+}
+
+/** La duración de una conexión: un entero positivo de milisegundos. */
+function assertDuration(durationMs: number): void {
+  if (!Number.isSafeInteger(durationMs) || durationMs <= 0) {
+    throw new TypeError('durationMs debe ser un entero positivo de milisegundos.');
   }
 }
 
@@ -275,11 +304,16 @@ async function waitPast(
  * Un intento de la sesión (ADR-0015 §3), con su ingestor: repara el cierre que le falte a la conexión
  * anterior del log, espera a que el reloj pase la hora del cierre de esa conexión y arranca una
  * `DerivConnection` que la supera (`supersedes_connection_id`). Devuelve la conexión que corre y la
- * promesa de su resultado, o el fin sin conectar (ver `DerivAttempt`). Si el log no pasa sus
- * comprobaciones, se rechaza con `LogIntegrityError`, sin conectar.
+ * promesa de su resultado, o el fin sin conectar (ver `DerivAttempt`). Si se aborta `signal` antes
+ * de la conexión, termina sin socket. Si el log no pasa sus comprobaciones, se rechaza con
+ * `LogIntegrityError`, sin conectar; un `durationMs` que no es un entero positivo es un error de
+ * programación (`TypeError`), y entonces no repara nada.
  */
 export async function startDerivAttempt(input: DerivAttemptInput): Promise<DerivAttempt> {
-  const { ingestor, preparation } = input;
+  if (input.durationMs !== undefined) {
+    assertDuration(input.durationMs);
+  }
+  const { ingestor, preparation, signal } = input;
   const { profile, schemas, symbol } = preparation;
   const alert = input.alert ?? stderrAlert;
   // Antes del socket: la conexión anterior sale del log, nunca de la memoria (ADR-0015 §3).
@@ -291,7 +325,19 @@ export async function startDerivAttempt(input: DerivAttemptInput): Promise<Deriv
     };
   }
   if (repair.closed_at_utc !== null) {
-    await waitPast({ alert, now: input.now, scheduler: input.scheduler }, repair.closed_at_utc);
+    await waitPast(
+      {
+        alert,
+        now: input.now,
+        scheduler: input.scheduler,
+        ...(signal === undefined ? {} : { signal }),
+      },
+      repair.closed_at_utc,
+    );
+  }
+  // Una parada que llegó durante la reparación o la espera: la conexión ya no se abre.
+  if (signal?.aborted === true) {
+    return { end: { status: 'completed' }, status: 'not_connected' };
   }
   const connection = new DerivConnection({
     alert,
@@ -329,9 +375,8 @@ export async function startDerivAttempt(input: DerivAttemptInput): Promise<Deriv
  * conectar.
  */
 export async function runDerivAdapter(input: DerivAdapterInput): Promise<DerivAdapterResult> {
-  if (!Number.isSafeInteger(input.durationMs) || input.durationMs <= 0) {
-    throw new TypeError('durationMs debe ser un entero positivo de milisegundos.');
-  }
+  // Antes de la descarga: un error de programación no espera a los esquemas.
+  assertDuration(input.durationMs);
   const last = input.log.lastEventId;
   const preparation = await prepareDerivAdapter({
     ...input,

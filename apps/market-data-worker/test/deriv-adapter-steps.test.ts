@@ -306,7 +306,8 @@ async function attemptHarness(
     sink: { invalidFrame: () => undefined, tick: () => undefined },
   });
 
-  const start = () =>
+  /** Lanza el intento, con la duración o la señal de `options` si las hay. */
+  const start = (options: { readonly durationMs?: number; readonly signal?: AbortSignal } = {}) =>
     startDerivAttempt({
       alert: (payload) => alerts.push(payload),
       catalog: new MemoryCatalogStore(),
@@ -322,6 +323,7 @@ async function attemptHarness(
       requestedResponses: new MemoryRequestedResponseIncidentStore(),
       scheduler: clock.scheduler,
       serverTime: false,
+      ...options,
     });
 
   /** Socket del intento; falla si no hay exactamente uno. */
@@ -406,6 +408,25 @@ describe('startDerivAttempt: un intento de la sesión', () => {
     ]);
   });
 
+  it.each([0, -1, 1.5, Number.NaN])(
+    'con durationMs %s, que no es un entero positivo, se rechaza con TypeError antes de reparar nada',
+    async (durationMs) => {
+      // La conexión anterior cayó sin su cierre: un intento válido lo repararía.
+      const run = await attemptHarness({ events: previousConnectionEvents().slice(0, 2) });
+      const outcome = run.start({ durationMs }).then(
+        (attempt) => attempt,
+        (error: unknown) => error,
+      );
+      await settle();
+      // Lo que esperaría un intento válido para pasar el cierre reparado.
+      await run.clock.advance(1);
+
+      expect(await outcome).toBeInstanceOf(TypeError);
+      expect(run.sockets).toEqual([]);
+      expect(await run.events()).toHaveLength(2);
+    },
+  );
+
   it('si el log no pasa sus comprobaciones, el intento se rechaza con LogIntegrityError, sin socket ni registro', async () => {
     const run = await attemptHarness({
       closeSegment: true,
@@ -482,6 +503,41 @@ describe('startDerivAttempt: la espera hasta pasar el cierre anterior', () => {
     expect(scheduled).toEqual(steps);
     expect(run.alerts).toEqual(alerts);
     await stopAttempt(await started);
+  });
+
+  it('si la señal se aborta a mitad de un tramo, cancela el tramo y termina sin socket, como una parada', async () => {
+    const run = await attemptHarness({ events: previousClosedAt('2026-03-02T10:02:30.000Z') });
+    const controller = new AbortController();
+    const started = run.start({ signal: controller.signal });
+    await settle();
+    await run.clock.advance(30_000);
+    expect(run.clock.pendingDelays()).toEqual([30_000]);
+    controller.abort();
+    await settle();
+
+    expect(run.clock.pendingDelays()).toEqual([]);
+    expect(await started).toEqual({ end: { status: 'completed' }, status: 'not_connected' });
+    // Ni después de pasar el cierre se abre un socket.
+    await run.clock.advance(300_000);
+    expect(run.sockets).toEqual([]);
+  });
+
+  it('si la señal se aborta durante la reparación, el cierre reparado queda, pero no espera ni abre el socket', async () => {
+    const run = await attemptHarness({ events: previousConnectionEvents().slice(0, 2) });
+    const controller = new AbortController();
+    const started = run.start({ signal: controller.signal });
+    controller.abort();
+    await settle();
+
+    expect(run.clock.pendingDelays()).toEqual([]);
+    expect(await started).toEqual({ end: { status: 'completed' }, status: 'not_connected' });
+    expect(run.sockets).toEqual([]);
+    // La pérdida ya quedó en el log: la parada no la deshace.
+    expect((await run.events()).at(-1)).toMatchObject({
+      connection_id: PREVIOUS,
+      kind: 'connection_closed',
+      reason: 'close_not_recorded',
+    });
   });
 
   it('después de cada tramo vuelve a mirar el reloj: si saltó por delante del cierre, abre el socket sin esperar el resto', async () => {

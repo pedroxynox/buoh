@@ -7,6 +7,7 @@ import {
   E,
   forgetAllSent,
   holdObjectWrites,
+  pagesSent,
   recovering,
   REQUEST,
   results,
@@ -16,8 +17,9 @@ import {
 
 // Cierres que decide quien sigue la conexión (ADR-0015 §3, §4 y §9): el cierre previsto
 // (`finish`), la parada por señal (`stop`) y el corte del propio transporte (`interrupt`), y una
-// conexión sin duración, que no se cierra sola. Socket falso, reloj y temporizador manuales, IDs
-// secuenciales, almacenes en memoria y esquemas sintéticos; ningún precio es de mercado.
+// conexión sin duración, que nunca pide el cierre previsto por su cuenta. Socket falso, reloj y
+// temporizador manuales, IDs secuenciales, almacenes en memoria y esquemas sintéticos; ningún
+// precio es de mercado.
 
 function forbidAmbientEffects(): void {
   vi.useFakeTimers({ now: new Date('2099-12-31T23:59:59.999Z'), toFake: ['Date'] });
@@ -56,7 +58,7 @@ const forgetAllRequests = (run: RecoveringRun) =>
 // petición siguiente lleva el `req_id` 3.
 
 describe('DerivConnection sin duración', () => {
-  it('no se cierra sola: nunca pide forget_all y su único temporizador es el keepalive', async () => {
+  it('nunca pide el cierre previsto por su cuenta: no pide forget_all y su único temporizador es el keepalive', async () => {
     const run = await recovering({ durationMs: null });
     // El keepalive vence a las 10:00:45, 45 000 ms después de abrir.
     expect(run.clock.pendingDelays()).toEqual([43_000]);
@@ -281,6 +283,25 @@ describe.each(['finish', 'stop'] as const)('DerivConnection.%s sin suscripción'
     expect(await run.events()).toEqual([]);
   });
 });
+
+describe.each(['finish', 'stop'] as const)(
+  'DerivConnection.recoverHistory después de %s',
+  (method) => {
+    it('se resuelve como abandoned sin pedir páginas, aunque forget_all todavía no haya respondido', async () => {
+      const run = await recovering({ durationMs: null });
+      run.connection[method]();
+      const outcome = run.connection.recoverHistory(REQUEST);
+      await settle();
+
+      expect(pagesSent(run)).toEqual([]);
+      expect(await outcome).toEqual({ status: 'abandoned' });
+      expect(forgetAllRequests(run)).toEqual([{ forget_all: 'ticks', req_id: 3 }]);
+      run.socket().text(derivMessages.forgetAll(3));
+      expect((await run.run).end).toEqual({ status: 'completed' });
+      expect(await results(run)).toEqual([]);
+    });
+  },
+);
 
 describe('DerivConnection.interrupt: el corte del propio transporte (ADR-0015 §9)', () => {
   it('corta el socket y cierra con transport_error y el motivo dado, detrás de los frames que ya llegaron: termina disconnected', async () => {
