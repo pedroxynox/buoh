@@ -2,6 +2,8 @@ import { TextDecoder } from 'node:util';
 
 import {
   canonicalJson,
+  connectionClosedSchema,
+  connectionOpenedSchema,
   sha256Hex,
   sourceEventSchema,
   type ConnectionClosed,
@@ -11,6 +13,7 @@ import {
 import {
   createCatalogResponseSchema,
   deriveCatalogSnapshot,
+  deriveMarketData,
   publicationThresholds,
   type InvalidFrameReason,
   type UnflaggedTick,
@@ -109,20 +112,27 @@ interface HarnessOptions {
   readonly durationMs?: number;
   readonly expectedSha256?: string;
   readonly fetch?: typeof fetch;
+  /** Último ID que usó una ejecución anterior: los de esta siguen desde el siguiente. */
+  readonly lastId?: number;
+  /** Objetos y log de una ejecución anterior; por defecto, vacíos. */
+  readonly objects?: MemoryObjectStore;
   readonly operational?: MemoryOperationalStore;
   /** Esquemas que cambian en el archivo sintético (`syntheticSchemaArchive`). */
   readonly schemaOverrides?: Readonly<Partial<Record<SchemaEntryName, unknown>>>;
   readonly serverTime?: boolean;
+  readonly sourceLog?: MemorySourceLogStore;
+  /** Hora del reloj manual al empezar; por defecto, `START`. */
+  readonly start?: string;
   readonly symbol?: string;
 }
 
 async function harness(options: HarnessOptions = {}) {
   forbidAmbientEffects();
-  const clock = new ManualClock(START);
-  let sequence = 0;
+  const clock = new ManualClock(options.start ?? START);
+  let sequence = options.lastId ?? 0;
   const nextId = () => uuid((sequence += 1));
-  const objects = new MemoryObjectStore();
-  const sourceLog = new MemorySourceLogStore();
+  const objects = options.objects ?? new MemoryObjectStore();
+  const sourceLog = options.sourceLog ?? new MemorySourceLogStore();
   const operational = options.operational ?? new MemoryOperationalStore();
   const catalog = options.catalog ?? new MemoryCatalogStore();
   const requested = new MemoryRequestedResponseIncidentStore();
@@ -144,10 +154,13 @@ async function harness(options: HarnessOptions = {}) {
     fetchCalls.push(typeof url === 'string' ? url : url instanceof URL ? url.href : url.url);
     return Promise.resolve(new Response(fixture.archive, { status: 200 }));
   }) as typeof fetch;
+  /** Filas del log en el momento en que el adaptador abre cada socket. */
+  const rowsAtConnect: number[] = [];
   const run = runDerivAdapter({
     alert: (payload) => alerts.push(payload),
     catalog,
     connect: (input) => {
+      rowsAtConnect.push(sourceLog.rows.length);
       if (options.connectError !== undefined) {
         throw options.connectError;
       }
@@ -232,9 +245,11 @@ async function harness(options: HarnessOptions = {}) {
     nonTick,
     objects,
     openAndListCatalog,
+    openLog,
     operational,
     registry,
     requested,
+    rowsAtConnect,
     run,
     socket,
     sockets,
@@ -1032,7 +1047,8 @@ describe('runDerivAdapter: antes de conectar', () => {
   });
 
   it('comprueba también la petición ticks_history: si su esquema la rechaza, no conecta', async () => {
-    // Release sintética que pide `end` como entero; la petición lo manda como texto (ADR-0015 §1).
+    // Release sintética que pide `end` como entero; la petición lo manda como texto
+    // (ADR-0015, contexto).
     const run = await harness({
       schemaOverrides: {
         'ticks_history_request.schema.json': {
@@ -1089,6 +1105,262 @@ describe('runDerivAdapter: antes de conectar', () => {
       closure_type: 'requested',
       reason: 'input_closed',
     });
+  });
+});
+
+/** Objetos y log que dejó una ejecución anterior: estos source events, ya durables. */
+async function storesWith(events: readonly SourceEvent[]) {
+  const objects = new MemoryObjectStore();
+  const sourceLog = new MemorySourceLogStore();
+  const log = await SourceEventLog.open({
+    objects,
+    source: DERIV_SOURCE,
+    store: sourceLog,
+    zlibVersion: 'test',
+  });
+  for (const event of events) {
+    await log.append(event);
+  }
+  return { objects, sourceLog };
+}
+
+describe('runDerivAdapter: conexión anterior y cierre no registrado (ADR-0015 §3)', () => {
+  const EARLIER = '2026-03-02T09:00:00.000Z';
+  const PREVIOUS = uuid(9001);
+
+  /** La conexión de una ejecución anterior, una hora antes: su apertura y un tick. */
+  function previousConnectionEvents(): SourceEvent[] {
+    return [
+      connectionOpenedSchema.parse({
+        connection_id: PREVIOUS,
+        event_id: uuid(9002),
+        kind: 'connection_opened',
+        occurred_at_utc: EARLIER,
+        schema_version: '1.0.0',
+        source: DERIV_SOURCE,
+        supersedes_connection_id: null,
+      }),
+      buildRawSourceFrame(
+        {
+          connection_id: PREVIOUS,
+          observation_id: uuid(9003),
+          payload_utf8: derivMessages.tick(2, Date.parse(EARLIER) / 1000),
+          received_at_utc: EARLIER,
+        },
+        createDerivMeasurementProfile({ schemas: syntheticSchemas(), symbol: 'SYNTH_100' }),
+      ),
+    ];
+  }
+
+  it('si la conexión anterior tiene su cierre, la apertura nueva la supera sin reparar nada', async () => {
+    const previous = [
+      ...previousConnectionEvents(),
+      connectionClosedSchema.parse({
+        affected_symbols: ['SYNTH_100'],
+        closure_type: 'remote',
+        connection_id: PREVIOUS,
+        event_id: uuid(9004),
+        kind: 'connection_closed',
+        occurred_at_utc: '2026-03-02T09:00:05.000Z',
+        reason: 'close_code_1001',
+        schema_version: '1.0.0',
+        source: DERIV_SOURCE,
+      }),
+    ];
+    const run = await harness(await storesWith(previous));
+    run.socket().open();
+    await settle();
+
+    expect(await run.events()).toEqual([
+      ...previous,
+      {
+        connection_id: uuid(1),
+        event_id: uuid(2),
+        kind: 'connection_opened',
+        occurred_at_utc: START,
+        schema_version: '1.0.0',
+        source: DERIV_SOURCE,
+        supersedes_connection_id: PREVIOUS,
+      },
+    ]);
+    expect(run.socket().requests()).toEqual([{ active_symbols: 'brief', req_id: 1 }]);
+    run.socket().emit({ code: 1000, kind: 'closed' });
+    await run.run;
+  });
+
+  it('si a la conexión anterior le falta el cierre, lo repara antes de abrir el socket y la apertura nueva la supera', async () => {
+    const previous = previousConnectionEvents();
+    const run = await harness(await storesWith(previous));
+    // Al abrir el socket, el cierre reparado ya era durable: la tercera fila del log.
+    expect(run.rowsAtConnect).toEqual([3]);
+    await run.clock.advance(1000);
+    run.socket().open();
+    await settle();
+
+    expect(await run.events()).toEqual([
+      ...previous,
+      {
+        affected_symbols: ['SYNTH_100'],
+        closure_type: 'transport_error',
+        connection_id: PREVIOUS,
+        event_id: uuid(1),
+        kind: 'connection_closed',
+        occurred_at_utc: START,
+        reason: 'close_not_recorded',
+        schema_version: '1.0.0',
+        source: DERIV_SOURCE,
+      },
+      {
+        connection_id: uuid(2),
+        event_id: uuid(3),
+        kind: 'connection_opened',
+        occurred_at_utc: '2026-03-02T10:00:01.000Z',
+        schema_version: '1.0.0',
+        source: DERIV_SOURCE,
+        supersedes_connection_id: PREVIOUS,
+      },
+    ]);
+    expect(run.socket().requests()).toEqual([{ active_symbols: 'brief', req_id: 1 }]);
+    run.socket().emit({ code: 1000, kind: 'closed' });
+    await run.run;
+  });
+
+  it('si el cierre reparado no queda durable, no abre el socket y termina en pausa por persistencia', async () => {
+    const previous = previousConnectionEvents();
+    const stores = await storesWith(previous);
+    stores.objects.armNextPutFailure('synthetic_put_failure');
+    const run = await harness(stores);
+    const result = await run.run;
+
+    expect(run.sockets).toEqual([]);
+    expect(result).toEqual({
+      catalog: null,
+      closure: null,
+      connection_id: null,
+      end: { detail: 'raw_object_write', reason: 'persistence_unavailable', status: 'paused' },
+      schemas: {
+        archive_sha256: run.fixture.expected.archive_sha256,
+        release: 'synthetic-deriv-1',
+      },
+      server_time_offset_ms: null,
+      subscription_id: null,
+    });
+    expect(await run.events()).toEqual(previous);
+    expect(run.operational.incidents).toEqual([
+      expect.objectContaining({
+        evidence: { reason: 'synthetic_put_failure', stage: 'raw_object_write' },
+        incident_type: 'persistence_unavailable',
+        // El ID del cierre que no quedó durable; el último evento durable es el tick.
+        observed_ref: uuid(1),
+        related_refs: [uuid(9003)],
+      }),
+    ]);
+    expect(run.registry.openConditionTypes()).toEqual(['persistence_unavailable']);
+  });
+
+  it('tras un cierre que no quedó durable, la ejecución siguiente lo repara y las reglas ven la pérdida sin continuidad', async () => {
+    // Primera ejecución: un tick y, al cortarse la conexión, el log no confirma su cierre.
+    const first = await harness();
+    await first.openAndListCatalog();
+    first.socket().text(derivMessages.tick(2, START_EPOCH));
+    await settle();
+    first.sourceLog.failIndex = (row) => row.kind === 'connection_closed';
+    first.socket().emit({ code: 1006, kind: 'closed' });
+    expect((await first.run).end).toEqual({
+      detail: null,
+      reason: 'persistence_unavailable',
+      status: 'paused',
+    });
+    first.sourceLog.failIndex = () => false;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+
+    // Segunda ejecución, cinco minutos después, sobre el mismo log y el mismo registro operativo.
+    const later = '2026-03-02T10:05:00.000Z';
+    const second = await harness({
+      lastId: 100,
+      objects: first.objects,
+      operational: first.operational,
+      sourceLog: first.sourceLog,
+      start: later,
+    });
+    // El cierre reparado es el primer evento durable: ya resolvió persistence_unavailable.
+    expect(second.registry.openConditionTypes()).toEqual([]);
+    await second.clock.advance(1000);
+    await second.openAndListCatalog();
+    second.socket().text(derivMessages.tick(2, Date.parse(later) / 1000 + 1));
+    await settle();
+    await second.clock.advance(30_000);
+    second.socket().text(derivMessages.forgetAll(3));
+    expect((await second.run).end).toEqual({ status: 'completed' });
+
+    const segments = await (await second.openLog()).readDurableSegments();
+    const events = segments.flat();
+    expect(events.map((event) => event.kind)).toEqual([
+      'connection_opened',
+      'raw_source_frame',
+      'raw_source_frame',
+      'connection_closed',
+      'connection_opened',
+      'raw_source_frame',
+      'raw_source_frame',
+      'raw_source_frame',
+      'connection_closed',
+    ]);
+    const [openedA, , , repaired, openedB] = events;
+    expect(repaired).toMatchObject({
+      affected_symbols: ['SYNTH_100'],
+      closure_type: 'transport_error',
+      connection_id: openedA?.connection_id,
+      occurred_at_utc: later,
+      reason: 'close_not_recorded',
+    });
+    expect(openedB).toMatchObject({
+      occurred_at_utc: '2026-03-02T10:05:01.000Z',
+      supersedes_connection_id: openedA?.connection_id,
+    });
+    const repairedId = repaired?.kind === 'connection_closed' ? repaired.event_id : null;
+    expect(second.operational.conditions).toEqual([
+      expect.objectContaining({ action: 'opened', condition_type: 'persistence_unavailable' }),
+      expect.objectContaining({
+        action: 'resolved',
+        cause_refs: expect.arrayContaining([repairedId]) as unknown,
+        occurred_at_utc: later,
+        resolution_reason: 'persistence_restored',
+      }),
+    ]);
+
+    // Las reglas: el cierre reparado abre connection_lost y la apertura que lo supera lo resuelve;
+    // sin historia, la continuidad sigue pendiente del tick anterior al primero posterior.
+    const derived = deriveMarketData(
+      segments,
+      createDerivMeasurementProfile({ schemas: syntheticSchemas(), symbol: 'SYNTH_100' }),
+    );
+    expect(
+      derived.incidents.map((incident) => [incident.incident_type, incident.observed_ref]),
+    ).toEqual([['connection_lost', repairedId]]);
+    expect(derived.conditions).toEqual([
+      expect.objectContaining({
+        action: 'opened',
+        condition_type: 'connection_lost',
+        occurred_at_utc: later,
+      }),
+      expect.objectContaining({
+        action: 'resolved',
+        condition_type: 'connection_lost',
+        occurred_at_utc: '2026-03-02T10:05:01.000Z',
+        resolution_reason: 'connection_reestablished',
+      }),
+    ]);
+    expect(derived.openConditionTypes).toEqual([]);
+    expect(derived.pendingGaps).toEqual([
+      {
+        from_event_time_utc: '2026-03-02T10:00:00.001Z',
+        symbol: 'SYNTH_100',
+        to_event_time_utc: '2026-03-02T10:05:00.999Z',
+      },
+    ]);
   });
 });
 

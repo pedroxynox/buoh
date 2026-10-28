@@ -113,15 +113,23 @@ export class MemoryMetadataStore implements MetadataStore {
 export class MemorySourceLogStore extends InMemorySourceLogStore {
   /** Devuelve true para hacer fallar la inserción de esa fila de índice. */
   failIndex: (row: SourceEventIndexRow) => boolean = () => false;
+  /**
+   * Devuelve true para insertar esa fila y aun así informar un error: el índice la confirmó, pero
+   * quien escribe no lo sabe (un resultado ambiguo, ADR-0004 §12). Al reabrir, el log la adopta.
+   */
+  failIndexAfterInsert: (row: SourceEventIndexRow) => boolean = () => false;
   failClose = false;
 
-  override insertIndexRow(row: SourceEventIndexRow): Promise<void> {
+  override async insertIndexRow(row: SourceEventIndexRow): Promise<void> {
     if (this.failIndex(row)) {
-      return Promise.reject(
-        Object.assign(new Error('Fallo inyectado'), { code: 'synthetic_index_failure' }),
-      );
+      throw Object.assign(new Error('Fallo inyectado'), { code: 'synthetic_index_failure' });
     }
-    return super.insertIndexRow(row);
+    await super.insertIndexRow(row);
+    if (this.failIndexAfterInsert(row)) {
+      throw Object.assign(new Error('Fallo inyectado tras insertar'), {
+        code: 'synthetic_index_ambiguous',
+      });
+    }
   }
 
   override insertClosedSegment(segment: ClosedSourceSegment): Promise<void> {

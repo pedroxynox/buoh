@@ -106,8 +106,10 @@ async function loadSchemas(input: DerivAdapterInput): Promise<SchemaLoadResult> 
 
 /**
  * Adaptador público de Deriv (`F1-SOURCE-001`, ADR-0012): carga los esquemas de la release fijada,
- * comprueba las peticiones con ellos, arma el perfil de medición y el `RawFirstIngestor`, y sigue una
- * conexión hasta su cierre. Si los esquemas no cargan, nunca se conecta (salud `failed`).
+ * comprueba las peticiones con ellos, arma el perfil de medición y el `RawFirstIngestor`, repara el
+ * cierre que le falte a la conexión anterior del log y sigue una conexión, que supera a esa, hasta
+ * su cierre (ADR-0015 §3). Si los esquemas no cargan, nunca se conecta (salud `failed`); si el cierre
+ * reparado no queda durable, tampoco (salud `paused`).
  */
 export async function runDerivAdapter(input: DerivAdapterInput): Promise<DerivAdapterResult> {
   if (!Number.isSafeInteger(input.durationMs) || input.durationMs <= 0) {
@@ -143,6 +145,15 @@ export async function runDerivAdapter(input: DerivAdapterInput): Promise<DerivAd
     reopenLog: input.reopenLog,
     sink: input.sink,
   });
+  // Antes del socket: la conexión anterior sale del log, nunca de la memoria (ADR-0015 §3).
+  const repair = await ingestor.repairUnrecordedClose({ affected_symbols: [input.symbol] });
+  if (repair.status === 'not_durable') {
+    return notConnected(summary, {
+      detail: repair.stage,
+      reason: 'persistence_unavailable',
+      status: 'paused',
+    });
+  }
   const connection = new DerivConnection({
     alert: input.alert ?? stderrAlert,
     catalog: input.catalog,
@@ -162,6 +173,7 @@ export async function runDerivAdapter(input: DerivAdapterInput): Promise<DerivAd
     scheduler: input.scheduler,
     schemas,
     serverTime: input.serverTime,
+    supersedes_connection_id: repair.connection_id,
     symbol: input.symbol,
   });
   return { ...(await connection.run()), schemas: summary };

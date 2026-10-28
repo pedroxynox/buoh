@@ -603,7 +603,7 @@ El perfil de Deriv no declara `ticks` ni `error`. Una suscripción fallida (`msg
 
 Decidido en [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §4, y llega con el PR 3 de su secuencia: quien pida `ticks_history` comprobará igual su respuesta `history`, y además que traiga `history.times`, `history.prices` y `pip_size`, que `times` y `prices` tengan la misma longitud, que los tiempos sean enteros estrictamente crecientes y que caigan dentro del rango pedido; si no, el motivo será `schema_validation_failed` o `history_inconsistent`. Una petición de historia rechazada llega con `msg_type` `ticks_history` y un objeto `error`; el perfil v2 no lo declara, así que la registran las reglas 2.0.0.
 
-`history_inconsistent` (longitudes, orden o rango de `history.times`) existe en `packages/domain` desde el PR 3 y es solo para las respuestas de historia. En PostgreSQL, `requested_response_incidents` lo admite desde la migración `0004` (PR 5 de ADR-0015 §13); la `0003` no lo admite.
+`history_inconsistent` (longitudes, orden o rango de `history.times`) existe en `packages/domain` desde el PR 3 y es solo para las respuestas de historia. En PostgreSQL, `requested_response_incidents` lo admitirá desde la migración `0004`, que llega con el PR 5 de ADR-0015 §13; la `0003`, la vigente, no lo admite.
 
 ## Contratos futuros
 

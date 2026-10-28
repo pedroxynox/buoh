@@ -18,6 +18,7 @@ export { createUuidV7Generator } from './ids.js';
 export {
   buildRawSourceFrame,
   RawFirstIngestor,
+  type CloseRepairOutcome,
   type FrameInput,
   type PersistenceFailureReport,
   type RawFirstIngestorInput,
@@ -51,6 +52,7 @@ export {
   type SourceLogState,
   type SourceLogStore,
 } from './source-log/ports.js';
+export { previousConnection, type PreviousConnection } from './source-log/previous-connection.js';
 export { publishFromLog, type PublishFromLogInput } from './source-log/publish-from-log.js';
 export {
   failureReason,

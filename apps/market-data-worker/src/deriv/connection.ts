@@ -115,6 +115,11 @@ export interface DerivConnectionInput {
   readonly schemas: DerivSchemaSet;
   /** Pide `time` una vez, tras el primer tick, para medir el desfase. */
   readonly serverTime: boolean;
+  /**
+   * Conexión anterior del log, que supera el `ConnectionOpened` de esta (ADR-0015 §3); `null` solo
+   * si el log no tiene conexiones.
+   */
+  readonly supersedes_connection_id: string | null;
   readonly symbol: string;
 }
 
@@ -318,7 +323,7 @@ export class DerivConnection {
       occurred_at_utc: this.#input.now(),
       schema_version: CONTRACT_SCHEMA_VERSION,
       source: this.#input.profile.source,
-      supersedes_connection_id: null,
+      supersedes_connection_id: this.#input.supersedes_connection_id,
     });
     this.#queue.pushControl({ event, kind: 'opened' });
   }

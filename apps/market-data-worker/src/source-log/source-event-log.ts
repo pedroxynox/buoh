@@ -331,6 +331,22 @@ export class SourceEventLog {
   }
 
   /**
+   * Todos los source events durables del log, agrupados por segmento y en orden: los cerrados,
+   * leídos y verificados como en `readClosedSegments`, y al final el abierto, si tiene eventos, desde
+   * las líneas que esta instancia releyó al abrirse o escribió. Es la entrada de `deriveMarketData`
+   * y de la conexión anterior (ADR-0015 §3). Tras un fallo de persistencia falla: lo que la instancia
+   * tiene en memoria podría no ser lo durable.
+   */
+  async readDurableSegments(): Promise<SourceEvent[][]> {
+    this.#assertUsable();
+    // Se copia antes de esperar: lo que se escriba mientras se leen los cerrados no entra.
+    const openIndex = this.#segmentIndex;
+    const openLines = [...this.#lines];
+    const closed = openIndex === 0 ? [] : await this.readClosedSegments(0, openIndex - 1);
+    return openLines.length === 0 ? closed : [...closed, openLines.map((line) => parseLine(line))];
+  }
+
+  /**
    * Lee los segmentos cerrados `[from, to]` desde sus objetos, verificando hash físico, hash
    * lógico, conteos y forma de cada línea. Es el input de una publicación.
    */

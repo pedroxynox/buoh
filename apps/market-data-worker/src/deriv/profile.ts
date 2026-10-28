@@ -11,7 +11,7 @@ import { type DerivSchemaSet } from './schema-archive.js';
 
 /**
  * Identidad de la fuente (ADR-0012 §1). Cambiar peticiones, límites o transporte crea otro conector:
- * la 1.1.0 añade `ticks_history` (ADR-0015 §1).
+ * la 1.1.0 añade `ticks_history` y la reconexión (ADR-0015 §1).
  */
 export const DERIV_SOURCE = 'deriv_options';
 export const DERIV_CONNECTOR_VERSION = 'deriv-options-ws-1.1.0';

@@ -50,6 +50,8 @@ Los umbrales live pertenecen a un perfil versionado por fuente/símbolo. El perf
 
 Desde F1.3b, `SourceEventLog.open` cubre la parte de los pasos 3–4 que toca al segmento no finalizado: lo continúa y relee y verifica el objeto de cada uno de sus eventos; si alguno falta o no coincide con su hash, el arranque aborta. El cursor y el high-watermark del paso 3 llegan con la reconexión (F1.5). Si el registro operativo tiene una condición abierta de la ejecución anterior, la entrada sigue cerrada hasta el `ConnectionOpened` que la resuelve.
 
+Desde el PR 3 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, antes de abrir el WebSocket del paso 5 el adaptador de Deriv repara el cierre que le falte a la última conexión del log, por una caída del proceso o un fallo de persistencia (ver «Adaptador público de Deriv», paso 2). Ese cierre reparado resuelve una condición de persistencia abierta, pero no reabre la entrada: la reabre el `ConnectionOpened`.
+
 Desde F1.4b, antes de abrir el log de una fuente en PostgreSQL se toma su bloqueo (ver «Una sola instancia por fuente»).
 
 ### Una sola instancia por fuente
@@ -70,7 +72,7 @@ Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de
 
 ### Desconexión de WebSocket
 
-1. Persistir `ConnectionClosed` con `closure_type`, símbolos afectados y motivo. Desde F1.4b lo hace el adaptador de Deriv (ver «Adaptador público de Deriv»); los pasos 2 a 9 llegan con la reconexión (F1.5).
+1. Persistir `ConnectionClosed` con `closure_type`, símbolos afectados y motivo. Desde F1.4b lo hace el adaptador de Deriv (ver «Adaptador público de Deriv»). Si no queda durable, desde el PR 3 de ADR-0015 §13 lo repara la ejecución siguiente antes de abrir su socket, con el motivo `close_not_recorded`. Los pasos 2 a 9 llegan con la reconexión (F1.5); desde ese mismo PR, cada `ConnectionOpened` ya lleva el `supersedes_connection_id` del paso 7.
 2. Leer y conservar `IngestionCursor` durable por símbolo; no incrustarlo en el evento de cierre.
 3. Si no fue solicitado, crear `connection_lost` y `OperationalConditionEvent.opened`; cambiar a `recovering`.
 4. Reconectar con espera exponencial y jitter inyectable; no crear bucle agresivo.
@@ -140,11 +142,12 @@ La condición de un límite de esquema se resuelve con el primer `ConnectionOpen
 Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §3 a §7), el worker tiene el adaptador del canal público (`apps/market-data-worker/src/deriv/`), con la fuente `deriv_options`. Desde el PR 3 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, su conector es `deriv-options-ws-1.1.0` (en F1.4b, `deriv-options-ws-1.0.0`) y su perfil de medición, `deriv_options-measurement-v2-<símbolo>`, que declara como respuestas pedidas `active_symbols`, `forget_all`, `history` (la respuesta a `ticks_history`), `ping` y `time` (ADR-0015 §1). `pnpm run data:smoke` lo ejecuta una vez, en memoria (ver «Smoke público de Deriv»); todavía no hay un proceso que ingiera de forma continua. El catálogo y las incidencias de respuestas pedidas se guardan en PostgreSQL desde el PR 6 (`PostgresCatalogStore` y `PostgresRequestedResponseIncidentStore`, migración `0003`). Una conexión sigue estos pasos:
 
 1. Carga los esquemas (sección anterior) y comprueba que sus seis peticiones (`active_symbols`, `ticks`, `ticks_history`, `ping`, `time` y `forget_all`) cumplen su esquema de petición. Si algo falla, no se conecta. `ticks_history` es la petición de la recuperación de historia (ADR-0015 §4), que todavía no envía ninguna conexión: se comprueba con un rango representativo (`start` y `end` en 0), porque el rango real se conoce después.
-2. Abre el WebSocket con `ws` 8.22.0: sin compresión, mensajes de hasta 1 048 576 bytes, sin seguir redirecciones y con 10 000 ms para abrir. Al abrir persiste `ConnectionOpened`. Si después sigue abierta una condición del registro operativo, cierra sin suscribirse.
-3. Pide `active_symbols` (`brief`). Un snapshot válido se guarda como versión nueva solo si cambia su contenido. Un catálogo inválido deja su incidencia y no crea versión, y sigue vigente la última versión válida.
-4. Se suscribe a `ticks` solo si el símbolo está en ese snapshot. El primer tick confirma la suscripción, y el adaptador guarda su `subscription.id`.
-5. Envía un `ping` cada 45 000 ms. Cada petición lleva un `req_id` creciente por conexión, desde 1, y espera su respuesta 15 000 ms.
-6. Al cumplirse la duración pedida, pide `forget_all` y cierra con `requested`.
+2. Repara el cierre de la conexión anterior, si falta (ADR-0015 §3, «Cierre no registrado», desde su PR 3). La conexión anterior es la última con `ConnectionOpened` durable en el log, nunca la que recuerda el proceso: un intento cuyo `ConnectionOpened` no quedó durable no existe para el log. Si no tiene un `ConnectionClosed` durable, por una caída del proceso o un fallo de persistencia, el adaptador lo persiste antes de abrir el socket, con `closure_type: transport_error`, motivo `close_not_recorded`, el símbolo como afectado y la hora de la detección. Si el log había fallado, antes lo reabre; y si el índice confirmó el cierre original aunque informó un error, el log reabierto ya lo tiene y no se repara nada, así que nunca se cierra dos veces la misma conexión. El cierre reparado no reabre la entrada. Si no queda durable, no se conecta.
+3. Abre el WebSocket con `ws` 8.22.0: sin compresión, mensajes de hasta 1 048 576 bytes, sin seguir redirecciones y con 10 000 ms para abrir. Al abrir persiste `ConnectionOpened`, que supera la conexión anterior con su `supersedes_connection_id` (`null` solo si el log no tiene conexiones). Si después sigue abierta una condición del registro operativo, cierra sin suscribirse.
+4. Pide `active_symbols` (`brief`). Un snapshot válido se guarda como versión nueva solo si cambia su contenido. Un catálogo inválido deja su incidencia y no crea versión, y sigue vigente la última versión válida.
+5. Se suscribe a `ticks` solo si el símbolo está en ese snapshot. El primer tick confirma la suscripción, y el adaptador guarda su `subscription.id`.
+6. Envía un `ping` cada 45 000 ms. Cada petición lleva un `req_id` creciente por conexión, desde 1, y espera su respuesta 15 000 ms.
+7. Al cumplirse la duración pedida, pide `forget_all` y cierra con `requested`.
 
 Cada mensaje de texto recibe su `observation_id` y su `received_at_utc` al llegar, y pasa por la cola en memoria hacia el `RawFirstIngestor`. Una respuesta se interpreta solo después de que su frame quede durable, y se empareja por `req_id` y por el `msg_type` que espera su petición. Una respuesta que no empareja se conserva raw y no cambia nada; su petición vence a los 15 000 ms.
 
@@ -157,6 +160,7 @@ Cada mensaje de texto recibe su `observation_id` y su `received_at_utc` al llega
 | Causa | `closure_type` | Motivo del `ConnectionClosed` | Resultado y su motivo |
 |---|---|---|---|
 | los esquemas no cargan, o una petición propia no cumple su esquema | no conecta | ninguno | `failed`: el motivo de la carga, o `request_invalid` |
+| el log no se puede reabrir ni leer, o el cierre reparado de la conexión anterior no queda durable (paso 2) | no conecta | ninguno | `paused`: `persistence_unavailable`, con la etapa |
 | no abre en 10 000 ms, o falla al conectar | no hay `ConnectionOpened` | ninguno | `disconnected`: `connect_timeout` o `connect_failed` |
 | cierre previsto, tras la respuesta a `forget_all` (con error o sin él) | `requested` | `requested` | `completed` |
 | sin snapshot válido, símbolo ausente del catálogo o suscripción rechazada | `requested` | `catalog_invalid`, `symbol_not_in_catalog` o `subscription_failed` | `failed`, con el mismo motivo |
@@ -169,7 +173,7 @@ Cada mensaje de texto recibe su `observation_id` y su `received_at_utc` al llega
 | una petición sin respuesta en 15 000 ms | `timeout` | `<operación>_timeout` | `disconnected`: `request_timeout` |
 | una respuesta a `ping` con error o que no cumple su esquema | `timeout` | `ping_invalid` | `disconnected`: `ping_invalid` |
 
-Los cierres `requested` no pierden datos: o no hubo suscripción, o se pidió `forget_all`. Los demás abren `connection_lost` en las reglas y dejan pendiente la continuidad del símbolo suscrito. Si el `ConnectionClosed` no queda durable, el log falló: un resultado `completed` o `disconnected` pasa a `paused` con `persistence_unavailable`.
+Los cierres `requested` no pierden datos: o no hubo suscripción, o se pidió `forget_all`. Los demás, incluido el reparado, abren `connection_lost` en las reglas y dejan pendiente la continuidad del símbolo suscrito. El `ConnectionOpened` siguiente supera esa conexión, así que las reglas resuelven su `connection_lost` (`connection_reestablished`), pero la continuidad sigue pendiente: con el perfil de medición, solo la decide un `HistoryRecoveryResult` (ADR-0015 §2). Si el `ConnectionClosed` no queda durable, el log falló: un resultado `completed` o `disconnected` pasa a `paused` con `persistence_unavailable`, y la ejecución siguiente repara ese cierre (paso 2).
 
 ### Smoke público de Deriv (`data:smoke`)
 
@@ -217,7 +221,7 @@ Desde F1.3b, si la escritura del objeto (`raw_object_write`) o la fila del índi
 - se registra `persistence_unavailable` con severidad `critical`; el motivo es el código del error, nunca su mensaje;
 - la entrada se pausa y el informe fail-closed indica `close_connection_then_recover`;
 - si PostgreSQL tampoco responde, solo queda una alerta JSON en stderr (`operational_registry_unavailable`);
-- para recuperar, el siguiente `ConnectionOpened` reabre el log desde el estado durable y, si queda durable, resuelve la condición (`persistence_restored`). En F1.3b no se verifica antes la continuidad ni se publican o reconcilian los segmentos pendientes (paso 6); eso llega con la reconexión (F1.5).
+- para recuperar, el siguiente `ConnectionOpened` reabre el log desde el estado durable y, si queda durable, resuelve la condición (`persistence_restored`). Desde el PR 3 de ADR-0015 §13, el adaptador de Deriv repara antes el cierre que falte (ver «Adaptador público de Deriv», paso 2): la reparación reabre el log si había fallado y, si hace falta un cierre, lo escribe. Ese cierre reparado es el primer evento durable y resuelve la condición, sin reabrir la entrada. Si no hace falta un cierre, la resuelve el `ConnectionOpened`, como hasta ahora. La entrada siempre la reabre el `ConnectionOpened` durable. En F1.3b no se verifica antes la continuidad ni se publican o reconcilian los segmentos pendientes (paso 6); eso llega con la reconexión (F1.5).
 
 ### Publicación interrumpida
 
