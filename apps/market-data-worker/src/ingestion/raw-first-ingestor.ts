@@ -1,4 +1,5 @@
 import {
+  connectionClosedSchema,
   rawSourceFrameSchema,
   sha256Hex,
   type RawSourceFrame,
@@ -18,9 +19,11 @@ import {
 
 import { type OperationalRegistry } from '../operational/registry.js';
 import { type ClosedSourceSegment } from '../source-log/ports.js';
+import { previousConnection } from '../source-log/previous-connection.js';
 import {
   failureReason,
   LogPersistenceError,
+  LogReadError,
   type SourceEventLog,
 } from '../source-log/source-event-log.js';
 
@@ -68,6 +71,27 @@ export type ReceiveOutcome =
   | { readonly status: 'input_closed' }
   | { readonly resource: string; readonly status: 'limit_exceeded' }
   | { readonly stage: string; readonly status: 'not_durable' };
+
+type NotDurable = Extract<ReceiveOutcome, { readonly status: 'not_durable' }>;
+
+/**
+ * Resultado de `repairUnrecordedClose`. `connection_id` es la conexión anterior del log, la que
+ * supera el `ConnectionOpened` siguiente, o `null` si el log no tiene conexiones. `closed_at_utc` es
+ * la hora de su `ConnectionClosed` durable (en `repaired`, la del cierre reparado), o `null` sin
+ * conexiones: el `ConnectionOpened` siguiente tiene que ser posterior.
+ */
+export type CloseRepairOutcome =
+  | NotDurable
+  | {
+      readonly closed_at_utc: string | null;
+      readonly connection_id: string | null;
+      readonly status: 'nothing_to_repair';
+    }
+  | {
+      readonly closed_at_utc: string;
+      readonly connection_id: string;
+      readonly status: 'repaired';
+    };
 
 /** Resumen fail-closed tras perder durabilidad (forma de `expected-persistence-failure.json`). */
 export interface PersistenceFailureReport {
@@ -138,7 +162,7 @@ export class RawFirstIngestor {
   async #onPersistenceFailure(
     error: LogPersistenceError,
     observedRef: string,
-  ): Promise<ReceiveOutcome> {
+  ): Promise<NotDurable> {
     const relatedRefs = this.#relatedRefs();
     this.#logFailed = true;
     this.#paused = true;
@@ -153,7 +177,10 @@ export class RawFirstIngestor {
     return { stage: error.stage, status: 'not_durable' };
   }
 
-  async #append(event: SourceEvent, observedRef: string): Promise<ReceiveOutcome> {
+  async #append(
+    event: SourceEvent,
+    observedRef: string,
+  ): Promise<Extract<ReceiveOutcome, { readonly status: 'durable' }> | NotDurable> {
     try {
       const result = await this.#log.append(event);
       return { position: result.position, segment_index: result.segment_index, status: 'durable' };
@@ -162,6 +189,23 @@ export class RawFirstIngestor {
         return this.#onPersistenceFailure(error, observedRef);
       }
       throw error;
+    }
+  }
+
+  /**
+   * Reabre desde los almacenes el log que falló. Si no se puede, registra `persistence_unavailable`
+   * (etapa `source_event_index`) con `observedRef` y devuelve el resultado no durable.
+   */
+  async #reopenLog(observedRef: string): Promise<NotDurable | null> {
+    try {
+      this.#log = await this.#input.reopenLog();
+      this.#logFailed = false;
+      return null;
+    } catch (error) {
+      return this.#onPersistenceFailure(
+        new LogPersistenceError('source_event_index', failureReason(error), { cause: error }),
+        observedRef,
+      );
     }
   }
 
@@ -258,14 +302,9 @@ export class RawFirstIngestor {
       return { status: 'input_closed' };
     }
     if (this.#logFailed) {
-      try {
-        this.#log = await this.#input.reopenLog();
-        this.#logFailed = false;
-      } catch (error) {
-        return this.#onPersistenceFailure(
-          new LogPersistenceError('source_event_index', failureReason(error), { cause: error }),
-          event.event_id,
-        );
+      const failure = await this.#reopenLog(event.event_id);
+      if (failure !== null) {
+        return failure;
       }
     }
     const outcome = await this.#append(event, event.event_id);
@@ -276,6 +315,84 @@ export class RawFirstIngestor {
       }
     }
     return outcome;
+  }
+
+  /**
+   * Cierre no registrado (ADR-0015 §3, pendiente 7 de F1.3): antes de abrir el socket siguiente,
+   * persiste el `ConnectionClosed` que le falta a la conexión anterior del log, por un fallo de
+   * persistencia o una caída del proceso. Solo se llama sin conexión abierta. En este orden:
+   *
+   * 1. reabre el log si había fallado;
+   * 2. vuelve a leer del log la conexión anterior. Si no hay ninguna o ya tiene su cierre, no hay nada
+   *    que reparar; también si el índice confirmó el cierre original aunque informó error, porque el
+   *    log reabierto lo adopta;
+   * 3. escribe el cierre (`transport_error`, motivo `close_not_recorded`, `affected_symbols` y la
+   *    hora de la detección) sin reabrir la entrada: sigue como estaba hasta un `ConnectionOpened`
+   *    durable. Como cualquier evento durable, el cierre resuelve `persistence_unavailable`.
+   *
+   * Si el log no se puede reabrir, un almacén no responde al leerlo o el cierre no queda durable,
+   * registra `persistence_unavailable` como `receiveEvent`, con el ID del cierre como
+   * `observed_ref`, y devuelve `not_durable`: no se debe abrir otro socket. Si el contenido del log
+   * no pasa sus comprobaciones (`LogIntegrityError`), o ante cualquier otro error, rechaza sin
+   * registrar nada: no se reintenta con contenido no confiable (ADR-0004 §12).
+   */
+  async repairUnrecordedClose(input: {
+    /** Símbolos de la sesión, que el cierre da como afectados. */
+    readonly affected_symbols: readonly string[];
+  }): Promise<CloseRepairOutcome> {
+    // El ID del cierre se genera solo cuando hace falta: con el log fallido, antes de reabrirlo.
+    let eventId: string | undefined;
+    const closeId = () => (eventId ??= this.#input.nextId());
+    if (this.#logFailed) {
+      const failure = await this.#reopenLog(closeId());
+      if (failure !== null) {
+        return failure;
+      }
+    }
+    let segments: SourceEvent[][];
+    try {
+      segments = await this.#log.readDurableSegments();
+    } catch (error) {
+      // Solo un almacén que no responde cuenta como no poder reabrir el log: sin leerlo no se sabe
+      // qué conexión cerrar. Un contenido que no pasa sus comprobaciones (`LogIntegrityError`) no se
+      // reintenta (ADR-0004 §12), y un error de programación tampoco: los dos rechazan la reparación.
+      if (!(error instanceof LogReadError)) {
+        throw error;
+      }
+      return this.#onPersistenceFailure(
+        new LogPersistenceError('source_event_index', error.reason, { cause: error }),
+        closeId(),
+      );
+    }
+    const previous = previousConnection(segments);
+    if (previous === null || previous.closed) {
+      return {
+        closed_at_utc: previous?.closed_at_utc ?? null,
+        connection_id: previous?.connection_id ?? null,
+        status: 'nothing_to_repair',
+      };
+    }
+    const event = connectionClosedSchema.parse({
+      affected_symbols: [...new Set(input.affected_symbols)].sort(),
+      closure_type: 'transport_error',
+      connection_id: previous.connection_id,
+      event_id: closeId(),
+      kind: 'connection_closed',
+      occurred_at_utc: this.#input.now(),
+      reason: 'close_not_recorded',
+      schema_version: CONTRACT_SCHEMA_VERSION,
+      source: this.#input.profile.source,
+    });
+    const outcome = await this.#append(event, event.event_id);
+    if (outcome.status !== 'durable') {
+      return outcome;
+    }
+    await this.#input.registry.resolveWith(event);
+    return {
+      closed_at_utc: event.occurred_at_utc,
+      connection_id: previous.connection_id,
+      status: 'repaired',
+    };
   }
 
   /** Cierre explícito del segmento abierto (harness, drenaje o apagado). */

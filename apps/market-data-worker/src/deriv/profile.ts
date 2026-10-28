@@ -9,21 +9,32 @@ import {
 
 import { type DerivSchemaSet } from './schema-archive.js';
 
-/** Identidad de la fuente (ADR-0012 §1). Cambiar peticiones, límites o transporte crea otro conector. */
+/**
+ * Identidad de la fuente (ADR-0012 §1). Cambiar peticiones, límites o transporte crea otro conector:
+ * la 1.1.0 añade `ticks_history` y la reconexión (ADR-0015 §1).
+ */
 export const DERIV_SOURCE = 'deriv_options';
-export const DERIV_CONNECTOR_VERSION = 'deriv-options-ws-1.0.0';
+export const DERIV_CONNECTOR_VERSION = 'deriv-options-ws-1.1.0';
 export const DERIV_PUBLIC_ENDPOINT = 'wss://api.derivws.com/trading/v1/options/ws/public';
 
 /**
- * Respuestas pedidas que no son ticks (ADR-0012 §5), en orden. Ni `ticks`, que trae el error de una
- * suscripción fallida, ni `error`, la respuesta a un método desconocido: las reglas 2.0.0 registran
- * los dos como `source_error_response`.
+ * Respuestas pedidas que no son ticks (ADR-0012 §5 y ADR-0015 §1), en orden. `history` es la
+ * respuesta a `ticks_history`. No están `ticks` ni `ticks_history`, que traen el error de una
+ * suscripción o de una petición de historia rechazadas, ni `error`, la respuesta a un método
+ * desconocido: las reglas 2.0.0 registran los tres como `source_error_response`.
  */
-export const DERIV_NON_TICK_MSG_TYPES = ['active_symbols', 'forget_all', 'ping', 'time'] as const;
+export const DERIV_NON_TICK_MSG_TYPES = [
+  'active_symbols',
+  'forget_all',
+  'history',
+  'ping',
+  'time',
+] as const;
 
 /**
- * Perfil de medición del adaptador (ADR-0012 §8): reglas 2.0.0, un solo símbolo y sin umbrales, así
- * que nunca deriva ni publica un dataset. El esquema de fuente es `ticks_response.schema.json` de la
+ * Perfil de medición del adaptador: reglas 2.0.0, un solo símbolo y sin umbrales. Sirve para
+ * normalizar y para derivar el estado vivo (salud, condiciones y continuidad; ADR-0015 §2), y nunca
+ * publica un dataset (ADR-0012 §8). El esquema de fuente es `ticks_response.schema.json` de la
  * release cargada. Sus bytes son el JCS del perfil, así que el mismo símbolo da siempre el mismo
  * hash.
  */
@@ -35,9 +46,9 @@ export function createDerivMeasurementProfile(input: {
     allowed_symbols: [input.symbol],
     gap_detection: 'after_reconnection',
     non_tick_msg_types: [...DERIV_NON_TICK_MSG_TYPES],
-    // Versionado como `synthetic-v1`: si cambian las respuestas declaradas (F1.5 añade el historial),
-    // el perfil cambia de identificador.
-    profile_id: `${DERIV_SOURCE}-measurement-v1-${input.symbol}`,
+    // Versionado como `synthetic-v1`: cambiar las respuestas declaradas cambia el identificador. La
+    // v2 declara `history` (ADR-0015 §1).
+    profile_id: `${DERIV_SOURCE}-measurement-v2-${input.symbol}`,
     purpose: 'measurement',
     quality_rule_version: RULE_SETS['2.0.0'].quality_rule_version,
     source: DERIV_SOURCE,

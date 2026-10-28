@@ -33,6 +33,12 @@ const EMPTY_PAYLOAD =
   '{"active_symbols":[],"echo_req":{"active_symbols":"brief","req_id":2},"msg_type":"active_symbols","req_id":2}';
 const EMPTY_RAW_SHA256 = 'ebd74416b301543a17c3f1cb287d20a32db5304371687afe01a56280a2c8acc9';
 const EMPTY_INCIDENT_ID = 'sha256:d8302c0178dfddfaf03ae340fa5625d1d932b419332db487c688a477da3c5c69';
+// Página de historia con dos tiempos y un solo precio: incoherente (ADR-0015 §4).
+const HISTORY_PAYLOAD =
+  '{"echo_req":{"count":1000,"end":"1700000060","req_id":4,"start":1700000000,"style":"ticks","ticks_history":"SYNTH_100"},"history":{"prices":[100.25],"times":[1700000000,1700000060]},"msg_type":"history","pip_size":2,"req_id":4}';
+const HISTORY_RAW_SHA256 = 'fd3cac80f18fdd2b58d8cf24c426609586c6e53360df8e6f853dc80271e0ba0e';
+const HISTORY_INCIDENT_ID =
+  'sha256:be2e333c19f4c5278112e0d313ce5be89a30a02d6ced42f5fef15e26211e967c';
 
 const schemaBytes = readFileSync(
   new URL('./fixtures/catalog-response.schema.json', import.meta.url),
@@ -340,6 +346,27 @@ describe('respuestas pedidas', () => {
       incident_type: 'invalid_source_frame',
       observed_at_utc: '2026-01-01T00:00:01.100Z',
       observed_ref: '019b76da-a800-7000-8000-000000000002',
+      quality_rule_version: '2.0.0',
+      related_refs: [],
+      schema_version: '2.0.0',
+      severity: 'error',
+      source: 'synthetic',
+      symbol: null,
+    });
+  });
+
+  it('deriva igual la incidencia de una página de historia incoherente (history_inconsistent)', () => {
+    const incident = deriveRequestedResponseIncident(
+      frame(HISTORY_PAYLOAD, 4),
+      'history_inconsistent',
+    );
+
+    expect(incident).toEqual({
+      evidence: { raw_payload_sha256: HISTORY_RAW_SHA256, reason: 'history_inconsistent' },
+      incident_id: HISTORY_INCIDENT_ID,
+      incident_type: 'invalid_source_frame',
+      observed_at_utc: '2026-01-01T00:00:03.100Z',
+      observed_ref: '019b76da-a800-7000-8000-000000000004',
       quality_rule_version: '2.0.0',
       related_refs: [],
       schema_version: '2.0.0',

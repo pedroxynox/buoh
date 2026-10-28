@@ -117,9 +117,32 @@ const SCHEMAS: Record<DerivOperation, { request: unknown; response: unknown }> =
       },
     }),
   },
+  // Con la forma de la petición real (ADR-0015, contexto): `end` es texto (`latest` o un epoch en
+  // segundos) y `start`, un entero.
   ticks_history: {
-    request: request('ticks_history', { type: 'string' }),
-    response: response('history', { history: { type: 'object' } }),
+    request: {
+      ...request(
+        'ticks_history',
+        { type: 'string' },
+        {
+          count: { type: 'integer' },
+          end: { pattern: '^(latest|[0-9]{1,10})$', type: 'string' },
+          start: { maximum: 9_999_999_999, minimum: 0, type: 'integer' },
+          style: { enum: ['candles', 'ticks'], type: 'string' },
+        },
+      ),
+      required: ['end', 'ticks_history'],
+    },
+    response: response('history', {
+      history: {
+        properties: {
+          prices: { items: { type: 'number' }, type: 'array' },
+          times: { items: { type: 'integer' }, type: 'array' },
+        },
+        type: 'object',
+      },
+      pip_size: { type: 'number' },
+    }),
   },
   time: {
     request: request('time', { enum: [1], type: 'integer' }),
@@ -129,8 +152,13 @@ const SCHEMAS: Record<DerivOperation, { request: unknown; response: unknown }> =
 
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
-/** `schemas.zip` sintético con las 14 entradas, y lo que se espera de él. */
-export function syntheticSchemaArchive(): {
+/**
+ * `schemas.zip` sintético con las 14 entradas, y lo que se espera de él. `overrides` cambia el
+ * esquema de algunas entradas, para probar una release que rechaza algo.
+ */
+export function syntheticSchemaArchive(
+  overrides: Readonly<Partial<Record<SchemaEntryName, unknown>>> = {},
+): {
   readonly archive: Uint8Array;
   readonly entries: Readonly<Record<SchemaEntryName, Uint8Array>>;
   readonly expected: ExpectedSchemaArchive;
@@ -138,7 +166,8 @@ export function syntheticSchemaArchive(): {
   const entries = {} as Record<SchemaEntryName, Uint8Array>;
   for (const operation of DERIV_OPERATIONS) {
     for (const kind of ['request', 'response'] as const) {
-      entries[schemaEntryName(operation, kind)] = strToU8(JSON.stringify(SCHEMAS[operation][kind]));
+      const name = schemaEntryName(operation, kind);
+      entries[name] = strToU8(JSON.stringify(overrides[name] ?? SCHEMAS[operation][kind]));
     }
   }
   const archive = zipSync(entries, { level: 9, mtime: new Date('2026-01-01T00:00:00.000Z') });
@@ -174,6 +203,11 @@ export function catalogEntry(symbol: string, name: string, tradeCount = 7) {
 export const SYNTH_100 = catalogEntry('SYNTH_100', 'Synthetic 100 Index');
 export const SYNTH_50 = catalogEntry('SYNTH_50', 'Synthetic 50 Index');
 
+/** Eco de una petición `ticks_history`: solo los campos que no cambian de una página a otra. */
+function historyEcho(id: number) {
+  return { count: 1000, req_id: id, style: 'ticks', ticks_history: 'SYNTH_100' };
+}
+
 /** Mensajes sintéticos con la forma de las respuestas de Deriv. Ningún valor es de mercado real. */
 export const derivMessages = {
   catalog: (id: number, entries: readonly unknown[] = [SYNTH_100, SYNTH_50]) =>
@@ -195,6 +229,20 @@ export const derivMessages = {
       echo_req: { forget_all: 'ticks', req_id: id },
       forget_all: ['sub-1'],
       msg_type: 'forget_all',
+      req_id: id,
+    }),
+  /**
+   * Página de `ticks_history` con `style: ticks`. Los precios van como lexemas, igual que `quote` en
+   * `tick`, para que conserven sus decimales.
+   */
+  history: (id: number, times: readonly number[], prices: readonly string[], pipSize = 2) =>
+    `{"echo_req":${JSON.stringify(historyEcho(id))},"history":{"prices":[${prices.join(',')}],"times":[${times.map(String).join(',')}]},"msg_type":"history","pip_size":${String(pipSize)},"req_id":${String(id)}}`,
+  /** Petición de historia rechazada: `msg_type` `ticks_history` con un objeto `error`. */
+  historyError: (id: number, code: string) =>
+    JSON.stringify({
+      echo_req: historyEcho(id),
+      error: { code, message: 'sintético' },
+      msg_type: 'ticks_history',
       req_id: id,
     }),
   ping: (id: number) =>
@@ -225,6 +273,8 @@ export function flush(): Promise<void> {
 /** Reloj y temporizador manuales: el tiempo solo avanza con `advance`. */
 export class ManualClock {
   #now: number;
+  /** Lo que el reloj de pared se apartó del tiempo transcurrido con `jumpWallClock`. */
+  #wallOffset = 0;
   #sequence = 0;
   readonly #timers = new Map<number, { readonly at: number; readonly callback: () => void }>();
 
@@ -232,7 +282,15 @@ export class ManualClock {
     this.#now = Date.parse(startUtc);
   }
 
-  readonly now = (): string => new Date(this.#now).toISOString();
+  readonly now = (): string => new Date(this.#now + this.#wallOffset).toISOString();
+
+  /**
+   * Salta el reloj de pared `ms` (negativo: hacia atrás), como un ajuste de NTP. Los temporizadores
+   * no cambian: como `setTimeout`, cuentan el tiempo transcurrido.
+   */
+  jumpWallClock(ms: number): void {
+    this.#wallOffset += ms;
+  }
 
   readonly scheduler: Scheduler = {
     schedule: (ms, callback) => {

@@ -3,10 +3,16 @@ import { resolve } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
 import {
+  connectionClosedSchema,
+  connectionOpenedSchema,
   rawSourceFrameSchema,
   sha256Hex,
+  sourceEventSchema,
   validateConditionCausality,
+  type ConnectionClosed,
+  type ConnectionOpened,
   type MarketTick,
+  type RawSourceFrame,
   type SourceEvent,
 } from '@buoh/contracts';
 import {
@@ -24,7 +30,9 @@ import {
   driveSyntheticStimuli,
   failureReason,
   loadSyntheticFixture,
+  LogIntegrityError,
   OperationalRegistry,
+  previousConnection,
   publishFromLog,
   RawFirstIngestor,
   replayDataset,
@@ -97,7 +105,12 @@ function tickPayload(epoch: number): string {
 
 /** Almacenes en memoria, log, registro e ingestor conectados como en runtime. */
 async function harness(
-  options: { operational?: MemoryOperationalStore; profile?: PipelineProfile } = {},
+  options: {
+    /** Reloj del ingestor; por defecto, fijo en `DETECTED_AT`. */
+    now?: () => string;
+    operational?: MemoryOperationalStore;
+    profile?: PipelineProfile;
+  } = {},
 ) {
   const profile = options.profile ?? fixture.profile;
   const objects = new MemoryObjectStore();
@@ -124,7 +137,7 @@ async function harness(
   const ingestor = new RawFirstIngestor({
     log: await openLog(),
     nextId: () => id((counter += 1)),
-    now: () => DETECTED_AT,
+    now: options.now ?? (() => DETECTED_AT),
     profile,
     registry,
     reopenLog: openLog,
@@ -164,6 +177,72 @@ const connectionOpened = (eventId: string, occurredAt: string): SourceEvent => (
   source: 'synthetic',
   supersedes_connection_id: CONNECTION_A,
 });
+
+function openedEvent(
+  connectionId: string,
+  eventId: string,
+  occurredAt: string,
+  supersedes: string | null = null,
+): ConnectionOpened {
+  return connectionOpenedSchema.parse({
+    connection_id: connectionId,
+    event_id: eventId,
+    kind: 'connection_opened',
+    occurred_at_utc: occurredAt,
+    schema_version: '1.0.0',
+    source: 'synthetic',
+    supersedes_connection_id: supersedes,
+  });
+}
+
+/** Cierre del servidor, como el que persiste el transporte. */
+function closedEvent(connectionId: string, eventId: string, occurredAt: string): ConnectionClosed {
+  return connectionClosedSchema.parse({
+    affected_symbols: ['SYNTH_100'],
+    closure_type: 'remote',
+    connection_id: connectionId,
+    event_id: eventId,
+    kind: 'connection_closed',
+    occurred_at_utc: occurredAt,
+    reason: 'close_code_1001',
+    schema_version: '1.0.0',
+    source: 'synthetic',
+  });
+}
+
+function frameEvent(connectionId: string, observationId: string): RawSourceFrame {
+  const payload = tickPayload(1767225601);
+  return rawSourceFrameSchema.parse({
+    connection_id: connectionId,
+    connector_version: 'fixture-v1',
+    kind: 'raw_source_frame',
+    observation_id: observationId,
+    payload_utf8: payload,
+    raw_payload_sha256: sha256Hex(payload),
+    received_at_utc: '2026-01-01T00:00:01.100Z',
+    schema_version: '1.0.0',
+    source: 'synthetic',
+  });
+}
+
+/** Source events durables según el almacén: las filas del índice, leídas de sus objetos. */
+async function storedEvents(stores: {
+  objects: MemoryObjectStore;
+  sourceLog: MemorySourceLogStore;
+}): Promise<{ event: SourceEvent; segment_index: number }[]> {
+  return Promise.all(
+    stores.sourceLog.rows.map(async (row) => ({
+      event: sourceEventSchema.parse(
+        JSON.parse(
+          Buffer.from(
+            await stores.objects.get(contentKey(row.object_sha256), row.byte_length),
+          ).toString('utf8'),
+        ),
+      ),
+      segment_index: row.segment_index,
+    })),
+  );
+}
 
 describe('F1-STREAM-001: captura raw-first contra market-data v1', () => {
   it('el escenario principal reproduce sus segmentos byte a byte y el mismo dataset_id', async () => {
@@ -662,6 +741,49 @@ describe('log de source events: rotación 1.0.0 y reinicio', () => {
     await expect(log.readClosedSegments(0, 0)).rejects.toThrow(/cerrados/u);
   });
 
+  it('la lectura durable da los segmentos cerrados y el abierto, en orden y como en el almacén', async () => {
+    const { log, objects, open, store } = await freshLog();
+    expect(await log.readDurableSegments()).toEqual([]);
+    const closedSegment = [1, 2].map((sequence) =>
+      raw(sequence, `2026-01-01T00:00:0${String(sequence)}.000Z`),
+    );
+    for (const event of closedSegment) {
+      await log.append(event);
+    }
+    await log.close('requested');
+    // Un segmento abierto sin eventos no tiene nada durable.
+    expect(await log.readDurableSegments()).toEqual([closedSegment]);
+    const openSegment = [3, 4, 5].map((sequence) =>
+      raw(sequence, `2026-01-01T00:00:0${String(sequence)}.000Z`),
+    );
+    for (const event of openSegment) {
+      await log.append(event);
+    }
+
+    const segments = await log.readDurableSegments();
+    expect(segments).toEqual([closedSegment, openSegment]);
+    const stored = await storedEvents({ objects, sourceLog: store });
+    expect(segments).toEqual(
+      [0, 1].map((index) =>
+        stored.filter((item) => item.segment_index === index).map((item) => item.event),
+      ),
+    );
+    // Una instancia abierta desde los almacenes lee lo mismo.
+    expect(await (await open()).readDurableSegments()).toEqual(segments);
+  });
+
+  it('la lectura durable falla tras un fallo de persistencia hasta reabrir el log', async () => {
+    const { log, objects, open } = await freshLog();
+    const first = raw(1, '2026-01-01T00:00:01.000Z');
+    await log.append(first);
+    objects.armNextPutFailure('synthetic_injected_failure');
+    await expect(log.append(raw(2, '2026-01-01T00:00:02.000Z'))).rejects.toMatchObject({
+      stage: 'raw_object_write',
+    });
+    await expect(log.readDurableSegments()).rejects.toThrow(/reábrelo/u);
+    expect(await (await open()).readDurableSegments()).toEqual([[first]]);
+  });
+
   it('el motivo de un fallo usa el código o nombre del error, nunca su mensaje', () => {
     const withCode = Object.assign(new Error('postgres://buoh:secreto@host'), {
       code: 'ECONNRESET',
@@ -669,5 +791,408 @@ describe('log de source events: rotación 1.0.0 y reinicio', () => {
     expect(failureReason(withCode)).toBe('ECONNRESET');
     expect(failureReason(Object.assign(new Error('x'), { code: 'con espacios' }))).toBe('Error');
     expect(failureReason('texto')).toBe('unknown_error');
+  });
+});
+
+// Conexión anterior y cierre no registrado: ADR-0015 §3 («Conexión anterior» y «Cierre no
+// registrado», pendiente 7 de F1.3) y contratos de dominio, «Registro operativo».
+describe('conexión anterior (ADR-0015 §3)', () => {
+  it('sin ConnectionOpened en el log no hay conexión anterior', () => {
+    expect(previousConnection([])).toBeNull();
+    // Un frame no basta: para el log, una conexión existe solo con su apertura durable.
+    expect(previousConnection([[frameEvent(CONNECTION_A, id(1))]])).toBeNull();
+  });
+
+  it('es la última conexión con ConnectionOpened, cerrada solo si la sigue su ConnectionClosed, con la hora de ese cierre', () => {
+    const openedA = openedEvent(CONNECTION_A, id(1), '2026-01-01T00:00:01.000Z');
+    const frameA = frameEvent(CONNECTION_A, id(2));
+    const closedA = closedEvent(CONNECTION_A, id(3), '2026-01-01T00:00:02.000Z');
+    const openedB = openedEvent(CONNECTION_B, id(4), '2026-01-01T00:00:03.000Z', CONNECTION_A);
+
+    expect(previousConnection([[openedA, frameA]])).toEqual({
+      closed: false,
+      closed_at_utc: null,
+      connection_id: CONNECTION_A,
+    });
+    expect(previousConnection([[openedA, frameA, closedA]])).toEqual({
+      closed: true,
+      closed_at_utc: '2026-01-01T00:00:02.000Z',
+      connection_id: CONNECTION_A,
+    });
+    // En otro segmento, y sin cierre todavía.
+    expect(previousConnection([[openedA, frameA, closedA], [openedB]])).toEqual({
+      closed: false,
+      closed_at_utc: null,
+      connection_id: CONNECTION_B,
+    });
+  });
+
+  it('un intento cuyo ConnectionOpened no quedó durable no existe para el log', async () => {
+    const run = await harness();
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), '2026-01-01T00:00:01.000Z'));
+    run.objects.armNextPutFailure('synthetic_injected_failure');
+    expect(
+      await run.ingestor.receiveEvent(
+        openedEvent(CONNECTION_B, id(2), '2026-01-01T00:00:20.000Z', CONNECTION_A),
+      ),
+    ).toEqual({ stage: 'raw_object_write', status: 'not_durable' });
+
+    const reopened = await run.openLog();
+    expect(previousConnection(await reopened.readDurableSegments())).toEqual({
+      closed: false,
+      closed_at_utc: null,
+      connection_id: CONNECTION_A,
+    });
+  });
+});
+
+describe('RawFirstIngestor.repairUnrecordedClose: cierre no registrado (ADR-0015 §3)', () => {
+  const OPENED_AT = '2026-01-01T00:00:01.000Z';
+  const DETECTION = '2026-01-01T00:00:30.000Z';
+  const REOPENED_AT = '2026-01-01T00:00:31.000Z';
+
+  function tick(observationId: string) {
+    return {
+      connection_id: CONNECTION_A,
+      observation_id: observationId,
+      payload_utf8: tickPayload(1767225601),
+      received_at_utc: '2026-01-01T00:00:01.100Z',
+    };
+  }
+
+  const unavailable = () => {
+    throw Object.assign(new Error('sintético'), { code: 'ECONNREFUSED' });
+  };
+
+  it('un log sin conexiones no tiene nada que reparar', async () => {
+    const run = await harness();
+    expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      closed_at_utc: null,
+      connection_id: null,
+      status: 'nothing_to_repair',
+    });
+    expect(run.sourceLog.rows).toEqual([]);
+  });
+
+  it('si la conexión anterior ya tiene su cierre, no escribe nada y da la hora de ese cierre', async () => {
+    const run = await harness();
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+    await run.ingestor.receiveEvent(closedEvent(CONNECTION_A, id(2), '2026-01-01T00:00:02.000Z'));
+
+    expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      closed_at_utc: '2026-01-01T00:00:02.000Z',
+      connection_id: CONNECTION_A,
+      status: 'nothing_to_repair',
+    });
+    expect(run.sourceLog.rows).toHaveLength(2);
+  });
+
+  it('con el log sano escribe el cierre close_not_recorded de la conexión anterior y deja la entrada como estaba', async () => {
+    let now = OPENED_AT;
+    const run = await harness({ now: () => now });
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+    await run.ingestor.receiveFrame(tick(id(2)));
+    // El proceso cayó con la conexión abierta: su ConnectionClosed nunca se escribió.
+    now = DETECTION;
+
+    expect(
+      await run.ingestor.repairUnrecordedClose({
+        affected_symbols: ['SYNTH_50', 'SYNTH_100', 'SYNTH_50'],
+      }),
+    ).toEqual({ closed_at_utc: DETECTION, connection_id: CONNECTION_A, status: 'repaired' });
+    expect((await storedEvents(run)).map((item) => item.event)).toEqual([
+      openedEvent(CONNECTION_A, id(1), OPENED_AT),
+      expect.objectContaining({ kind: 'raw_source_frame', observation_id: id(2) }),
+      {
+        affected_symbols: ['SYNTH_100', 'SYNTH_50'],
+        closure_type: 'transport_error',
+        connection_id: CONNECTION_A,
+        event_id: id(9001),
+        kind: 'connection_closed',
+        occurred_at_utc: DETECTION,
+        reason: 'close_not_recorded',
+        schema_version: '1.0.0',
+        source: 'synthetic',
+      },
+    ]);
+    expect(run.ingestor.state).toBe('accepting');
+    // Ya tiene su cierre durable: nunca se cierra dos veces la misma conexión.
+    expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      closed_at_utc: DETECTION,
+      connection_id: CONNECTION_A,
+      status: 'nothing_to_repair',
+    });
+    expect(run.sourceLog.rows).toHaveLength(3);
+  });
+
+  it('si la conexión anterior abrió en un segmento ya cerrado, el cierre reparado va al segmento abierto, vacío tras la rotación', async () => {
+    let now = OPENED_AT;
+    const run = await harness({ now: () => now });
+    const openedA = openedEvent(CONNECTION_A, id(1), OPENED_AT);
+    await run.ingestor.receiveEvent(openedA);
+    // El segmento de la apertura queda cerrado y el abierto no tiene eventos.
+    await run.ingestor.rotate('requested');
+    now = DETECTION;
+
+    expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      closed_at_utc: DETECTION,
+      connection_id: CONNECTION_A,
+      status: 'repaired',
+    });
+    const close = connectionClosedSchema.parse({
+      affected_symbols: ['SYNTH_100'],
+      closure_type: 'transport_error',
+      connection_id: CONNECTION_A,
+      event_id: id(9001),
+      kind: 'connection_closed',
+      occurred_at_utc: DETECTION,
+      reason: 'close_not_recorded',
+      schema_version: '1.0.0',
+      source: 'synthetic',
+    });
+    expect(await storedEvents(run)).toEqual([
+      { event: openedA, segment_index: 0 },
+      { event: close, segment_index: 1 },
+    ]);
+    expect(await run.ingestor.log.readDurableSegments()).toEqual([[openedA], [close]]);
+    // Igual desde los almacenes.
+    expect(await (await run.openLog()).readDurableSegments()).toEqual([[openedA], [close]]);
+  });
+
+  it('el cierre reparado no reabre la entrada: sigue cerrada hasta el ConnectionOpened', async () => {
+    let now = OPENED_AT;
+    const run = await harness({ now: () => now });
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+    // Un frame de más de 1 MiB cierra la entrada, y el proceso cae antes del ConnectionClosed.
+    await run.ingestor.receiveFrame({ ...tick(id(2)), payload_utf8: 'x'.repeat(1_048_577) });
+    expect(run.ingestor.state).toBe('paused');
+    now = DETECTION;
+
+    expect(
+      (await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).status,
+    ).toBe('repaired');
+    expect(run.ingestor.state).toBe('paused');
+    expect(run.registry.openConditionTypes()).toEqual(['source_limit_exceeded']);
+    now = REOPENED_AT;
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_B, id(3), REOPENED_AT, CONNECTION_A));
+    expect(run.ingestor.state).toBe('accepting');
+  });
+
+  it('con el log fallido lo reabre antes de leer la conexión anterior, y el cierre reparado resuelve persistence_unavailable', async () => {
+    let now = OPENED_AT;
+    const run = await harness({ now: () => now });
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+    run.objects.armNextPutFailure('synthetic_injected_failure');
+    await run.ingestor.receiveFrame(tick(id(2)));
+    const failedLog = run.ingestor.log;
+    now = DETECTION;
+
+    expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      closed_at_utc: DETECTION,
+      connection_id: CONNECTION_A,
+      status: 'repaired',
+    });
+    expect(run.ingestor.log).not.toBe(failedLog);
+    expect((await storedEvents(run)).map((item) => item.event)).toEqual([
+      openedEvent(CONNECTION_A, id(1), OPENED_AT),
+      expect.objectContaining({
+        connection_id: CONNECTION_A,
+        event_id: id(9001),
+        occurred_at_utc: DETECTION,
+        reason: 'close_not_recorded',
+      }),
+    ]);
+    // Es el primer evento durable tras el fallo: resuelve la condición.
+    const [opening, resolution] = run.operational.conditions;
+    expect(resolution).toMatchObject({
+      action: 'resolved',
+      cause_refs: [id(9001), opening?.condition_event_id].sort(),
+      condition_key: opening?.condition_key,
+      occurred_at_utc: DETECTION,
+      resolution_reason: 'persistence_restored',
+    });
+    // Pero no reabre la entrada: eso lo hace el ConnectionOpened durable.
+    expect(run.ingestor.state).toBe('paused');
+    now = REOPENED_AT;
+    expect(
+      (await run.ingestor.receiveEvent(openedEvent(CONNECTION_B, id(3), REOPENED_AT, CONNECTION_A)))
+        .status,
+    ).toBe('durable');
+    expect(run.ingestor.state).toBe('accepting');
+  });
+
+  it('si no puede reabrir el log, el cierre no es durable y queda persistence_unavailable con su ID', async () => {
+    let now = OPENED_AT;
+    const run = await harness({ now: () => now });
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+    run.objects.armNextPutFailure('synthetic_injected_failure');
+    await run.ingestor.receiveFrame(tick(id(2)));
+    // El almacenamiento tampoco responde al reabrir el log.
+    run.objects.onRead = unavailable;
+    now = DETECTION;
+
+    expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      stage: 'source_event_index',
+      status: 'not_durable',
+    });
+    expect(run.operational.incidents.at(-1)).toMatchObject({
+      evidence: { reason: 'ECONNREFUSED', stage: 'source_event_index' },
+      incident_type: 'persistence_unavailable',
+      observed_at_utc: DETECTION,
+      // El ID del cierre que se iba a escribir identifica el intento.
+      observed_ref: id(9001),
+      related_refs: [id(1)],
+      severity: 'critical',
+    });
+    expect(run.sourceLog.rows.map((row) => row.event_id)).toEqual([id(1)]);
+    expect(run.ingestor.state).toBe('paused');
+
+    // Con el almacenamiento de vuelta, el intento siguiente lo repara.
+    run.objects.onRead = (_key, bytes) => bytes;
+    now = REOPENED_AT;
+    expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      closed_at_utc: REOPENED_AT,
+      connection_id: CONNECTION_A,
+      status: 'repaired',
+    });
+    expect((await storedEvents(run)).at(-1)?.event).toMatchObject({
+      event_id: id(9002),
+      occurred_at_utc: REOPENED_AT,
+      reason: 'close_not_recorded',
+    });
+  });
+
+  it.each<[string, (run: Awaited<ReturnType<typeof harness>>) => void]>([
+    [
+      'el almacenamiento de objetos',
+      (run) => {
+        // El segmento cerrado se lee de su objeto.
+        run.objects.onRead = unavailable;
+      },
+    ],
+    [
+      'el índice',
+      (run) => {
+        vi.spyOn(run.sourceLog, 'listClosedSegments').mockImplementation(unavailable);
+      },
+    ],
+  ])(
+    'si %s no responde al leer el log, el cierre no es durable y queda persistence_unavailable',
+    async (_store, failReads) => {
+      let now = OPENED_AT;
+      const run = await harness({ now: () => now });
+      await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+      await run.ingestor.rotate('requested');
+      failReads(run);
+      now = DETECTION;
+
+      expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual(
+        { stage: 'source_event_index', status: 'not_durable' },
+      );
+      expect(run.operational.incidents).toEqual([
+        expect.objectContaining({
+          evidence: { reason: 'ECONNREFUSED', stage: 'source_event_index' },
+          incident_type: 'persistence_unavailable',
+          observed_ref: id(9001),
+        }),
+      ]);
+      expect(run.sourceLog.rows).toHaveLength(1);
+      expect(run.ingestor.state).toBe('paused');
+    },
+  );
+
+  it.each<[string, (stored: Uint8Array) => Uint8Array | null, RegExp]>([
+    [
+      'alterado: ya no tiene el hash de su fila',
+      (stored) => {
+        const altered = Uint8Array.from(stored);
+        altered[2] = 0x41;
+        return altered;
+      },
+      /segmento 0 alterado/u,
+    ],
+    // El índice confirmó el segmento: un objeto que falta o que crece no es un almacén que no
+    // responde, sino contenido confirmado que ya no está, como en el replay.
+    ['ausente', () => null, /segmento 0 ausente/u],
+    [
+      'mayor que su fila',
+      (stored) => Uint8Array.from([...stored, 0x0a]),
+      /segmento 0 mayor que su fila/u,
+    ],
+  ])(
+    'si el objeto de un segmento cerrado está %s, la reparación se rechaza con LogIntegrityError sin escribir el cierre ni registrar persistence_unavailable',
+    async (_label, change, message) => {
+      let now = OPENED_AT;
+      const run = await harness({ now: () => now });
+      await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+      await run.ingestor.rotate('requested');
+      const key = contentKey(run.sourceLog.closed[0]?.object_bytes_sha256 ?? '');
+      const changed = change(run.objects.objects.get(key) ?? new Uint8Array());
+      if (changed === null) {
+        run.objects.objects.delete(key);
+      } else {
+        run.objects.objects.set(key, changed);
+      }
+      now = DETECTION;
+
+      // Con contenido no confiable no se reintenta (ADR-0004 §12): ni pausa ni incidencia.
+      const repair = run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] });
+      await expect(repair).rejects.toThrow(LogIntegrityError);
+      await expect(repair).rejects.toThrow(message);
+      expect(run.sourceLog.rows).toHaveLength(1);
+      expect(run.operational.incidents).toEqual([]);
+      expect(run.registry.openConditionTypes()).toEqual([]);
+      expect(run.ingestor.state).toBe('accepting');
+    },
+  );
+
+  it('un error al leer el log que no viene de un almacén rechaza la reparación sin registrar persistence_unavailable', async () => {
+    const run = await harness();
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+    // Un error de programación, por ejemplo: no dice que el almacenamiento no esté disponible.
+    const bug = new TypeError('sintético');
+    vi.spyOn(run.ingestor.log, 'readDurableSegments').mockRejectedValueOnce(bug);
+
+    await expect(
+      run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] }),
+    ).rejects.toBe(bug);
+    expect(run.sourceLog.rows).toHaveLength(1);
+    expect(run.operational.incidents).toEqual([]);
+    expect(run.ingestor.state).toBe('accepting');
+  });
+
+  it('si el índice confirmó el cierre aunque informó error, el log reabierto lo adopta y no hay nada que reparar', async () => {
+    let now = OPENED_AT;
+    const run = await harness({ now: () => now });
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+    run.sourceLog.failIndexAfterInsert = (row) => row.kind === 'connection_closed';
+    expect(
+      await run.ingestor.receiveEvent(closedEvent(CONNECTION_A, id(2), '2026-01-01T00:00:02.000Z')),
+    ).toEqual({ stage: 'source_event_index', status: 'not_durable' });
+    expect(run.operational.incidents[0]?.evidence).toEqual({
+      reason: 'synthetic_index_ambiguous',
+      stage: 'source_event_index',
+    });
+    run.sourceLog.failIndexAfterInsert = () => false;
+    now = DETECTION;
+
+    // La hora es la del cierre adoptado: la apertura siguiente tiene que ser posterior.
+    expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      closed_at_utc: '2026-01-01T00:00:02.000Z',
+      connection_id: CONNECTION_A,
+      status: 'nothing_to_repair',
+    });
+    // Solo el cierre original.
+    expect((await storedEvents(run)).map((item) => item.event)).toEqual([
+      openedEvent(CONNECTION_A, id(1), OPENED_AT),
+      closedEvent(CONNECTION_A, id(2), '2026-01-01T00:00:02.000Z'),
+    ]);
+    // Nada nuevo quedó durable: la condición sigue abierta hasta el ConnectionOpened.
+    expect(run.registry.openConditionTypes()).toEqual(['persistence_unavailable']);
+    expect(run.ingestor.state).toBe('paused');
+    now = REOPENED_AT;
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_B, id(3), REOPENED_AT, CONNECTION_A));
+    expect(run.registry.openConditionTypes()).toEqual([]);
+    expect(run.ingestor.state).toBe('accepting');
   });
 });

@@ -2,6 +2,8 @@ import { TextDecoder } from 'node:util';
 
 import {
   canonicalJson,
+  connectionClosedSchema,
+  connectionOpenedSchema,
   sha256Hex,
   sourceEventSchema,
   type ConnectionClosed,
@@ -11,6 +13,7 @@ import {
 import {
   createCatalogResponseSchema,
   deriveCatalogSnapshot,
+  deriveMarketData,
   publicationThresholds,
   type InvalidFrameReason,
   type UnflaggedTick,
@@ -25,7 +28,12 @@ import {
   DERIV_PUBLIC_ENDPOINT,
   DERIV_SOURCE,
 } from '../src/deriv/profile.js';
-import { openSchemaArchive, type DerivSchemaSet } from '../src/deriv/schema-archive.js';
+import { encodeRequest } from '../src/deriv/requests.js';
+import {
+  openSchemaArchive,
+  type DerivSchemaSet,
+  type SchemaEntryName,
+} from '../src/deriv/schema-archive.js';
 import { CONNECT_TIMEOUT_MS, declaredMessageLength } from '../src/deriv/socket.js';
 import {
   buildRawSourceFrame,
@@ -104,26 +112,36 @@ interface HarnessOptions {
   readonly durationMs?: number;
   readonly expectedSha256?: string;
   readonly fetch?: typeof fetch;
+  /** Último ID que usó una ejecución anterior: los de esta siguen desde el siguiente. */
+  readonly lastId?: number;
+  /** Objetos y log de una ejecución anterior; por defecto, vacíos. */
+  readonly objects?: MemoryObjectStore;
   readonly operational?: MemoryOperationalStore;
+  /** Esquemas que cambian en el archivo sintético (`syntheticSchemaArchive`). */
+  readonly schemaOverrides?: Readonly<Partial<Record<SchemaEntryName, unknown>>>;
   readonly serverTime?: boolean;
+  readonly sourceLog?: MemorySourceLogStore;
+  /** Hora del reloj manual al empezar; por defecto, `START`. */
+  readonly start?: string;
   readonly symbol?: string;
 }
 
 async function harness(options: HarnessOptions = {}) {
   forbidAmbientEffects();
-  const clock = new ManualClock(START);
-  let sequence = 0;
+  const clock = new ManualClock(options.start ?? START);
+  let sequence = options.lastId ?? 0;
   const nextId = () => uuid((sequence += 1));
-  const objects = new MemoryObjectStore();
-  const sourceLog = new MemorySourceLogStore();
+  const objects = options.objects ?? new MemoryObjectStore();
+  const sourceLog = options.sourceLog ?? new MemorySourceLogStore();
   const operational = options.operational ?? new MemoryOperationalStore();
   const catalog = options.catalog ?? new MemoryCatalogStore();
   const requested = new MemoryRequestedResponseIncidentStore();
   const alerts: Parameters<OperationalAlert>[0][] = [];
   const ticks: UnflaggedTick[] = [];
   const invalid: { observation_id: string; reason: InvalidFrameReason }[] = [];
+  const nonTick: { msg_type: string; observation_id: string }[] = [];
   const sockets: FakeDerivSocket[] = [];
-  const fixture = syntheticSchemaArchive();
+  const fixture = syntheticSchemaArchive(options.schemaOverrides);
   const fetchCalls: string[] = [];
   const openLog = () =>
     SourceEventLog.open({ objects, source: DERIV_SOURCE, store: sourceLog, zlibVersion: 'test' });
@@ -136,10 +154,13 @@ async function harness(options: HarnessOptions = {}) {
     fetchCalls.push(typeof url === 'string' ? url : url instanceof URL ? url.href : url.url);
     return Promise.resolve(new Response(fixture.archive, { status: 200 }));
   }) as typeof fetch;
+  /** Filas del log en el momento en que el adaptador abre cada socket. */
+  const rowsAtConnect: number[] = [];
   const run = runDerivAdapter({
     alert: (payload) => alerts.push(payload),
     catalog,
     connect: (input) => {
+      rowsAtConnect.push(sourceLog.rows.length);
       if (options.connectError !== undefined) {
         throw options.connectError;
       }
@@ -164,6 +185,7 @@ async function harness(options: HarnessOptions = {}) {
     serverTime: options.serverTime ?? false,
     sink: {
       invalidFrame: (item) => invalid.push(item),
+      nonTickFrame: (item) => nonTick.push(item),
       tick: (tick) => ticks.push(tick),
     },
     symbol: options.symbol ?? 'SYNTH_100',
@@ -220,11 +242,14 @@ async function harness(options: HarnessOptions = {}) {
     frames,
     invalid,
     lastClosed,
+    nonTick,
     objects,
     openAndListCatalog,
+    openLog,
     operational,
     registry,
     requested,
+    rowsAtConnect,
     run,
     socket,
     sockets,
@@ -1021,6 +1046,29 @@ describe('runDerivAdapter: antes de conectar', () => {
     expect(result.end).toEqual({ detail: 'ticks', reason: 'request_invalid', status: 'failed' });
   });
 
+  it('comprueba también la petición ticks_history: si su esquema la rechaza, no conecta', async () => {
+    // Release sintética que pide `end` como entero; la petición lo manda como texto
+    // (ADR-0015, contexto).
+    const run = await harness({
+      schemaOverrides: {
+        'ticks_history_request.schema.json': {
+          $schema: 'http://json-schema.org/draft-04/schema#',
+          properties: { end: { type: 'integer' }, ticks_history: { type: 'string' } },
+          required: ['end', 'ticks_history'],
+          type: 'object',
+        },
+      },
+    });
+    expect(run.sockets).toEqual([]);
+    const result = await run.run;
+    expect(run.sockets).toEqual([]);
+    expect(result.end).toEqual({
+      detail: 'ticks_history',
+      reason: 'request_invalid',
+      status: 'failed',
+    });
+  });
+
   it('una condición abierta que la apertura no resuelve deja la entrada cerrada', async () => {
     // Condición de una ejecución anterior, que el registro no podrá resolver porque PostgreSQL
     // deja de responder: la entrada sigue en pausa después de la apertura.
@@ -1057,6 +1105,359 @@ describe('runDerivAdapter: antes de conectar', () => {
       closure_type: 'requested',
       reason: 'input_closed',
     });
+  });
+});
+
+/** Objetos y log que dejó una ejecución anterior: estos source events, ya durables. */
+async function storesWith(events: readonly SourceEvent[]) {
+  const objects = new MemoryObjectStore();
+  const sourceLog = new MemorySourceLogStore();
+  const log = await SourceEventLog.open({
+    objects,
+    source: DERIV_SOURCE,
+    store: sourceLog,
+    zlibVersion: 'test',
+  });
+  for (const event of events) {
+    await log.append(event);
+  }
+  return { objects, sourceLog };
+}
+
+describe('runDerivAdapter: conexión anterior y cierre no registrado (ADR-0015 §3)', () => {
+  const EARLIER = '2026-03-02T09:00:00.000Z';
+  const PREVIOUS = uuid(9001);
+
+  /** La conexión de una ejecución anterior, una hora antes: su apertura y un tick. */
+  function previousConnectionEvents(): SourceEvent[] {
+    return [
+      connectionOpenedSchema.parse({
+        connection_id: PREVIOUS,
+        event_id: uuid(9002),
+        kind: 'connection_opened',
+        occurred_at_utc: EARLIER,
+        schema_version: '1.0.0',
+        source: DERIV_SOURCE,
+        supersedes_connection_id: null,
+      }),
+      buildRawSourceFrame(
+        {
+          connection_id: PREVIOUS,
+          observation_id: uuid(9003),
+          payload_utf8: derivMessages.tick(2, Date.parse(EARLIER) / 1000),
+          received_at_utc: EARLIER,
+        },
+        createDerivMeasurementProfile({ schemas: syntheticSchemas(), symbol: 'SYNTH_100' }),
+      ),
+    ];
+  }
+
+  /** El cierre del servidor que la ejecución anterior sí persistió, a esa hora. */
+  function previousClose(occurredAt: string): SourceEvent {
+    return connectionClosedSchema.parse({
+      affected_symbols: ['SYNTH_100'],
+      closure_type: 'remote',
+      connection_id: PREVIOUS,
+      event_id: uuid(9004),
+      kind: 'connection_closed',
+      occurred_at_utc: occurredAt,
+      reason: 'close_code_1001',
+      schema_version: '1.0.0',
+      source: DERIV_SOURCE,
+    });
+  }
+
+  const measurementProfile = () =>
+    createDerivMeasurementProfile({ schemas: syntheticSchemas(), symbol: 'SYNTH_100' });
+
+  it('si la conexión anterior tiene su cierre, la apertura nueva la supera sin reparar nada', async () => {
+    const previous = [...previousConnectionEvents(), previousClose('2026-03-02T09:00:05.000Z')];
+    const run = await harness(await storesWith(previous));
+    run.socket().open();
+    await settle();
+
+    expect(await run.events()).toEqual([
+      ...previous,
+      {
+        connection_id: uuid(1),
+        event_id: uuid(2),
+        kind: 'connection_opened',
+        occurred_at_utc: START,
+        schema_version: '1.0.0',
+        source: DERIV_SOURCE,
+        supersedes_connection_id: PREVIOUS,
+      },
+    ]);
+    expect(run.socket().requests()).toEqual([{ active_symbols: 'brief', req_id: 1 }]);
+    run.socket().emit({ code: 1000, kind: 'closed' });
+    await run.run;
+  });
+
+  it('si a la conexión anterior le falta el cierre, lo repara y abre el socket cuando el reloj pasa la hora del cierre: la apertura lo supera y el log se deriva', async () => {
+    const previous = previousConnectionEvents();
+    const run = await harness(await storesWith(previous));
+    // El cierre reparado ya es durable, con la hora de ahora, y todavía no hay socket: el adaptador
+    // espera con el temporizador inyectado a que el reloj pase ese milisegundo.
+    expect(run.sourceLog.rows).toHaveLength(3);
+    expect(run.rowsAtConnect).toEqual([]);
+    expect(run.clock.pendingDelays()).toEqual([1]);
+    // Vence esa espera de 1 ms, la que pidió el adaptador. La prueba no adelanta el reloj por su
+    // cuenta: no modela ningún handshake.
+    await run.clock.advance(1);
+    expect(run.rowsAtConnect).toEqual([3]);
+    // El socket abre en el acto, sin que el reloj avance más.
+    run.socket().open();
+    await settle();
+
+    expect(await run.events()).toEqual([
+      ...previous,
+      {
+        affected_symbols: ['SYNTH_100'],
+        closure_type: 'transport_error',
+        connection_id: PREVIOUS,
+        event_id: uuid(1),
+        kind: 'connection_closed',
+        occurred_at_utc: START,
+        reason: 'close_not_recorded',
+        schema_version: '1.0.0',
+        source: DERIV_SOURCE,
+      },
+      {
+        connection_id: uuid(2),
+        event_id: uuid(3),
+        kind: 'connection_opened',
+        occurred_at_utc: '2026-03-02T10:00:00.001Z',
+        schema_version: '1.0.0',
+        source: DERIV_SOURCE,
+        supersedes_connection_id: PREVIOUS,
+      },
+    ]);
+    expect(run.socket().requests()).toEqual([{ active_symbols: 'brief', req_id: 1 }]);
+
+    // Las reglas abren connection_lost con el cierre reparado y lo resuelven con la apertura, un
+    // milisegundo después: la resolución nunca queda antes de su apertura.
+    const derived = deriveMarketData(
+      await (await run.openLog()).readDurableSegments(),
+      measurementProfile(),
+    );
+    expect(derived.conditions).toEqual([
+      expect.objectContaining({
+        action: 'opened',
+        condition_type: 'connection_lost',
+        occurred_at_utc: START,
+      }),
+      expect.objectContaining({
+        action: 'resolved',
+        condition_type: 'connection_lost',
+        occurred_at_utc: '2026-03-02T10:00:00.001Z',
+        resolution_reason: 'connection_reestablished',
+      }),
+    ]);
+    expect(derived.openConditionTypes).toEqual([]);
+    run.socket().emit({ code: 1000, kind: 'closed' });
+    await run.run;
+  });
+
+  it('si el reloj va por detrás del cierre de la conexión anterior, espera a pasarlo para abrir el socket', async () => {
+    // El cierre quedó 2,5 s por delante de este reloj, por ejemplo porque el reloj se atrasó.
+    const previous = [...previousConnectionEvents(), previousClose('2026-03-02T10:00:02.500Z')];
+    const run = await harness(await storesWith(previous));
+    expect(run.rowsAtConnect).toEqual([]);
+    expect(run.clock.pendingDelays()).toEqual([2501]);
+    // El reloj llega al milisegundo del cierre, pero no lo pasa: sigue sin socket.
+    await run.clock.advance(2500);
+    expect(run.rowsAtConnect).toEqual([]);
+    // Un milisegundo más vence la espera del adaptador, y abre el socket.
+    await run.clock.advance(1);
+    expect(run.rowsAtConnect).toEqual([3]);
+    run.socket().open();
+    await settle();
+
+    expect((await run.events()).slice(previous.length)).toEqual([
+      {
+        connection_id: uuid(1),
+        event_id: uuid(2),
+        kind: 'connection_opened',
+        occurred_at_utc: '2026-03-02T10:00:02.501Z',
+        schema_version: '1.0.0',
+        source: DERIV_SOURCE,
+        supersedes_connection_id: PREVIOUS,
+      },
+    ]);
+    expect(
+      deriveMarketData(await (await run.openLog()).readDurableSegments(), measurementProfile())
+        .openConditionTypes,
+    ).toEqual([]);
+    run.socket().emit({ code: 1000, kind: 'closed' });
+    await run.run;
+  });
+
+  it('si el reloj retrocede mientras espera, vuelve a esperar a que pase la hora del cierre', async () => {
+    const run = await harness(await storesWith(previousConnectionEvents()));
+    expect(run.clock.pendingDelays()).toEqual([1]);
+    // Un ajuste del reloj de 1 s hacia atrás durante la espera.
+    run.clock.jumpWallClock(-1000);
+    // Vence la espera de 1 ms del adaptador, pero al reloj le faltan 999 ms para pasar el cierre
+    // reparado: espera otros 1000 ms.
+    await run.clock.advance(1);
+    expect(run.rowsAtConnect).toEqual([]);
+    expect(run.clock.pendingDelays()).toEqual([1000]);
+    // Vence esa segunda espera: ahora el reloj pasó el cierre.
+    await run.clock.advance(1000);
+    expect(run.rowsAtConnect).toEqual([3]);
+    run.socket().open();
+    await settle();
+
+    const [repaired, opened] = (await run.events()).slice(2);
+    expect(repaired).toMatchObject({ occurred_at_utc: START, reason: 'close_not_recorded' });
+    expect(opened).toMatchObject({
+      kind: 'connection_opened',
+      occurred_at_utc: '2026-03-02T10:00:00.001Z',
+      supersedes_connection_id: PREVIOUS,
+    });
+    run.socket().emit({ code: 1000, kind: 'closed' });
+    await run.run;
+  });
+
+  it('si el cierre reparado no queda durable, no abre el socket y termina en pausa por persistencia', async () => {
+    const previous = previousConnectionEvents();
+    const stores = await storesWith(previous);
+    stores.objects.armNextPutFailure('synthetic_put_failure');
+    const run = await harness(stores);
+    const result = await run.run;
+
+    expect(run.sockets).toEqual([]);
+    expect(result).toEqual({
+      catalog: null,
+      closure: null,
+      connection_id: null,
+      end: { detail: 'raw_object_write', reason: 'persistence_unavailable', status: 'paused' },
+      schemas: {
+        archive_sha256: run.fixture.expected.archive_sha256,
+        release: 'synthetic-deriv-1',
+      },
+      server_time_offset_ms: null,
+      subscription_id: null,
+    });
+    expect(await run.events()).toEqual(previous);
+    expect(run.operational.incidents).toEqual([
+      expect.objectContaining({
+        evidence: { reason: 'synthetic_put_failure', stage: 'raw_object_write' },
+        incident_type: 'persistence_unavailable',
+        // El ID del cierre que no quedó durable; el último evento durable es el tick.
+        observed_ref: uuid(1),
+        related_refs: [uuid(9003)],
+      }),
+    ]);
+    expect(run.registry.openConditionTypes()).toEqual(['persistence_unavailable']);
+  });
+
+  it('tras un cierre que no quedó durable, la ejecución siguiente lo repara y las reglas ven la pérdida sin continuidad', async () => {
+    // Primera ejecución: un tick y, al cortarse la conexión, el log no confirma su cierre.
+    const first = await harness();
+    await first.openAndListCatalog();
+    first.socket().text(derivMessages.tick(2, START_EPOCH));
+    await settle();
+    first.sourceLog.failIndex = (row) => row.kind === 'connection_closed';
+    first.socket().emit({ code: 1006, kind: 'closed' });
+    expect((await first.run).end).toEqual({
+      detail: null,
+      reason: 'persistence_unavailable',
+      status: 'paused',
+    });
+    first.sourceLog.failIndex = () => false;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+
+    // Segunda ejecución, cinco minutos después, sobre el mismo log y el mismo registro operativo.
+    const later = '2026-03-02T10:05:00.000Z';
+    const second = await harness({
+      lastId: 100,
+      objects: first.objects,
+      operational: first.operational,
+      sourceLog: first.sourceLog,
+      start: later,
+    });
+    // El cierre reparado es el primer evento durable: ya resolvió persistence_unavailable.
+    expect(second.registry.openConditionTypes()).toEqual([]);
+    // Modela el handshake: el socket abre 1 s después de empezar. En el primer milisegundo vence la
+    // espera del adaptador, que solo conecta cuando el reloj pasa la hora del cierre reparado.
+    await second.clock.advance(1000);
+    await second.openAndListCatalog();
+    second.socket().text(derivMessages.tick(2, Date.parse(later) / 1000 + 1));
+    await settle();
+    // Modela la escucha: al cumplirse la duración (`durationMs`, 30 000 ms), pide forget_all.
+    await second.clock.advance(30_000);
+    second.socket().text(derivMessages.forgetAll(3));
+    expect((await second.run).end).toEqual({ status: 'completed' });
+
+    const segments = await (await second.openLog()).readDurableSegments();
+    const events = segments.flat();
+    expect(events.map((event) => event.kind)).toEqual([
+      'connection_opened',
+      'raw_source_frame',
+      'raw_source_frame',
+      'connection_closed',
+      'connection_opened',
+      'raw_source_frame',
+      'raw_source_frame',
+      'raw_source_frame',
+      'connection_closed',
+    ]);
+    const [openedA, , , repaired, openedB] = events;
+    expect(repaired).toMatchObject({
+      affected_symbols: ['SYNTH_100'],
+      closure_type: 'transport_error',
+      connection_id: openedA?.connection_id,
+      occurred_at_utc: later,
+      reason: 'close_not_recorded',
+    });
+    expect(openedB).toMatchObject({
+      occurred_at_utc: '2026-03-02T10:05:01.000Z',
+      supersedes_connection_id: openedA?.connection_id,
+    });
+    const repairedId = repaired?.kind === 'connection_closed' ? repaired.event_id : null;
+    expect(second.operational.conditions).toEqual([
+      expect.objectContaining({ action: 'opened', condition_type: 'persistence_unavailable' }),
+      expect.objectContaining({
+        action: 'resolved',
+        cause_refs: expect.arrayContaining([repairedId]) as unknown,
+        occurred_at_utc: later,
+        resolution_reason: 'persistence_restored',
+      }),
+    ]);
+
+    // Las reglas: el cierre reparado abre connection_lost y la apertura que lo supera lo resuelve;
+    // sin historia, la continuidad sigue pendiente del tick anterior al primero posterior.
+    const derived = deriveMarketData(
+      segments,
+      createDerivMeasurementProfile({ schemas: syntheticSchemas(), symbol: 'SYNTH_100' }),
+    );
+    expect(
+      derived.incidents.map((incident) => [incident.incident_type, incident.observed_ref]),
+    ).toEqual([['connection_lost', repairedId]]);
+    expect(derived.conditions).toEqual([
+      expect.objectContaining({
+        action: 'opened',
+        condition_type: 'connection_lost',
+        occurred_at_utc: later,
+      }),
+      expect.objectContaining({
+        action: 'resolved',
+        condition_type: 'connection_lost',
+        occurred_at_utc: '2026-03-02T10:05:01.000Z',
+        resolution_reason: 'connection_reestablished',
+      }),
+    ]);
+    expect(derived.openConditionTypes).toEqual([]);
+    expect(derived.pendingGaps).toEqual([
+      {
+        from_event_time_utc: '2026-03-02T10:00:00.001Z',
+        symbol: 'SYNTH_100',
+        to_event_time_utc: '2026-03-02T10:05:00.999Z',
+      },
+    ]);
   });
 });
 
@@ -1153,15 +1554,15 @@ describe('RawFirstIngestor.pauseForSourceLimit', () => {
   });
 });
 
-describe('perfil de medición de Deriv (ADR-0012 §8)', () => {
-  it('usa las reglas 2.0.0, las cuatro respuestas pedidas y el esquema de ticks, y nunca publica', () => {
+describe('perfil de medición de Deriv (ADR-0012 §8 y ADR-0015 §1)', () => {
+  it('usa las reglas 2.0.0, las cinco respuestas pedidas con history, el esquema de ticks y el conector 1.1.0, y nunca publica', () => {
     const schemas = syntheticSchemas();
     const profile = createDerivMeasurementProfile({ schemas, symbol: 'SYNTH_100' });
     const expected = {
       allowed_symbols: ['SYNTH_100'],
       gap_detection: 'after_reconnection',
-      non_tick_msg_types: ['active_symbols', 'forget_all', 'ping', 'time'],
-      profile_id: 'deriv_options-measurement-v1-SYNTH_100',
+      non_tick_msg_types: ['active_symbols', 'forget_all', 'history', 'ping', 'time'],
+      profile_id: 'deriv_options-measurement-v2-SYNTH_100',
       purpose: 'measurement',
       quality_rule_version: '2.0.0',
       source: 'deriv_options',
@@ -1171,7 +1572,7 @@ describe('perfil de medición de Deriv (ADR-0012 §8)', () => {
     expect(profile.purpose).toBe('measurement');
     expect(profile.rules.quality_rule_version).toBe('2.0.0');
     expect([...profile.nonTickMsgTypes]).toEqual(expected.non_tick_msg_types);
-    expect(profile.connector_version).toBe('deriv-options-ws-1.0.0');
+    expect(profile.connector_version).toBe('deriv-options-ws-1.1.0');
     expect(profile.source_schema_release).toBe('synthetic-deriv-1');
     const ticksSchema = syntheticSchemaArchive().entries['ticks_response.schema.json'];
     expect(profile.source_schema_bytes).toEqual(ticksSchema);
@@ -1179,6 +1580,40 @@ describe('perfil de medición de Deriv (ADR-0012 §8)', () => {
       sha256Hex(canonicalJson(JSON.parse(decoder.decode(ticksSchema)) as never)),
     );
     expect(() => publicationThresholds(profile)).toThrow(/medición/u);
+  });
+
+  it('un frame history durable es una respuesta declarada: ni tick ni frame inválido', async () => {
+    const run = await harness();
+    const socket = run.socket();
+    socket.open();
+    await settle();
+    const payload = derivMessages.history(7, [START_EPOCH - 2, START_EPOCH], ['100.25', '100.75']);
+    socket.text(payload);
+    await settle();
+    socket.emit({ code: 1000, kind: 'closed' });
+    await run.run;
+
+    const [historyFrame] = await run.frames();
+    expect(historyFrame?.payload_utf8).toBe(payload);
+    expect(run.nonTick).toEqual([
+      { msg_type: 'history', observation_id: historyFrame?.observation_id },
+    ]);
+    expect(run.invalid).toEqual([]);
+    expect(run.ticks).toEqual([]);
+  });
+});
+
+describe('petición ticks_history (ADR-0015 §4)', () => {
+  it('pide una página de 1000 ticks con start entero y end como texto, en JCS', () => {
+    const request = {
+      end: 1_700_000_060,
+      operation: 'ticks_history',
+      start: 1_700_000_000,
+      symbol: 'SYNTH_100',
+    } as const;
+    expect(encodeRequest(syntheticSchemas(), request, 7)).toBe(
+      '{"count":1000,"end":"1700000060","req_id":7,"start":1700000000,"style":"ticks","ticks_history":"SYNTH_100"}',
+    );
   });
 });
 

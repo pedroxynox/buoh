@@ -71,11 +71,25 @@ function attributeSymbol(
   throw new SymbolAttributionError(frame.observation_id);
 }
 
-/** Convierte el lexema numérico a decimal canónico con exactamente `pipSize` decimales. */
-function toQuoteDecimal(
-  lexeme: string,
-  pipSize: number,
-): { ok: true; value: string } | { ok: false; reason: InvalidFrameReason } {
+/** Resultado de `canonicalQuoteDecimal`: el decimal canónico o el motivo de su rechazo. */
+export type QuoteDecimalResult =
+  | { readonly ok: true; readonly value: string }
+  | {
+      readonly ok: false;
+      readonly reason: Extract<
+        InvalidFrameReason,
+        'quote_exponent_not_supported' | 'quote_precision_exceeds_pip_size'
+      >;
+    };
+
+/**
+ * Cotización en decimal canónico (ADR-0004 §4): el lexema de un número JSON con exactamente
+ * `pipSize` decimales, completados con ceros y sin aritmética binaria. Rechaza un exponente y más
+ * decimales que `pipSize`. Es la regla de `quote_decimal` en el normalizador, y la usa también quien
+ * compara con un tick una cotización de otra respuesta, como la recuperación de historia del worker
+ * (ADR-0015 §4).
+ */
+export function canonicalQuoteDecimal(lexeme: string, pipSize: number): QuoteDecimalResult {
   if (/[eE]/u.test(lexeme)) {
     return { ok: false, reason: 'quote_exponent_not_supported' };
   }
@@ -85,6 +99,24 @@ function toQuoteDecimal(
   }
   const padded = fraction.padEnd(pipSize, '0');
   return { ok: true, value: pipSize === 0 ? integerPart : `${integerPart}.${padded}` };
+}
+
+/**
+ * `pip_size` válido (ADR-0004 §4): el lexema de un entero de 0 a 18, sin signo, fracción, exponente
+ * ni ceros a la izquierda. Es la regla del normalizador para un tick, y la usa también quien lee
+ * otra respuesta con cotizaciones, como la recuperación de historia del worker (ADR-0015 §4).
+ */
+export function isPipSizeLexeme(lexeme: string): boolean {
+  return /^(?:0|[1-9]\d*)$/u.test(lexeme) && Number(lexeme) <= 18;
+}
+
+/**
+ * Epoch en segundos enteros (ADR-0004 §4): el lexema de un entero, sin fracción, exponente ni ceros
+ * a la izquierda, para no inventar fracciones. No comprueba el rango de la hora. Como
+ * `isPipSizeLexeme`, es una regla del normalizador que comparte la recuperación de historia.
+ */
+export function isEpochSecondsLexeme(lexeme: string): boolean {
+  return /^-?(?:0|[1-9]\d*)$/u.test(lexeme);
 }
 
 function epochSecondsToUtc(seconds: number): string | null {
@@ -166,10 +198,10 @@ export function normalizeRawFrame(
 
   // ADR-0004 §4: epoch entero en segundos, sin fracciones inventadas; pip_size 0..18. Se exigen
   // aquí además del esquema de fuente para no depender de un esquema más laxo.
-  if (!/^(?:0|[1-9]\d*)$/u.test(pipNode.lexeme) || Number(pipNode.lexeme) > 18) {
+  if (!isPipSizeLexeme(pipNode.lexeme)) {
     return invalid('schema_validation_failed');
   }
-  if (!/^-?(?:0|[1-9]\d*)$/u.test(epochNode.lexeme)) {
+  if (!isEpochSecondsLexeme(epochNode.lexeme)) {
     return invalid('event_time_out_of_range');
   }
   const eventTime = epochSecondsToUtc(Number(epochNode.lexeme));
@@ -178,7 +210,7 @@ export function normalizeRawFrame(
   }
 
   const pipSize = Number(pipNode.lexeme);
-  const quote = toQuoteDecimal(quoteNode.lexeme, pipSize);
+  const quote = canonicalQuoteDecimal(quoteNode.lexeme, pipSize);
   if (!quote.ok) {
     return invalid(quote.reason);
   }

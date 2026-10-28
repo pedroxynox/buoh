@@ -50,11 +50,16 @@ export interface DerivAdapterResult extends DerivConnectionResult {
   readonly schemas: { readonly archive_sha256: string; readonly release: string } | null;
 }
 
-/** Las cinco peticiones que puede hacer una conexión. */
+/**
+ * Las seis peticiones que se comprueban antes de conectar. `ticks_history` lleva un rango
+ * representativo (`start` y `end` en 0): se comprueban la forma de la petición y el símbolo, y el
+ * rango se conoce después.
+ */
 function connectionRequests(symbol: string): DerivRequest[] {
   return [
     { operation: 'active_symbols' },
     { operation: 'ticks', symbol },
+    { end: 0, operation: 'ticks_history', start: 0, symbol },
     { operation: 'ping' },
     { operation: 'time' },
     { operation: 'forget_all' },
@@ -100,9 +105,33 @@ async function loadSchemas(input: DerivAdapterInput): Promise<SchemaLoadResult> 
 }
 
 /**
+ * Espera, con el temporizador inyectado, a que el reloj pase de `instantUtc`, la hora del cierre de
+ * la conexión anterior. El `ConnectionOpened` toma su hora al abrir el socket, así que queda
+ * estrictamente después del cierre que supera: con la misma hora, las reglas podrían ordenar la
+ * resolución de `connection_lost` antes de su apertura, y el log no se podría derivar. Si el reloj
+ * retrocede durante la espera, vuelve a mirarlo y espera otra vez.
+ */
+async function waitPast(input: DerivAdapterInput, instantUtc: string): Promise<void> {
+  const instant = Date.parse(instantUtc);
+  for (;;) {
+    const remaining = instant - Date.parse(input.now());
+    if (remaining < 0) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      input.scheduler.schedule(remaining + 1, resolve);
+    });
+  }
+}
+
+/**
  * Adaptador público de Deriv (`F1-SOURCE-001`, ADR-0012): carga los esquemas de la release fijada,
- * comprueba las peticiones con ellos, arma el perfil de medición y el `RawFirstIngestor`, y sigue una
- * conexión hasta su cierre. Si los esquemas no cargan, nunca se conecta (salud `failed`).
+ * comprueba las peticiones con ellos, arma el perfil de medición y el `RawFirstIngestor`, repara el
+ * cierre que le falte a la conexión anterior del log y, cuando el reloj pasa la hora de ese cierre,
+ * sigue una conexión, que supera a esa, hasta su cierre (ADR-0015 §3). Si los esquemas no cargan,
+ * nunca se conecta (salud `failed`); si la reparación no queda durable o un almacén no responde al
+ * leer el log, tampoco (salud `paused`). Si el log no pasa sus comprobaciones, se rechaza con
+ * `LogIntegrityError`, sin conectar.
  */
 export async function runDerivAdapter(input: DerivAdapterInput): Promise<DerivAdapterResult> {
   if (!Number.isSafeInteger(input.durationMs) || input.durationMs <= 0) {
@@ -138,6 +167,18 @@ export async function runDerivAdapter(input: DerivAdapterInput): Promise<DerivAd
     reopenLog: input.reopenLog,
     sink: input.sink,
   });
+  // Antes del socket: la conexión anterior sale del log, nunca de la memoria (ADR-0015 §3).
+  const repair = await ingestor.repairUnrecordedClose({ affected_symbols: [input.symbol] });
+  if (repair.status === 'not_durable') {
+    return notConnected(summary, {
+      detail: repair.stage,
+      reason: 'persistence_unavailable',
+      status: 'paused',
+    });
+  }
+  if (repair.closed_at_utc !== null) {
+    await waitPast(input, repair.closed_at_utc);
+  }
   const connection = new DerivConnection({
     alert: input.alert ?? stderrAlert,
     catalog: input.catalog,
@@ -157,6 +198,7 @@ export async function runDerivAdapter(input: DerivAdapterInput): Promise<DerivAd
     scheduler: input.scheduler,
     schemas,
     serverTime: input.serverTime,
+    supersedes_connection_id: repair.connection_id,
     symbol: input.symbol,
   });
   return { ...(await connection.run()), schemas: summary };
