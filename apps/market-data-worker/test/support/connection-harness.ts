@@ -91,8 +91,11 @@ export interface ConnectionHarnessOptions {
   readonly answerPings?: boolean;
   /** El socket falso avisa del cierre solo con `finishClose`, como `ws`. */
   readonly deferClose?: boolean;
-  /** Tiempo de escucha hasta `forget_all`; por defecto, 600 000 ms, fuera de las pruebas. */
-  readonly durationMs?: number;
+  /**
+   * Tiempo de escucha hasta `forget_all`; por defecto, 600 000 ms, fuera de las pruebas. Con `null`,
+   * la conexión no lo tiene, como en la sesión: no se cierra sola.
+   */
+  readonly durationMs?: number | null;
   /** Source events que el log ya tiene, de ejecuciones anteriores; por defecto, ninguno. */
   readonly events?: readonly SourceEvent[];
   /** Esquemas que cambian en el archivo sintético (`syntheticSchemaArchive`); por defecto, ninguno. */
@@ -162,7 +165,7 @@ export async function connectionHarness(options: ConnectionHarnessOptions = {}) 
       sockets.push(socket);
       return socket;
     },
-    durationMs: options.durationMs ?? 600_000,
+    ...(options.durationMs === null ? {} : { durationMs: options.durationMs ?? 600_000 }),
     endpoint: DERIV_PUBLIC_ENDPOINT,
     ingestor,
     nextId,

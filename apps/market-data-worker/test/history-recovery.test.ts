@@ -1,9 +1,4 @@
-import {
-  connectionClosedSchema,
-  connectionOpenedSchema,
-  sha256Hex,
-  type SourceEvent,
-} from '@buoh/contracts';
+import { sha256Hex } from '@buoh/contracts';
 import { deriveMarketData } from '@buoh/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -13,21 +8,23 @@ import {
   HistoryRecovery,
   type HistoryRecoveryHooks,
   type HistoryRecoveryOutcome,
-  type HistoryRecoveryRequest,
 } from '../src/deriv/history-recovery.js';
-import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
-import { buildRawSourceFrame } from '../src/ingestion/raw-first-ingestor.js';
-import {
-  connectionHarness,
-  settle,
-  START,
-  START_EPOCH,
-  syntheticSchemas,
-  uuid,
-  type ConnectionHarnessOptions,
-} from './support/connection-harness.js';
+import { DERIV_SOURCE } from '../src/deriv/profile.js';
+import { connectionHarness, settle, START, uuid } from './support/connection-harness.js';
 import { derivMessages, ManualClock } from './support/deriv-fixtures.js';
-import { type MemoryObjectStore } from './support/memory-stores.js';
+import {
+  E,
+  forgetAllSent,
+  holdObjectWrites,
+  pagesSent,
+  PREVIOUS,
+  previousConnectionEvents,
+  recovering,
+  REQUEST,
+  results,
+  S,
+  type RecoveringRun,
+} from './support/recovery-harness.js';
 
 // Recuperación de historia en `DerivConnection` (ADR-0015 §4), con sus reintentos y el cierre
 // previsto que la espera. La conexión se arma sin el adaptador: socket falso, reloj y temporizador
@@ -65,82 +62,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Conexión anterior del log, que la nueva supera. */
-const PREVIOUS = uuid(9001);
-/** S: segundo del high-watermark, el último tick antes del cierre (09:59:00). */
-const S = START_EPOCH - 60;
-/** E: segundo del primer tick posterior al cierre, el primero de la conexión nueva (10:00:00). */
-const E = START_EPOCH;
-
-/** El hueco que dan las reglas, y la cotización canónica recibida en cada extremo. */
-const REQUEST: HistoryRecoveryRequest = {
-  end_quote: '100.75',
-  from_event_time_utc: '2026-03-02T09:59:00.001Z',
-  start_quote: '100.25',
-  symbol: 'SYNTH_100',
-  to_event_time_utc: '2026-03-02T09:59:59.999Z',
-};
-
-/** La conexión anterior: su apertura, un tick en S (100.25) y su cierre remoto, que no es pedido. */
-function previousConnection(): SourceEvent[] {
-  const profile = createDerivMeasurementProfile({
-    schemas: syntheticSchemas(),
-    symbol: 'SYNTH_100',
-  });
-  return [
-    connectionOpenedSchema.parse({
-      connection_id: PREVIOUS,
-      event_id: uuid(9002),
-      kind: 'connection_opened',
-      occurred_at_utc: '2026-03-02T09:58:00.000Z',
-      schema_version: '1.0.0',
-      source: DERIV_SOURCE,
-      supersedes_connection_id: null,
-    }),
-    buildRawSourceFrame(
-      {
-        connection_id: PREVIOUS,
-        observation_id: uuid(9003),
-        payload_utf8: derivMessages.tick(2, S, '100.25'),
-        received_at_utc: '2026-03-02T09:59:00.000Z',
-      },
-      profile,
-    ),
-    connectionClosedSchema.parse({
-      affected_symbols: ['SYNTH_100'],
-      closure_type: 'remote',
-      connection_id: PREVIOUS,
-      event_id: uuid(9004),
-      kind: 'connection_closed',
-      occurred_at_utc: '2026-03-02T09:59:30.000Z',
-      reason: 'close_code_1001',
-      schema_version: '1.0.0',
-      source: DERIV_SOURCE,
-    }),
-  ];
-}
-
-/**
- * La conexión nueva, que supera a la anterior, suscrita y con su primer tick (E, 100.75) durable.
- * Después avanza 2000 ms, la espera que hará la sesión antes de pedir la historia. IDs: 1 la
- * conexión, 2 su apertura, 3 el catálogo y 4 el primer tick. El servidor responde cada `ping` del
- * keepalive, porque los tres intentos pasan de 45 000 ms.
- */
-async function recovering(
-  options: Pick<ConnectionHarnessOptions, 'deferClose' | 'durationMs' | 'schemaOverrides'> = {},
-) {
-  const run = await connectionHarness({
-    ...options,
-    answerPings: true,
-    events: previousConnection(),
-    supersedes: PREVIOUS,
-  });
-  await run.subscribe(derivMessages.tick(2, E, '100.75'));
-  await run.clock.advance(2000);
-  return run;
-}
-
-type Run = Awaited<ReturnType<typeof recovering>>;
+type Run = RecoveringRun;
 
 /** `req_id` de cada página pedida, en orden. */
 const pageIds = (run: Run) => pagesSent(run).map((page) => page['req_id']);
@@ -176,11 +98,6 @@ async function everyAttempt(run: Run, attempt: () => Promise<void>): Promise<voi
   }
 }
 
-/** Los `HistoryRecoveryResult` del log. */
-async function results(run: Run): Promise<SourceEvent[]> {
-  return (await run.events()).filter((event) => event.kind === 'history_recovery_result');
-}
-
 /** Una página pedida: `start` siempre en S, `end` según la página. */
 function pageRequest(reqId: number, end: number) {
   return {
@@ -192,13 +109,6 @@ function pageRequest(reqId: number, end: number) {
     ticks_history: 'SYNTH_100',
   };
 }
-
-/** Las páginas pedidas, sin las demás peticiones (catálogo, suscripción, `ping` y `forget_all`). */
-const pagesSent = (run: Run) =>
-  run
-    .socket()
-    .requests()
-    .filter((request) => 'ticks_history' in request);
 
 /** Respuesta `history` a la página `reqId` (por defecto, la 3) con estos miembros, tal cual. */
 function historyPage(members: string, reqId = 3): string {
@@ -234,21 +144,6 @@ async function answerOneTickPages(run: Run, count: number, endPrice: string): Pr
     run.socket().text(derivMessages.history(reqId, [time], [page === 1 ? endPrice : '100.5']));
     await settle();
   }
-}
-
-/** Retiene las escrituras de objetos hasta `release`, para dejar un frame en curso. */
-function holdObjectWrites(objects: MemoryObjectStore) {
-  const gate = Promise.withResolvers<undefined>();
-  const original = objects.putIfAbsent.bind(objects);
-  vi.spyOn(objects, 'putIfAbsent').mockImplementation(async (key, bytes) => {
-    await gate.promise;
-    return original(key, bytes);
-  });
-  return {
-    release: () => {
-      gate.resolve(undefined);
-    },
-  };
 }
 
 describe('DerivConnection.recoverHistory: páginas y resultado (ADR-0015 §4)', () => {
@@ -713,7 +608,10 @@ describe('DerivConnection.recoverHistory: conexión perdida o cerrándose', () =
   });
 
   it('sin suscripción se abandona sin pedir nada', async () => {
-    const run = await connectionHarness({ events: previousConnection(), supersedes: PREVIOUS });
+    const run = await connectionHarness({
+      events: previousConnectionEvents(),
+      supersedes: PREVIOUS,
+    });
     run.socket().open();
     await settle();
 
@@ -894,13 +792,6 @@ describe('DerivConnection.recoverHistory con las reglas (ADR-0015 §2 y §4)', (
     );
   });
 });
-
-/** ¿Se pidió `forget_all`? */
-const forgetAllSent = (run: Run) =>
-  run
-    .socket()
-    .requests()
-    .some((request) => 'forget_all' in request);
 
 describe('DerivConnection.recoverHistory: reintentos (ADR-0015 §4)', () => {
   it.each<[string, (run: Run) => Promise<void>, Record<string, unknown>]>([
