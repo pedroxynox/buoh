@@ -71,11 +71,25 @@ function attributeSymbol(
   throw new SymbolAttributionError(frame.observation_id);
 }
 
-/** Convierte el lexema numérico a decimal canónico con exactamente `pipSize` decimales. */
-function toQuoteDecimal(
-  lexeme: string,
-  pipSize: number,
-): { ok: true; value: string } | { ok: false; reason: InvalidFrameReason } {
+/** Resultado de `canonicalQuoteDecimal`: el decimal canónico o el motivo de su rechazo. */
+export type QuoteDecimalResult =
+  | { readonly ok: true; readonly value: string }
+  | {
+      readonly ok: false;
+      readonly reason: Extract<
+        InvalidFrameReason,
+        'quote_exponent_not_supported' | 'quote_precision_exceeds_pip_size'
+      >;
+    };
+
+/**
+ * Cotización en decimal canónico (ADR-0004 §4): el lexema de un número JSON con exactamente
+ * `pipSize` decimales, completados con ceros y sin aritmética binaria. Rechaza un exponente y más
+ * decimales que `pipSize`. Es la regla de `quote_decimal` en el normalizador, y la usa también quien
+ * compara con un tick una cotización de otra respuesta, como la recuperación de historia del worker
+ * (ADR-0015 §4).
+ */
+export function canonicalQuoteDecimal(lexeme: string, pipSize: number): QuoteDecimalResult {
   if (/[eE]/u.test(lexeme)) {
     return { ok: false, reason: 'quote_exponent_not_supported' };
   }
@@ -178,7 +192,7 @@ export function normalizeRawFrame(
   }
 
   const pipSize = Number(pipNode.lexeme);
-  const quote = toQuoteDecimal(quoteNode.lexeme, pipSize);
+  const quote = canonicalQuoteDecimal(quoteNode.lexeme, pipSize);
   if (!quote.ok) {
     return invalid(quote.reason);
   }

@@ -16,7 +16,8 @@ import { RULE_SETS } from './profile.js';
  * Motivos de `evidence.reason`. `schema_validation_failed` y `source_error_response` valen para toda
  * respuesta pedida; los `catalog_*`, solo para el catálogo (contratos de dominio,
  * «SourceCatalogSnapshot»), y `history_inconsistent`, solo para la respuesta a `ticks_history`
- * cuando su historia no es coherente (ADR-0015 §4: longitudes, orden o rango de `history.times`).
+ * cuando su historia no es coherente (ADR-0015 §4): `pip_size`, longitudes, orden o rango de
+ * `history.times`, o un precio que no acepta la regla de `quote_decimal`.
  */
 export type RequestedResponseInvalidReason =
   | 'catalog_duplicate_symbol'

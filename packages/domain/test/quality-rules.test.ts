@@ -5,6 +5,7 @@ import { rawSourceFrameSchema, sha256Hex } from '@buoh/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
+  canonicalQuoteDecimal,
   createPipelineProfile,
   deriveHealthReport,
   deriveMarketData,
@@ -107,6 +108,27 @@ describe('normalizador 1.0.0', () => {
       type: 'array',
     });
     expect(() => parseJsonPreservingNumbers('{} {}')).toThrow();
+  });
+});
+
+describe('canonicalQuoteDecimal (la regla de quote_decimal)', () => {
+  it.each([
+    ['100.13', 3, '100.130'],
+    ['100.130', 3, '100.130'],
+    ['100', 2, '100.00'],
+    ['-0.5', 2, '-0.50'],
+    ['7', 0, '7'],
+  ])('%s con pip_size %d da %s, sin aritmética binaria', (lexeme, pipSize, value) => {
+    expect(canonicalQuoteDecimal(lexeme, pipSize)).toEqual({ ok: true, value });
+  });
+
+  it.each([
+    ['100.1301', 3, 'quote_precision_exceeds_pip_size'],
+    ['100.0', 0, 'quote_precision_exceeds_pip_size'],
+    ['1.0013e2', 3, 'quote_exponent_not_supported'],
+    ['1E2', 2, 'quote_exponent_not_supported'],
+  ])('rechaza %s con pip_size %d (%s)', (lexeme, pipSize, reason) => {
+    expect(canonicalQuoteDecimal(lexeme, pipSize)).toEqual({ ok: false, reason });
   });
 });
 

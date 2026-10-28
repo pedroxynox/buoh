@@ -22,10 +22,12 @@ export {
   type JsonNode,
 } from './json-lexeme.js';
 export {
+  canonicalQuoteDecimal,
   normalizeRawFrame,
   SymbolAttributionError,
   type InvalidFrameReason,
   type NormalizationResult,
+  type QuoteDecimalResult,
   type UnflaggedTick,
 } from './normalizer.js';
 export {

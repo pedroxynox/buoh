@@ -128,11 +128,11 @@ Restricciones por `status`:
 
 `from_event_time_utc <= to_event_time_utc`.
 
-Decidido en [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §4, y llega con el PR 3 de su secuencia (§13): el worker de Deriv lo construirá con `ticks_history`, después del primer tick posterior al cierre.
+Desde el PR 3 de [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13 (§4), el worker de Deriv lo construye con `ticks_history` y lo persiste por la misma cola que los frames, así que queda después del primer tick posterior al cierre:
 
-- `connection_id` será la conexión que recuperó; `from_event_time_utc`, el high-watermark del inicio del hueco + 1 ms, y `to_event_time_utc`, el primer tick posterior al último cierre − 1 ms. Es el rango que las reglas aceptan para decidir el hueco;
-- `complete`: las páginas son válidas, cubren el rango pedido y traen el tick del high-watermark y el primer tick posterior, con la misma cotización que se recibió. `recovered_event_count` cuenta los ticks entre los dos, sin incluirlos;
-- `partial` y `unavailable` llevarán uno de estos motivos: `history_page_limit`, `history_error_response`, `history_invalid`, `history_timeout`, `history_boundary_missing` o `history_boundary_mismatch`. `unavailable` significa que falló la primera página.
+- `connection_id` es la conexión que recuperó; `from_event_time_utc`, el high-watermark del inicio del hueco + 1 ms, y `to_event_time_utc`, el primer tick posterior al último cierre − 1 ms. Es el rango que las reglas aceptan para decidir el hueco;
+- `complete`: las páginas son válidas, cubren el rango pedido y traen el tick del high-watermark y el primer tick posterior, con la misma cotización que se recibió, en decimal canónico con el `pip_size` de la respuesta. `recovered_event_count` cuenta los ticks entre los dos, sin incluirlos; en `partial`, los de las páginas válidas;
+- `partial` y `unavailable` llevan uno de estos motivos: `history_page_limit`, `history_error_response`, `history_invalid`, `history_timeout`, `history_boundary_missing` o `history_boundary_mismatch`. `unavailable` significa que falló la primera página. Si se cumple más de uno, va el primero en este orden: una página que falla (`history_error_response`, `history_invalid` o `history_timeout`), un extremo con otra cotización (`history_boundary_mismatch`), el tope de páginas sin llegar al inicio del rango (`history_page_limit`) y un extremo que falta (`history_boundary_missing`).
 
 ## `IngestionCursor`
 
@@ -601,9 +601,9 @@ En `packages/domain`, `checkRequestedResponse` hace las dos comprobaciones comun
 
 El perfil de Deriv no declara `ticks` ni `error`. Una suscripción fallida (`msg_type` `ticks`) y la respuesta a un método desconocido (`msg_type` `error`) llegan con un objeto `error`, y las reglas 2.0.0 ya las registran como `source_error_response`.
 
-Decidido en [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §4, y llega con el PR 3 de su secuencia: quien pida `ticks_history` comprobará igual su respuesta `history`, y además que traiga `history.times`, `history.prices` y `pip_size`, que `times` y `prices` tengan la misma longitud, que los tiempos sean enteros estrictamente crecientes y que caigan dentro del rango pedido; si no, el motivo será `schema_validation_failed` o `history_inconsistent`. Una petición de historia rechazada llega con `msg_type` `ticks_history` y un objeto `error`; el perfil v2 no lo declara, así que la registran las reglas 2.0.0.
+Desde el PR 3 de [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13 (§4), quien pide `ticks_history` comprueba igual su respuesta `history`, con `checkRequestedResponse`. Después, la página tiene que traer el objeto `history`, sus arrays `times` y `prices`, y `pip_size`; si falta alguno, el motivo es `schema_validation_failed`. Y tiene que ser coherente: `pip_size` entero de 0 a 18, `times` y `prices` de la misma longitud, tiempos enteros estrictamente crecientes dentro del rango pedido y precios que acepta con ese `pip_size` la regla de `quote_decimal` (`canonicalQuoteDecimal`, en `packages/domain`); si no, el motivo es `history_inconsistent`. Una petición de historia rechazada llega con `msg_type` `ticks_history` y un objeto `error`; el perfil v2 no lo declara, así que la registran las reglas 2.0.0 y no deja incidencia de respuesta pedida.
 
-`history_inconsistent` (longitudes, orden o rango de `history.times`) existe en `packages/domain` desde el PR 3 y es solo para las respuestas de historia. En PostgreSQL, `requested_response_incidents` lo admitirá desde la migración `0004`, que llega con el PR 5 de ADR-0015 §13; la `0003`, la vigente, no lo admite.
+`history_inconsistent` (una página de historia incoherente) existe en `packages/domain` desde el PR 3 y es solo para las respuestas de historia. En PostgreSQL, `requested_response_incidents` lo admitirá desde la migración `0004`, que llega con el PR 5 de ADR-0015 §13; la `0003`, la vigente, no lo admite.
 
 ## Contratos futuros
 
