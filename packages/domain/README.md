@@ -20,7 +20,7 @@ estado durable ─ deriveHealthReport ─▶ HealthReport
 - `checkRequestedResponse` y `deriveRequestedResponseIncident`: comprobaciones e incidencia de una respuesta pedida inválida (ADR-0012 §6).
 - `normalizeRawFrame`: valida el payload exacto y conserva el lexema numérico de la cotización. Con reglas 2.0.0, además separa los mensajes declarados en `non_tick_msg_types`, reconoce errores de la fuente y atribuye el símbolo por `echo_req`.
 - `deriveMarketData`: reglas del perfil (1.0.0 o 2.0.0) en orden de observación; recomputar desde source events persistidos da el mismo resultado. Con un perfil de medición, la continuidad tras un cierre no pedido solo la decide la historia, y `pendingGaps` da el rango de cada hueco pendiente (ADR-0015 §2).
-- `deriveHealthReport`: salud del estado durable, con entradas opcionales para las condiciones del registro operativo, la conexión observada y una salud mínima; `unobservedHealthReport`, el informe cuando no se puede observar nada (ADR-0015 §8).
+- `deriveHealthReport`: salud del estado durable, con entradas opcionales para las condiciones del registro operativo, la conexión observada y una salud mínima; `unobservedHealthReport`, el informe cuando nada de lo observado es fiable (ADR-0015 §8).
 - `evaluateSourceLimit`: matriz de límites de ADR-0004 §7.
 - `evaluateSegmentRotation`: política `segment_policy_version = 1.0.0` (bytes, frames y ventana; ADR-0005 §5), evaluada antes de añadir cada source event.
 - `buildDatasetPublication` acepta `encodeObject` para la codificación física (por defecto `none`, como los vectores); la usa `apps/market-data-worker` para gzip. Cambiarla no altera `dataset_id`.

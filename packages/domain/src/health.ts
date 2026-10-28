@@ -33,7 +33,9 @@ export interface HealthInput {
   /**
    * Estado de la conexión observado fuera del log, por ejemplo en el latido de la ingesta
    * (ADR-0015 §8). Sin él, sale del último evento de conexión del log. Una conexión que no es
-   * `connected` nunca deja la salud en `healthy`.
+   * `connected` nunca deja la salud en `healthy`: con raw durable y el log conectado es una causa
+   * más, de mínimo `recovering`, porque la ingesta está reconectando; sin raw durable la salud
+   * sigue en `starting`, y tras un cierre pedido, en `paused`.
    */
   readonly connection_state?: HealthReport['connection_state'];
   readonly derived: DerivedMarketData;
@@ -99,6 +101,11 @@ export function deriveHealthReport(input: HealthInput): HealthReport {
   ) {
     minimums.push(input.minimum_health);
   }
+  if (lastRaw !== undefined && connectedInLog && connectionState !== 'connected') {
+    // El log sigue conectado, pero quien observa la ingesta ya la ve reconectando (ADR-0015 §8,
+    // regla 5): es una causa más, así que un hueco antiguo sin resolver no la tapa.
+    minimums.push('recovering');
+  }
 
   let health: ServiceHealth;
   if (minimums.length > 0) {
@@ -110,9 +117,6 @@ export function deriveHealthReport(input: HealthInput): HealthReport {
   } else if (!connectedInLog) {
     // Cierre solicitado sin reapertura: no se procesa entrada, pero no hay incidencia abierta.
     health = 'paused';
-  } else if (connectionState !== 'connected') {
-    // El log sigue conectado, pero quien observa la ingesta ya ve otra cosa (ADR-0015 §8, regla 5).
-    health = 'recovering';
   } else {
     health = 'healthy';
   }
@@ -134,9 +138,10 @@ export function deriveHealthReport(input: HealthInput): HealthReport {
 }
 
 /**
- * Informe sin observación (ADR-0015 §8, reglas 2 y 3): `failed` cuando lo que se observa es
- * incompatible y `paused` cuando el almacenamiento no responde. Sin conexión, sin backlog y sin
- * datos, porque no se pudo leer nada fiable; el motivo va aparte, saneado, por quien lo emite.
+ * Informe sin observación fiable (ADR-0015 §8, reglas 2 y 3): `failed` cuando lo que se observa es
+ * incompatible y `paused` cuando el almacenamiento no responde. Sin conexión, backlog 0 y campos
+ * `null`, como fija la regla 3; la regla 2 no fija esos campos y usa los mismos, porque nada de lo
+ * observado es fiable. El motivo va aparte, saneado, por quien lo emite.
  */
 export function unobservedHealthReport(input: {
   readonly service_health: 'failed' | 'paused';

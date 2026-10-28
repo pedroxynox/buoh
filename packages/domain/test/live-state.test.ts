@@ -77,20 +77,27 @@ function tick(sequence: number, connection: string, epoch: number, delayMs = 100
   };
 }
 
-function close(sequence: number, connection: string, occurredAt: string) {
+const LOST = { closure_type: 'timeout', reason: 'ping_timeout' } as const;
+const REQUESTED = { closure_type: 'requested', reason: 'operator_shutdown' } as const;
+
+function close(
+  sequence: number,
+  connection: string,
+  occurredAt: string,
+  closure: typeof LOST | typeof REQUESTED = LOST,
+) {
   return {
     affected_symbols: ['SYNTH_100'],
-    closure_type: 'timeout',
     connection_id: connection,
     event_id: id(sequence),
     fixture_sequence: sequence,
     kind: 'connection_closed',
     occurred_at_utc: occurredAt,
-    reason: 'ping_timeout',
+    ...closure,
   };
 }
 
-function open(sequence: number, connection: string, supersedes: string, occurredAt: string) {
+function open(sequence: number, connection: string, supersedes: string | null, occurredAt: string) {
   return {
     connection_id: connection,
     event_id: id(sequence),
@@ -310,6 +317,11 @@ describe('entradas nuevas de la salud (ADR-0015 §8)', () => {
   const live = persisted([tick(1, CONNECTION_A, T0)], measurement);
   // Ninguna ejecución escribió todavía: no hay segmentos.
   const empty: ReturnType<typeof persisted> = [];
+  // La última conexión se cerró a petición y no se reabrió.
+  const stopped = persisted(
+    [tick(1, CONNECTION_A, T0), close(2, CONNECTION_A, at(T0, 500), REQUESTED)],
+    measurement,
+  );
 
   it('sin entradas nuevas, un log conectado y con datos es healthy', () => {
     const report = health(live, measurement);
@@ -333,17 +345,55 @@ describe('entradas nuevas de la salud (ADR-0015 §8)', () => {
   });
 
   it('una conexión observada que no es connected nunca deja healthy', () => {
-    const connecting = health(live, measurement, { connection_state: 'connecting' });
-    expect(connecting.connection_state).toBe('connecting');
-    expect(connecting.service_health).toBe('recovering');
+    for (const observed of ['connecting', 'disconnected'] as const) {
+      const report = health(live, measurement, { connection_state: observed });
+      expect(report.connection_state).toBe(observed);
+      expect(report.service_health).toBe('recovering');
+    }
     expect(health(live, measurement, { connection_state: 'connected' }).service_health).toBe(
       'healthy',
     );
   });
 
+  it('la reconexión observada no la tapa un hueco antiguo sin resolver', () => {
+    // Una recuperación anterior dejó `event_gap_unresolved` abierto (degraded) y la ingesta reconecta.
+    const segments = persisted(
+      [
+        ...RECONNECTION,
+        recovery(
+          5,
+          { from: at(T0, 1), to: at(T0, 999) },
+          { reason: 'history_page_limit', recovered_event_count: 0, status: 'partial' },
+        ),
+      ],
+      measurement,
+    );
+    expect(health(segments, measurement).service_health).toBe('degraded');
+
+    const report = health(segments, measurement, { connection_state: 'connecting' });
+    expect(report.service_health).toBe('recovering');
+    expect(report.open_condition_types).toEqual(['event_gap_unresolved']);
+  });
+
+  it('tras un cierre pedido sigue en paused aunque se observe otra conexión', () => {
+    expect(health(stopped, measurement).service_health).toBe('paused');
+    for (const observed of ['connected', 'connecting', 'disconnected'] as const) {
+      const report = health(stopped, measurement, { connection_state: observed });
+      expect(report.connection_state).toBe(observed);
+      expect(report.service_health).toBe('paused');
+    }
+  });
+
   it('la salud mínima se impone solo si es más severa que healthy', () => {
     expect(health(live, measurement, { minimum_health: 'paused' }).service_health).toBe('paused');
     expect(health(live, measurement, { minimum_health: 'healthy' }).service_health).toBe('healthy');
+    // `starting` no rebaja un log vivo, y `healthy` no adelanta un healthy sin raw durable.
+    expect(health(live, measurement, { minimum_health: 'starting' }).service_health).toBe(
+      'healthy',
+    );
+    expect(health(empty, measurement, { minimum_health: 'healthy' }).service_health).toBe(
+      'starting',
+    );
     expect(health(empty, measurement, { minimum_health: 'starting' }).service_health).toBe(
       'starting',
     );
@@ -353,6 +403,11 @@ describe('entradas nuevas de la salud (ADR-0015 §8)', () => {
     const report = health(empty, measurement, { connection_state: 'connecting' });
     expect(report.service_health).toBe('starting');
     expect(report.connection_state).toBe('connecting');
+    // Con la apertura durable y sin raw tampoco hay nada que recuperar.
+    const opened = persisted([open(1, CONNECTION_A, null, at(T0))], measurement);
+    expect(health(opened, measurement, { connection_state: 'connecting' }).service_health).toBe(
+      'starting',
+    );
     expect(health(empty, measurement, { minimum_health: 'paused' }).service_health).toBe('paused');
   });
 
