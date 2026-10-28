@@ -85,7 +85,8 @@ export class LogReadError extends Error {
  * Lectura de un almacén del log: si no responde, lanza `LogReadError`. Un objeto que no existe o que
  * supera el tamaño de su fila (`ObjectReadError`) sí respondió: falta o cambió contenido que el
  * índice confirmó, así que lanza `LogIntegrityError`, como el replay con un objeto ausente o
- * excedido (ADR-0015 §8, regla 2).
+ * excedido. ADR-0015 §8 separa igual lo guardado que falta (regla 2) de un almacén que no responde
+ * (regla 3).
  */
 async function fromStore<T>(read: () => Promise<T>): Promise<T> {
   try {
