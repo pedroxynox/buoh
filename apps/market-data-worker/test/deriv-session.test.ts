@@ -66,6 +66,7 @@ describe('startDerivSession: arranque', () => {
         reason: 'archive_sha256_mismatch',
         status: 'failed',
       },
+      recoveries: [],
       schemas: null,
       server_time_offset_ms: null,
       subscription_id: null,
@@ -311,6 +312,8 @@ describe('startDerivSession: cómo terminó cada conexión (ADR-0015 §3)', () =
         },
       ],
       end: { status: 'completed' },
+      // El log estaba vacío: no hay hueco que recuperar.
+      recoveries: [],
       schemas: {
         archive_sha256: run.fixture.expected.archive_sha256,
         release: 'synthetic-deriv-1',

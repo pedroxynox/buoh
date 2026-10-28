@@ -293,8 +293,11 @@ async function waitPast(
   }
 }
 
-/** La duración de una conexión: un entero positivo de milisegundos. */
-function assertDuration(durationMs: number): void {
+/**
+ * Una duración, de una conexión o de la sesión, es un entero positivo de milisegundos; si no, es un
+ * error de programación (`TypeError`).
+ */
+export function assertDuration(durationMs: number): void {
   if (!Number.isSafeInteger(durationMs) || durationMs <= 0) {
     throw new TypeError('durationMs debe ser un entero positivo de milisegundos.');
   }

@@ -172,6 +172,10 @@ export interface SessionHarnessOptions {
   readonly stopOnRelease?: number;
   /** Pide `time` tras el primer tick de cada conexión; por defecto, no. */
   readonly serverTime?: boolean;
+  /** Duración prevista de la sesión, en milisegundos; por defecto, ninguna. */
+  readonly durationMs?: number;
+  /** Cada socket falso avisa del cierre solo con `finishClose`, como `ws`; por defecto, enseguida. */
+  readonly deferClose?: boolean;
 }
 
 /**
@@ -232,6 +236,7 @@ export async function sessionHarness(options: SessionHarnessOptions = {}) {
   const session = startDerivSession({
     alert: (payload) => alerts.push(payload),
     catalog: new MemoryCatalogStore(),
+    ...(options.durationMs === undefined ? {} : { durationMs: options.durationMs }),
     connect: (input) => {
       rowsAtConnect.push(sourceLog.rows.length);
       timeline.push(`connect:${String(rowsAtConnect.length)}`);
@@ -242,8 +247,8 @@ export async function sessionHarness(options: SessionHarnessOptions = {}) {
         failingConnects -= 1;
         throw Object.assign(new Error('sintético'), { code: 'ECONNREFUSED' });
       }
-      const socket =
-        options.answerPings === true ? new PongingSocket(input) : new FakeDerivSocket(input);
+      const Socket = options.answerPings === true ? PongingSocket : FakeDerivSocket;
+      const socket = new Socket({ ...input, deferClose: options.deferClose ?? false });
       sockets.push(socket);
       return socket;
     },
@@ -320,15 +325,15 @@ export async function sessionHarness(options: SessionHarnessOptions = {}) {
     (await (await unlockedLog()).readDurableSegments()).flat();
 
   /**
-   * Abre el socket, responde el catálogo (`req_id` 1) y entrega el primer tick, en `epoch`, como
-   * respuesta a la suscripción (`req_id` 2).
+   * Abre el socket, responde el catálogo (`req_id` 1) y entrega el primer tick, en `epoch` y con
+   * `quote`, como respuesta a la suscripción (`req_id` 2).
    */
-  const subscribe = async (target: FakeDerivSocket, epoch: number) => {
+  const subscribe = async (target: FakeDerivSocket, epoch: number, quote = '100.25') => {
     target.open();
     await settle();
     target.text(derivMessages.catalog(1));
     await settle();
-    target.text(derivMessages.tick(2, epoch));
+    target.text(derivMessages.tick(2, epoch, quote));
     await settle();
   };
 

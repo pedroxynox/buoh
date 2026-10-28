@@ -1457,6 +1457,23 @@ describe('RawFirstIngestor: reabrir el log que falló', () => {
     },
   );
 
+  it('readDurableSegments da null con el log fallido, sin reabrirlo; con el log reabierto, da sus eventos durables', async () => {
+    const run = await failedLog();
+    const open = vi.spyOn(SourceEventLog, 'open');
+
+    expect(await run.ingestor.readDurableSegments()).toBeNull();
+    expect(open).not.toHaveBeenCalled();
+    await reopenWith.receiveEvent(run);
+    const segments = await run.ingestor.readDurableSegments();
+    expect(
+      segments
+        ?.flat()
+        .map((event) =>
+          event.kind === 'raw_source_frame' ? event.observation_id : event.event_id,
+        ),
+    ).toEqual([id(1), id(2), id(4)]);
+  });
+
   it('rotate no reabre el log fallido: devuelve input_closed sin cerrar el segmento', async () => {
     const run = await failedLog();
     const open = vi.spyOn(SourceEventLog, 'open');

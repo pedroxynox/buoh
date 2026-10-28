@@ -10,6 +10,7 @@ import {
   type SourceEventLog,
 } from '../source-log/source-event-log.js';
 import {
+  assertDuration,
   prepareDerivAdapter,
   startDerivAttempt,
   type DerivAdapterInput,
@@ -22,6 +23,8 @@ import {
   type DerivConnectionResult,
   type DerivSessionEnd,
 } from './connection.js';
+import { GapWatch, type GapWatchFailure } from './gap-watch.js';
+import { type HistoryRecoveryOutcome } from './history-recovery.js';
 
 /** El bloqueo de la fuente que tiene la sesión (ADR-0012 §9): `SourceLock` en PostgreSQL. */
 export interface SessionLock {
@@ -94,8 +97,12 @@ export interface DerivSessionInput extends Pick<
   /** Azar de la espera entre intentos, en [0, 1). */
   readonly random: () => number;
   /**
-   * Duración prevista de toda la sesión, en milisegundos (ADR-0015 §4 y §9). Es de la sesión, nunca
-   * de una conexión: la sesión no la pasa a sus conexiones. Todavía no la aplica: sin ella o con
+   * Duración prevista de toda la sesión, en milisegundos (ADR-0015 §4 y §9): un entero positivo, o
+   * `startDerivSession` lanza `TypeError`. Cuenta desde el primer `ConnectionOpened` durable de la
+   * sesión, y al cumplirse la sesión pide el cierre previsto (`finish`) a la conexión en curso. Si
+   * queda una recuperación de historia pendiente, lo pide después de su resultado, como mucho
+   * 300 000 ms después del plazo; pasado ese tope, para. Después de `finish` no reconecta ni pide más
+   * historia. Es de la sesión, nunca de una conexión: la sesión no la pasa a sus conexiones. Sin
    * ella, la sesión sigue hasta la parada o un fallo.
    */
   readonly durationMs?: number;
@@ -114,12 +121,17 @@ export interface DerivSessionResult {
   /** Las conexiones, en orden. */
   readonly connections: readonly DerivSessionConnection[];
   /**
-   * `completed` tras la parada; `failed` si no se puede seguir sin intervención, con un motivo
-   * estable (`reason`) y un dato saneado (`detail`).
+   * `completed` tras la parada o el cierre previsto; `failed` si no se puede seguir sin
+   * intervención, con un motivo estable (`reason`) y un dato saneado (`detail`).
    */
   readonly end:
     | { readonly status: 'completed' }
     | { readonly detail: string | null; readonly reason: string; readonly status: 'failed' };
+  /**
+   * Cómo terminó cada recuperación de historia que la sesión pidió, en orden: como mucho una por
+   * conexión (`recoverHistory`, ADR-0015 §4).
+   */
+  readonly recoveries: readonly HistoryRecoveryOutcome[];
   /** Release y SHA-256 de los esquemas cargados, o `null` si la carga falló. */
   readonly schemas: DerivSchemaSummary | null;
   /** Desfase con el servidor medido en la última conexión, o `null`. */
@@ -154,6 +166,11 @@ const MAX_BACKOFF_MS = 60_000;
  * contador de intentos a 1 (ADR-0015 §3, «Espera»).
  */
 const STEADY_CONNECTION_MS = 60_000;
+/**
+ * Lo que el cierre previsto espera, después del plazo, a una recuperación de historia pendiente;
+ * pasado, la sesión para y la abandona.
+ */
+const PLANNED_CLOSE_BOUND_MS = 300_000;
 
 /**
  * La espera del intento n, desde 1 (ADR-0015 §3, «Espera»): con d = mín(60 000, 1000 · 2^(n−1)) ms,
@@ -247,6 +264,24 @@ class SessionRun {
   #attempt = 1;
   /** Cuándo quedó durable el primer tick de la conexión en curso, en ms desde la época. */
   #firstTickAt: number | null = null;
+  /** La vigilancia del hueco pendiente durante la conexión en curso (ADR-0015 §4). */
+  #watch: GapWatch | null = null;
+  /** Los resultados de las recuperaciones pedidas, en orden. */
+  readonly #recoveries: Promise<HistoryRecoveryOutcome>[] = [];
+  /** La vigilancia del hueco no pudo seguir: la sesión termina cuando la conexión termine. */
+  #failure: GapWatchFailure | null = null;
+  /** Ya empezó a contar el plazo del cierre previsto. */
+  #deadlineArmed = false;
+  #cancelDeadline: (() => void) | null = null;
+  /** El plazo ya se cumplió: se pide el cierre previsto en cuanto no quede recuperación pendiente. */
+  #due = false;
+  /**
+   * Ya se pidió el cierre previsto a una conexión (`finish`): desde entonces la sesión no reconecta ni
+   * empieza ninguna recuperación de historia.
+   */
+  #finishAsked = false;
+  /** Cancela el tope de la espera a la recuperación pendiente después del plazo. */
+  #cancelBound: (() => void) | null = null;
 
   constructor(input: DerivSessionInput) {
     this.#input = input;
@@ -256,13 +291,16 @@ class SessionRun {
   /**
    * La parada (ADR-0015 §3, «Parada»): con una conexión en curso, la para, y la sesión termina cuando
    * esa conexión termina, sin reconectar; si espera, corta la espera, y si un intento todavía no
-   * conectó, lo aborta sin socket.
+   * conectó, lo aborta sin socket. Una recuperación de historia que espera sus 2000 ms ya no se pide;
+   * una en curso la abandona la conexión.
    */
   stop(): void {
     if (this.#stopped) {
       return;
     }
     this.#stopped = true;
+    this.#cancelPlannedClose();
+    this.#watch?.cancel();
     this.#cancelWait?.();
     this.#abort?.abort();
     this.#connection?.stop();
@@ -273,9 +311,11 @@ class SessionRun {
     try {
       end = await this.#session();
     } catch (error) {
+      this.#cancelPlannedClose();
       await this.#releaseLock();
       throw error;
     }
+    this.#cancelPlannedClose();
     try {
       // Con el log sano y el bloqueo vigente, cierra el segmento abierto (ADR-0015 §3, «Parada»).
       // Un log que no pasa sus comprobaciones no se toca, uno fallido no lo cierra `rotate`, y uno
@@ -287,10 +327,13 @@ class SessionRun {
       await this.#releaseLock();
     }
     const last = this.#last;
+    // Cada una se resolvió antes de que terminara su conexión.
+    const recoveries = await Promise.all(this.#recoveries);
     return {
       catalog: last?.catalog ?? null,
       connections: [...this.#connections],
       end,
+      recoveries,
       schemas: this.#summary,
       server_time_offset_ms: last?.server_time_offset_ms ?? null,
       subscription_id: last?.subscription_id ?? null,
@@ -316,6 +359,9 @@ class SessionRun {
       now: input.now,
       profile: preparation.profile,
       registry: input.registry,
+      onConnectionOpened: () => {
+        this.#onConnectionOpened();
+      },
       // Siempre con el bloqueo vigente: después de perderlo, la sesión toma otro antes de escribir.
       reopenLog: () => input.openLog(this.#heldLock()),
       sink: {
@@ -328,6 +374,8 @@ class SessionRun {
         tick: (tick) => {
           this.#firstTickAt ??= Date.parse(input.now());
           input.sink.tick(tick);
+          // Ya durable: si es posterior al high-watermark del hueco, la sesión vuelve a derivar.
+          this.#watch?.onTick(tick);
         },
       },
     });
@@ -501,9 +549,11 @@ class SessionRun {
     }
     const { connection } = attempt;
     this.#connection = connection;
-    // Una parada que llegó mientras se creaba la conexión, antes de verla aquí.
     if (this.#stopped) {
+      // Una parada que llegó mientras se creaba la conexión, antes de verla aquí.
       connection.stop();
+    } else {
+      this.#watchGap(connection, ingestor, preparation);
     }
     let result: DerivConnectionResult;
     try {
@@ -512,6 +562,9 @@ class SessionRun {
       return integrityEnd(error);
     } finally {
       this.#connection = null;
+      // Con la conexión terminada, la recuperación pendiente la pide la siguiente (ADR-0015 §4).
+      this.#watch?.cancel();
+      this.#watch = null;
     }
     this.#connections.push({
       closure: result.closure,
@@ -519,6 +572,13 @@ class SessionRun {
       end: result.end,
     });
     this.#last = result;
+    const failure = this.#failure;
+    if (failure !== null) {
+      if (failure.reason === 'unexpected') {
+        throw failure.error;
+      }
+      return notDerivable(failure.error);
+    }
     const { end } = result;
     if (end.status === 'completed') {
       return COMPLETED;
@@ -526,12 +586,129 @@ class SessionRun {
     if (end.status === 'failed') {
       return failed(end.reason, end.detail);
     }
+    if (this.#finishAsked) {
+      // Después del cierre previsto, como después de la parada, no se reconecta aunque la conexión se
+      // perdiera antes de responder `forget_all`: la conexión nueva tendría que recuperar el hueco de
+      // esta pérdida, y después de `finish` no empieza ninguna recuperación. La ejecución siguiente lo
+      // recupera.
+      return COMPLETED;
+    }
     // `disconnected` o `paused`: se espera y se reconecta. Después de la parada, la espera no empieza,
     // aunque la conexión no terminara con el cierre pedido.
     if (this.#wasSteady()) {
       this.#attempt = 1;
     }
     return null;
+  }
+
+  /**
+   * Vigila durante la conexión el hueco pendiente del símbolo y pide su historia por ella, una vez
+   * como mucho (ADR-0015 §4, «Cuándo»; ver `GapWatch`). Lee el log del ingestor de la sesión, ya con
+   * el cierre reparado del intento, y lo deriva con el perfil de medición. Cada recuperación pedida
+   * entra en el resultado de la sesión.
+   */
+  #watchGap(
+    connection: DerivConnection,
+    ingestor: RawFirstIngestor,
+    preparation: DerivPreparation,
+  ): void {
+    const watch: GapWatch = new GapWatch({
+      alert: (payload) => {
+        this.#alert(payload);
+      },
+      derive: (segments) => deriveMarketData(segments, preparation.profile),
+      onFailure: (failure) => {
+        this.#onWatchFailure(watch, failure);
+      },
+      onSettled: () => {
+        this.#onSettled(watch);
+      },
+      read: () => ingestor.readDurableSegments(),
+      recover: (request) => {
+        const outcome = connection.recoverHistory(request);
+        this.#recoveries.push(outcome);
+        return outcome;
+      },
+      scheduler: this.#input.scheduler,
+      symbol: preparation.symbol,
+    });
+    this.#watch = watch;
+    watch.start();
+  }
+
+  /**
+   * La vigilancia del hueco no puede seguir: para la conexión, y la sesión termina cuando esa
+   * conexión termine, con `log_not_derivable` si el log no se puede derivar (ADR-0015 §2) o
+   * rechazándose con el error de programación.
+   */
+  #onWatchFailure(watch: GapWatch, failure: GapWatchFailure): void {
+    if (this.#watch !== watch) {
+      return;
+    }
+    this.#failure ??= failure;
+    this.#connection?.stop();
+  }
+
+  /** Ya no queda recuperación pendiente en la conexión: si el plazo pasó, pide el cierre previsto. */
+  #onSettled(watch: GapWatch): void {
+    if (this.#due && this.#watch === watch) {
+      this.#finish();
+    }
+  }
+
+  /** Pide el cierre previsto a la conexión en curso; desde entonces la sesión ya no reconecta. */
+  #finish(): void {
+    const connection = this.#connection;
+    if (connection !== null) {
+      this.#finishAsked = true;
+      connection.finish();
+    }
+  }
+
+  /**
+   * El primer `ConnectionOpened` durable de la sesión pone en marcha el plazo del cierre previsto:
+   * `durationMs` después (ADR-0015 §4 y §9).
+   */
+  #onConnectionOpened(): void {
+    const { durationMs } = this.#input;
+    if (durationMs === undefined || this.#deadlineArmed || this.#stopped) {
+      return;
+    }
+    this.#deadlineArmed = true;
+    this.#cancelDeadline = this.#input.scheduler.schedule(durationMs, () => {
+      this.#cancelDeadline = null;
+      this.#onDeadline();
+    });
+  }
+
+  /**
+   * El plazo del cierre previsto (ADR-0015 §4 y §9): pide `finish` a la conexión en curso, salvo que
+   * quede una recuperación pendiente, porque la sesión reconecta tras un cierre no pedido o porque en
+   * la conexión en curso se espera el primer tick posterior al cierre, se esperan los 2000 ms o la
+   * recuperación corre. Entonces lo pide en cuanto esa recuperación termine (`#onSettled`), también
+   * en la conexión siguiente si esta se pierde antes. Espera como mucho 300 000 ms desde el plazo:
+   * después, para la sesión, que abandona la recuperación. Después de `finish`, la sesión termina
+   * cuando termina esa conexión (`#connect`).
+   */
+  #onDeadline(): void {
+    if (this.#stopped) {
+      return;
+    }
+    this.#due = true;
+    this.#cancelBound = this.#input.scheduler.schedule(PLANNED_CLOSE_BOUND_MS, () => {
+      this.#cancelBound = null;
+      this.stop();
+    });
+    if (this.#watch?.pending === false) {
+      this.#finish();
+    }
+  }
+
+  #cancelPlannedClose(): void {
+    this.#cancelDeadline?.();
+    this.#cancelDeadline = null;
+    this.#cancelBound?.();
+    this.#cancelBound = null;
   }
 
   /**
@@ -573,14 +750,20 @@ class SessionRun {
 }
 
 /**
- * La sesión de ingesta de Deriv (ADR-0015 §3 y §5). Prepara los esquemas una vez, toma el bloqueo de
- * la fuente, abre el log con él y lo comprueba, y sigue una conexión por intento con un solo
- * `RawFirstIngestor`: tras una conexión que se pierde o se pausa, o un intento que no conecta, espera
- * y lo intenta otra vez, con un bloqueo nuevo si perdió el suyo. Termina con la parada (`completed`)
- * o cuando no puede seguir sin intervención (`failed`). Al terminar cierra el segmento abierto, si el
- * log está sano y el bloqueo sigue tomado, y suelta el bloqueo.
+ * La sesión de ingesta de Deriv (ADR-0015 §3, §4 y §5). Prepara los esquemas una vez, toma el
+ * bloqueo de la fuente, abre el log con él y lo comprueba, y sigue una conexión por intento con un
+ * solo `RawFirstIngestor`: tras una conexión que se pierde o se pausa, o un intento que no conecta,
+ * espera y lo intenta otra vez, con un bloqueo nuevo si perdió el suyo. En cada conexión pide la
+ * historia del hueco pendiente, 2000 ms después del primer tick durable posterior al cierre. Termina
+ * con la parada o el cierre previsto por `durationMs` (`completed`), o cuando no puede seguir sin
+ * intervención (`failed`). Al terminar cierra el segmento abierto, si el log está sano y el bloqueo
+ * sigue tomado, y suelta el bloqueo. Un `durationMs` que no es un entero positivo de milisegundos es
+ * un error de programación: lanza `TypeError` sin empezar nada.
  */
 export function startDerivSession(input: DerivSessionInput): DerivSession {
+  if (input.durationMs !== undefined) {
+    assertDuration(input.durationMs);
+  }
   const run = new SessionRun(input);
   return {
     done: run.done,

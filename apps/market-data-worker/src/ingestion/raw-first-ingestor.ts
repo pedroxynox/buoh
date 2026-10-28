@@ -2,6 +2,7 @@ import {
   connectionClosedSchema,
   rawSourceFrameSchema,
   sha256Hex,
+  type ConnectionOpened,
   type RawSourceFrame,
   type SourceEvent,
 } from '@buoh/contracts';
@@ -117,6 +118,12 @@ export interface RawFirstIngestorInput {
   /** Reabre el log desde los almacenes tras un fallo de persistencia. */
   readonly reopenLog: () => Promise<SourceEventLog>;
   readonly sink: TickSink;
+  /**
+   * Recibe cada `ConnectionOpened` que `receiveEvent` hizo durable, después de resolver con él las
+   * condiciones operativas. La sesión cuenta desde el primero el plazo de su cierre previsto
+   * (ADR-0015 §4 y §9).
+   */
+  readonly onConnectionOpened?: (event: ConnectionOpened) => void;
 }
 
 /**
@@ -334,8 +341,11 @@ export class RawFirstIngestor {
     const outcome = await this.#append(event, event.event_id);
     if (outcome.status === 'durable') {
       const resolution = await this.#input.registry.resolveWith(event);
-      if (event.kind === 'connection_opened' && resolution.status === 'recorded') {
-        this.#paused = this.#input.registry.openConditions().length > 0;
+      if (event.kind === 'connection_opened') {
+        if (resolution.status === 'recorded') {
+          this.#paused = this.#input.registry.openConditions().length > 0;
+        }
+        this.#input.onConnectionOpened?.(event);
       }
     }
     return outcome;
@@ -418,6 +428,18 @@ export class RawFirstIngestor {
       connection_id: previous.connection_id,
       status: 'repaired',
     };
+  }
+
+  /**
+   * Los source events durables del log (`SourceEventLog.readDurableSegments`), o `null` si el log tuvo
+   * un fallo de persistencia y todavía no se reabrió: lo que tiene en memoria podría no ser lo
+   * durable, y la entrada sigue cerrada. No reabre nada. La sesión lo deriva durante una conexión
+   * para seguir el hueco pendiente (ADR-0015 §4); un fallo del log cierra esa conexión. Como
+   * `SourceEventLog.readDurableSegments`, lanza `LogReadError` si un almacén no responde y
+   * `LogIntegrityError` si el contenido no pasa sus comprobaciones.
+   */
+  readDurableSegments(): Promise<SourceEvent[][] | null> {
+    return this.#logFailed ? Promise.resolve(null) : this.#log.readDurableSegments();
   }
 
   /**
