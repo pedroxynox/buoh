@@ -1,5 +1,6 @@
-// `pnpm run data:smoke -- --live [--symbol R_100] [--duration-seconds 120]` (runbook, «Smoke
-// público de Deriv»). Compila el worker y ejecuta su CLI de smoke. Los mensajes de la compilación van
+// `pnpm run data:smoke -- --live [--symbol R_100] [--duration-seconds 120]
+// [--interrupt-after-seconds <n>]` (runbook, «Smoke público de Deriv»). Compila el worker y ejecuta
+// su CLI de smoke. Los mensajes de la compilación van
 // a stderr, para que stdout lleve solo la línea JSON del resultado. El emulador de shell de pnpm no
 // respeta `1>&2` (ADR-0003), así que la redirección se hace aquí y funciona igual en Linux, macOS y
 // Windows.

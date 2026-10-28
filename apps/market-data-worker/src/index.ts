@@ -88,12 +88,14 @@ export {
 export {
   DERIV_TIME_RESOLUTION_MS,
   distribution,
+  lastDurableRecovery,
   runSmoke,
   smokeCommand,
   smokeExitCode,
   SMOKE_NOTE,
   type Distribution,
   type SmokeInput,
+  type SmokeRecovery,
   type SmokeReport,
 } from './smoke.js';
 export {

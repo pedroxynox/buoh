@@ -109,7 +109,20 @@ export interface DerivSessionInput extends Pick<
    * ella, la sesión sigue hasta la parada o un fallo.
    */
   readonly durationMs?: number;
+  /**
+   * El corte del smoke de reconexión (ADR-0015 §9), en milisegundos: un entero positivo, o
+   * `startDerivSession` lanza `TypeError`. Cuenta desde el primer tick durable de la sesión, y al
+   * cumplirse corta una sola vez la conexión en curso con `interrupt('smoke_interrupt')`, como una
+   * pérdida (`transport_error`): la sesión reconecta y recupera el hueco como tras cualquier cierre
+   * no pedido. No corta nada si entonces no hay conexión en curso, porque espera para reconectar, o
+   * si ya se cumplió el plazo del cierre previsto (`durationMs`). Sin él, la sesión nunca corta su
+   * conexión.
+   */
+  readonly interruptAfterMs?: number;
 }
+
+/** Motivo del corte del smoke de reconexión (ADR-0015 §9). */
+export const SMOKE_INTERRUPT_REASON = 'smoke_interrupt';
 
 /** Una conexión de la sesión: su ID (`null` si no llegó a abrirse), su cierre y cómo terminó. */
 export interface DerivSessionConnection {
@@ -285,6 +298,9 @@ class SessionRun {
   #finishAsked = false;
   /** Cancela el tope de la espera a la recuperación pendiente después del plazo. */
   #cancelBound: (() => void) | null = null;
+  /** Ya empezó a contar el corte del smoke, con el primer tick durable de la sesión. */
+  #interruptArmed = false;
+  #cancelInterrupt: (() => void) | null = null;
 
   constructor(input: DerivSessionInput) {
     this.#input = input;
@@ -302,7 +318,7 @@ class SessionRun {
       return;
     }
     this.#stopped = true;
-    this.#cancelPlannedClose();
+    this.#cancelTimers();
     this.#watch?.cancel();
     this.#cancelWait?.();
     this.#abort?.abort();
@@ -314,11 +330,11 @@ class SessionRun {
     try {
       end = await this.#session();
     } catch (error) {
-      this.#cancelPlannedClose();
+      this.#cancelTimers();
       await this.#releaseLock();
       throw error;
     }
-    this.#cancelPlannedClose();
+    this.#cancelTimers();
     try {
       // Con el log sano y el bloqueo vigente, cierra el segmento abierto (ADR-0015 §3, «Parada»).
       // Un log que no pasa sus comprobaciones no se toca, uno fallido no lo cierra `rotate`, y uno
@@ -382,6 +398,7 @@ class SessionRun {
         },
         tick: (tick) => {
           this.#firstTickAt ??= Date.parse(input.now());
+          this.#armInterrupt();
           input.sink.tick(tick);
           // Ya durable: si es posterior al high-watermark del hueco, la sesión vuelve a derivar.
           this.#watch?.onTick(tick);
@@ -716,11 +733,34 @@ class SessionRun {
     }
   }
 
-  #cancelPlannedClose(): void {
+  /**
+   * El primer tick durable de la sesión pone en marcha el corte del smoke de reconexión:
+   * `interruptAfterMs` después, una sola vez (ADR-0015 §9). Al cumplirse corta la conexión en
+   * curso, si la hay y el plazo del cierre previsto no se cumplió: el corte es para antes de ese
+   * cierre.
+   */
+  #armInterrupt(): void {
+    const { interruptAfterMs } = this.#input;
+    if (interruptAfterMs === undefined || this.#interruptArmed || this.#stopped) {
+      return;
+    }
+    this.#interruptArmed = true;
+    this.#cancelInterrupt = this.#input.scheduler.schedule(interruptAfterMs, () => {
+      this.#cancelInterrupt = null;
+      if (!this.#due) {
+        this.#connection?.interrupt(SMOKE_INTERRUPT_REASON);
+      }
+    });
+  }
+
+  /** Cancela los temporizadores de la sesión: el plazo, su tope y el corte del smoke. */
+  #cancelTimers(): void {
     this.#cancelDeadline?.();
     this.#cancelDeadline = null;
     this.#cancelBound?.();
     this.#cancelBound = null;
+    this.#cancelInterrupt?.();
+    this.#cancelInterrupt = null;
   }
 
   /**
@@ -768,13 +808,21 @@ class SessionRun {
  * espera y lo intenta otra vez, con un bloqueo nuevo si perdió el suyo. En cada conexión pide la
  * historia del hueco pendiente, 2000 ms después del primer tick durable posterior al cierre. Termina
  * con la parada o el cierre previsto por `durationMs` (`completed`), o cuando no puede seguir sin
- * intervención (`failed`). Al terminar cierra el segmento abierto, si el log está sano y el bloqueo
- * sigue tomado, y suelta el bloqueo. Un `durationMs` que no es un entero positivo de milisegundos es
- * un error de programación: lanza `TypeError` sin empezar nada.
+ * intervención (`failed`). Con `interruptAfterMs`, corta una vez su conexión, como el smoke de
+ * reconexión (ADR-0015 §9). Al terminar cierra el segmento abierto, si el log está sano y el
+ * bloqueo sigue tomado, y suelta el bloqueo. Un `durationMs` o un `interruptAfterMs` que no es un
+ * entero positivo de milisegundos es un error de programación: lanza `TypeError` sin empezar nada.
  */
 export function startDerivSession(input: DerivSessionInput): DerivSession {
   if (input.durationMs !== undefined) {
     assertDuration(input.durationMs);
+  }
+  const { interruptAfterMs } = input;
+  if (
+    interruptAfterMs !== undefined &&
+    !(Number.isSafeInteger(interruptAfterMs) && interruptAfterMs > 0)
+  ) {
+    throw new TypeError('interruptAfterMs debe ser un entero positivo de milisegundos.');
   }
   const run = new SessionRun(input);
   return {

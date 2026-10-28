@@ -179,6 +179,8 @@ export interface SessionHarnessOptions {
   readonly serverTime?: boolean;
   /** Duración prevista de la sesión, en milisegundos; por defecto, ninguna. */
   readonly durationMs?: number;
+  /** El corte del smoke de reconexión, en ms desde el primer tick; por defecto, ninguno. */
+  readonly interruptAfterMs?: number;
   /** Cada socket falso avisa del cierre solo con `finishClose`, como `ws`; por defecto, enseguida. */
   readonly deferClose?: boolean;
 }
@@ -242,6 +244,9 @@ export async function sessionHarness(options: SessionHarnessOptions = {}) {
     alert: (payload) => alerts.push(payload),
     catalog: new MemoryCatalogStore(),
     ...(options.durationMs === undefined ? {} : { durationMs: options.durationMs }),
+    ...(options.interruptAfterMs === undefined
+      ? {}
+      : { interruptAfterMs: options.interruptAfterMs }),
     connect: (input) => {
       rowsAtConnect.push(sourceLog.rows.length);
       timeline.push(`connect:${String(rowsAtConnect.length)}`);

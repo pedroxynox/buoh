@@ -754,3 +754,132 @@ describe('startDerivSession: el cierre previsto por duración (ADR-0015 §4 y §
     expect(run.clock.pendingDelays()).toEqual([]);
   });
 });
+
+describe('startDerivSession: el corte del smoke de reconexión (ADR-0015 §9)', () => {
+  it.each([0, -1000, 1.5, Number.NaN, 2 ** 53])(
+    'un corte a los %s ms, que no es un entero positivo de milisegundos, es un error de programación: lanza TypeError',
+    async (interruptAfterMs) => {
+      await expect(sessionHarness({ interruptAfterMs })).rejects.toThrow(TypeError);
+    },
+  );
+
+  it('corta la conexión en curso una sola vez, interruptAfterMs después del primer tick durable de la sesión, con transport_error y smoke_interrupt: reconecta y recupera el hueco que deja el corte', async () => {
+    const run = await sessionHarness({ interruptAfterMs: 3000 });
+    run.socket(1).open();
+    await settle();
+    // El catálogo responde 400 ms después de la apertura, y el primer tick llega enseguida.
+    await run.clock.advance(400);
+    run.socket(1).text(derivMessages.catalog(1));
+    await settle();
+    await tick(run.socket(1), START_EPOCH, '100.25');
+    await run.clock.advance(2999);
+    expect(run.socket(1).ended).toBeNull();
+    await run.clock.advance(1);
+    expect(run.socket(1).ended).toBe('terminate');
+    await settle();
+
+    expect(run.clock.pendingDelays()).toEqual([500]);
+    await run.clock.advance(500);
+    await run.subscribe(run.socket(2), START_EPOCH + 4, '100.5');
+    // Una sola vez: el primer tick de la conexión nueva no lo vuelve a poner en marcha.
+    expect(run.clock.pendingDelays()).toEqual([HISTORY_DELAY_MS, 45_000]);
+    await run.clock.advance(HISTORY_DELAY_MS);
+    expect(pages(run.socket(2))).toEqual([page(3, START_EPOCH, START_EPOCH + 4)]);
+    run
+      .socket(2)
+      .text(
+        derivMessages.history(
+          3,
+          [START_EPOCH, START_EPOCH + 2, START_EPOCH + 4],
+          ['100.25', '100.3', '100.5'],
+        ),
+      );
+    await settle();
+
+    const result = await stopSession(run, run.socket(2), 4);
+    // IDs: 1 la conexión, 2 su apertura, 3 el catálogo, 4 el tick y 5 el cierre; la segunda es
+    // la 6.
+    expect(result.connections).toEqual([
+      {
+        closure: { closure_type: 'transport_error', persisted: true, reason: 'smoke_interrupt' },
+        connection_id: uuid(1),
+        end: { detail: null, reason: 'smoke_interrupt', status: 'disconnected' },
+      },
+      {
+        closure: { closure_type: 'requested', persisted: true, reason: 'requested' },
+        connection_id: uuid(6),
+        end: { status: 'completed' },
+      },
+    ]);
+    expect(result.waits_ms).toEqual([500]);
+    expect(result.recoveries).toEqual([
+      expect.objectContaining({
+        result: expect.objectContaining({
+          recovered_event_count: 1,
+          status: 'complete',
+        }) as unknown,
+        status: 'finished',
+      }),
+    ]);
+    expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
+  it('si llega sin conexión en curso, mientras espera para reconectar, no corta nada, tampoco la conexión siguiente', async () => {
+    const run = await sessionHarness({ interruptAfterMs: 3000 });
+    await run.subscribe(run.socket(1), START_EPOCH, '100.25');
+    // El servidor cierra a las 10:00:02.800: el corte vence durante la espera, a las 10:00:03.
+    await run.clock.advance(2800);
+    run.socket(1).emit({ code: 1001, kind: 'closed' });
+    await settle();
+    await run.clock.advance(500);
+    await run.subscribe(run.socket(2), START_EPOCH + 4, '100.5');
+
+    expect(run.socket(2).ended).toBeNull();
+    expect(run.clock.pendingDelays()).toEqual([HISTORY_DELAY_MS, 45_000]);
+    const result = await stopSession(run, run.socket(2), 3);
+    expect(result.connections.map((connection) => connection.closure?.reason)).toEqual([
+      'close_code_1001',
+      'requested',
+    ]);
+  });
+
+  it('si el plazo del cierre previsto ya se cumplió, no corta nada: la conexión termina con el cierre previsto aunque forget_all todavía no haya respondido', async () => {
+    // El plazo vence a las 10:00:10, desde la apertura; el corte, a las 10:00:10.500, desde el
+    // primer tick, que llega a las 10:00:01.
+    const run = await sessionHarness({ durationMs: 10_000, interruptAfterMs: 9500 });
+    run.socket(1).open();
+    await settle();
+    await run.clock.advance(1000);
+    run.socket(1).text(derivMessages.catalog(1));
+    await settle();
+    await tick(run.socket(1), START_EPOCH + 1, '100.25');
+    await run.clock.advance(9000);
+    expect(forgetAll(run.socket(1))).toEqual([{ forget_all: 'ticks', req_id: 3 }]);
+    await run.clock.advance(500);
+    expect(run.socket(1).ended).toBeNull();
+
+    run.socket(1).text(derivMessages.forgetAll(3));
+    const result = await run.done;
+    expect(result.connections).toEqual([
+      {
+        closure: { closure_type: 'requested', persisted: true, reason: 'requested' },
+        connection_id: uuid(1),
+        end: { status: 'completed' },
+      },
+    ]);
+    expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
+  it('una parada antes del corte lo cancela: no corta nada y no deja temporizadores', async () => {
+    const run = await sessionHarness({ interruptAfterMs: 3000 });
+    await run.subscribe(run.socket(1), START_EPOCH, '100.25');
+    await run.clock.advance(1000);
+    const result = await stopSession(run, run.socket(1), 3);
+
+    expect(run.socket(1).ended).toBe('close');
+    expect(result.connections.map((connection) => connection.closure?.reason)).toEqual([
+      'requested',
+    ]);
+    expect(run.clock.pendingDelays()).toEqual([]);
+  });
+});
