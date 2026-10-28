@@ -23,6 +23,7 @@ import { previousConnection } from '../source-log/previous-connection.js';
 import {
   failureReason,
   LogPersistenceError,
+  LogReadError,
   type SourceEventLog,
 } from '../source-log/source-event-log.js';
 
@@ -75,12 +76,22 @@ type NotDurable = Extract<ReceiveOutcome, { readonly status: 'not_durable' }>;
 
 /**
  * Resultado de `repairUnrecordedClose`. `connection_id` es la conexión anterior del log, la que
- * supera el `ConnectionOpened` siguiente, o `null` si el log no tiene conexiones.
+ * supera el `ConnectionOpened` siguiente, o `null` si el log no tiene conexiones. `closed_at_utc` es
+ * la hora de su `ConnectionClosed` durable (en `repaired`, la del cierre reparado), o `null` sin
+ * conexiones: el `ConnectionOpened` siguiente tiene que ser posterior.
  */
 export type CloseRepairOutcome =
   | NotDurable
-  | { readonly connection_id: string | null; readonly status: 'nothing_to_repair' }
-  | { readonly connection_id: string; readonly status: 'repaired' };
+  | {
+      readonly closed_at_utc: string | null;
+      readonly connection_id: string | null;
+      readonly status: 'nothing_to_repair';
+    }
+  | {
+      readonly closed_at_utc: string;
+      readonly connection_id: string;
+      readonly status: 'repaired';
+    };
 
 /** Resumen fail-closed tras perder durabilidad (forma de `expected-persistence-failure.json`). */
 export interface PersistenceFailureReport {
@@ -319,9 +330,11 @@ export class RawFirstIngestor {
    *    hora de la detección) sin reabrir la entrada: sigue como estaba hasta un `ConnectionOpened`
    *    durable. Como cualquier evento durable, el cierre resuelve `persistence_unavailable`.
    *
-   * Si el log no se puede reabrir ni leer, o el cierre no queda durable, registra
-   * `persistence_unavailable` como `receiveEvent`, con el ID del cierre como `observed_ref`, y
-   * devuelve `not_durable`: no se debe abrir otro socket.
+   * Si el log no se puede reabrir, un almacén no responde al leerlo o el cierre no queda durable,
+   * registra `persistence_unavailable` como `receiveEvent`, con el ID del cierre como
+   * `observed_ref`, y devuelve `not_durable`: no se debe abrir otro socket. Si el contenido del log
+   * no pasa sus comprobaciones (`LogIntegrityError`), o ante cualquier otro error, rechaza sin
+   * registrar nada: no se reintenta con contenido no confiable (ADR-0004 §12).
    */
   async repairUnrecordedClose(input: {
     /** Símbolos de la sesión, que el cierre da como afectados. */
@@ -340,15 +353,24 @@ export class RawFirstIngestor {
     try {
       segments = await this.#log.readDurableSegments();
     } catch (error) {
-      // Sin leer el log no se sabe qué conexión cerrar: cuenta como no poder reabrirlo.
+      // Solo un almacén que no responde cuenta como no poder reabrir el log: sin leerlo no se sabe
+      // qué conexión cerrar. Un contenido que no pasa sus comprobaciones (`LogIntegrityError`) no se
+      // reintenta (ADR-0004 §12), y un error de programación tampoco: los dos rechazan la reparación.
+      if (!(error instanceof LogReadError)) {
+        throw error;
+      }
       return this.#onPersistenceFailure(
-        new LogPersistenceError('source_event_index', failureReason(error), { cause: error }),
+        new LogPersistenceError('source_event_index', error.reason, { cause: error }),
         closeId(),
       );
     }
     const previous = previousConnection(segments);
     if (previous === null || previous.closed) {
-      return { connection_id: previous?.connection_id ?? null, status: 'nothing_to_repair' };
+      return {
+        closed_at_utc: previous?.closed_at_utc ?? null,
+        connection_id: previous?.connection_id ?? null,
+        status: 'nothing_to_repair',
+      };
     }
     const event = connectionClosedSchema.parse({
       affected_symbols: [...new Set(input.affected_symbols)].sort(),
@@ -366,7 +388,11 @@ export class RawFirstIngestor {
       return outcome;
     }
     await this.#input.registry.resolveWith(event);
-    return { connection_id: previous.connection_id, status: 'repaired' };
+    return {
+      closed_at_utc: event.occurred_at_utc,
+      connection_id: previous.connection_id,
+      status: 'repaired',
+    };
   }
 
   /** Cierre explícito del segmento abierto (harness, drenaje o apagado). */

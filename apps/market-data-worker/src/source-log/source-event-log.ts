@@ -53,6 +53,52 @@ export function failureReason(error: unknown): string {
   return 'unknown_error';
 }
 
+/**
+ * Al leerlo, el contenido durable del log no pasa sus comprobaciones: un objeto alterado, un hash o
+ * unos conteos que no cuadran, un segmento que no se descomprime, una línea que no es un source
+ * event JCS o segmentos que no están todos cerrados. No se reintenta con ese contenido (ADR-0004
+ * §12). Es un `TypeError`, como esas comprobaciones antes, y conserva sus mensajes.
+ */
+export class LogIntegrityError extends TypeError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'LogIntegrityError';
+  }
+}
+
+/**
+ * Al leer el log, no respondió un almacén: el de objetos o el índice. No dice nada del contenido,
+ * así que se puede reintentar. `reason` es el motivo saneado (`failureReason`).
+ */
+export class LogReadError extends Error {
+  readonly reason: string;
+
+  constructor(reason: string, options?: { cause?: unknown }) {
+    super(`Lectura del log no disponible: ${reason}`, options);
+    this.name = 'LogReadError';
+    this.reason = reason;
+  }
+}
+
+/** Lectura de un almacén del log: si falla, lanza `LogReadError`. */
+async function fromStore<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    throw new LogReadError(failureReason(error), { cause: error });
+  }
+}
+
+/** Comprobación de lo leído: lo que lance `check` es un `LogIntegrityError`, con el mismo mensaje. */
+function verified<T>(check: () => T): T {
+  try {
+    return check();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Contenido del log inválido.';
+    throw new LogIntegrityError(message, { cause: error });
+  }
+}
+
 const decoder = new TextDecoder('utf-8', { fatal: true });
 
 function eventId(event: SourceEvent): string {
@@ -335,7 +381,8 @@ export class SourceEventLog {
    * leídos y verificados como en `readClosedSegments`, y al final el abierto, si tiene eventos, desde
    * las líneas que esta instancia releyó al abrirse o escribió. Es la entrada de `deriveMarketData`
    * y de la conexión anterior (ADR-0015 §3). Tras un fallo de persistencia falla: lo que la instancia
-   * tiene en memoria podría no ser lo durable.
+   * tiene en memoria podría no ser lo durable. Como `readClosedSegments`, lanza `LogReadError` si un
+   * almacén no responde y `LogIntegrityError` si el contenido no pasa sus comprobaciones.
    */
   async readDurableSegments(): Promise<SourceEvent[][]> {
     this.#assertUsable();
@@ -343,54 +390,69 @@ export class SourceEventLog {
     const openIndex = this.#segmentIndex;
     const openLines = [...this.#lines];
     const closed = openIndex === 0 ? [] : await this.readClosedSegments(0, openIndex - 1);
-    return openLines.length === 0 ? closed : [...closed, openLines.map((line) => parseLine(line))];
+    return openLines.length === 0
+      ? closed
+      : [...closed, openLines.map((line) => verified(() => parseLine(line)))];
   }
 
   /**
    * Lee los segmentos cerrados `[from, to]` desde sus objetos, verificando hash físico, hash
-   * lógico, conteos y forma de cada línea. Es el input de una publicación.
+   * lógico, conteos y forma de cada línea. Es el input de una publicación. Si un almacén no responde,
+   * lanza `LogReadError`; si el contenido no pasa una comprobación, `LogIntegrityError`.
    */
   async readClosedSegments(from: number, to: number): Promise<SourceEvent[][]> {
     if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to < from) {
       throw new TypeError('Rango de segmentos inválido.');
     }
-    const segments = await this.#store.listClosedSegments(this.source, from, to);
+    const segments = await fromStore(() => this.#store.listClosedSegments(this.source, from, to));
     if (
       segments.length !== to - from + 1 ||
       segments.some((item, index) => item.segment_index !== from + index)
     ) {
-      throw new TypeError(`Los segmentos ${String(from)}–${String(to)} no están todos cerrados.`);
+      throw new LogIntegrityError(
+        `Los segmentos ${String(from)}–${String(to)} no están todos cerrados.`,
+      );
     }
     const result: SourceEvent[][] = [];
     for (const segment of segments) {
-      const physical = await this.#objects.get(
-        contentKey(segment.object_bytes_sha256),
-        segment.object_size_bytes,
+      const physical = await fromStore(() =>
+        this.#objects.get(contentKey(segment.object_bytes_sha256), segment.object_size_bytes),
       );
       if (sha256Hex(physical) !== segment.object_bytes_sha256) {
-        throw new TypeError(`Objeto del segmento ${String(segment.segment_index)} alterado.`);
+        throw new LogIntegrityError(
+          `Objeto del segmento ${String(segment.segment_index)} alterado.`,
+        );
       }
       const logical =
         segment.compression === 'gzip'
-          ? new Uint8Array(gunzipSync(physical, { maxOutputLength: SEGMENT_POLICY.maximum_bytes }))
+          ? verified(
+              () =>
+                new Uint8Array(
+                  gunzipSync(physical, { maxOutputLength: SEGMENT_POLICY.maximum_bytes }),
+                ),
+            )
           : physical;
       if (sha256Hex(logical) !== segment.logical_content_sha256) {
-        throw new TypeError(`Hash lógico del segmento ${String(segment.segment_index)} inválido.`);
+        throw new LogIntegrityError(
+          `Hash lógico del segmento ${String(segment.segment_index)} inválido.`,
+        );
       }
-      const text = decoder.decode(logical);
+      const text = verified(() => decoder.decode(logical));
       if (!text.endsWith('\n')) {
-        throw new TypeError(`Segmento ${String(segment.segment_index)} sin newline final.`);
+        throw new LogIntegrityError(`Segmento ${String(segment.segment_index)} sin newline final.`);
       }
       const events = text
         .slice(0, -1)
         .split('\n')
-        .map((line) => parseLine(new TextEncoder().encode(line)));
+        .map((line) => verified(() => parseLine(new TextEncoder().encode(line))));
       if (
         events.length !== segment.event_count ||
         events.filter((event) => event.kind === 'raw_source_frame').length !==
           segment.raw_frame_count
       ) {
-        throw new TypeError(`Conteos del segmento ${String(segment.segment_index)} inválidos.`);
+        throw new LogIntegrityError(
+          `Conteos del segmento ${String(segment.segment_index)} inválidos.`,
+        );
       }
       result.push(events);
     }

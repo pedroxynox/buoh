@@ -273,6 +273,8 @@ export function flush(): Promise<void> {
 /** Reloj y temporizador manuales: el tiempo solo avanza con `advance`. */
 export class ManualClock {
   #now: number;
+  /** Lo que el reloj de pared se apartó del tiempo transcurrido con `jumpWallClock`. */
+  #wallOffset = 0;
   #sequence = 0;
   readonly #timers = new Map<number, { readonly at: number; readonly callback: () => void }>();
 
@@ -280,7 +282,15 @@ export class ManualClock {
     this.#now = Date.parse(startUtc);
   }
 
-  readonly now = (): string => new Date(this.#now).toISOString();
+  readonly now = (): string => new Date(this.#now + this.#wallOffset).toISOString();
+
+  /**
+   * Salta el reloj de pared `ms` (negativo: hacia atrás), como un ajuste de NTP. Los temporizadores
+   * no cambian: como `setTimeout`, cuentan el tiempo transcurrido.
+   */
+  jumpWallClock(ms: number): void {
+    this.#wallOffset += ms;
+  }
 
   readonly scheduler: Scheduler = {
     schedule: (ms, callback) => {

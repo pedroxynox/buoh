@@ -4,6 +4,11 @@ import { type SourceEvent } from '@buoh/contracts';
 export interface PreviousConnection {
   /** Un `ConnectionClosed` durable con su `connection_id` sigue a su apertura. */
   readonly closed: boolean;
+  /**
+   * Hora (`occurred_at_utc`) de ese `ConnectionClosed`, o `null` si no lo tiene. El
+   * `ConnectionOpened` que supera la conexión tiene que ser posterior.
+   */
+  readonly closed_at_utc: string | null;
   readonly connection_id: string;
 }
 
@@ -17,14 +22,16 @@ export function previousConnection(
   segments: readonly (readonly SourceEvent[])[],
 ): PreviousConnection | null {
   let connectionId: string | null = null;
-  let closed = false;
+  let closedAt: string | null = null;
   for (const event of segments.flat()) {
     if (event.kind === 'connection_opened') {
       connectionId = event.connection_id;
-      closed = false;
+      closedAt = null;
     } else if (event.kind === 'connection_closed' && event.connection_id === connectionId) {
-      closed = true;
+      closedAt = event.occurred_at_utc;
     }
   }
-  return connectionId === null ? null : { closed, connection_id: connectionId };
+  return connectionId === null
+    ? null
+    : { closed: closedAt !== null, closed_at_utc: closedAt, connection_id: connectionId };
 }

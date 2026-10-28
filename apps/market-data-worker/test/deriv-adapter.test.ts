@@ -1152,21 +1152,26 @@ describe('runDerivAdapter: conexión anterior y cierre no registrado (ADR-0015 �
     ];
   }
 
+  /** El cierre del servidor que la ejecución anterior sí persistió, a esa hora. */
+  function previousClose(occurredAt: string): SourceEvent {
+    return connectionClosedSchema.parse({
+      affected_symbols: ['SYNTH_100'],
+      closure_type: 'remote',
+      connection_id: PREVIOUS,
+      event_id: uuid(9004),
+      kind: 'connection_closed',
+      occurred_at_utc: occurredAt,
+      reason: 'close_code_1001',
+      schema_version: '1.0.0',
+      source: DERIV_SOURCE,
+    });
+  }
+
+  const measurementProfile = () =>
+    createDerivMeasurementProfile({ schemas: syntheticSchemas(), symbol: 'SYNTH_100' });
+
   it('si la conexión anterior tiene su cierre, la apertura nueva la supera sin reparar nada', async () => {
-    const previous = [
-      ...previousConnectionEvents(),
-      connectionClosedSchema.parse({
-        affected_symbols: ['SYNTH_100'],
-        closure_type: 'remote',
-        connection_id: PREVIOUS,
-        event_id: uuid(9004),
-        kind: 'connection_closed',
-        occurred_at_utc: '2026-03-02T09:00:05.000Z',
-        reason: 'close_code_1001',
-        schema_version: '1.0.0',
-        source: DERIV_SOURCE,
-      }),
-    ];
+    const previous = [...previousConnectionEvents(), previousClose('2026-03-02T09:00:05.000Z')];
     const run = await harness(await storesWith(previous));
     run.socket().open();
     await settle();
@@ -1188,12 +1193,19 @@ describe('runDerivAdapter: conexión anterior y cierre no registrado (ADR-0015 �
     await run.run;
   });
 
-  it('si a la conexión anterior le falta el cierre, lo repara antes de abrir el socket y la apertura nueva la supera', async () => {
+  it('si a la conexión anterior le falta el cierre, lo repara y abre el socket cuando el reloj pasa la hora del cierre: la apertura lo supera y el log se deriva', async () => {
     const previous = previousConnectionEvents();
     const run = await harness(await storesWith(previous));
-    // Al abrir el socket, el cierre reparado ya era durable: la tercera fila del log.
+    // El cierre reparado ya es durable, con la hora de ahora, y todavía no hay socket: el adaptador
+    // espera con el temporizador inyectado a que el reloj pase ese milisegundo.
+    expect(run.sourceLog.rows).toHaveLength(3);
+    expect(run.rowsAtConnect).toEqual([]);
+    expect(run.clock.pendingDelays()).toEqual([1]);
+    // Vence esa espera de 1 ms, la que pidió el adaptador. La prueba no adelanta el reloj por su
+    // cuenta: no modela ningún handshake.
+    await run.clock.advance(1);
     expect(run.rowsAtConnect).toEqual([3]);
-    await run.clock.advance(1000);
+    // El socket abre en el acto, sin que el reloj avance más.
     run.socket().open();
     await settle();
 
@@ -1214,13 +1226,95 @@ describe('runDerivAdapter: conexión anterior y cierre no registrado (ADR-0015 �
         connection_id: uuid(2),
         event_id: uuid(3),
         kind: 'connection_opened',
-        occurred_at_utc: '2026-03-02T10:00:01.000Z',
+        occurred_at_utc: '2026-03-02T10:00:00.001Z',
         schema_version: '1.0.0',
         source: DERIV_SOURCE,
         supersedes_connection_id: PREVIOUS,
       },
     ]);
     expect(run.socket().requests()).toEqual([{ active_symbols: 'brief', req_id: 1 }]);
+
+    // Las reglas abren connection_lost con el cierre reparado y lo resuelven con la apertura, un
+    // milisegundo después: la resolución nunca queda antes de su apertura.
+    const derived = deriveMarketData(
+      await (await run.openLog()).readDurableSegments(),
+      measurementProfile(),
+    );
+    expect(derived.conditions).toEqual([
+      expect.objectContaining({
+        action: 'opened',
+        condition_type: 'connection_lost',
+        occurred_at_utc: START,
+      }),
+      expect.objectContaining({
+        action: 'resolved',
+        condition_type: 'connection_lost',
+        occurred_at_utc: '2026-03-02T10:00:00.001Z',
+        resolution_reason: 'connection_reestablished',
+      }),
+    ]);
+    expect(derived.openConditionTypes).toEqual([]);
+    run.socket().emit({ code: 1000, kind: 'closed' });
+    await run.run;
+  });
+
+  it('si el reloj va por detrás del cierre de la conexión anterior, espera a pasarlo para abrir el socket', async () => {
+    // El cierre quedó 2,5 s por delante de este reloj, por ejemplo porque el reloj se atrasó.
+    const previous = [...previousConnectionEvents(), previousClose('2026-03-02T10:00:02.500Z')];
+    const run = await harness(await storesWith(previous));
+    expect(run.rowsAtConnect).toEqual([]);
+    expect(run.clock.pendingDelays()).toEqual([2501]);
+    // El reloj llega al milisegundo del cierre, pero no lo pasa: sigue sin socket.
+    await run.clock.advance(2500);
+    expect(run.rowsAtConnect).toEqual([]);
+    // Un milisegundo más vence la espera del adaptador, y abre el socket.
+    await run.clock.advance(1);
+    expect(run.rowsAtConnect).toEqual([3]);
+    run.socket().open();
+    await settle();
+
+    expect((await run.events()).slice(previous.length)).toEqual([
+      {
+        connection_id: uuid(1),
+        event_id: uuid(2),
+        kind: 'connection_opened',
+        occurred_at_utc: '2026-03-02T10:00:02.501Z',
+        schema_version: '1.0.0',
+        source: DERIV_SOURCE,
+        supersedes_connection_id: PREVIOUS,
+      },
+    ]);
+    expect(
+      deriveMarketData(await (await run.openLog()).readDurableSegments(), measurementProfile())
+        .openConditionTypes,
+    ).toEqual([]);
+    run.socket().emit({ code: 1000, kind: 'closed' });
+    await run.run;
+  });
+
+  it('si el reloj retrocede mientras espera, vuelve a esperar a que pase la hora del cierre', async () => {
+    const run = await harness(await storesWith(previousConnectionEvents()));
+    expect(run.clock.pendingDelays()).toEqual([1]);
+    // Un ajuste del reloj de 1 s hacia atrás durante la espera.
+    run.clock.jumpWallClock(-1000);
+    // Vence la espera de 1 ms del adaptador, pero al reloj le faltan 999 ms para pasar el cierre
+    // reparado: espera otros 1000 ms.
+    await run.clock.advance(1);
+    expect(run.rowsAtConnect).toEqual([]);
+    expect(run.clock.pendingDelays()).toEqual([1000]);
+    // Vence esa segunda espera: ahora el reloj pasó el cierre.
+    await run.clock.advance(1000);
+    expect(run.rowsAtConnect).toEqual([3]);
+    run.socket().open();
+    await settle();
+
+    const [repaired, opened] = (await run.events()).slice(2);
+    expect(repaired).toMatchObject({ occurred_at_utc: START, reason: 'close_not_recorded' });
+    expect(opened).toMatchObject({
+      kind: 'connection_opened',
+      occurred_at_utc: '2026-03-02T10:00:00.001Z',
+      supersedes_connection_id: PREVIOUS,
+    });
     run.socket().emit({ code: 1000, kind: 'closed' });
     await run.run;
   });
@@ -1287,10 +1381,13 @@ describe('runDerivAdapter: conexión anterior y cierre no registrado (ADR-0015 �
     });
     // El cierre reparado es el primer evento durable: ya resolvió persistence_unavailable.
     expect(second.registry.openConditionTypes()).toEqual([]);
+    // Modela el handshake: el socket abre 1 s después de empezar. En el primer milisegundo vence la
+    // espera del adaptador, que solo conecta cuando el reloj pasa la hora del cierre reparado.
     await second.clock.advance(1000);
     await second.openAndListCatalog();
     second.socket().text(derivMessages.tick(2, Date.parse(later) / 1000 + 1));
     await settle();
+    // Modela la escucha: al cumplirse la duración (`durationMs`, 30 000 ms), pide forget_all.
     await second.clock.advance(30_000);
     second.socket().text(derivMessages.forgetAll(3));
     expect((await second.run).end).toEqual({ status: 'completed' });

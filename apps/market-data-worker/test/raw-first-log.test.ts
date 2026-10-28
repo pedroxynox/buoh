@@ -30,6 +30,7 @@ import {
   driveSyntheticStimuli,
   failureReason,
   loadSyntheticFixture,
+  LogIntegrityError,
   OperationalRegistry,
   previousConnection,
   publishFromLog,
@@ -802,7 +803,7 @@ describe('conexión anterior (ADR-0015 §3)', () => {
     expect(previousConnection([[frameEvent(CONNECTION_A, id(1))]])).toBeNull();
   });
 
-  it('es la última conexión con ConnectionOpened, cerrada solo si la sigue su ConnectionClosed', () => {
+  it('es la última conexión con ConnectionOpened, cerrada solo si la sigue su ConnectionClosed, con la hora de ese cierre', () => {
     const openedA = openedEvent(CONNECTION_A, id(1), '2026-01-01T00:00:01.000Z');
     const frameA = frameEvent(CONNECTION_A, id(2));
     const closedA = closedEvent(CONNECTION_A, id(3), '2026-01-01T00:00:02.000Z');
@@ -810,15 +811,18 @@ describe('conexión anterior (ADR-0015 §3)', () => {
 
     expect(previousConnection([[openedA, frameA]])).toEqual({
       closed: false,
+      closed_at_utc: null,
       connection_id: CONNECTION_A,
     });
     expect(previousConnection([[openedA, frameA, closedA]])).toEqual({
       closed: true,
+      closed_at_utc: '2026-01-01T00:00:02.000Z',
       connection_id: CONNECTION_A,
     });
     // En otro segmento, y sin cierre todavía.
     expect(previousConnection([[openedA, frameA, closedA], [openedB]])).toEqual({
       closed: false,
+      closed_at_utc: null,
       connection_id: CONNECTION_B,
     });
   });
@@ -836,6 +840,7 @@ describe('conexión anterior (ADR-0015 §3)', () => {
     const reopened = await run.openLog();
     expect(previousConnection(await reopened.readDurableSegments())).toEqual({
       closed: false,
+      closed_at_utc: null,
       connection_id: CONNECTION_A,
     });
   });
@@ -862,18 +867,20 @@ describe('RawFirstIngestor.repairUnrecordedClose: cierre no registrado (ADR-0015
   it('un log sin conexiones no tiene nada que reparar', async () => {
     const run = await harness();
     expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      closed_at_utc: null,
       connection_id: null,
       status: 'nothing_to_repair',
     });
     expect(run.sourceLog.rows).toEqual([]);
   });
 
-  it('si la conexión anterior ya tiene su cierre, no escribe nada', async () => {
+  it('si la conexión anterior ya tiene su cierre, no escribe nada y da la hora de ese cierre', async () => {
     const run = await harness();
     await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
     await run.ingestor.receiveEvent(closedEvent(CONNECTION_A, id(2), '2026-01-01T00:00:02.000Z'));
 
     expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      closed_at_utc: '2026-01-01T00:00:02.000Z',
       connection_id: CONNECTION_A,
       status: 'nothing_to_repair',
     });
@@ -892,7 +899,7 @@ describe('RawFirstIngestor.repairUnrecordedClose: cierre no registrado (ADR-0015
       await run.ingestor.repairUnrecordedClose({
         affected_symbols: ['SYNTH_50', 'SYNTH_100', 'SYNTH_50'],
       }),
-    ).toEqual({ connection_id: CONNECTION_A, status: 'repaired' });
+    ).toEqual({ closed_at_utc: DETECTION, connection_id: CONNECTION_A, status: 'repaired' });
     expect((await storedEvents(run)).map((item) => item.event)).toEqual([
       openedEvent(CONNECTION_A, id(1), OPENED_AT),
       expect.objectContaining({ kind: 'raw_source_frame', observation_id: id(2) }),
@@ -911,10 +918,45 @@ describe('RawFirstIngestor.repairUnrecordedClose: cierre no registrado (ADR-0015
     expect(run.ingestor.state).toBe('accepting');
     // Ya tiene su cierre durable: nunca se cierra dos veces la misma conexión.
     expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      closed_at_utc: DETECTION,
       connection_id: CONNECTION_A,
       status: 'nothing_to_repair',
     });
     expect(run.sourceLog.rows).toHaveLength(3);
+  });
+
+  it('si la conexión anterior abrió en un segmento ya cerrado, el cierre reparado va al segmento abierto, vacío tras la rotación', async () => {
+    let now = OPENED_AT;
+    const run = await harness({ now: () => now });
+    const openedA = openedEvent(CONNECTION_A, id(1), OPENED_AT);
+    await run.ingestor.receiveEvent(openedA);
+    // El segmento de la apertura queda cerrado y el abierto no tiene eventos.
+    await run.ingestor.rotate('requested');
+    now = DETECTION;
+
+    expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      closed_at_utc: DETECTION,
+      connection_id: CONNECTION_A,
+      status: 'repaired',
+    });
+    const close = connectionClosedSchema.parse({
+      affected_symbols: ['SYNTH_100'],
+      closure_type: 'transport_error',
+      connection_id: CONNECTION_A,
+      event_id: id(9001),
+      kind: 'connection_closed',
+      occurred_at_utc: DETECTION,
+      reason: 'close_not_recorded',
+      schema_version: '1.0.0',
+      source: 'synthetic',
+    });
+    expect(await storedEvents(run)).toEqual([
+      { event: openedA, segment_index: 0 },
+      { event: close, segment_index: 1 },
+    ]);
+    expect(await run.ingestor.log.readDurableSegments()).toEqual([[openedA], [close]]);
+    // Igual desde los almacenes.
+    expect(await (await run.openLog()).readDurableSegments()).toEqual([[openedA], [close]]);
   });
 
   it('el cierre reparado no reabre la entrada: sigue cerrada hasta el ConnectionOpened', async () => {
@@ -946,6 +988,7 @@ describe('RawFirstIngestor.repairUnrecordedClose: cierre no registrado (ADR-0015
     now = DETECTION;
 
     expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      closed_at_utc: DETECTION,
       connection_id: CONNECTION_A,
       status: 'repaired',
     });
@@ -1008,6 +1051,7 @@ describe('RawFirstIngestor.repairUnrecordedClose: cierre no registrado (ADR-0015
     run.objects.onRead = (_key, bytes) => bytes;
     now = REOPENED_AT;
     expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      closed_at_utc: REOPENED_AT,
       connection_id: CONNECTION_A,
       status: 'repaired',
     });
@@ -1018,28 +1062,80 @@ describe('RawFirstIngestor.repairUnrecordedClose: cierre no registrado (ADR-0015
     });
   });
 
-  it('si no puede leer el log, el cierre no es durable y queda persistence_unavailable', async () => {
+  it.each<[string, (run: Awaited<ReturnType<typeof harness>>) => void]>([
+    [
+      'el almacenamiento de objetos',
+      (run) => {
+        // El segmento cerrado se lee de su objeto.
+        run.objects.onRead = unavailable;
+      },
+    ],
+    [
+      'el índice',
+      (run) => {
+        vi.spyOn(run.sourceLog, 'listClosedSegments').mockImplementation(unavailable);
+      },
+    ],
+  ])(
+    'si %s no responde al leer el log, el cierre no es durable y queda persistence_unavailable',
+    async (_store, failReads) => {
+      let now = OPENED_AT;
+      const run = await harness({ now: () => now });
+      await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+      await run.ingestor.rotate('requested');
+      failReads(run);
+      now = DETECTION;
+
+      expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual(
+        { stage: 'source_event_index', status: 'not_durable' },
+      );
+      expect(run.operational.incidents).toEqual([
+        expect.objectContaining({
+          evidence: { reason: 'ECONNREFUSED', stage: 'source_event_index' },
+          incident_type: 'persistence_unavailable',
+          observed_ref: id(9001),
+        }),
+      ]);
+      expect(run.sourceLog.rows).toHaveLength(1);
+      expect(run.ingestor.state).toBe('paused');
+    },
+  );
+
+  it('si un segmento cerrado no pasa sus comprobaciones, la reparación se rechaza sin escribir el cierre ni registrar persistence_unavailable', async () => {
     let now = OPENED_AT;
     const run = await harness({ now: () => now });
     await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
     await run.ingestor.rotate('requested');
-    // El segmento cerrado se lee de su objeto, y el almacenamiento no responde.
-    run.objects.onRead = unavailable;
+    // El objeto del segmento cerrado cambia en el almacén: ya no tiene el hash de su fila.
+    const key = contentKey(run.sourceLog.closed[0]?.object_bytes_sha256 ?? '');
+    const altered = Uint8Array.from(run.objects.objects.get(key) ?? new Uint8Array());
+    altered[2] = 0x41;
+    run.objects.objects.set(key, altered);
     now = DETECTION;
 
-    expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
-      stage: 'source_event_index',
-      status: 'not_durable',
-    });
-    expect(run.operational.incidents).toEqual([
-      expect.objectContaining({
-        evidence: { reason: 'ECONNREFUSED', stage: 'source_event_index' },
-        incident_type: 'persistence_unavailable',
-        observed_ref: id(9001),
-      }),
-    ]);
+    // Con contenido no confiable no se reintenta (ADR-0004 §12): ni pausa ni incidencia.
+    const repair = run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] });
+    await expect(repair).rejects.toThrow(LogIntegrityError);
+    await expect(repair).rejects.toThrow(/segmento 0 alterado/u);
     expect(run.sourceLog.rows).toHaveLength(1);
-    expect(run.ingestor.state).toBe('paused');
+    expect(run.operational.incidents).toEqual([]);
+    expect(run.registry.openConditionTypes()).toEqual([]);
+    expect(run.ingestor.state).toBe('accepting');
+  });
+
+  it('un error al leer el log que no viene de un almacén rechaza la reparación sin registrar persistence_unavailable', async () => {
+    const run = await harness();
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+    // Un error de programación, por ejemplo: no dice que el almacenamiento no esté disponible.
+    const bug = new TypeError('sintético');
+    vi.spyOn(run.ingestor.log, 'readDurableSegments').mockRejectedValueOnce(bug);
+
+    await expect(
+      run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] }),
+    ).rejects.toBe(bug);
+    expect(run.sourceLog.rows).toHaveLength(1);
+    expect(run.operational.incidents).toEqual([]);
+    expect(run.ingestor.state).toBe('accepting');
   });
 
   it('si el índice confirmó el cierre aunque informó error, el log reabierto lo adopta y no hay nada que reparar', async () => {
@@ -1057,7 +1153,9 @@ describe('RawFirstIngestor.repairUnrecordedClose: cierre no registrado (ADR-0015
     run.sourceLog.failIndexAfterInsert = () => false;
     now = DETECTION;
 
+    // La hora es la del cierre adoptado: la apertura siguiente tiene que ser posterior.
     expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      closed_at_utc: '2026-01-01T00:00:02.000Z',
       connection_id: CONNECTION_A,
       status: 'nothing_to_repair',
     });

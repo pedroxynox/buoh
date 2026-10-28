@@ -56,7 +56,9 @@ export { previousConnection, type PreviousConnection } from './source-log/previo
 export { publishFromLog, type PublishFromLogInput } from './source-log/publish-from-log.js';
 export {
   failureReason,
+  LogIntegrityError,
   LogPersistenceError,
+  LogReadError,
   SourceEventLog,
   type LogStage,
   type OpenSourceEventLogInput,

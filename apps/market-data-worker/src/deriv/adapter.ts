@@ -105,11 +105,33 @@ async function loadSchemas(input: DerivAdapterInput): Promise<SchemaLoadResult> 
 }
 
 /**
+ * Espera, con el temporizador inyectado, a que el reloj pase de `instantUtc`, la hora del cierre de
+ * la conexión anterior. El `ConnectionOpened` toma su hora al abrir el socket, así que queda
+ * estrictamente después del cierre que supera: con la misma hora, las reglas podrían ordenar la
+ * resolución de `connection_lost` antes de su apertura, y el log no se podría derivar. Si el reloj
+ * retrocede durante la espera, vuelve a mirarlo y espera otra vez.
+ */
+async function waitPast(input: DerivAdapterInput, instantUtc: string): Promise<void> {
+  const instant = Date.parse(instantUtc);
+  for (;;) {
+    const remaining = instant - Date.parse(input.now());
+    if (remaining < 0) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      input.scheduler.schedule(remaining + 1, resolve);
+    });
+  }
+}
+
+/**
  * Adaptador público de Deriv (`F1-SOURCE-001`, ADR-0012): carga los esquemas de la release fijada,
  * comprueba las peticiones con ellos, arma el perfil de medición y el `RawFirstIngestor`, repara el
- * cierre que le falte a la conexión anterior del log y sigue una conexión, que supera a esa, hasta
- * su cierre (ADR-0015 §3). Si los esquemas no cargan, nunca se conecta (salud `failed`); si el cierre
- * reparado no queda durable, tampoco (salud `paused`).
+ * cierre que le falte a la conexión anterior del log y, cuando el reloj pasa la hora de ese cierre,
+ * sigue una conexión, que supera a esa, hasta su cierre (ADR-0015 §3). Si los esquemas no cargan,
+ * nunca se conecta (salud `failed`); si la reparación no queda durable o un almacén no responde al
+ * leer el log, tampoco (salud `paused`). Si el log no pasa sus comprobaciones, se rechaza con
+ * `LogIntegrityError`, sin conectar.
  */
 export async function runDerivAdapter(input: DerivAdapterInput): Promise<DerivAdapterResult> {
   if (!Number.isSafeInteger(input.durationMs) || input.durationMs <= 0) {
@@ -153,6 +175,9 @@ export async function runDerivAdapter(input: DerivAdapterInput): Promise<DerivAd
       reason: 'persistence_unavailable',
       status: 'paused',
     });
+  }
+  if (repair.closed_at_utc !== null) {
+    await waitPast(input, repair.closed_at_utc);
   }
   const connection = new DerivConnection({
     alert: input.alert ?? stderrAlert,
