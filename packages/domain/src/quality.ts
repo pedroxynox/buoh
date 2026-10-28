@@ -17,7 +17,7 @@ import {
 } from '@buoh/contracts';
 
 import { normalizeRawFrame, type UnflaggedTick } from './normalizer.js';
-import { CONTRACT_SCHEMA_VERSION, publicationThresholds, type PipelineProfile } from './profile.js';
+import { CONTRACT_SCHEMA_VERSION, derivationThresholds, type PipelineProfile } from './profile.js';
 
 type IncidentType = DataQualityIncident['incident_type'];
 type Severity = DataQualityIncident['severity'];
@@ -38,6 +38,19 @@ export const RESOLUTION_REASONS = {
   event_gap_unresolved: 'history_recovered',
 } as const;
 
+/**
+ * Hueco de un símbolo cuya continuidad está pendiente (ADR-0015 §2): el rango que tiene que cubrir
+ * un `HistoryRecoveryResult` para decidirlo. `to_event_time_utc` es `null` mientras no llegue el
+ * primer tick posterior al último cierre, que fija el fin del hueco.
+ */
+export interface PendingGap {
+  /** High-watermark del inicio del hueco + 1 ms. */
+  readonly from_event_time_utc: string;
+  readonly symbol: string;
+  /** Primer tick posterior al último cierre − 1 ms, nunca antes de `from_event_time_utc`. */
+  readonly to_event_time_utc: string | null;
+}
+
 export interface DerivedMarketData {
   /** Condiciones en orden de reducer: `occurred_at_utc`, `condition_event_id`. */
   readonly conditions: OperationalConditionEvent[];
@@ -45,10 +58,13 @@ export interface DerivedMarketData {
   readonly incidents: DataQualityIncident[];
   /** Tipos cuya última acción es `opened`, únicos y ordenados. */
   readonly openConditionTypes: string[];
+  /** Huecos pendientes, uno por símbolo de `pendingContinuitySymbols`, en el mismo orden. */
+  readonly pendingGaps: PendingGap[];
   /**
    * Símbolos cuya continuidad tras una pérdida de conexión aún no está demostrada: ni la separación
-   * respecto del high-watermark quedó dentro de `maximum_event_gap_ms` ni existe todavía un
-   * `HistoryRecoveryResult`. No produce incidencia; impide reportar `healthy`.
+   * respecto del high-watermark quedó dentro de `maximum_event_gap_ms` (un perfil de medición no lo
+   * tiene) ni existe todavía un `HistoryRecoveryResult` que la decida. No produce incidencia; impide
+   * reportar `healthy`.
    */
   readonly pendingContinuitySymbols: string[];
   /** Ticks en orden canónico: `event_time_utc`, `tick_fingerprint_sha256`, `observation_id`. */
@@ -111,19 +127,22 @@ function withDerivedId<K extends string>(key: K, body: Record<string, unknown>) 
 }
 
 /**
- * Motor puro de normalización y calidad (reglas 1.0.0).
+ * Motor puro de normalización y calidad (reglas 1.0.0 y 2.0.0).
  *
  * Recorre los source events en orden de observación persistido y produce ticks, incidencias
  * derivables y eventos de condición. Solo usa source events, esquema, perfil y versiones; no lee
  * reloj, red, aleatoriedad ni artefactos derivados previos, por lo que replay recompone lo mismo.
+ *
+ * Con un perfil de medición deriva el estado vivo sin umbrales (ADR-0015 §2): sin `delivery_delayed`,
+ * y con la continuidad tras un cierre no pedido pendiente hasta que la decide la historia. Publicar
+ * con él sigue prohibido (`buildDatasetPublication`).
  */
 export function deriveMarketData(
   segments: readonly (readonly unknown[])[],
   profile: PipelineProfile,
 ): DerivedMarketData {
-  // Un perfil de medición falla aquí, antes de leer nada: nunca deriva ni publica (ADR-0012 §8).
   const { maximum_delivery_delay_ms: maximumDelay, maximum_event_gap_ms: maximumGap } =
-    publicationThresholds(profile);
+    derivationThresholds(profile);
   const events: SourceEvent[] = segments.flat().map((event) => sourceEventSchema.parse(event));
   const source = profile.source;
 
@@ -285,7 +304,8 @@ export function deriveMarketData(
     // gap_detection = after_reconnection: decide solo el primer tick estrictamente posterior al
     // high-watermark del último cierre (uno igual o anterior no informa sobre el intervalo). Si el
     // hueco no estaba excedido y la separación desde su inicio no supera el perfil, demuestra
-    // continuidad; si no, fija el fin del hueco y solo un HistoryRecoveryResult lo decide.
+    // continuidad; si no, fija el fin del hueco y solo un HistoryRecoveryResult lo decide. Sin umbral
+    // (perfil de medición), la separación nunca la demuestra.
     const pending = pendingContinuity.get(tick.symbol);
     if (
       pending !== undefined &&
@@ -294,6 +314,7 @@ export function deriveMarketData(
     ) {
       if (
         !pending.exceeded &&
+        maximumGap !== null &&
         Date.parse(tick.event_time_utc) - Date.parse(pending.watermark) <= maximumGap
       ) {
         pendingContinuity.delete(tick.symbol);
@@ -306,9 +327,9 @@ export function deriveMarketData(
       }
     }
 
-    // delivery_delayed: recepción menos evento supera el perfil.
+    // delivery_delayed: recepción menos evento supera el perfil. Sin umbral no se evalúa.
     const delay = Date.parse(tick.received_at_utc) - Date.parse(tick.event_time_utc);
-    if (delay > maximumDelay) {
+    if (maximumDelay !== null && delay > maximumDelay) {
       emitIncident({
         ...common,
         evidence: { delay_ms: delay, maximum_delivery_delay_ms: maximumDelay },
@@ -526,11 +547,30 @@ export function deriveMarketData(
     sourceEvents: events,
   });
 
+  const pendingSymbols = [...pendingContinuity.keys()].sort();
+  const pendingGaps = pendingSymbols.map((symbol): PendingGap => {
+    const pending = pendingContinuity.get(symbol);
+    if (pending === undefined) {
+      throw new TypeError(`Continuidad pendiente sin estado para ${symbol}.`);
+    }
+    // El rango que acepta onHistoryRecovery: desde el inicio + 1 ms hasta el fin − 1 ms.
+    const from = Date.parse(pending.watermark) + 1;
+    return {
+      from_event_time_utc: new Date(from).toISOString(),
+      symbol,
+      to_event_time_utc:
+        pending.end === undefined
+          ? null
+          : new Date(Math.max(Date.parse(pending.end) - 1, from)).toISOString(),
+    };
+  });
+
   return {
     conditions: causality.conditions,
     incidents: orderedIncidents,
     openConditionTypes: causality.openConditionTypes,
-    pendingContinuitySymbols: [...pendingContinuity.keys()].sort(),
+    pendingContinuitySymbols: pendingSymbols,
+    pendingGaps,
     ticks,
   };
 }

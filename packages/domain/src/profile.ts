@@ -60,10 +60,10 @@ const qualityProfileFields = {
 };
 
 /**
- * Perfil de calidad (contratos de dominio, «Perfil de medición»; ADR-0012 §8). Sin `purpose`, es un
- * perfil de publicación, con sus dos umbrales, y conserva los bytes y el hash de siempre. Con
- * `purpose: "measurement"`, no lleva umbrales y nunca deriva ni publica un dataset: sirve para que
- * el smoke normalice y mida antes de fijar los umbrales live.
+ * Perfil de calidad (contratos de dominio, «Perfil de medición»; ADR-0012 §8 y ADR-0015 §2). Sin
+ * `purpose`, es un perfil de publicación, con sus dos umbrales, y conserva los bytes y el hash de
+ * siempre. Con `purpose: "measurement"`, no lleva umbrales y nunca publica un dataset: sirve para
+ * normalizar, medir y derivar el estado vivo antes de fijar los umbrales live.
  *
  * Hay una copia de la forma de publicación en packages/contracts/src/vector-integrity.ts para
  * verificar los vectores; mantenerlas iguales es el pendiente 4 de F1.2 (PROJECT_STATUS.md).
@@ -166,8 +166,8 @@ export function createPipelineProfile(input: PipelineProfileInput): PipelineProf
 }
 
 /**
- * Umbrales de un perfil de publicación. Un perfil de medición no los tiene y nunca deriva ni
- * publica un dataset (ADR-0004 §13, ADR-0012 §8), así que aquí falla cerrado.
+ * Umbrales de un perfil de publicación. Un perfil de medición no los tiene y nunca publica un
+ * dataset (ADR-0004 §13, ADR-0012 §8 y ADR-0015 §2), así que aquí falla cerrado.
  */
 export function publicationThresholds(profile: PipelineProfile): {
   readonly maximum_delivery_delay_ms: number;
@@ -175,12 +175,24 @@ export function publicationThresholds(profile: PipelineProfile): {
 } {
   const quality = profile.quality_profile;
   if ('purpose' in quality) {
-    throw new TypeError(
-      `El perfil ${quality.profile_id} es de medición: no deriva ni publica datasets.`,
-    );
+    throw new TypeError(`El perfil ${quality.profile_id} es de medición: no publica datasets.`);
   }
   return {
     maximum_delivery_delay_ms: quality.maximum_delivery_delay_ms,
     maximum_event_gap_ms: quality.maximum_event_gap_ms,
   };
+}
+
+/**
+ * Umbrales con los que se deriva (ADR-0015 §2): los de un perfil de publicación o, en un perfil de
+ * medición, `null`. Sin umbral de retraso no se evalúa `delivery_delayed`. Sin umbral de hueco, la
+ * separación tras una reconexión nunca demuestra continuidad: solo la decide la historia.
+ */
+export function derivationThresholds(profile: PipelineProfile): {
+  readonly maximum_delivery_delay_ms: number | null;
+  readonly maximum_event_gap_ms: number | null;
+} {
+  return profile.purpose === 'measurement'
+    ? { maximum_delivery_delay_ms: null, maximum_event_gap_ms: null }
+    : publicationThresholds(profile);
 }

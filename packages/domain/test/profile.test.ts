@@ -181,12 +181,12 @@ describe('perfil de medición', () => {
     );
   });
 
-  it('nunca deriva ni publica un dataset', () => {
+  it('deriva el estado vivo, pero nunca publica un dataset (ADR-0015 §2)', () => {
     const measurement = profileWith(schema, measurementBytes());
     const segments = [[raw(tick(1767225600))]];
 
     expect(() => publicationThresholds(measurement)).toThrow(/de medición/u);
-    expect(() => deriveMarketData(segments, measurement)).toThrow(/de medición/u);
+    expect(deriveMarketData(segments, measurement).ticks).toHaveLength(1);
     expect(() =>
       buildDatasetPublication({
         locateManifest: () => 'memory://manifest',
@@ -197,8 +197,10 @@ describe('perfil de medición', () => {
         segments,
       }),
     ).toThrow(/de medición/u);
-    // Con un perfil de publicación, la misma derivación funciona.
-    expect(deriveMarketData(segments, profileWith(schema)).ticks).toHaveLength(1);
+    // Con un perfil de publicación, la misma derivación da lo mismo.
+    expect(deriveMarketData(segments, profileWith(schema)).ticks).toEqual(
+      deriveMarketData(segments, measurement).ticks,
+    );
   });
 
   it('no lleva umbrales, usa reglas 2.0.0 y solo admite `purpose: "measurement"`', () => {
