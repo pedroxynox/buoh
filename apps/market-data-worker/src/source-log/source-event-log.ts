@@ -13,6 +13,7 @@ import {
 } from '@buoh/domain';
 
 import { createStorageEncoder } from '../encoding.js';
+import { ObjectReadError } from '../errors.js';
 import { contentKey } from '../object-keys.js';
 import { type ObjectStore } from '../ports.js';
 import {
@@ -54,9 +55,9 @@ export function failureReason(error: unknown): string {
 }
 
 /**
- * Al leerlo, el contenido durable del log no pasa sus comprobaciones: un objeto alterado, un hash o
- * unos conteos que no cuadran, un segmento que no se descomprime, una línea que no es un source
- * event JCS o segmentos que no están todos cerrados. No se reintenta con ese contenido (ADR-0004
+ * Al leerlo, el contenido durable del log no pasa sus comprobaciones: un objeto alterado, que falta
+ * o mayor que su fila, un hash o unos conteos que no cuadran, un segmento que no se descomprime, una
+ * línea que no es un source event JCS o segmentos que no están todos cerrados. No se reintenta con ese contenido (ADR-0004
  * §12). Es un `TypeError`, como esas comprobaciones antes, y conserva sus mensajes.
  */
 export class LogIntegrityError extends TypeError {
@@ -80,11 +81,22 @@ export class LogReadError extends Error {
   }
 }
 
-/** Lectura de un almacén del log: si falla, lanza `LogReadError`. */
+/**
+ * Lectura de un almacén del log: si no responde, lanza `LogReadError`. Un objeto que no existe o que
+ * supera el tamaño de su fila (`ObjectReadError`) sí respondió: falta o cambió contenido que el
+ * índice confirmó, así que lanza `LogIntegrityError`, como el replay con un objeto ausente o
+ * excedido (ADR-0015 §8, regla 2).
+ */
 async function fromStore<T>(read: () => Promise<T>): Promise<T> {
   try {
     return await read();
   } catch (error) {
+    if (error instanceof ObjectReadError) {
+      throw new LogIntegrityError(
+        `Objeto del log ${error.reason === 'not_found' ? 'ausente' : 'mayor que su fila'}.`,
+        { cause: error },
+      );
+    }
     throw new LogReadError(failureReason(error), { cause: error });
   }
 }

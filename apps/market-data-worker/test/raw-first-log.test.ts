@@ -1101,27 +1101,46 @@ describe('RawFirstIngestor.repairUnrecordedClose: cierre no registrado (ADR-0015
     },
   );
 
-  it('si un segmento cerrado no pasa sus comprobaciones, la reparación se rechaza sin escribir el cierre ni registrar persistence_unavailable', async () => {
-    let now = OPENED_AT;
-    const run = await harness({ now: () => now });
-    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
-    await run.ingestor.rotate('requested');
-    // El objeto del segmento cerrado cambia en el almacén: ya no tiene el hash de su fila.
-    const key = contentKey(run.sourceLog.closed[0]?.object_bytes_sha256 ?? '');
-    const altered = Uint8Array.from(run.objects.objects.get(key) ?? new Uint8Array());
-    altered[2] = 0x41;
-    run.objects.objects.set(key, altered);
-    now = DETECTION;
+  it.each<[string, (stored: Uint8Array) => Uint8Array | null, RegExp]>([
+    [
+      'alterado: ya no tiene el hash de su fila',
+      (stored) => {
+        const altered = Uint8Array.from(stored);
+        altered[2] = 0x41;
+        return altered;
+      },
+      /segmento 0 alterado/u,
+    ],
+    // El índice confirmó el segmento: un objeto que falta o que crece no es un almacén que no
+    // responde, sino contenido confirmado que ya no está (ADR-0015 §8, regla 2).
+    ['ausente', () => null, /ausente/u],
+    ['mayor que su fila', (stored) => Uint8Array.from([...stored, 0x0a]), /mayor que su fila/u],
+  ])(
+    'si el objeto de un segmento cerrado está %s, la reparación se rechaza con LogIntegrityError sin escribir el cierre ni registrar persistence_unavailable',
+    async (_label, change, message) => {
+      let now = OPENED_AT;
+      const run = await harness({ now: () => now });
+      await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+      await run.ingestor.rotate('requested');
+      const key = contentKey(run.sourceLog.closed[0]?.object_bytes_sha256 ?? '');
+      const changed = change(run.objects.objects.get(key) ?? new Uint8Array());
+      if (changed === null) {
+        run.objects.objects.delete(key);
+      } else {
+        run.objects.objects.set(key, changed);
+      }
+      now = DETECTION;
 
-    // Con contenido no confiable no se reintenta (ADR-0004 §12): ni pausa ni incidencia.
-    const repair = run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] });
-    await expect(repair).rejects.toThrow(LogIntegrityError);
-    await expect(repair).rejects.toThrow(/segmento 0 alterado/u);
-    expect(run.sourceLog.rows).toHaveLength(1);
-    expect(run.operational.incidents).toEqual([]);
-    expect(run.registry.openConditionTypes()).toEqual([]);
-    expect(run.ingestor.state).toBe('accepting');
-  });
+      // Con contenido no confiable no se reintenta (ADR-0004 §12): ni pausa ni incidencia.
+      const repair = run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] });
+      await expect(repair).rejects.toThrow(LogIntegrityError);
+      await expect(repair).rejects.toThrow(message);
+      expect(run.sourceLog.rows).toHaveLength(1);
+      expect(run.operational.incidents).toEqual([]);
+      expect(run.registry.openConditionTypes()).toEqual([]);
+      expect(run.ingestor.state).toBe('accepting');
+    },
+  );
 
   it('un error al leer el log que no viene de un almacén rechaza la reparación sin registrar persistence_unavailable', async () => {
     const run = await harness();
