@@ -351,6 +351,26 @@ describe('DerivConnection.recoverHistory: páginas y resultado (ADR-0015 §4)', 
     expect(run.clock.pendingDelays()).toEqual([43_000, 598_000]);
   });
 
+  it('si la página 50 llega a S, el tope no cuenta: con los dos extremos da complete, no history_page_limit', async () => {
+    const run = await recovering();
+    const outcome = run.connection.recoverHistory(REQUEST);
+    await settle();
+    // Páginas 1 a 49: un tick cada una, de E a E − 48. La 50 pide hasta E − 49 y trae todos los
+    // segundos desde S, con su cotización.
+    await answerOneTickPages(run, 49, '100.75');
+    expect(pagesSent(run).at(-1)).toEqual(pageRequest(52, E - 49));
+    const times = Array.from({ length: E - 49 - S + 1 }, (_, index) => S + index);
+    const prices = times.map((time) => (time === S ? '100.25' : '100.5'));
+    await answerPage(run, (id) => derivMessages.history(id, times, prices));
+
+    expect(pagesSent(run)).toHaveLength(50);
+    expect(await outcome).toMatchObject({
+      attempts: 1,
+      pages: 50,
+      result: { recovered_event_count: 59, status: 'complete' },
+    });
+  });
+
   it('si la primera página es un error de ticks_history en los tres intentos, da unavailable con history_error_response y ninguna incidencia de respuesta pedida', async () => {
     const run = await recovering();
     const outcome = run.connection.recoverHistory(REQUEST);
@@ -1164,6 +1184,35 @@ describe('DerivConnection.recoverHistory: el cierre previsto por duración la es
     });
     expect(await results(run)).toEqual([]);
     expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
+  it('si la conexión falla mientras el cierre previsto espera a la recuperación, no pide forget_all: el cierre se decide antes de abandonarla', async () => {
+    // Release sintética cuyo esquema de `ping` rechaza la petición: el keepalive es un error del
+    // código, que falla la conexión.
+    const run = await recovering({
+      durationMs: 10_000,
+      schemaOverrides: {
+        'ping_request.schema.json': {
+          $schema: 'http://json-schema.org/draft-04/schema#',
+          type: 'string',
+        },
+      },
+    });
+    const rejected = run.run.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    const outcome = run.connection.recoverHistory(REQUEST);
+    await settle();
+    // La duración se cumple a las 10:00:10 y la página vence a las 10:00:17: el cierre previsto
+    // espera al reintento de las 10:00:47, y el keepalive de las 10:00:45 falla la conexión antes.
+    await run.clock.advance(42_999);
+    expect(forgetAllSent(run)).toBe(false);
+    await run.clock.advance(1);
+
+    expect(await rejected).toBeInstanceOf(TypeError);
+    expect(await outcome).toEqual({ status: 'abandoned' });
+    expect(forgetAllSent(run)).toBe(false);
   });
 });
 
