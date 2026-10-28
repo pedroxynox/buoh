@@ -307,9 +307,11 @@ export class DerivConnection {
    *
    * Si la conexión no está suscrita, o se cierra antes de encolar el resultado, también durante la
    * espera entre intentos, se resuelve como `abandoned` y no persiste nada; si falla por un error
-   * inesperado, igual, aunque el resultado ya esté en la cola. Un hueco con horas que no están en UTC
-   * con milisegundos o que no dan segundos enteros, otro símbolo o una segunda llamada con una
-   * recuperación en curso son errores de programación (`TypeError`).
+   * inesperado, igual, aunque el resultado ya esté en la cola. Si el fallo llega mientras el
+   * resultado ya se escribe, esa escritura puede terminar aunque se resuelva como `abandoned`: el
+   * log es la fuente de verdad. Un hueco con horas que no están en UTC con milisegundos o que no
+   * dan segundos enteros, otro símbolo o una segunda llamada con una recuperación en curso son
+   * errores de programación (`TypeError`).
    */
   recoverHistory(request: HistoryRecoveryRequest): Promise<HistoryRecoveryOutcome> {
     const range = historyRange(request);
@@ -341,6 +343,14 @@ export class DerivConnection {
       request,
     });
     this.#recovery = recovery;
+    // Si se abandona sola, con una página que no salió (`HistoryRecoveryHooks.sendPage`), la
+    // conexión la suelta al resolverse: si no, el cierre previsto la esperaría para siempre.
+    void recovery.outcome.then(() => {
+      if (this.#recovery === recovery) {
+        this.#recovery = null;
+        this.#afterRecovery();
+      }
+    });
     recovery.start();
     return recovery.outcome;
   }

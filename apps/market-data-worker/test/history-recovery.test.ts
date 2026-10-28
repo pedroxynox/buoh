@@ -8,21 +8,25 @@ import { deriveMarketData } from '@buoh/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { REQUEST_TIMEOUT_MS } from '../src/deriv/connection.js';
-import type {
-  HistoryRecoveryOutcome,
-  HistoryRecoveryRequest,
+import {
+  historyRange,
+  HistoryRecovery,
+  type HistoryRecoveryHooks,
+  type HistoryRecoveryOutcome,
+  type HistoryRecoveryRequest,
 } from '../src/deriv/history-recovery.js';
 import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
 import { buildRawSourceFrame } from '../src/ingestion/raw-first-ingestor.js';
 import {
   connectionHarness,
   settle,
+  START,
   START_EPOCH,
   syntheticSchemas,
   uuid,
   type ConnectionHarnessOptions,
 } from './support/connection-harness.js';
-import { derivMessages } from './support/deriv-fixtures.js';
+import { derivMessages, ManualClock } from './support/deriv-fixtures.js';
 import { type MemoryObjectStore } from './support/memory-stores.js';
 
 // Recuperación de historia en `DerivConnection` (ADR-0015 §4), con sus reintentos y el cierre
@@ -1269,5 +1273,36 @@ describe('DerivConnection.recoverHistory: el resultado en la cola y el cierre', 
         evidence: { raw_payload_sha256: sha256Hex(payload), reason: 'history_inconsistent' },
       }),
     ]);
+  });
+});
+
+describe('HistoryRecovery: una página que no sale (invariante de sendPage)', () => {
+  // La conexión devuelve `null` solo después de abandonar la recuperación, así que este caso se
+  // prueba con hooks falsos.
+  it('si sendPage no envía la página de un reintento con la recuperación en curso, la abandona: outcome se resuelve, no encola ningún resultado y no deja tiempos pendientes', async () => {
+    const clock = new ManualClock(START);
+    // La página del primer intento sale con el req_id 1; la del reintento, no.
+    const sendPage = vi
+      .fn<HistoryRecoveryHooks['sendPage']>()
+      .mockReturnValueOnce(1)
+      .mockReturnValue(null);
+    const queueResult = vi.fn<HistoryRecoveryHooks['queueResult']>();
+    const recovery = new HistoryRecovery({
+      hooks: { queueResult, scheduler: clock.scheduler, sendPage },
+      range: historyRange(REQUEST),
+      request: REQUEST,
+    });
+    recovery.start();
+    // Un error de ticks_history termina el primer intento: el reintento sale 30 000 ms después.
+    recovery.onPage(1, { incident: null, status: 'error_response' });
+    await clock.advance(RETRY_WAIT_MS);
+
+    expect(sendPage.mock.calls).toEqual([[{ end: E, start: S }], [{ end: E, start: S }]]);
+    expect(recovery.abandoned).toBe(true);
+    expect(await recovery.outcome).toEqual({
+      status: 'abandoned',
+    } satisfies HistoryRecoveryOutcome);
+    expect(queueResult).not.toHaveBeenCalled();
+    expect(clock.pendingDelays()).toEqual([]);
   });
 });

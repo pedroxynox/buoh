@@ -36,7 +36,9 @@ export interface HistoryRecoveryRequest {
  * Cómo terminó `recoverHistory`: `abandoned` si la conexión no estaba suscrita, se cerró antes de
  * encolar el resultado o falló, y entonces el resultado no se persiste; si no, `finished` con el
  * resultado del último intento, si quedó durable, los intentos hechos (de 1 a 3) y las páginas
- * pedidas en el último intento. Un resultado que no quedó durable cierra la conexión.
+ * pedidas en el último intento. Un resultado que no quedó durable cierra la conexión. Si el fallo
+ * llega mientras el resultado ya se escribe, esa escritura puede terminar aunque la recuperación se
+ * resuelva como `abandoned`: el log es la fuente de verdad.
  */
 export type HistoryRecoveryOutcome =
   | { readonly status: 'abandoned' }
@@ -296,7 +298,13 @@ const RETRIED_REASONS: ReadonlySet<HistoryRecoveryReason> = new Set([
 
 /** Lo que una recuperación necesita de su conexión. */
 export interface HistoryRecoveryHooks {
-  /** Pide la página `page` por la conexión: devuelve su `req_id`, o `null` si no la envió. */
+  /**
+   * Pide la página `page` por la conexión: devuelve su `req_id`, o `null` si no la envió.
+   * Invariante: la conexión devuelve `null` solo si ya decidió el cierre o falló, y en los dos
+   * casos ya abandonó la recuperación. Si aun así devuelve `null` con la recuperación en curso, la
+   * recuperación se abandona sola: sin página no llega respuesta ni vencimiento, y `outcome` no se
+   * resolvería nunca.
+   */
   readonly sendPage: (page: HistoryRange) => number | null;
   /** Encola la decisión del último intento, para persistir su resultado detrás de lo que espera. */
   readonly queueResult: (decision: HistoryRecoveryDecision) => void;
@@ -375,8 +383,8 @@ export class HistoryRecovery {
   }
 
   /**
-   * Termina con `abandoned` si su resultado no está en la cola, o aunque esté si `force`: la cola
-   * falló y ya no lo procesará. Devuelve si la abandonó.
+   * Termina con `abandoned` si su resultado no está en la cola, o aunque esté si `force`: la
+   * conexión falló, y el consumidor ya no lo entrega al ingestor. Devuelve si la abandonó.
    */
   abandon(force = false): boolean {
     if (this.#state === 'abandoned' || this.#state === 'finished') {
@@ -420,6 +428,10 @@ export class HistoryRecovery {
   #requestPage(end: number): void {
     this.#requested += 1;
     this.#pendingReqId = this.#hooks.sendPage({ end, start: this.range.start });
+    // No la envió y no abandonó la recuperación: se rompió el invariante de `sendPage`.
+    if (this.#pendingReqId === null && this.#state === 'running') {
+      this.abandon();
+    }
   }
 
   #endAttempt(failure: HistoryPageFailure | null): void {

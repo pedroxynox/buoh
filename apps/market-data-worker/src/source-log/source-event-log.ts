@@ -56,9 +56,10 @@ export function failureReason(error: unknown): string {
 
 /**
  * Al leerlo, el contenido durable del log no pasa sus comprobaciones: un objeto alterado, que falta
- * o mayor que su fila, un hash o unos conteos que no cuadran, un segmento que no se descomprime, una
- * línea que no es un source event JCS o segmentos que no están todos cerrados. No se reintenta con ese contenido (ADR-0004
- * §12). Es un `TypeError`, como esas comprobaciones antes, y conserva sus mensajes.
+ * o mayor que su fila, un hash o unos conteos que no cuadran, un segmento que no se descomprime,
+ * una línea que no es un source event JCS o segmentos que no están todos cerrados. No se reintenta
+ * con ese contenido (ADR-0004 §12). Es un `TypeError`, como esas comprobaciones antes, y conserva
+ * sus mensajes.
  */
 export class LogIntegrityError extends TypeError {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -86,15 +87,15 @@ export class LogReadError extends Error {
  * supera el tamaño de su fila (`ObjectReadError`) sí respondió: falta o cambió contenido que el
  * índice confirmó, así que lanza `LogIntegrityError`, como el replay con un objeto ausente o
  * excedido. ADR-0015 §8 separa igual lo guardado que falta (regla 2) de un almacén que no responde
- * (regla 3).
+ * (regla 3). `label` dice en el mensaje de qué es el objeto, por ejemplo «del segmento 0».
  */
-async function fromStore<T>(read: () => Promise<T>): Promise<T> {
+async function fromStore<T>(read: () => Promise<T>, label = 'del log'): Promise<T> {
   try {
     return await read();
   } catch (error) {
     if (error instanceof ObjectReadError) {
       throw new LogIntegrityError(
-        `Objeto del log ${error.reason === 'not_found' ? 'ausente' : 'mayor que su fila'}.`,
+        `Objeto ${label} ${error.reason === 'not_found' ? 'ausente' : 'mayor que su fila'}.`,
         { cause: error },
       );
     }
@@ -428,8 +429,9 @@ export class SourceEventLog {
     }
     const result: SourceEvent[][] = [];
     for (const segment of segments) {
-      const physical = await fromStore(() =>
-        this.#objects.get(contentKey(segment.object_bytes_sha256), segment.object_size_bytes),
+      const physical = await fromStore(
+        () => this.#objects.get(contentKey(segment.object_bytes_sha256), segment.object_size_bytes),
+        `del segmento ${String(segment.segment_index)}`,
       );
       if (sha256Hex(physical) !== segment.object_bytes_sha256) {
         throw new LogIntegrityError(

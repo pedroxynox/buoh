@@ -1113,8 +1113,12 @@ describe('RawFirstIngestor.repairUnrecordedClose: cierre no registrado (ADR-0015
     ],
     // El índice confirmó el segmento: un objeto que falta o que crece no es un almacén que no
     // responde, sino contenido confirmado que ya no está, como en el replay.
-    ['ausente', () => null, /ausente/u],
-    ['mayor que su fila', (stored) => Uint8Array.from([...stored, 0x0a]), /mayor que su fila/u],
+    ['ausente', () => null, /segmento 0 ausente/u],
+    [
+      'mayor que su fila',
+      (stored) => Uint8Array.from([...stored, 0x0a]),
+      /segmento 0 mayor que su fila/u,
+    ],
   ])(
     'si el objeto de un segmento cerrado está %s, la reparación se rechaza con LogIntegrityError sin escribir el cierre ni registrar persistence_unavailable',
     async (_label, change, message) => {
