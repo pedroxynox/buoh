@@ -118,7 +118,8 @@ export interface DerivConnectionInput {
   readonly connect: SocketFactory;
   /**
    * Tiempo de escucha desde el primer tick hasta el cierre previsto, como `finish`. Sin él, la
-   * conexión no se cierra sola: la cierra quien la sigue, con `finish`, `stop` o `interrupt`.
+   * conexión nunca pide el cierre previsto por su cuenta: termina cuando se pierde o cuando quien la
+   * sigue la cierra, con `finish`, `stop` o `interrupt`.
    */
   readonly durationMs?: number;
   readonly endpoint: string;
@@ -223,8 +224,8 @@ const STABLE_CODE = /^[a-z][a-z0-9_]*$/u;
  * `ConnectionOpened`, pide el catálogo, se suscribe al símbolo si está en el último snapshot válido y
  * mantiene el keepalive. Quien la sigue la cierra con `finish` (el cierre previsto), `stop` (la
  * parada por señal) o `interrupt` (un corte del propio transporte); con `durationMs`, el cierre
- * previsto llega solo al cumplirse la duración. El cierre previsto espera a la recuperación de
- * historia en curso; la parada, no.
+ * previsto llega también por sí mismo, al cumplirse la duración. El cierre previsto espera a la
+ * recuperación de historia en curso; la parada, no.
  *
  * Todo lo que toca el ingestor pasa por una cola con un solo consumidor: frames, apertura, pausa por
  * límite, resultado de la recuperación de historia y cierre. Las respuestas se interpretan solo
@@ -276,7 +277,8 @@ export class DerivConnection {
 
   /**
    * Abre la conexión y la sigue hasta el final. Se resuelve cuando la entrada está cerrada y el
-   * socket también; se rechaza solo con un error inesperado, después de cortar el socket.
+   * socket también; se rechaza solo con un error inesperado, después de cortar el socket: por
+   * ejemplo, el `LogIntegrityError` de un log que, al reabrirse, no pasa sus comprobaciones.
    */
   run(): Promise<DerivConnectionResult> {
     this.#cancelConnect = this.#input.scheduler.schedule(CONNECT_TIMEOUT_MS, () => {

@@ -109,7 +109,7 @@ export interface DerivAttemptInput {
   readonly connect: SocketFactory;
   /**
    * Tiempo de escucha desde el primer tick hasta el cierre previsto, en milisegundos. Sin él, la
-   * conexión no se cierra sola: la cierra quien la sigue.
+   * conexión nunca pide el cierre previsto por su cuenta: lo decide quien la sigue.
    */
   readonly durationMs?: number;
   /** El ingestor de la sesión, el mismo en todos sus intentos: la conexión anterior sale de su log. */
@@ -125,10 +125,10 @@ export interface DerivAttemptInput {
 
 /**
  * Cómo empezó un intento: no conectó, porque el cierre reparado no quedó durable o un almacén no
- * respondió al leer el log (fin `paused` con `persistence_unavailable` y la etapa), o ya corre su
- * conexión. `connection` es la instancia que corre, para pedirle `recoverHistory` o cerrarla con
- * `finish`, `stop` o `interrupt`; `result` es su `run()`, que se resuelve cuando la conexión termina
- * y se rechaza solo con un error inesperado.
+ * respondió al reabrir o leer el log (fin `paused` con `persistence_unavailable` y la etapa), o ya
+ * corre su conexión. `connection` es la instancia que corre, para pedirle `recoverHistory` o
+ * cerrarla con `finish`, `stop` o `interrupt`; `result` es su `run()`, que se resuelve cuando la
+ * conexión termina y se rechaza solo con un error inesperado.
  */
 export type DerivAttempt =
   | { readonly end: DerivSessionEnd; readonly status: 'not_connected' }
@@ -324,8 +324,9 @@ export async function startDerivAttempt(input: DerivAttemptInput): Promise<Deriv
  * el log y sigue un intento (`startDerivAttempt`) hasta el cierre de su conexión: repara el cierre
  * que le falte a la conexión anterior del log y, cuando el reloj pasa la hora de ese cierre, abre una
  * conexión que la supera (ADR-0015 §3). Si la preparación falla, nunca se conecta (salud `failed`);
- * si la reparación no queda durable o un almacén no responde al leer el log, tampoco (salud
- * `paused`). Si el log no pasa sus comprobaciones, se rechaza con `LogIntegrityError`, sin conectar.
+ * si la reparación no queda durable o un almacén no responde al reabrir o leer el log, tampoco
+ * (salud `paused`). Si el log no pasa sus comprobaciones, se rechaza con `LogIntegrityError`, sin
+ * conectar.
  */
 export async function runDerivAdapter(input: DerivAdapterInput): Promise<DerivAdapterResult> {
   if (!Number.isSafeInteger(input.durationMs) || input.durationMs <= 0) {
