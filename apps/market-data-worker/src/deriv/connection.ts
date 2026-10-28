@@ -51,6 +51,12 @@ export const KEEPALIVE_INTERVAL_MS = 45_000;
 type ClosureType = ConnectionClosed['closure_type'];
 
 /**
+ * Peticiones que envía una conexión: todas menos `ticks_history`, que el adaptador ya comprueba antes
+ * de conectar (ADR-0015 §1) y que ninguna conexión pide todavía.
+ */
+type ConnectionRequest = Exclude<DerivRequest, { readonly operation: 'ticks_history' }>;
+
+/**
  * Cómo terminó la conexión:
  * - `completed`: el cierre previsto, después de `forget_all`;
  * - `disconnected`: la conexión se perdió o no se abrió (cierre remoto, error de transporte, tiempo
@@ -197,10 +203,10 @@ export class DerivConnection {
   readonly #queue: IngestQueue<Work>;
   readonly #pending = new Map<
     number,
-    { readonly cancel: () => void; readonly request: DerivRequest }
+    { readonly cancel: () => void; readonly request: ConnectionRequest }
   >();
   /** Peticiones declaradas que esperaban respuesta cuando se decidió el cierre. */
-  readonly #pendingAtClose = new Map<number, DerivRequest>();
+  readonly #pendingAtClose = new Map<number, ConnectionRequest>();
   readonly #done = Promise.withResolvers<DerivConnectionResult>();
   #socket: DerivSocket | null = null;
   #socketClosed = false;
@@ -830,14 +836,14 @@ export class DerivConnection {
   }
 
   /** Envía una petición validada contra su esquema, con su `req_id` y su tiempo de espera. */
-  #send(request: DerivRequest): void {
+  #send(request: ConnectionRequest): void {
     if (this.#closing !== null) {
       return;
     }
     const reqId = this.#lastReqId + 1;
     const text = encodeRequest(this.#input.schemas, request, reqId);
     if (text === null) {
-      // El adaptador comprueba las cinco peticiones antes de conectar: esto es un error del código.
+      // El adaptador comprueba sus peticiones antes de conectar: esto es un error del código.
       this.#fail(new TypeError(`La petición ${request.operation} no cumple su esquema.`));
       return;
     }

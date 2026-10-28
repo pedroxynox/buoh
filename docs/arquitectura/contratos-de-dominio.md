@@ -554,7 +554,7 @@ Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §8),
 - Un perfil con `purpose: "measurement"` y algún umbral, o con `purpose` de otro valor, se rechaza.
 - Implementado en `packages/domain`: `createPipelineProfile` expone `purpose`; `publicationThresholds` falla con un perfil de medición, y `buildDatasetPublication` la llama antes de leer nada.
 - Desde F1.5 ([ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §2), `deriveMarketData` acepta un perfil de medición para derivar el estado vivo (salud, condiciones y continuidad). `derivationThresholds` da `null` como umbrales de un perfil de medición. Sin umbral de retraso no se evalúa `delivery_delayed`. Sin umbral de hueco, la separación tras una reconexión nunca demuestra continuidad (lo que en las reglas 1.0.0 decide `maximum_event_gap_ms`): el símbolo sigue pendiente hasta que lo decide un `HistoryRecoveryResult` que cubre su hueco. `pendingGaps` da cada hueco pendiente: `from_event_time_utc`, el high-watermark del inicio + 1 ms, y `to_event_time_utc`, el primer tick posterior al último cierre − 1 ms (nunca antes de `from_event_time_utc`), o `null` mientras ese tick no llegue. No hace falta otra `quality_rule_version` (ADR-0015 §2, «Versionado»).
-- El perfil de Deriv v2 (`deriv_options-measurement-v2-<símbolo>`, PR 3) declarará además `history`, la respuesta a `ticks_history`.
+- Desde el PR 3 de [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, el perfil de Deriv es el v2 (`deriv_options-measurement-v2-<símbolo>`, conector `deriv-options-ws-1.1.0`): declara además `history`, la respuesta a `ticks_history`.
 
 ### Registro operativo de persistencia y límites
 
@@ -593,7 +593,7 @@ Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §6).
 | `observed_ref` y `observed_at_utc` | `observation_id` y `received_at_utc` del frame |
 | `related_refs` | `[]` |
 | `symbol` | `null`: ninguna respuesta declarada es de un símbolo. Es una diferencia deliberada con la atribución de las reglas 2.0.0, que acabaría en el único símbolo del perfil |
-| `evidence` | `raw_payload_sha256` y el motivo: `source_error_response`, `schema_validation_failed` o uno de los del catálogo |
+| `evidence` | `raw_payload_sha256` y el motivo: `source_error_response`, `schema_validation_failed`, uno de los del catálogo o, solo en las respuestas de historia, `history_inconsistent` |
 
 Así, la incidencia se puede volver a derivar del frame durable. Vive en la tabla PostgreSQL append-only `requested_response_incidents`, fuera de los datasets y del registro operativo: no abre condiciones ni cambia la salud.
 
@@ -601,7 +601,9 @@ En `packages/domain`, `checkRequestedResponse` hace las dos comprobaciones comun
 
 El perfil de Deriv no declara `ticks` ni `error`. Una suscripción fallida (`msg_type` `ticks`) y la respuesta a un método desconocido (`msg_type` `error`) llegan con un objeto `error`, y las reglas 2.0.0 ya las registran como `source_error_response`.
 
-Decidido en [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §4, y llega con el PR 3 de su secuencia: quien pida `ticks_history` comprobará igual su respuesta `history`, y además que traiga `history.times`, `history.prices` y `pip_size`, que `times` y `prices` tengan la misma longitud, que los tiempos sean enteros estrictamente crecientes y que caigan dentro del rango pedido; si no, el motivo será `history_inconsistent`. Una petición de historia rechazada llega con `msg_type` `ticks_history` y un objeto `error`; el perfil no lo declarará, así que la registrarán las reglas 2.0.0.
+Decidido en [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §4, y llega con el PR 3 de su secuencia: quien pida `ticks_history` comprobará igual su respuesta `history`, y además que traiga `history.times`, `history.prices` y `pip_size`, que `times` y `prices` tengan la misma longitud, que los tiempos sean enteros estrictamente crecientes y que caigan dentro del rango pedido; si no, el motivo será `schema_validation_failed` o `history_inconsistent`. Una petición de historia rechazada llega con `msg_type` `ticks_history` y un objeto `error`; el perfil v2 no lo declara, así que la registran las reglas 2.0.0.
+
+`history_inconsistent` (longitudes, orden o rango de `history.times`) existe en `packages/domain` desde el PR 3 y es solo para las respuestas de historia. En PostgreSQL, `requested_response_incidents` lo admite desde la migración `0004` (PR 5 de ADR-0015 §13); la `0003` no lo admite.
 
 ## Contratos futuros
 

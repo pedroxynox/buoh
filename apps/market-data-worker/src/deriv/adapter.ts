@@ -50,11 +50,16 @@ export interface DerivAdapterResult extends DerivConnectionResult {
   readonly schemas: { readonly archive_sha256: string; readonly release: string } | null;
 }
 
-/** Las cinco peticiones que puede hacer una conexión. */
+/**
+ * Las seis peticiones que se comprueban antes de conectar. `ticks_history` lleva un rango
+ * representativo (`start` y `end` en 0): se comprueban la forma de la petición y el símbolo, y el
+ * rango se conoce después.
+ */
 function connectionRequests(symbol: string): DerivRequest[] {
   return [
     { operation: 'active_symbols' },
     { operation: 'ticks', symbol },
+    { end: 0, operation: 'ticks_history', start: 0, symbol },
     { operation: 'ping' },
     { operation: 'time' },
     { operation: 'forget_all' },

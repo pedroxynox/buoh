@@ -25,7 +25,12 @@ import {
   DERIV_PUBLIC_ENDPOINT,
   DERIV_SOURCE,
 } from '../src/deriv/profile.js';
-import { openSchemaArchive, type DerivSchemaSet } from '../src/deriv/schema-archive.js';
+import { encodeRequest } from '../src/deriv/requests.js';
+import {
+  openSchemaArchive,
+  type DerivSchemaSet,
+  type SchemaEntryName,
+} from '../src/deriv/schema-archive.js';
 import { CONNECT_TIMEOUT_MS, declaredMessageLength } from '../src/deriv/socket.js';
 import {
   buildRawSourceFrame,
@@ -105,6 +110,8 @@ interface HarnessOptions {
   readonly expectedSha256?: string;
   readonly fetch?: typeof fetch;
   readonly operational?: MemoryOperationalStore;
+  /** Esquemas que cambian en el archivo sintético (`syntheticSchemaArchive`). */
+  readonly schemaOverrides?: Readonly<Partial<Record<SchemaEntryName, unknown>>>;
   readonly serverTime?: boolean;
   readonly symbol?: string;
 }
@@ -122,8 +129,9 @@ async function harness(options: HarnessOptions = {}) {
   const alerts: Parameters<OperationalAlert>[0][] = [];
   const ticks: UnflaggedTick[] = [];
   const invalid: { observation_id: string; reason: InvalidFrameReason }[] = [];
+  const nonTick: { msg_type: string; observation_id: string }[] = [];
   const sockets: FakeDerivSocket[] = [];
-  const fixture = syntheticSchemaArchive();
+  const fixture = syntheticSchemaArchive(options.schemaOverrides);
   const fetchCalls: string[] = [];
   const openLog = () =>
     SourceEventLog.open({ objects, source: DERIV_SOURCE, store: sourceLog, zlibVersion: 'test' });
@@ -164,6 +172,7 @@ async function harness(options: HarnessOptions = {}) {
     serverTime: options.serverTime ?? false,
     sink: {
       invalidFrame: (item) => invalid.push(item),
+      nonTickFrame: (item) => nonTick.push(item),
       tick: (tick) => ticks.push(tick),
     },
     symbol: options.symbol ?? 'SYNTH_100',
@@ -220,6 +229,7 @@ async function harness(options: HarnessOptions = {}) {
     frames,
     invalid,
     lastClosed,
+    nonTick,
     objects,
     openAndListCatalog,
     operational,
@@ -1021,6 +1031,28 @@ describe('runDerivAdapter: antes de conectar', () => {
     expect(result.end).toEqual({ detail: 'ticks', reason: 'request_invalid', status: 'failed' });
   });
 
+  it('comprueba también la petición ticks_history: si su esquema la rechaza, no conecta', async () => {
+    // Release sintética que pide `end` como entero; la petición lo manda como texto (ADR-0015 §1).
+    const run = await harness({
+      schemaOverrides: {
+        'ticks_history_request.schema.json': {
+          $schema: 'http://json-schema.org/draft-04/schema#',
+          properties: { end: { type: 'integer' }, ticks_history: { type: 'string' } },
+          required: ['end', 'ticks_history'],
+          type: 'object',
+        },
+      },
+    });
+    expect(run.sockets).toEqual([]);
+    const result = await run.run;
+    expect(run.sockets).toEqual([]);
+    expect(result.end).toEqual({
+      detail: 'ticks_history',
+      reason: 'request_invalid',
+      status: 'failed',
+    });
+  });
+
   it('una condición abierta que la apertura no resuelve deja la entrada cerrada', async () => {
     // Condición de una ejecución anterior, que el registro no podrá resolver porque PostgreSQL
     // deja de responder: la entrada sigue en pausa después de la apertura.
@@ -1153,15 +1185,15 @@ describe('RawFirstIngestor.pauseForSourceLimit', () => {
   });
 });
 
-describe('perfil de medición de Deriv (ADR-0012 §8)', () => {
-  it('usa las reglas 2.0.0, las cuatro respuestas pedidas y el esquema de ticks, y nunca publica', () => {
+describe('perfil de medición de Deriv (ADR-0012 §8 y ADR-0015 §1)', () => {
+  it('usa las reglas 2.0.0, las cinco respuestas pedidas con history, el esquema de ticks y el conector 1.1.0, y nunca publica', () => {
     const schemas = syntheticSchemas();
     const profile = createDerivMeasurementProfile({ schemas, symbol: 'SYNTH_100' });
     const expected = {
       allowed_symbols: ['SYNTH_100'],
       gap_detection: 'after_reconnection',
-      non_tick_msg_types: ['active_symbols', 'forget_all', 'ping', 'time'],
-      profile_id: 'deriv_options-measurement-v1-SYNTH_100',
+      non_tick_msg_types: ['active_symbols', 'forget_all', 'history', 'ping', 'time'],
+      profile_id: 'deriv_options-measurement-v2-SYNTH_100',
       purpose: 'measurement',
       quality_rule_version: '2.0.0',
       source: 'deriv_options',
@@ -1171,7 +1203,7 @@ describe('perfil de medición de Deriv (ADR-0012 §8)', () => {
     expect(profile.purpose).toBe('measurement');
     expect(profile.rules.quality_rule_version).toBe('2.0.0');
     expect([...profile.nonTickMsgTypes]).toEqual(expected.non_tick_msg_types);
-    expect(profile.connector_version).toBe('deriv-options-ws-1.0.0');
+    expect(profile.connector_version).toBe('deriv-options-ws-1.1.0');
     expect(profile.source_schema_release).toBe('synthetic-deriv-1');
     const ticksSchema = syntheticSchemaArchive().entries['ticks_response.schema.json'];
     expect(profile.source_schema_bytes).toEqual(ticksSchema);
@@ -1179,6 +1211,40 @@ describe('perfil de medición de Deriv (ADR-0012 §8)', () => {
       sha256Hex(canonicalJson(JSON.parse(decoder.decode(ticksSchema)) as never)),
     );
     expect(() => publicationThresholds(profile)).toThrow(/medición/u);
+  });
+
+  it('un frame history durable es una respuesta declarada: ni tick ni frame inválido', async () => {
+    const run = await harness();
+    const socket = run.socket();
+    socket.open();
+    await settle();
+    const payload = derivMessages.history(7, [START_EPOCH - 2, START_EPOCH], ['100.25', '100.75']);
+    socket.text(payload);
+    await settle();
+    socket.emit({ code: 1000, kind: 'closed' });
+    await run.run;
+
+    const [historyFrame] = await run.frames();
+    expect(historyFrame?.payload_utf8).toBe(payload);
+    expect(run.nonTick).toEqual([
+      { msg_type: 'history', observation_id: historyFrame?.observation_id },
+    ]);
+    expect(run.invalid).toEqual([]);
+    expect(run.ticks).toEqual([]);
+  });
+});
+
+describe('petición ticks_history (ADR-0015 §4)', () => {
+  it('pide una página de 1000 ticks con start entero y end como texto, en JCS', () => {
+    const request = {
+      end: 1_700_000_060,
+      operation: 'ticks_history',
+      start: 1_700_000_000,
+      symbol: 'SYNTH_100',
+    } as const;
+    expect(encodeRequest(syntheticSchemas(), request, 7)).toBe(
+      '{"count":1000,"end":"1700000060","req_id":7,"start":1700000000,"style":"ticks","ticks_history":"SYNTH_100"}',
+    );
   });
 });
 

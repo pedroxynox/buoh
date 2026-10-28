@@ -13,14 +13,17 @@ import { RULE_SETS } from './profile.js';
  * reglas 2.0.0 no comprueban las respuestas declaradas en `non_tick_msg_types`: lo hace quien las
  * pidió, con estas funciones puras, después de que el frame sea durable.
  *
- * Motivos de `evidence.reason`. Los dos primeros valen para toda respuesta pedida; los demás, solo
- * para el catálogo (contratos de dominio, «SourceCatalogSnapshot»).
+ * Motivos de `evidence.reason`. `schema_validation_failed` y `source_error_response` valen para toda
+ * respuesta pedida; los `catalog_*`, solo para el catálogo (contratos de dominio,
+ * «SourceCatalogSnapshot»), y `history_inconsistent`, solo para la respuesta a `ticks_history`
+ * cuando su historia no es coherente (ADR-0015 §4: longitudes, orden o rango de `history.times`).
  */
 export type RequestedResponseInvalidReason =
   | 'catalog_duplicate_symbol'
   | 'catalog_empty'
   | 'catalog_entry_invalid'
   | 'catalog_exponent_not_supported'
+  | 'history_inconsistent'
   | 'schema_validation_failed'
   | 'source_error_response';
 
