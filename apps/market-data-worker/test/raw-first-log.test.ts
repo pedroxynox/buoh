@@ -1285,6 +1285,39 @@ describe('RawFirstIngestor.repairUnrecordedClose: cierre no registrado (ADR-0015
     expect(run.ingestor.state).toBe('accepting');
   });
 
+  it('con el log marcado como desactualizado (markLogStale), lo reabre antes de leer la conexión anterior: ve la que abrió otro escritor y repara su cierre', async () => {
+    let now = OPENED_AT;
+    const run = await harness({ now: () => now });
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+    await run.ingestor.receiveEvent(closedEvent(CONNECTION_A, id(2), '2026-01-01T00:00:02.000Z'));
+    // Otro escritor, con el bloqueo que esta instancia perdió, abre una conexión y cae sin cerrarla.
+    const openedB = openedEvent(CONNECTION_B, id(3), '2026-01-01T00:00:03.000Z', CONNECTION_A);
+    await (await run.openLog()).append(openedB);
+    // El log abierto no lo ve: para él, la conexión anterior es A, ya cerrada.
+    expect(
+      (await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).status,
+    ).toBe('nothing_to_repair');
+    run.ingestor.markLogStale();
+    now = DETECTION;
+
+    expect(await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] })).toEqual({
+      closed_at_utc: DETECTION,
+      connection_id: CONNECTION_B,
+      status: 'repaired',
+    });
+    expect((await storedEvents(run)).map((item) => item.event).slice(-2)).toEqual([
+      openedB,
+      expect.objectContaining({
+        connection_id: CONNECTION_B,
+        occurred_at_utc: DETECTION,
+        reason: 'close_not_recorded',
+      }),
+    ]);
+    // No hubo ningún fallo: ni incidencia ni pausa.
+    expect(run.operational.incidents).toEqual([]);
+    expect(run.ingestor.state).toBe('accepting');
+  });
+
   it('si el índice confirmó el cierre aunque informó error, el log reabierto lo adopta y no hay nada que reparar', async () => {
     let now = OPENED_AT;
     const run = await harness({ now: () => now });

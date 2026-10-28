@@ -1,0 +1,542 @@
+import { type SourceEvent } from '@buoh/contracts';
+import { deriveMarketData, type DerivedMarketData } from '@buoh/domain';
+
+import { RawFirstIngestor } from '../ingestion/raw-first-ingestor.js';
+import {
+  failureReason,
+  LogIntegrityError,
+  LogReadError,
+  type SourceEventLog,
+} from '../source-log/source-event-log.js';
+import {
+  prepareDerivAdapter,
+  startDerivAttempt,
+  type DerivAdapterInput,
+  type DerivAttempt,
+  type DerivPreparation,
+  type DerivSchemaSummary,
+} from './adapter.js';
+import {
+  type DerivConnection,
+  type DerivConnectionResult,
+  type DerivSessionEnd,
+} from './connection.js';
+
+/** El bloqueo de la fuente que tiene la sesión (ADR-0012 §9): `SourceLock` en PostgreSQL. */
+export interface SessionLock {
+  /** `false` desde que se perdió: las escrituras del log protegido por él fallan. */
+  readonly held: boolean;
+  /** Lo suelta. Nunca falla. */
+  release(): Promise<void>;
+}
+
+/** Toma el bloqueo de la fuente: `SourceLock.acquire` en PostgreSQL. */
+export interface SessionLockProvider {
+  /** `null` si lo tiene otro proceso; lanza si PostgreSQL no responde. */
+  acquire(): Promise<SessionLock | null>;
+}
+
+/**
+ * Los puertos del adaptador, salvo el log ya abierto, `reopenLog` y la duración de cada conexión: la
+ * sesión abre el log con su bloqueo. Más el bloqueo, la apertura del log y el azar de la espera.
+ */
+export interface DerivSessionInput extends Pick<
+  DerivAdapterInput,
+  | 'alert'
+  | 'catalog'
+  | 'connect'
+  | 'expected'
+  | 'fetch'
+  | 'nextId'
+  | 'now'
+  | 'registry'
+  | 'requestedResponses'
+  | 'scheduler'
+  | 'schemaUrl'
+  | 'serverTime'
+  | 'sink'
+  | 'symbol'
+> {
+  readonly lock: SessionLockProvider;
+  /**
+   * Abre el log con el almacén protegido por ese bloqueo (`lockedSourceLogStore` en PostgreSQL). Si
+   * un almacén no responde, lanza `LogReadError`; si el contenido no pasa sus comprobaciones,
+   * `LogIntegrityError` (`SourceEventLog.open`).
+   */
+  readonly openLog: (lock: SessionLock) => Promise<SourceEventLog>;
+  /** Azar de la espera entre intentos, en [0, 1). */
+  readonly random: () => number;
+  /**
+   * Duración prevista de toda la sesión, en milisegundos (ADR-0015 §4 y §9). Es de la sesión, nunca
+   * de una conexión: la sesión no la pasa a sus conexiones. Todavía no la aplica: sin ella o con
+   * ella, la sesión sigue hasta la parada o un fallo.
+   */
+  readonly durationMs?: number;
+}
+
+/** Una conexión de la sesión: su ID (`null` si no llegó a abrirse), su cierre y cómo terminó. */
+export interface DerivSessionConnection {
+  readonly closure: DerivConnectionResult['closure'];
+  readonly connection_id: string | null;
+  readonly end: DerivSessionEnd;
+}
+
+export interface DerivSessionResult {
+  /** Catálogo vigente de la última conexión, o `null`. */
+  readonly catalog: DerivConnectionResult['catalog'];
+  /** Las conexiones, en orden. */
+  readonly connections: readonly DerivSessionConnection[];
+  /**
+   * `completed` tras la parada; `failed` si no se puede seguir sin intervención, con un motivo
+   * estable (`reason`) y un dato saneado (`detail`).
+   */
+  readonly end:
+    | { readonly status: 'completed' }
+    | { readonly detail: string | null; readonly reason: string; readonly status: 'failed' };
+  /** Release y SHA-256 de los esquemas cargados, o `null` si la carga falló. */
+  readonly schemas: DerivSchemaSummary | null;
+  /** Desfase con el servidor medido en la última conexión, o `null`. */
+  readonly server_time_offset_ms: number | null;
+  /** `subscription.id` de la última conexión, o `null`. */
+  readonly subscription_id: string | null;
+  /**
+   * Las esperas antes de cada reintento, en milisegundos y en orden, también la que corta una
+   * parada.
+   */
+  readonly waits_ms: readonly number[];
+}
+
+export interface DerivSession {
+  /**
+   * Se resuelve cuando la sesión termina; se rechaza solo con un error de programación, después de
+   * soltar el bloqueo.
+   */
+  readonly done: Promise<DerivSessionResult>;
+  /** La parada por señal (ADR-0015 §3, «Parada»). No hace nada si ya se pidió. */
+  stop(): void;
+}
+
+type SessionEnd = DerivSessionResult['end'];
+
+const COMPLETED: SessionEnd = { status: 'completed' };
+
+/** Tope de d, en milisegundos (ADR-0015 §3, «Espera»). */
+const MAX_BACKOFF_MS = 60_000;
+/**
+ * Tiempo seguido de conexión con ticks durables, desde el primero hasta el fin, que devuelve el
+ * contador de intentos a 1 (ADR-0015 §3, «Espera»).
+ */
+const STEADY_CONNECTION_MS = 60_000;
+
+/**
+ * La espera del intento n, desde 1 (ADR-0015 §3, «Espera»): con d = mín(60 000, 1000 · 2^(n−1)) ms,
+ * d/2 + `random` · d/2, en milisegundos enteros. d/2 es entero, así que redondear hacia abajo la
+ * parte aleatoria deja la espera entre d/2 y d − 1.
+ */
+function backoffDelay(attempt: number, random: number): number {
+  if (!(random >= 0 && random < 1)) {
+    throw new TypeError(`random() tiene que dar un número en [0, 1), no ${String(random)}.`);
+  }
+  const half = Math.min(MAX_BACKOFF_MS, 1000 * 2 ** (attempt - 1)) / 2;
+  return half + Math.floor(random * half);
+}
+
+const failed = (reason: string, detail: string | null = null): SessionEnd => ({
+  detail,
+  reason,
+  status: 'failed',
+});
+
+/** El log no se puede derivar (ADR-0015 §2 y §5): hace falta un log nuevo. */
+const notDerivable = (error: unknown): SessionEnd =>
+  failed('log_not_derivable', failureReason(error));
+
+/**
+ * Un intento o una conexión que se rechazan: con `LogIntegrityError`, el log no pasa sus
+ * comprobaciones (`log_not_derivable`); cualquier otro error es de programación y se relanza.
+ */
+function integrityEnd(error: unknown): SessionEnd {
+  if (error instanceof LogIntegrityError) {
+    return notDerivable(error);
+  }
+  throw error;
+}
+
+const isNotDerivable = (end: SessionEnd): boolean =>
+  end.status === 'failed' && end.reason === 'log_not_derivable';
+
+/**
+ * Las comprobaciones del log antes de conectar que no necesitan el cursor (ADR-0015 §5): todos sus
+ * frames son de este conector, se deriva con el perfil de medición y sus ticks son del símbolo
+ * pedido. Devuelve el fin `failed`, o `null` si las pasa.
+ */
+function checkLog(
+  segments: readonly (readonly SourceEvent[])[],
+  preparation: DerivPreparation,
+): SessionEnd | null {
+  const { profile } = preparation;
+  const foreign = segments.some((segment) =>
+    segment.some(
+      (event) =>
+        event.kind === 'raw_source_frame' && event.connector_version !== profile.connector_version,
+    ),
+  );
+  if (foreign) {
+    return failed('connector_version_mismatch');
+  }
+  let derived: DerivedMarketData;
+  try {
+    derived = deriveMarketData(segments, profile);
+  } catch (error) {
+    return notDerivable(error);
+  }
+  // El perfil admite solo el símbolo pedido, así que todo tick derivado es de ese símbolo: un tick de
+  // otro símbolo queda como frame inválido con `symbol_not_allowed`.
+  const otherSymbol = derived.incidents.some(
+    (incident) =>
+      incident.incident_type === 'invalid_source_frame' &&
+      incident.evidence.reason === 'symbol_not_allowed',
+  );
+  return otherSymbol ? failed('symbol_mismatch') : null;
+}
+
+/** Una sesión en curso: su estado vive aquí, y `startDerivSession` expone `done` y `stop`. */
+class SessionRun {
+  readonly done: Promise<DerivSessionResult>;
+  readonly #input: DerivSessionInput;
+  readonly #connections: DerivSessionConnection[] = [];
+  readonly #waits: number[] = [];
+  #stopped = false;
+  #lock: SessionLock | null = null;
+  #ingestor: RawFirstIngestor | null = null;
+  #connection: DerivConnection | null = null;
+  #summary: DerivSchemaSummary | null = null;
+  #last: DerivConnectionResult | null = null;
+  /** Corta la espera en curso, entre intentos o para volver a tomar el bloqueo. */
+  #cancelWait: (() => void) | null = null;
+  /** Aborta el intento en curso antes de su conexión: la reparación o la espera para pasarla. */
+  #abort: AbortController | null = null;
+  /** n, el intento desde el último reinicio del contador: da la próxima espera. */
+  #attempt = 1;
+  /** Cuándo quedó durable el primer tick de la conexión en curso, en ms desde la época. */
+  #firstTickAt: number | null = null;
+
+  constructor(input: DerivSessionInput) {
+    this.#input = input;
+    this.done = this.#run();
+  }
+
+  /**
+   * La parada (ADR-0015 §3, «Parada»): con una conexión en curso, la para, y la sesión termina cuando
+   * esa conexión termina, sin reconectar; si espera, corta la espera, y si un intento todavía no
+   * conectó, lo aborta sin socket.
+   */
+  stop(): void {
+    if (this.#stopped) {
+      return;
+    }
+    this.#stopped = true;
+    this.#cancelWait?.();
+    this.#abort?.abort();
+    this.#connection?.stop();
+  }
+
+  async #run(): Promise<DerivSessionResult> {
+    let end: SessionEnd;
+    try {
+      end = await this.#session();
+    } catch (error) {
+      await this.#releaseLock();
+      throw error;
+    }
+    try {
+      // Con el log sano y el bloqueo vigente, cierra el segmento abierto (ADR-0015 §3, «Parada»).
+      // Un log que no pasa sus comprobaciones no se toca, y uno fallido no lo cierra `rotate`.
+      if (this.#ingestor !== null && this.#lock?.held === true && !isNotDerivable(end)) {
+        await this.#ingestor.rotate('requested');
+      }
+    } finally {
+      await this.#releaseLock();
+    }
+    const last = this.#last;
+    return {
+      catalog: last?.catalog ?? null,
+      connections: [...this.#connections],
+      end,
+      schemas: this.#summary,
+      server_time_offset_ms: last?.server_time_offset_ms ?? null,
+      subscription_id: last?.subscription_id ?? null,
+      waits_ms: [...this.#waits],
+    };
+  }
+
+  async #session(): Promise<SessionEnd> {
+    const input = this.#input;
+    const preparation = await prepareDerivAdapter({ ...input, related_refs: [] });
+    this.#summary = preparation.summary;
+    if (preparation.status === 'failed') {
+      return preparation.end;
+    }
+    const opened = await this.#openLog(preparation);
+    if ('end' in opened) {
+      return opened.end;
+    }
+    const { log } = opened;
+    const ingestor = new RawFirstIngestor({
+      log,
+      nextId: input.nextId,
+      now: input.now,
+      profile: preparation.profile,
+      registry: input.registry,
+      // Siempre con el bloqueo vigente: después de perderlo, la sesión toma otro antes de escribir.
+      reopenLog: () => input.openLog(this.#heldLock()),
+      sink: {
+        invalidFrame: (item) => {
+          input.sink.invalidFrame(item);
+        },
+        nonTickFrame: (item) => {
+          input.sink.nonTickFrame?.(item);
+        },
+        tick: (tick) => {
+          this.#firstTickAt ??= Date.parse(input.now());
+          input.sink.tick(tick);
+        },
+      },
+    });
+    this.#ingestor = ingestor;
+    for (;;) {
+      if (this.#stopped) {
+        return COMPLETED;
+      }
+      if (this.#lock?.held !== true) {
+        // Antes de reconectar, un bloqueo nuevo (ADR-0015 §3, «Bloqueo»).
+        const retaken = await this.#takeLock();
+        if (retaken !== null) {
+          return retaken;
+        }
+        // El log abierto escribe con el bloqueo anterior, y otro proceso pudo escribir mientras
+        // tanto: la reparación del intento lo reabre y relee la conexión anterior.
+        ingestor.markLogStale();
+        continue;
+      }
+      const end = await this.#connect(ingestor, preparation);
+      if (end !== null) {
+        return end;
+      }
+      if (!(await this.#backoff())) {
+        return COMPLETED;
+      }
+    }
+  }
+
+  /**
+   * Toma el bloqueo, abre el log con él, lo lee entero y lo comprueba antes de conectar (ADR-0015
+   * §5). Si un almacén no responde, espera y lo intenta otra vez, con un bloqueo nuevo si mientras
+   * tanto se perdió. Si el contenido no pasa sus comprobaciones, el fin es `log_not_derivable`.
+   */
+  async #openLog(
+    preparation: DerivPreparation,
+  ): Promise<{ readonly end: SessionEnd } | { readonly log: SourceEventLog }> {
+    for (;;) {
+      // También una parada durante la carga de los esquemas, que no se corta: termina al acabar.
+      if (this.#stopped) {
+        return { end: COMPLETED };
+      }
+      if (this.#lock?.held !== true) {
+        const taken = await this.#takeLock();
+        if (taken !== null) {
+          return { end: taken };
+        }
+        continue;
+      }
+      let log: SourceEventLog;
+      let segments: SourceEvent[][];
+      try {
+        log = await this.#input.openLog(this.#heldLock());
+        segments = await log.readDurableSegments();
+      } catch (error) {
+        if (error instanceof LogIntegrityError) {
+          return { end: notDerivable(error) };
+        }
+        if (!(error instanceof LogReadError)) {
+          throw error;
+        }
+        if (!(await this.#backoff())) {
+          return { end: COMPLETED };
+        }
+        continue;
+      }
+      const end = checkLog(segments, preparation);
+      return end === null ? { log } : { end };
+    }
+  }
+
+  /**
+   * Toma un bloqueo nuevo, después de soltar el anterior si lo había: devuelve `null` cuando lo
+   * tiene, o el fin `failed` con `source_lock_taken` si lo tiene otro proceso. Si PostgreSQL no
+   * responde, espera y lo intenta otra vez (ADR-0015 §3, «Bloqueo»). Tras la parada, el fin es
+   * `completed` y no toma otro. Quien la llama vuelve a mirar la parada antes de seguir: un bloqueo
+   * tomado mientras llegaba la parada lo suelta el cierre de la sesión.
+   */
+  async #takeLock(): Promise<SessionEnd | null> {
+    await this.#releaseLock();
+    for (;;) {
+      // Una parada mientras se soltaba el bloqueo anterior: no se toma otro.
+      if (this.#stopped) {
+        return COMPLETED;
+      }
+      let lock: SessionLock | null;
+      try {
+        lock = await this.#input.lock.acquire();
+      } catch {
+        if (!(await this.#backoff())) {
+          return COMPLETED;
+        }
+        continue;
+      }
+      if (lock === null) {
+        return failed('source_lock_taken');
+      }
+      this.#lock = lock;
+      return null;
+    }
+  }
+
+  /** El bloqueo vigente; la sesión solo abre el log después de tomarlo. */
+  #heldLock(): SessionLock {
+    if (this.#lock === null) {
+      throw new TypeError('La sesión abre el log sin bloqueo.');
+    }
+    return this.#lock;
+  }
+
+  /**
+   * Un intento y su conexión. Devuelve el fin de la sesión según cómo terminó la conexión
+   * (ADR-0015 §3), o `null` para esperar y reconectar: no conectó, o la conexión terminó
+   * `disconnected` o `paused`.
+   */
+  async #connect(
+    ingestor: RawFirstIngestor,
+    preparation: DerivPreparation,
+  ): Promise<SessionEnd | null> {
+    const input = this.#input;
+    this.#firstTickAt = null;
+    const abort = new AbortController();
+    this.#abort = abort;
+    let attempt: DerivAttempt;
+    try {
+      // Sin `durationMs`: el cierre previsto es de toda la sesión, nunca de cada conexión por su
+      // cuenta (ADR-0015 §4 y §9).
+      attempt = await startDerivAttempt({
+        ...(input.alert === undefined ? {} : { alert: input.alert }),
+        catalog: input.catalog,
+        connect: input.connect,
+        ingestor,
+        nextId: input.nextId,
+        now: input.now,
+        preparation,
+        requestedResponses: input.requestedResponses,
+        scheduler: input.scheduler,
+        serverTime: input.serverTime,
+        signal: abort.signal,
+      });
+    } catch (error) {
+      return integrityEnd(error);
+    } finally {
+      this.#abort = null;
+    }
+    if (attempt.status === 'not_connected') {
+      // Sin socket: el cierre reparado no quedó durable o un almacén no respondió, y se espera; o
+      // llegó la parada, y la espera no empieza.
+      return null;
+    }
+    const { connection } = attempt;
+    this.#connection = connection;
+    // Una parada que llegó mientras se creaba la conexión, antes de verla aquí.
+    if (this.#stopped) {
+      connection.stop();
+    }
+    let result: DerivConnectionResult;
+    try {
+      result = await attempt.result;
+    } catch (error) {
+      return integrityEnd(error);
+    } finally {
+      this.#connection = null;
+    }
+    this.#connections.push({
+      closure: result.closure,
+      connection_id: result.connection_id,
+      end: result.end,
+    });
+    this.#last = result;
+    const { end } = result;
+    if (end.status === 'completed') {
+      return COMPLETED;
+    }
+    if (end.status === 'failed') {
+      return failed(end.reason, end.detail);
+    }
+    // `disconnected` o `paused`: se espera y se reconecta. Después de la parada, la espera no empieza,
+    // aunque la conexión no terminara con el cierre pedido.
+    if (this.#wasSteady()) {
+      this.#attempt = 1;
+    }
+    return null;
+  }
+
+  /**
+   * La conexión que acaba de terminar tuvo ticks durables durante 60 000 ms seguidos, desde el
+   * primero hasta su fin: el contador de intentos vuelve a 1 (ADR-0015 §3, «Espera»).
+   */
+  #wasSteady(): boolean {
+    const first = this.#firstTickAt;
+    return first !== null && Date.parse(this.#input.now()) - first >= STEADY_CONNECTION_MS;
+  }
+
+  /**
+   * Espera antes del intento siguiente (ADR-0015 §3, «Espera») y la anota en el resultado. Devuelve
+   * `false` si llegó la parada, antes o durante la espera, que entonces se corta.
+   */
+  async #backoff(): Promise<boolean> {
+    if (this.#stopped) {
+      return false;
+    }
+    const delay = backoffDelay(this.#attempt, this.#input.random());
+    this.#attempt += 1;
+    this.#waits.push(delay);
+    await new Promise<void>((resolve) => {
+      const cancel = this.#input.scheduler.schedule(delay, resolve);
+      this.#cancelWait = () => {
+        cancel();
+        resolve();
+      };
+    });
+    this.#cancelWait = null;
+    return !this.#stopped;
+  }
+
+  async #releaseLock(): Promise<void> {
+    const lock = this.#lock;
+    this.#lock = null;
+    await lock?.release();
+  }
+}
+
+/**
+ * La sesión de ingesta de Deriv (ADR-0015 §3 y §5). Prepara los esquemas una vez, toma el bloqueo de
+ * la fuente, abre el log con él y lo comprueba, y sigue una conexión por intento con un solo
+ * `RawFirstIngestor`: tras una conexión que se pierde o se pausa, o un intento que no conecta, espera
+ * y lo intenta otra vez, con un bloqueo nuevo si perdió el suyo. Termina con la parada (`completed`)
+ * o cuando no puede seguir sin intervención (`failed`). Al terminar cierra el segmento abierto, si el
+ * log está sano y el bloqueo sigue tomado, y suelta el bloqueo.
+ */
+export function startDerivSession(input: DerivSessionInput): DerivSession {
+  const run = new SessionRun(input);
+  return {
+    done: run.done,
+    stop: () => {
+      run.stop();
+    },
+  };
+}

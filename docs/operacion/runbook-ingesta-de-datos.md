@@ -54,6 +54,16 @@ Desde el PR 3 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-s
 
 Desde F1.4b, antes de abrir el log de una fuente en PostgreSQL se toma su bloqueo (ver «Una sola instancia por fuente»).
 
+Desde el PR 4 de ADR-0015 §13, el paso 3 de la sesión de ingesta (ver «Adaptador público de Deriv», «Sesión de ingesta») sale de la derivación del log, nunca de la memoria del proceso (ADR-0015 §5): después de tomar el bloqueo, abre el log, lo lee entero y lo deriva con el perfil de medición. Antes de conectar comprueba tres cosas, y si una falla no conecta y termina `failed`; en los tres casos hace falta un log nuevo:
+
+| Motivo | Qué indica |
+|---|---|
+| `connector_version_mismatch` | el log tiene frames de otro conector, por ejemplo de `deriv-options-ws-1.0.0` |
+| `log_not_derivable` | las reglas no pueden derivarlo, por ejemplo porque cierra dos veces la misma conexión (`detail`: el nombre del error, como `TypeError`), o su contenido no pasa sus comprobaciones al abrirlo o al leerlo (`detail`: `LogIntegrityError`) |
+| `symbol_mismatch` | sus ticks son de otro símbolo: con el perfil del símbolo pedido, cada uno queda como frame inválido con motivo `symbol_not_allowed` |
+
+El último cursor y su comprobación contra el índice llegan con el PR 5. Si un almacén no responde al abrir o leer el log, la sesión espera, como entre intentos, y lo vuelve a intentar.
+
 ### Una sola instancia por fuente
 
 Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §9), todo proceso que escribe el log de una fuente en PostgreSQL toma antes un bloqueo de sesión (`pg_try_advisory_lock`, `SourceLock`). Su clave son los 8 primeros bytes del SHA-256 de `buoh:source-log:<fuente>`, como entero de 64 bits con signo. La clave vale para toda la base de datos: también bloquea la misma fuente en otro `BUOH_POSTGRES_SCHEMA` de la misma base. Lo toma en un cliente propio, fuera del pool, porque el pool cierra los clientes inactivos y el bloqueo se iría con ellos, y lo mantiene mientras escribe. Hoy lo hace `fixture:publish`; `data:smoke` no lo necesita, porque guarda todo en memoria.
@@ -69,6 +79,7 @@ Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de
 
 - **Si la sesión del bloqueo se pierde**, las escrituras siguientes del log fallan con el código `source_lock_lost`. El evento no es durable, queda `persistence_unavailable` con ese motivo y la entrada se pausa. Un `ConnectionOpened` no la reabre mientras falte el bloqueo. `SourceLock` lo nota en unos 10 s: cada 5 s consulta su sesión, y la da por perdida si se cierra, falla o no responde en 5 s. La conexión también usa el keepalive de TCP desde los 10 s de inactividad. Para volver a escribir hace falta un bloqueo nuevo (`SourceLock.acquire`), que devuelve `null` si ya lo tomó otro proceso. `fixture:publish` no lo intenta: termina con error.
 - En esos segundos otro proceso podría tomar el bloqueo, y los dos escribirían a la vez. Los triggers de `0002` siguen exigiendo posiciones contiguas, así que el log no queda incoherente: cada posición se acepta para un solo escritor, y el otro falla y pausa su entrada.
+- **La sesión de ingesta** (desde el PR 4 de ADR-0015 §13, ADR-0015 §3, «Bloqueo») toma el bloqueo antes de abrir el log y escribe siempre con el vigente. Si al arrancar lo tiene otro proceso, termina `failed` con `source_lock_taken`, sin abrir el log. Si PostgreSQL no responde al tomarlo, espera, como entre intentos, y lo vuelve a intentar. Si lo pierde, una escritura falla con `source_lock_lost` y la conexión termina en `paused`; antes de reconectar, suelta el bloqueo perdido y toma uno nuevo: si lo tiene otro proceso, termina `failed` con `source_lock_taken`, y si PostgreSQL no responde, espera y lo vuelve a intentar. Con el bloqueo nuevo, la reparación del intento siguiente reabre el log desde los almacenes y relee la conexión anterior antes de escribir, aunque el bloqueo se perdiera sin conexión: en los segundos que tardó en notarse, otro proceso pudo escribir, y si dejó una conexión sin cierre, la sesión lo repara y la supera. Todavía no hay un comando que la ejecute sobre PostgreSQL: `ingest` llega con el PR 5.
 
 ### Desconexión de WebSocket
 
@@ -81,6 +92,8 @@ Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de
 7. Al reconectar, persistir `ConnectionOpened.supersedes_connection_id` y resolver la condición de conexión.
 8. Si no se demuestra continuidad por símbolo, crear `event_gap_unresolved`, abrir su condición y quedar `degraded`.
 9. Volver a `healthy` solo si no queda condición bloqueante y continuidad, hashes y almacenamiento se verifican.
+
+Desde el PR 4 de ADR-0015 §13, la sesión de ingesta reconecta (paso 4; ver «Adaptador público de Deriv», «Sesión de ingesta»). Tras una conexión que termina `disconnected` o `paused`, o un intento que no llegó a conectar, espera d/2 + `random` · d/2 ms, con d = mín(60 000, 1000 · 2^(n−1)) en el intento n desde 1: de 500 a 999 ms al principio y de 30 000 a 59 999 ms con el tope, desde el séptimo intento. El contador vuelve a 1 solo si la conexión que acaba de terminar tuvo ticks durables durante 60 000 ms seguidos, desde el primero hasta su fin, para que una conexión que muere enseguida no reintente cada segundo (ADR-0015 §3, «Espera»). Antes del socket siguiente repara el cierre que no quedó durable, y el `ConnectionOpened` supera la última conexión durable del log (paso 7). Una conexión que termina `failed` no se reintenta. La sesión todavía no pide la historia de los pasos 5 y 6.
 
 ### Frame inválido
 
@@ -146,14 +159,14 @@ Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de
 
    Después, con cierre reparado o sin él, el adaptador abre el socket solo cuando el reloj pasa la hora del cierre de la conexión anterior. Si no la pasa, espera con su temporizador hasta el milisegundo siguiente y vuelve a mirar el reloj: 1 ms tras un cierre reparado, o más si el reloj va por detrás de un cierre anterior; si el reloj retrocede durante la espera, espera otra vez. Así el `ConnectionOpened`, que toma su hora al abrir el socket, queda siempre después del cierre que supera. Con la misma hora, las reglas podrían ordenar la resolución de `connection_lost` antes de su apertura, y el log no se podría derivar. Límite: un reloj que retrocede durante el handshake, entre crear el socket y abrirlo, no está cubierto.
 
-   Desde el PR 4 de ADR-0015 §13, la espera va en tramos de 60 000 ms como mucho, y después de cada uno vuelve a mirar el reloj: un ajuste del reloj hacia delante se nota en un minuto, y una espera enorme nunca llega entera al temporizador. Si falta más de 60 000 ms, el reloj va por detrás del log: queda una vez la alerta JSON `clock_behind_log` en stderr, con la hora del cierre (`previous_close_utc`) y la del reloj (`now_utc`), y la espera sigue, sin socket. Qué hacer: comprobar la sincronización del reloj del host; si el log se escribió con un reloj adelantado, la espera dura lo que falte para pasar ese cierre. Una parada durante la reparación o la espera la corta: la espera se cancela y el socket no se abre. Un cierre reparado ya escrito se queda, porque registra una pérdida real.
+   Desde el PR 4 de ADR-0015 §13, la espera va en tramos de 60 000 ms como mucho, y después de cada uno vuelve a mirar el reloj: un ajuste del reloj hacia delante se nota en un minuto, y una espera enorme nunca llega entera al temporizador. Si falta más de 60 000 ms, el reloj va por detrás del log: queda una vez la alerta JSON `clock_behind_log` en stderr, con la hora del cierre (`previous_close_utc`) y la del reloj (`now_utc`), y la espera sigue, sin socket. Qué hacer: comprobar la sincronización del reloj del host; si el log se escribió con un reloj adelantado, la espera dura lo que falte para pasar ese cierre. Una parada durante la reparación o la espera la corta: la espera se cancela y el socket no se abre (ver «Sesión de ingesta», más abajo). Un cierre reparado ya escrito se queda, porque registra una pérdida real.
 3. Abre el WebSocket con `ws` 8.22.0: sin compresión, mensajes de hasta 1 048 576 bytes, sin seguir redirecciones y con 10 000 ms para abrir. Al abrir persiste `ConnectionOpened`, que supera la conexión anterior con su `supersedes_connection_id` (`null` solo si el log no tiene conexiones). Si después sigue abierta una condición del registro operativo, cierra sin suscribirse.
 4. Pide `active_symbols` (`brief`). Un snapshot válido se guarda como versión nueva solo si cambia su contenido. Un catálogo inválido deja su incidencia y no crea versión, y sigue vigente la última versión válida.
 5. Se suscribe a `ticks` solo si el símbolo está en ese snapshot. El primer tick confirma la suscripción, y el adaptador guarda su `subscription.id`.
 6. Envía un `ping` cada 45 000 ms. Cada petición lleva un `req_id` creciente por conexión, desde 1, y espera su respuesta 15 000 ms.
 7. Al cumplirse la duración pedida, pide `forget_all` y cierra con `requested`. Si en ese momento hay una recuperación de historia en curso, pide `forget_all` cuando termina (ver «Recuperación de historia»). Desde el PR 4 de ADR-0015 §13, la duración es opcional en la conexión: sin ella, nunca pide el cierre previsto por su cuenta, y termina cuando se pierde o cuando quien la sigue la cierra (ver «Cierres a pedido»).
 
-Desde el PR 4 de ADR-0015 §13, estos pasos se reparten en dos, que reutiliza la sesión (§3): la preparación (`prepareDerivAdapter`, `apps/market-data-worker/src/deriv/adapter.ts`), una sola vez, es el paso 1 y arma además el perfil de medición; el intento (`startDerivAttempt`), uno por conexión y con el `RawFirstIngestor` de la sesión, es el paso 2 y el arranque de la conexión. El intento devuelve la conexión que corre, para pedirle la historia o cerrarla (ver «Cierres a pedido»), y la promesa de su resultado; si el cierre reparado no queda durable o un almacén no responde al reabrir o leer el log, devuelve el fin en pausa sin conectar, y si el log no pasa sus comprobaciones, se rechaza con `LogIntegrityError`. `runDerivAdapter`, el que usa el smoke, es una preparación, un `RawFirstIngestor` nuevo y un intento, y termina con el resultado de su conexión.
+Desde el PR 4 de ADR-0015 §13, estos pasos se reparten en dos, que reutiliza la sesión (§3; ver «Sesión de ingesta», más abajo): la preparación (`prepareDerivAdapter`, `apps/market-data-worker/src/deriv/adapter.ts`), una sola vez, es el paso 1 y arma además el perfil de medición; el intento (`startDerivAttempt`), uno por conexión y con el `RawFirstIngestor` de la sesión, es el paso 2 y el arranque de la conexión. El intento devuelve la conexión que corre, para pedirle la historia o cerrarla (ver «Cierres a pedido»), y la promesa de su resultado; si el cierre reparado no queda durable o un almacén no responde al reabrir o leer el log, devuelve el fin en pausa sin conectar, y si el log no pasa sus comprobaciones, se rechaza con `LogIntegrityError`. `runDerivAdapter`, el que usa el smoke, es una preparación, un `RawFirstIngestor` nuevo y un intento, y termina con el resultado de su conexión.
 
 Cada mensaje de texto recibe su `observation_id` y su `received_at_utc` al llegar, y pasa por la cola en memoria hacia el `RawFirstIngestor`. Una respuesta se interpreta solo después de que su frame quede durable, y se empareja por `req_id` y por el `msg_type` que espera su petición. Una respuesta que no empareja se conserva raw y no cambia nada; su petición vence a los 15 000 ms.
 
@@ -179,7 +192,7 @@ Cada mensaje de texto recibe su `observation_id` y su `received_at_utc` al llega
 - Después de `finish()` o de `stop()`, la conexión ya no empieza ninguna recuperación de historia: `recoverHistory` se resuelve como `abandoned` sin pedir páginas, aunque `forget_all` todavía no haya respondido.
 - `interrupt(motivo)`, un corte del propio transporte, como una pérdida de la conexión: cierra con `transport_error` y ese motivo, corta el socket y termina con `disconnected`. Los frames que ya llegaron se persisten antes del cierre. El motivo es un código estable, como `smoke_interrupt`, el del smoke de reconexión (ADR-0015 §9).
 
-**Cierres.** Ninguno reconecta todavía (F1.5). El adaptador termina con un resultado: `completed`, `disconnected`, `paused` o `failed`, con un motivo (`reason`) y un dato saneado (`detail`): el código de error o de cierre, la etapa, la operación vencida o el motivo de la incidencia. El motivo del resultado puede no ser el del `ConnectionClosed`:
+**Cierres.** Una conexión no reconecta: termina con un resultado, `completed`, `disconnected`, `paused` o `failed`, con un motivo (`reason`) y un dato saneado (`detail`): el código de error o de cierre, la etapa, la operación vencida o el motivo de la incidencia. Desde el PR 4 de ADR-0015 §13, la sesión de ingesta decide con ese resultado si reconecta (ver «Sesión de ingesta», más abajo); `runDerivAdapter`, el que usa el smoke, no reconecta. El motivo del resultado puede no ser el del `ConnectionClosed`:
 
 | Causa | `closure_type` | Motivo del `ConnectionClosed` | Resultado y su motivo |
 |---|---|---|---|
@@ -202,6 +215,24 @@ Cada mensaje de texto recibe su `observation_id` y su `received_at_utc` al llega
 | una respuesta a `ping` con error o que no cumple su esquema | `timeout` | `ping_invalid` | `disconnected`: `ping_invalid` |
 
 Los cierres `requested` no pierden datos: o no hubo suscripción, o se pidió `forget_all`. Los demás, incluido el reparado, abren `connection_lost` en las reglas y dejan pendiente la continuidad del símbolo suscrito. El `ConnectionOpened` siguiente supera esa conexión, así que las reglas resuelven su `connection_lost` (`connection_reestablished`), pero la continuidad sigue pendiente: con el perfil de medición, solo la decide un `HistoryRecoveryResult` (ADR-0015 §2). Si el `ConnectionClosed` no queda durable, el log falló: un resultado `completed` o `disconnected` pasa a `paused` con `persistence_unavailable`, y la ejecución siguiente repara ese cierre (paso 2).
+
+**Sesión de ingesta.** Desde el PR 4 de ADR-0015 §13 (§3), `startDerivSession` (`apps/market-data-worker/src/deriv/session.ts`) sigue la fuente con una conexión por intento, hasta la parada o un fallo. Todavía no la ejecuta ningún comando: el smoke sigue con `runDerivAdapter`, y `ingest` llega con el PR 5.
+
+- **Arranque**, en este orden: la preparación (paso 1), una sola vez; el bloqueo de la fuente (ver «Una sola instancia por fuente»); el log, abierto con el almacén protegido por ese bloqueo, leído entero y comprobado (ver «Inicio»); y un solo `RawFirstIngestor` para toda la sesión, que reabre el log siempre con el bloqueo vigente. Si la preparación falla, termina `failed` con su motivo, sin tomar el bloqueo.
+- **Intentos.** Cada uno es el paso 2 y la conexión que lo sigue. Antes de cada uno, si el bloqueo se perdió, toma uno nuevo y el intento reabre el log con él. Según cómo termina:
+
+  | Fin | Qué hace la sesión |
+  |---|---|
+  | la conexión termina `completed`, por la parada | termina `completed` |
+  | la conexión termina `failed` | termina `failed`, con el motivo y el dato de la conexión. No reintenta con contenido no confiable (ADR-0004 §12) |
+  | la conexión termina `disconnected` o `paused`, o el intento no conecta porque el cierre reparado no quedó durable o un almacén no respondió | espera y lo intenta otra vez (ver «Desconexión de WebSocket») |
+  | el log no pasa sus comprobaciones al reparar el cierre o durante la conexión (`LogIntegrityError`) | termina `failed` con `log_not_derivable` (`detail`: `LogIntegrityError`) |
+  | cualquier otro error | es de programación: suelta el bloqueo y se rechaza con ese error |
+
+- **Parada** (`stop`, ADR-0015 §3, «Parada»): con una conexión en curso, la para (ver «Cierres a pedido»), y la sesión termina cuando esa conexión termina, sin reconectar, aunque termine `disconnected` porque `forget_all` no respondió. Si espera, entre intentos, para volver a tomar el bloqueo o para pasar el cierre anterior, corta la espera y no abre ningún socket. Una parada durante la carga de los esquemas termina cuando la carga acaba, sin tomar el bloqueo. Después de la parada la sesión termina `completed`, salvo que la conexión terminara `failed`.
+- **Al terminar**, si el log está sano y el bloqueo sigue tomado, cierra el segmento abierto con motivo `requested`, también tras un fin `failed`; con `log_not_derivable` no escribe nada en el log. Siempre suelta el bloqueo.
+- **Resultado:** el fin (`completed`, o `failed` con `reason` y `detail`); por cada conexión, su ID (`null` si no llegó a abrirse), su cierre y su fin; las esperas en milisegundos y en orden (`waits_ms`); el resumen de los esquemas; y el catálogo, el `subscription.id` y el desfase con el servidor de la última conexión.
+- Acepta una duración prevista de toda la sesión (`durationMs`), pero todavía no la aplica, y nunca la pasa a sus conexiones: el cierre previsto es de la sesión (ADR-0015 §4 y §9). Todavía no pide la historia de los huecos.
 
 ### Smoke público de Deriv (`data:smoke`)
 
@@ -269,6 +300,8 @@ En F1.3 el fallo se informa como `PublicationError` con el paso (`precondition`,
 3. Cerrar segmento y conexión.
 4. Reiniciar; validar versiones y dependencias.
 5. Ejecutar recuperación de inicio y confirmar continuidad antes de `healthy`.
+
+Desde el PR 4 de ADR-0015 §13, la parada de la sesión de ingesta (ADR-0015 §3, «Parada»; `SIGINT` o `SIGTERM` cuando llegue `ingest`) cierra la conexión con `requested`: si estaba suscrita, antes pide `forget_all`. Después cierra el segmento abierto con motivo `requested` y suelta el bloqueo, y la sesión termina `completed`. Un cierre pedido no deja hueco pendiente (paso 5): el intervalo parado queda visible en el log como un cierre pedido seguido de la apertura siguiente, y no se recupera. Un hueco que ya estaba pendiente sigue pendiente, porque un cierre pedido no lo cambia (ADR-0015 §10). Rellenar la historia de una parada programada queda para el plan de alojamiento.
 
 ## Entorno local y replay (F1.3)
 

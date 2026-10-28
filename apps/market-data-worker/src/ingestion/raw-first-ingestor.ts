@@ -405,6 +405,17 @@ export class RawFirstIngestor {
     };
   }
 
+  /**
+   * El log abierto ya no vale: la reparación del cierre o el evento de conexión siguientes lo vuelven
+   * a abrir desde los almacenes con `reopenLog`, como tras un fallo de persistencia, pero sin
+   * registrar nada. Lo usa la sesión después de tomar un bloqueo nuevo (ADR-0015 §3, «Conexión
+   * anterior»): el log abierto escribe con el bloqueo anterior, y en los segundos que tardó en
+   * notarse la pérdida otro proceso pudo escribir. Hasta reabrirlo, `rotate` no cierra el segmento.
+   */
+  markLogStale(): void {
+    this.#logFailed = true;
+  }
+
   /** Cierre explícito del segmento abierto (harness, drenaje o apagado). */
   async rotate(
     reason: SegmentCloseReason = 'requested',

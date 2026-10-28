@@ -73,7 +73,7 @@ export function syntheticSchemas(): DerivSchemaSet {
 }
 
 /** Socket falso cuyo servidor responde enseguida cada `ping` del keepalive. */
-class PongingSocket extends FakeDerivSocket {
+export class PongingSocket extends FakeDerivSocket {
   override send(text: string): void {
     super.send(text);
     const body = JSON.parse(text) as { readonly ping?: unknown; readonly req_id?: unknown };
