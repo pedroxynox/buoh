@@ -213,7 +213,8 @@ const failed = (reason: string, detail: string | null = null): DerivSessionEnd =
 /**
  * Una conexión al canal público de Deriv (ADR-0012 §3 a §7): abre el WebSocket, persiste
  * `ConnectionOpened`, pide el catálogo, se suscribe al símbolo si está en el último snapshot válido,
- * mantiene el keepalive y, al cumplirse la duración, pide `forget_all` y cierra.
+ * mantiene el keepalive y, al cumplirse la duración, pide `forget_all` y cierra; si entonces hay una
+ * recuperación de historia en curso, primero espera a que termine.
  *
  * Todo lo que toca el ingestor pasa por una cola con un solo consumidor: frames, apertura, pausa por
  * límite, resultado de la recuperación de historia y cierre. Las respuestas se interpretan solo
@@ -248,6 +249,8 @@ export class DerivConnection {
   #subscriptionId: string | null = null;
   #serverTimeOffsetMs: number | null = null;
   #recovery: HistoryRecovery | null = null;
+  /** La duración se cumplió durante una recuperación: `forget_all` espera a que termine. */
+  #forgetAfterRecovery = false;
 
   constructor(input: DerivConnectionInput) {
     this.#input = input;
@@ -292,17 +295,21 @@ export class DerivConnection {
   }
 
   /**
-   * Recupera la historia de un hueco por esta conexión, con un intento (ADR-0015 §4). Pide páginas
-   * `ticks_history` desde el final del hueco hacia atrás, cada una con su `req_id` y 15 000 ms de
-   * espera; vencer no cierra la conexión y el flujo de ticks sigue. Cada respuesta se interpreta
-   * cuando su frame es durable, y la que no es válida deja su incidencia de respuesta pedida. El
-   * `HistoryRecoveryResult` pasa por la cola, detrás del primer tick posterior al cierre. Si no queda
-   * durable, la conexión se cierra como con un frame no durable.
+   * Recupera la historia de un hueco por esta conexión, con hasta tres intentos (ADR-0015 §4). Cada
+   * intento pide páginas `ticks_history` desde el final del hueco hacia atrás, cada una con su
+   * `req_id` y 15 000 ms de espera; vencer no cierra la conexión y el flujo de ticks sigue. Cada
+   * respuesta se interpreta cuando su frame es durable, y la que no es válida deja su incidencia de
+   * respuesta pedida. Un intento que termina con `history_error_response`, `history_timeout` o
+   * `history_boundary_missing` se repite 30 000 ms después, desde la primera página. El
+   * `HistoryRecoveryResult` del último intento pasa por la cola, detrás del primer tick posterior al
+   * cierre. Si no queda durable, la conexión se cierra como con un frame no durable. Si la duración
+   * se cumple mientras tanto, `forget_all` espera a que la recuperación termine.
    *
-   * Si la conexión no está suscrita, o se cierra antes de encolar el resultado, se resuelve como
-   * `abandoned` y no persiste nada. Un hueco con horas que no están en UTC con milisegundos o que no
-   * dan segundos enteros, otro símbolo o una segunda llamada con una recuperación en curso son
-   * errores de programación (`TypeError`).
+   * Si la conexión no está suscrita, o se cierra antes de encolar el resultado, también durante la
+   * espera entre intentos, se resuelve como `abandoned` y no persiste nada; si falla por un error
+   * inesperado, igual, aunque el resultado ya esté en la cola. Un hueco con horas que no están en UTC
+   * con milisegundos o que no dan segundos enteros, otro símbolo o una segunda llamada con una
+   * recuperación en curso son errores de programación (`TypeError`).
    */
   recoverHistory(request: HistoryRecoveryRequest): Promise<HistoryRecoveryOutcome> {
     const range = historyRange(request);
@@ -321,6 +328,7 @@ export class DerivConnection {
         queueResult: (decision) => {
           this.#queueRecoveryResult(recovery, connectionId, decision);
         },
+        scheduler: this.#input.scheduler,
         sendPage: (page) =>
           this.#send({
             end: page.end,
@@ -361,11 +369,23 @@ export class DerivConnection {
 
   /**
    * Termina la recuperación en curso con `abandoned`, si su resultado no está en la cola o si
-   * `force`: la cola falló y ya no lo procesará.
+   * `force`: la conexión falló, y el resultado ya no se persiste aunque esté en la cola.
    */
   #abandonRecovery(force = false): void {
     if (this.#recovery?.abandon(force) === true) {
       this.#recovery = null;
+      this.#afterRecovery();
+    }
+  }
+
+  /**
+   * La recuperación terminó: su resultado pasó por la cola, o se abandonó. Si el cierre previsto la
+   * esperaba, ahora pide `forget_all`; con el cierre ya decidido, `#send` no envía nada.
+   */
+  #afterRecovery(): void {
+    if (this.#forgetAfterRecovery) {
+      this.#forgetAfterRecovery = false;
+      this.#send({ operation: 'forget_all' });
     }
   }
 
@@ -588,16 +608,19 @@ export class DerivConnection {
     });
   }
 
-  /** Error inesperado: corta el socket, abandona la recuperación y rechaza la conexión. */
+  /**
+   * Error inesperado: corta el socket, abandona la recuperación aunque su resultado ya esté en la
+   * cola y rechaza la conexión. El cierre se decide primero, para que ya no se envíe nada.
+   */
   #fail(error: unknown): void {
-    this.#cancelTimers();
-    this.#abandonRecovery(true);
     this.#closing ??= {
       closure_type: 'transport_error',
       drop_waiting: true,
       end: failed('unexpected'),
       reason: 'unexpected',
     };
+    this.#cancelTimers();
+    this.#abandonRecovery(true);
     if (!this.#socketClosed) {
       this.#socket?.terminate();
     }
@@ -620,14 +643,21 @@ export class DerivConnection {
         await ingestor.pauseForSourceLimit(work);
         return;
       case 'recovery': {
+        const { recovery } = work;
+        // Abandonada mientras esperaba en la cola, porque la conexión falló: su resultado nunca
+        // llega al ingestor (ADR-0015 §4).
+        if (recovery.abandoned) {
+          return;
+        }
         const outcome = await ingestor.receiveEvent(work.event);
         if (outcome.status !== 'durable') {
           this.#closeAfterIngest(outcome);
         }
-        if (this.#recovery === work.recovery) {
+        if (this.#recovery === recovery) {
           this.#recovery = null;
         }
-        work.recovery.finish(outcome.status === 'durable', work.event);
+        recovery.finish(outcome.status === 'durable', work.event);
+        this.#afterRecovery();
         return;
       }
       case 'closed': {
@@ -977,7 +1007,12 @@ export class DerivConnection {
     this.#subscriptionId = stringMember(root.entries.get('subscription'), 'id');
     this.#cancelDuration = this.#input.scheduler.schedule(this.#input.durationMs, () => {
       this.#cancelDuration = null;
-      this.#send({ operation: 'forget_all' });
+      if (this.#recovery === null) {
+        this.#send({ operation: 'forget_all' });
+      } else {
+        // El cierre previsto espera a la recuperación en curso, con sus reintentos (ADR-0015 §4).
+        this.#forgetAfterRecovery = true;
+      }
     });
     if (this.#input.serverTime) {
       this.#send({ operation: 'time' });

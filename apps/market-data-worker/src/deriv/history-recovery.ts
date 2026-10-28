@@ -8,6 +8,7 @@ import {
   type RequestedResponseInvalidReason,
 } from '@buoh/domain';
 
+import { type Scheduler } from './ports.js';
 import { EXPECTED_MSG_TYPE } from './requests.js';
 
 // Recuperación de historia (ADR-0015 §4). Las partes puras: el rango que se pide, la lectura de cada
@@ -32,10 +33,10 @@ export interface HistoryRecoveryRequest {
 }
 
 /**
- * Cómo terminó `recoverHistory`: `abandoned` si la conexión no estaba suscrita o se cerró antes de
- * encolar el resultado, que entonces no se persiste; si no, `finished` con el resultado, si quedó
- * durable, los intentos y las páginas pedidas en el intento del resultado. Un resultado que no quedó
- * durable cierra la conexión.
+ * Cómo terminó `recoverHistory`: `abandoned` si la conexión no estaba suscrita, se cerró antes de
+ * encolar el resultado o falló, y entonces el resultado no se persiste; si no, `finished` con el
+ * resultado del último intento, si quedó durable, los intentos hechos (de 1 a 3) y las páginas
+ * pedidas en el último intento. Un resultado que no quedó durable cierra la conexión.
  */
 export type HistoryRecoveryOutcome =
   | { readonly status: 'abandoned' }
@@ -278,29 +279,51 @@ export function decideHistoryRecovery(input: {
   return { recovered_event_count: recovered, status: 'complete' };
 }
 
+/** Intentos como máximo: el primero y dos reintentos (ADR-0015 §4, «Reintentos»). */
+export const HISTORY_ATTEMPT_LIMIT = 3;
+/** Espera entre el final de un intento y el siguiente. */
+export const HISTORY_RETRY_DELAY_MS = 30_000;
+
+/**
+ * Motivos que se reintentan: un error, una página sin respuesta o un extremo que falta pueden cambiar
+ * en otro intento. Una página inválida, el tope de páginas o un extremo con otra cotización, no.
+ */
+const RETRIED_REASONS: ReadonlySet<HistoryRecoveryReason> = new Set([
+  'history_boundary_missing',
+  'history_error_response',
+  'history_timeout',
+]);
+
 /** Lo que una recuperación necesita de su conexión. */
 export interface HistoryRecoveryHooks {
   /** Pide la página `page` por la conexión: devuelve su `req_id`, o `null` si no la envió. */
   readonly sendPage: (page: HistoryRange) => number | null;
-  /** Encola la decisión del intento, para persistir su resultado detrás de lo que ya espera. */
+  /** Encola la decisión del último intento, para persistir su resultado detrás de lo que espera. */
   readonly queueResult: (decision: HistoryRecoveryDecision) => void;
+  /** Temporizador de la espera entre intentos. */
+  readonly scheduler: Scheduler;
 }
 
 /**
- * Una recuperación de historia en curso en una conexión: pide las páginas de su intento con
- * `sendPage`, recibe sus respuestas o vencimientos con `onPage` y, al terminar el intento, encola su
- * decisión con `queueResult`. Termina con `finish`, cuando el resultado pasó por la cola, o con
- * `abandon`.
+ * Una recuperación de historia en curso en una conexión. Cada intento pide sus páginas con
+ * `sendPage`, desde la primera, y recibe sus respuestas o vencimientos con `onPage`. Si termina con
+ * un motivo que se reintenta y quedan intentos, el siguiente empieza 30 000 ms después; si no, encola
+ * su decisión con `queueResult`: solo se persiste la del último intento. Termina con `finish`,
+ * cuando el resultado pasó por la cola, o con `abandon`, que también cancela la espera.
  */
 export class HistoryRecovery {
   readonly request: HistoryRecoveryRequest;
   readonly range: HistoryRange;
   readonly #hooks: HistoryRecoveryHooks;
   readonly #done = Promise.withResolvers<HistoryRecoveryOutcome>();
-  /** Páginas válidas recibidas, en orden: cada una termina antes de la anterior. */
+  /** Intentos empezados. */
+  #attempts = 0;
+  /** Páginas válidas del intento, en orden: cada una termina antes de la anterior. */
   #pages: (readonly HistoryTick[])[] = [];
-  /** Páginas pedidas. */
+  /** Páginas pedidas en el intento. */
   #requested = 0;
+  /** Cancela la espera hasta el intento siguiente, si hay una en curso. */
+  #cancelRetry: (() => void) | null = null;
   /** `req_id` de la página que espera respuesta, o `null`. */
   #pendingReqId: number | null = null;
   /** `queued`: el resultado ya está en la cola; `abandoned` y `finished` son finales. */
@@ -327,9 +350,9 @@ export class HistoryRecovery {
     return this.#state === 'abandoned';
   }
 
-  /** Pide la primera página: termina en el fin del hueco y empieza, como todas, en su inicio. */
+  /** Empieza el primer intento. */
   start(): void {
-    this.#requestPage(this.range.end);
+    this.#startAttempt();
   }
 
   /** Respuesta, o vencimiento, de la página `reqId`. Si ya no es la que espera, no hace nada. */
@@ -364,6 +387,8 @@ export class HistoryRecovery {
     }
     this.#state = 'abandoned';
     this.#pendingReqId = null;
+    this.#cancelRetry?.();
+    this.#cancelRetry = null;
     this.#done.resolve({ status: 'abandoned' });
     return true;
   }
@@ -375,7 +400,7 @@ export class HistoryRecovery {
     }
     this.#state = 'finished';
     this.#done.resolve({
-      attempts: 1,
+      attempts: this.#attempts,
       durable,
       pages: this.#requested,
       result,
@@ -383,6 +408,15 @@ export class HistoryRecovery {
     });
   }
 
+  /** Un intento nuevo, con el mismo rango y las mismas cotizaciones, desde la primera página. */
+  #startAttempt(): void {
+    this.#attempts += 1;
+    this.#pages = [];
+    this.#requested = 0;
+    this.#requestPage(this.range.end);
+  }
+
+  /** Pide la página que termina en `end`; empieza siempre en el inicio del hueco. */
   #requestPage(end: number): void {
     this.#requested += 1;
     this.#pendingReqId = this.#hooks.sendPage({ end, start: this.range.start });
@@ -396,6 +430,17 @@ export class HistoryRecovery {
       range: this.range,
       start_quote: this.request.start_quote,
     });
+    if (
+      decision.status !== 'complete' &&
+      RETRIED_REASONS.has(decision.reason) &&
+      this.#attempts < HISTORY_ATTEMPT_LIMIT
+    ) {
+      this.#cancelRetry = this.#hooks.scheduler.schedule(HISTORY_RETRY_DELAY_MS, () => {
+        this.#cancelRetry = null;
+        this.#startAttempt();
+      });
+      return;
+    }
     this.#state = 'queued';
     this.#hooks.queueResult(decision);
   }

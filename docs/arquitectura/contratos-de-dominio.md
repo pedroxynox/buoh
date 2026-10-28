@@ -128,11 +128,12 @@ Restricciones por `status`:
 
 `from_event_time_utc <= to_event_time_utc`.
 
-Desde el PR 3 de [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13 (§4), el worker de Deriv lo construye con `ticks_history` y lo persiste por la misma cola que los frames, así que queda después del primer tick posterior al cierre:
+Desde el PR 3 de [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13 (§4), una conexión del worker de Deriv sabe construirlo con `ticks_history` y persistirlo por la misma cola que los frames, así que queda después del primer tick posterior al cierre. La sesión que lo pide llega con el PR 4:
 
 - `connection_id` es la conexión que recuperó; `from_event_time_utc`, el high-watermark del inicio del hueco + 1 ms, y `to_event_time_utc`, el primer tick posterior al último cierre − 1 ms. Es el rango que las reglas aceptan para decidir el hueco;
 - `complete`: las páginas son válidas, cubren el rango pedido y traen el tick del high-watermark y el primer tick posterior, con la misma cotización que se recibió, en decimal canónico con el `pip_size` de la respuesta. `recovered_event_count` cuenta los ticks entre los dos, sin incluirlos; en `partial`, los de las páginas válidas;
-- `partial` y `unavailable` llevan uno de estos motivos: `history_page_limit`, `history_error_response`, `history_invalid`, `history_timeout`, `history_boundary_missing` o `history_boundary_mismatch`. `unavailable` significa que falló la primera página. Si se cumple más de uno, va el primero en este orden: una página que falla (`history_error_response`, `history_invalid` o `history_timeout`), un extremo con otra cotización (`history_boundary_mismatch`), el tope de páginas sin llegar al inicio del rango (`history_page_limit`) y un extremo que falta (`history_boundary_missing`).
+- `partial` y `unavailable` llevan uno de estos motivos: `history_page_limit`, `history_error_response`, `history_invalid`, `history_timeout`, `history_boundary_missing` o `history_boundary_mismatch`. `unavailable` significa que falló la primera página. Si se cumple más de uno, va el primero en este orden: una página que falla (`history_error_response`, `history_invalid` o `history_timeout`), un extremo con otra cotización (`history_boundary_mismatch`), el tope de páginas sin llegar al inicio del rango (`history_page_limit`) y un extremo que falta (`history_boundary_missing`);
+- un intento que termina con `history_error_response`, `history_timeout` o `history_boundary_missing` se repite, con 30 000 ms entre intentos y hasta tres en total. Solo se persiste el resultado del último intento.
 
 ## `IngestionCursor`
 
