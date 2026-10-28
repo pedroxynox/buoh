@@ -2,6 +2,7 @@ import { type SourceEvent } from '@buoh/contracts';
 import { deriveMarketData, type DerivedMarketData } from '@buoh/domain';
 
 import { RawFirstIngestor } from '../ingestion/raw-first-ingestor.js';
+import { stderrAlert, type OperationalAlert } from '../operational/registry.js';
 import {
   failureReason,
   LogIntegrityError,
@@ -30,11 +31,37 @@ export interface SessionLock {
   release(): Promise<void>;
 }
 
-/** Toma el bloqueo de la fuente: `SourceLock.acquire` en PostgreSQL. */
+/**
+ * PostgreSQL no respondió al tomar el bloqueo de la fuente: no dice nada de quién lo tiene, así que
+ * la sesión espera y lo intenta otra vez (ADR-0015 §3, «Bloqueo»). `reason` es el motivo saneado de
+ * la causa (`failureReason`), nunca su mensaje.
+ */
+export class SourceLockUnavailableError extends Error {
+  readonly reason: string;
+
+  constructor(reason: string, options?: { cause?: unknown }) {
+    super(`Bloqueo de la fuente no disponible: ${reason}`, options);
+    this.name = 'SourceLockUnavailableError';
+    this.reason = reason;
+  }
+}
+
+/**
+ * Toma el bloqueo de la fuente. En PostgreSQL envuelve `SourceLock.acquire`: un fallo de la conexión
+ * o de la consulta lo convierte en `SourceLockUnavailableError`, con su motivo saneado.
+ */
 export interface SessionLockProvider {
-  /** `null` si lo tiene otro proceso; lanza si PostgreSQL no responde. */
+  /**
+   * Devuelve el bloqueo tomado (`held` es `true` al devolverlo), o `null` si lo tiene otro proceso.
+   * Si PostgreSQL no responde, lanza `SourceLockUnavailableError`, y la sesión espera y lo intenta
+   * otra vez. Cualquier otro rechazo es un error de programación: la sesión suelta su bloqueo y se
+   * rechaza con él.
+   */
   acquire(): Promise<SessionLock | null>;
 }
+
+/** Motivo de la alerta de un bloqueo que ya no está tomado al recibirlo, como `SOURCE_LOCK_LOST`. */
+const LOCK_LOST = 'source_lock_lost';
 
 /**
  * Los puertos del adaptador, salvo el log ya abierto, `reopenLog` y la duración de cada conexión: la
@@ -251,7 +278,8 @@ class SessionRun {
     }
     try {
       // Con el log sano y el bloqueo vigente, cierra el segmento abierto (ADR-0015 §3, «Parada»).
-      // Un log que no pasa sus comprobaciones no se toca, y uno fallido no lo cierra `rotate`.
+      // Un log que no pasa sus comprobaciones no se toca, uno fallido no lo cierra `rotate`, y uno
+      // desactualizado tras volver a tomar el bloqueo lo reabre antes con el bloqueo nuevo.
       if (this.#ingestor !== null && this.#lock?.held === true && !isNotDerivable(end)) {
         await this.#ingestor.rotate('requested');
       }
@@ -361,6 +389,7 @@ class SessionRun {
         if (!(error instanceof LogReadError)) {
           throw error;
         }
+        this.#alert({ event: 'source_log_unavailable', reason: error.reason });
         if (!(await this.#backoff())) {
           return { end: COMPLETED };
         }
@@ -374,9 +403,11 @@ class SessionRun {
   /**
    * Toma un bloqueo nuevo, después de soltar el anterior si lo había: devuelve `null` cuando lo
    * tiene, o el fin `failed` con `source_lock_taken` si lo tiene otro proceso. Si PostgreSQL no
-   * responde, espera y lo intenta otra vez (ADR-0015 §3, «Bloqueo»). Tras la parada, el fin es
-   * `completed` y no toma otro. Quien la llama vuelve a mirar la parada antes de seguir: un bloqueo
-   * tomado mientras llegaba la parada lo suelta el cierre de la sesión.
+   * responde (`SourceLockUnavailableError`), o si el bloqueo que recibe ya no está tomado, y entonces
+   * lo suelta, avisa con `source_lock_unavailable` y su motivo, espera y lo intenta otra vez
+   * (ADR-0015 §3, «Bloqueo»). Cualquier otro rechazo de `acquire` es de programación y se relanza.
+   * Tras la parada, el fin es `completed` y no toma otro. Quien la llama vuelve a mirar la parada
+   * antes de seguir: un bloqueo tomado mientras llegaba la parada lo suelta el cierre de la sesión.
    */
   async #takeLock(): Promise<SessionEnd | null> {
     await this.#releaseLock();
@@ -388,7 +419,11 @@ class SessionRun {
       let lock: SessionLock | null;
       try {
         lock = await this.#input.lock.acquire();
-      } catch {
+      } catch (error) {
+        if (!(error instanceof SourceLockUnavailableError)) {
+          throw error;
+        }
+        this.#alert({ event: 'source_lock_unavailable', reason: error.reason });
         if (!(await this.#backoff())) {
           return COMPLETED;
         }
@@ -397,9 +432,23 @@ class SessionRun {
       if (lock === null) {
         return failed('source_lock_taken');
       }
+      if (!lock.held) {
+        // Perdido antes de usarlo: tomar otro enseguida volvería a tomar y soltar sin esperar.
+        await lock.release();
+        this.#alert({ event: 'source_lock_unavailable', reason: LOCK_LOST });
+        if (!(await this.#backoff())) {
+          return COMPLETED;
+        }
+        continue;
+      }
       this.#lock = lock;
       return null;
     }
+  }
+
+  /** Alerta saneada, en stderr por defecto. */
+  #alert(payload: Parameters<OperationalAlert>[0]): void {
+    (this.#input.alert ?? stderrAlert)(payload);
   }
 
   /** El bloqueo vigente; la sesión solo abre el log después de tomarlo. */

@@ -13,7 +13,7 @@ import { settle, START_EPOCH, uuid } from './support/connection-harness.js';
 import { derivMessages } from './support/deriv-fixtures.js';
 import { type MemoryObjectStore, type MemorySourceLogStore } from './support/memory-stores.js';
 import { PREVIOUS, previousConnectionEvents } from './support/recovery-harness.js';
-import { sessionHarness, type SessionRun } from './support/session-harness.js';
+import { LOCK_BUG, sessionHarness, type SessionRun } from './support/session-harness.js';
 
 // La sesión de ingesta de Deriv (ADR-0015 §3 y §5): prepara una vez, toma el bloqueo, abre y
 // comprueba el log y sigue una conexión por intento, con la espera entre intentos, hasta la parada o
@@ -211,6 +211,24 @@ describe('startDerivSession: el estado al arrancar (ADR-0015 §5)', () => {
     expectRefusedLog(run, 3);
   });
 
+  it('con un frame de tick del símbolo pedido que no cumple el esquema (schema_validation_failed), conecta: symbol_mismatch es solo para ticks de otro símbolo', async () => {
+    const [opened, tick, closed] = previousConnectionEvents();
+    // Sin `pip_size`, que el esquema de `ticks` exige: un frame inválido, pero de SYNTH_100.
+    const payload = `{"echo_req":{"req_id":2,"subscribe":1,"ticks":"SYNTH_100"},"msg_type":"tick","req_id":2,"subscription":{"id":"sub-1"},"tick":{"epoch":${String(START_EPOCH - 50)},"id":"sub-1","quote":100.5,"symbol":"SYNTH_100"}}`;
+    const invalid = rawSourceFrameSchema.parse({
+      ...tick,
+      observation_id: uuid(9006),
+      payload_utf8: payload,
+      raw_payload_sha256: sha256Hex(payload),
+      received_at_utc: '2026-03-02T09:59:10.000Z',
+    });
+    const run = await sessionHarness({ events: [opened, tick, invalid, closed].filter(isEvent) });
+
+    expect(run.sockets).toHaveLength(1);
+    run.session.stop();
+    expect((await run.done).end).toEqual({ status: 'completed' });
+  });
+
   it('con un log del símbolo pedido, que pasa las comprobaciones, conecta y supera su última conexión', async () => {
     const run = await sessionHarness({ events: previousConnectionEvents() });
     expect(run.sockets).toHaveLength(1);
@@ -237,7 +255,7 @@ describe('startDerivSession: el estado al arrancar (ADR-0015 §5)', () => {
         vi.spyOn(sourceLog, 'listClosedSegments').mockRejectedValueOnce(unavailable());
       },
     ],
-  ])('si un almacén no responde %s, espera y lo intenta otra vez', async (_label, fail) => {
+  ])('si un almacén no responde %s, avisa, espera y lo intenta otra vez', async (_label, fail) => {
     const run = await sessionHarness({
       beforeStart: ({ sourceLog }) => {
         fail(sourceLog);
@@ -247,6 +265,7 @@ describe('startDerivSession: el estado al arrancar (ADR-0015 §5)', () => {
     });
     expect(run.sockets).toEqual([]);
     expect(run.clock.pendingDelays()).toEqual([500]);
+    expect(run.alerts).toEqual([{ event: 'source_log_unavailable', reason: 'ECONNREFUSED' }]);
 
     await run.clock.advance(500);
     expect(run.timeline).toEqual(['acquire:1', 'connect:1']);
@@ -515,15 +534,59 @@ describe('startDerivSession: el bloqueo de la fuente (ADR-0015 §3, «Bloqueo»)
     expect(run.openedWith).toEqual([]);
   });
 
-  it('si PostgreSQL no responde al tomarlo, espera y lo intenta otra vez antes de abrir el log', async () => {
+  it('si PostgreSQL no responde al tomarlo, avisa, espera y lo intenta otra vez antes de abrir el log', async () => {
     const run = await sessionHarness({ locks: ['unavailable'] });
     expect(run.timeline).toEqual(['acquire:unavailable']);
     expect(run.openedWith).toEqual([]);
     expect(run.clock.pendingDelays()).toEqual([500]);
+    // Una alerta saneada por intento fallido: el motivo, nunca el mensaje.
+    expect(run.alerts).toEqual([{ event: 'source_lock_unavailable', reason: 'ECONNREFUSED' }]);
 
     await run.clock.advance(500);
     expect(run.timeline).toEqual(['acquire:unavailable', 'acquire:1', 'connect:1']);
     expect(run.openedWith).toEqual([run.provider.lock(1)]);
+    expect(run.alerts).toHaveLength(1);
+    run.session.stop();
+    expect((await run.done).waits_ms).toEqual([500]);
+  });
+
+  it('un rechazo de acquire que no es SourceLockUnavailableError es de programación: la sesión se rechaza con él, sin esperar ni abrir el log', async () => {
+    const run = await sessionHarness({ locks: ['bug'] });
+
+    await expect(run.done).rejects.toBe(LOCK_BUG);
+    expect(run.timeline).toEqual(['acquire:bug']);
+    expect(run.openedWith).toEqual([]);
+    expect(run.alerts).toEqual([]);
+    expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
+  it('si acquire devuelve un bloqueo que ya no está tomado, lo suelta, avisa y espera antes de intentarlo otra vez, sin abrir el log con él', async () => {
+    const run = await sessionHarness({ locks: ['lost'] });
+    expect(run.timeline).toEqual(['acquire:1', 'release:1']);
+    expect(run.openedWith).toEqual([]);
+    expect(run.clock.pendingDelays()).toEqual([500]);
+    expect(run.alerts).toEqual([{ event: 'source_lock_unavailable', reason: 'source_lock_lost' }]);
+
+    await run.clock.advance(500);
+    expect(run.timeline).toEqual(['acquire:1', 'release:1', 'acquire:2', 'connect:1']);
+    expect(run.openedWith).toEqual([run.provider.lock(2)]);
+    run.session.stop();
+    expect((await run.done).waits_ms).toEqual([500]);
+  });
+
+  it('si se pierde mientras espera para volver a abrir el log al arrancar, toma uno nuevo y abre el log con él', async () => {
+    const run = await sessionHarness({
+      beforeStart: ({ sourceLog }) => {
+        vi.spyOn(sourceLog, 'readLogState').mockRejectedValueOnce(unavailable());
+      },
+    });
+    expect(run.timeline).toEqual(['acquire:1']);
+    expect(run.clock.pendingDelays()).toEqual([500]);
+    run.provider.lock(1).lose();
+
+    await run.clock.advance(500);
+    expect(run.timeline).toEqual(['acquire:1', 'release:1', 'acquire:2', 'connect:1']);
+    expect(run.openedWith).toEqual([run.provider.lock(1), run.provider.lock(2)]);
     run.session.stop();
     expect((await run.done).waits_ms).toEqual([500]);
   });
@@ -642,7 +705,7 @@ describe('startDerivSession: el bloqueo de la fuente (ADR-0015 §3, «Bloqueo»)
     expect(run.sockets).toHaveLength(1);
   });
 
-  it('si al tomar uno nuevo PostgreSQL no responde, espera con el intento siguiente y lo vuelve a intentar', async () => {
+  it('si al tomar uno nuevo PostgreSQL no responde, avisa, espera con el intento siguiente y lo vuelve a intentar', async () => {
     const run = await sessionHarness({ locks: ['lock', 'unavailable'] });
     await run.subscribe(run.socket(1), START_EPOCH);
     run.socket(1).emit({ code: 1001, kind: 'closed' });
@@ -651,6 +714,7 @@ describe('startDerivSession: el bloqueo de la fuente (ADR-0015 §3, «Bloqueo»)
 
     await run.clock.advance(500);
     expect(run.timeline).toEqual(['acquire:1', 'connect:1', 'release:1', 'acquire:unavailable']);
+    expect(run.alerts).toEqual([{ event: 'source_lock_unavailable', reason: 'ECONNREFUSED' }]);
     expect(run.clock.pendingDelays()).toEqual([1000]);
     await run.clock.advance(1000);
     expect(run.timeline.slice(-2)).toEqual(['acquire:2', 'connect:2']);
@@ -831,7 +895,7 @@ describe('startDerivSession: la parada fuera de una conexión (ADR-0015 §3, «P
     expect(run.timeline).toEqual(['acquire:1', 'connect:1', 'release:1']);
   });
 
-  it('mientras vuelve a tomar el bloqueo, termina completed sin otro socket', async () => {
+  it('mientras vuelve a tomar el bloqueo, termina completed sin otro socket: con el bloqueo nuevo, reabre el log y cierra el segmento con requested', async () => {
     const run = await sessionHarness({ stopOnAcquire: 2 });
     await run.subscribe(run.socket(1), START_EPOCH);
     run.socket(1).emit({ code: 1001, kind: 'closed' });
@@ -841,6 +905,11 @@ describe('startDerivSession: la parada fuera de una conexión (ADR-0015 §3, «P
 
     expect((await run.done).end).toEqual({ status: 'completed' });
     expect(run.timeline).toEqual(['acquire:1', 'connect:1', 'release:1', 'acquire:2', 'release:2']);
+    // La apertura, el catálogo, el tick y el cierre remoto de la conexión.
+    expect(run.sourceLog.closed).toEqual([
+      expect.objectContaining({ close_reason: 'requested', event_count: 4, segment_index: 0 }),
+    ]);
+    expect(run.openedWith).toEqual([run.provider.lock(1), run.provider.lock(2)]);
     await run.clock.advance(600_000);
     expect(run.sockets).toHaveLength(1);
   });

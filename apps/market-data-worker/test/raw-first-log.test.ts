@@ -1457,6 +1457,16 @@ describe('RawFirstIngestor: reabrir el log que falló', () => {
     },
   );
 
+  it('rotate no reabre el log fallido: devuelve input_closed sin cerrar el segmento', async () => {
+    const run = await failedLog();
+    const open = vi.spyOn(SourceEventLog, 'open');
+
+    expect(await run.ingestor.rotate('requested')).toEqual({ status: 'input_closed' });
+    expect(open).not.toHaveBeenCalled();
+    expect(run.sourceLog.closed).toEqual([]);
+    expect(run.ingestor.state).toBe('paused');
+  });
+
   // La reparación con un almacén que no responde al reabrir está en «si no puede reabrir el log».
   it('si un almacén no responde al reabrir, receiveEvent registra persistence_unavailable y no queda durable', async () => {
     const run = await failedLog();
@@ -1475,5 +1485,102 @@ describe('RawFirstIngestor: reabrir el log que falló', () => {
       observed_ref: id(4),
     });
     expect(run.operational.incidents).toHaveLength(2);
+  });
+});
+
+// Un log desactualizado no falló: la sesión lo marca así después de tomar un bloqueo nuevo, porque
+// en los segundos que tardó en notarse la pérdida otro proceso pudo escribir (ADR-0015 §3,
+// «Conexión anterior»). Lo que use el log lo reabre antes, sin incidencia; un log fallido, en cambio,
+// sigue cerrado como hasta ahora.
+describe('RawFirstIngestor.markLogStale: el log desactualizado se reabre antes de usarlo', () => {
+  const OPENED_AT = '2026-01-01T00:00:01.000Z';
+  const OTHER_AT = '2026-01-01T00:00:02.000Z';
+  const LATER = '2026-01-01T00:00:03.000Z';
+
+  /**
+   * La entrada abrió la conexión A. Después otro escritor, con el bloqueo que esta instancia perdió,
+   * añade el cierre de A al segmento abierto, y la instancia queda marcada como desactualizada.
+   */
+  async function staleLog() {
+    let now = OPENED_AT;
+    const run = await harness({ now: () => now });
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+    await (await run.openLog()).append(closedEvent(CONNECTION_A, id(2), OTHER_AT));
+    run.ingestor.markLogStale();
+    now = LATER;
+    return run;
+  }
+
+  type Run = Awaited<ReturnType<typeof staleLog>>;
+
+  const tickFrame = {
+    connection_id: CONNECTION_A,
+    observation_id: id(3),
+    payload_utf8: tickPayload(1767225601),
+    received_at_utc: LATER,
+  };
+
+  it.each<[string, (run: Run) => Promise<unknown>, unknown, string[], number]>([
+    [
+      'receiveFrame escribe el frame después del evento del otro escritor',
+      (run) => run.ingestor.receiveFrame(tickFrame),
+      { position: 2, segment_index: 0, status: 'durable' },
+      [id(1), id(2), id(3)],
+      0,
+    ],
+    [
+      'receiveEvent escribe el evento después del evento del otro escritor',
+      (run) => run.ingestor.receiveEvent(openedEvent(CONNECTION_B, id(3), LATER, CONNECTION_A)),
+      { position: 2, segment_index: 0, status: 'durable' },
+      [id(1), id(2), id(3)],
+      0,
+    ],
+    [
+      'rotate cierra el segmento con el evento del otro escritor',
+      (run) => run.ingestor.rotate('requested'),
+      {
+        segment: expect.objectContaining({
+          close_reason: 'requested',
+          event_count: 2,
+          segment_index: 0,
+        }) as unknown,
+        status: 'closed',
+      },
+      [id(1), id(2)],
+      1,
+    ],
+  ])(
+    'lo reabre antes, sin incidencia: %s',
+    async (_label, operation, expected, rows, closedSegments) => {
+      const run = await staleLog();
+
+      expect(await operation(run)).toEqual(expected);
+      expect(run.sourceLog.rows.map((row) => row.event_id)).toEqual(rows);
+      expect(run.sourceLog.closed).toHaveLength(closedSegments);
+      expect(run.operational.incidents).toEqual([]);
+      expect(run.registry.openConditionTypes()).toEqual([]);
+      expect(run.ingestor.state).toBe('accepting');
+    },
+  );
+
+  it('si un almacén no responde al reabrirlo, receiveFrame no escribe el frame y registra persistence_unavailable con su observation_id', async () => {
+    const run = await staleLog();
+    run.objects.onRead = () => {
+      throw Object.assign(new Error('sintético'), { code: 'ECONNREFUSED' });
+    };
+
+    expect(await run.ingestor.receiveFrame(tickFrame)).toEqual({
+      stage: 'source_event_index',
+      status: 'not_durable',
+    });
+    expect(run.ticks).toEqual([]);
+    expect(run.operational.incidents).toEqual([
+      expect.objectContaining({
+        evidence: { reason: 'ECONNREFUSED', stage: 'source_event_index' },
+        incident_type: 'persistence_unavailable',
+        observed_ref: id(3),
+      }),
+    ]);
+    expect(run.ingestor.state).toBe('paused');
   });
 });

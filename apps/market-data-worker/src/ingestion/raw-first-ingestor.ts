@@ -128,7 +128,10 @@ export interface RawFirstIngestorInput {
 export class RawFirstIngestor {
   readonly #input: RawFirstIngestorInput;
   #log: SourceEventLog;
+  /** El log tuvo un fallo de persistencia: la entrada sigue cerrada hasta reabrirlo. */
   #logFailed = false;
+  /** El log no falló, pero ya no vale (`markLogStale`): se reabre antes de usarlo. */
+  #logStale = false;
   #paused: boolean;
   #emittedTicks = 0;
   #lastFailure: { reason: string; stage: string } | null = null;
@@ -192,17 +195,18 @@ export class RawFirstIngestor {
   }
 
   /**
-   * Reabre desde los almacenes el log que falló. Si no se puede porque un almacén no responde
-   * (`LogReadError`), registra `persistence_unavailable` (etapa `source_event_index`) con
-   * `observedRef` y el motivo saneado, y devuelve el resultado no durable. Cualquier otro error lo
-   * relanza sin registrar nada: si el contenido del log no pasa sus comprobaciones
-   * (`LogIntegrityError`), no se reintenta con contenido no confiable (ADR-0004 §12), y un error de
-   * programación no se reintenta como si fuera una pausa.
+   * Reabre desde los almacenes el log que falló o que está desactualizado. Si no se puede porque un
+   * almacén no responde (`LogReadError`), registra `persistence_unavailable` (etapa
+   * `source_event_index`) con `observedRef` y el motivo saneado, y devuelve el resultado no durable.
+   * Cualquier otro error lo relanza sin registrar nada: si el contenido del log no pasa sus
+   * comprobaciones (`LogIntegrityError`), no se reintenta con contenido no confiable (ADR-0004 §12),
+   * y un error de programación no se reintenta como si fuera una pausa.
    */
   async #reopenLog(observedRef: string): Promise<NotDurable | null> {
     try {
       this.#log = await this.#input.reopenLog();
       this.#logFailed = false;
+      this.#logStale = false;
       return null;
     } catch (error) {
       if (!(error instanceof LogReadError)) {
@@ -215,10 +219,20 @@ export class RawFirstIngestor {
     }
   }
 
-  /** Frame del transporte: límite de bytes, escritura raw durable y después normalización. */
+  /**
+   * Frame del transporte: límite de bytes, escritura raw durable y después normalización. Un log
+   * desactualizado (`markLogStale`) se reabre antes; si un almacén no responde al reabrirlo, el frame
+   * no se escribe y queda `persistence_unavailable` con su `observation_id`.
+   */
   async receiveFrame(frame: FrameInput): Promise<ReceiveOutcome> {
     if (this.#paused) {
       return { status: 'input_closed' };
+    }
+    if (this.#logStale) {
+      const failure = await this.#reopenLog(frame.observation_id);
+      if (failure !== null) {
+        return failure;
+      }
     }
     // Límite antes de construir el RawSourceFrame: nunca se carga contenido fuera del límite.
     const violation = evaluateSourceLimit(
@@ -295,10 +309,11 @@ export class RawFirstIngestor {
   /**
    * Evento de conexión o recuperación. Con la entrada pausada se rechazan recuperaciones; se admite
    * el `ConnectionClosed` del cierre de la entrada si el log sigue sano, y un `ConnectionOpened`,
-   * que reabre el log si había fallado y, al quedar durable, resuelve las condiciones operativas. Si
-   * al reabrir el log su contenido no pasa sus comprobaciones, se rechaza con `LogIntegrityError`,
-   * sin registrar nada; igual con cualquier error al reabrirlo que no sea de un almacén que no
-   * responde (`LogReadError`).
+   * que reabre el log si había fallado y, al quedar durable, resuelve las condiciones operativas. Un
+   * log desactualizado (`markLogStale`) se reabre antes de escribir cualquier evento. Si al reabrir
+   * el log su contenido no pasa sus comprobaciones, se rechaza con `LogIntegrityError`, sin
+   * registrar nada; igual con cualquier error al reabrirlo que no sea de un almacén que no responde
+   * (`LogReadError`).
    */
   async receiveEvent(
     event: Exclude<SourceEvent, { kind: 'raw_source_frame' }>,
@@ -310,7 +325,7 @@ export class RawFirstIngestor {
     ) {
       return { status: 'input_closed' };
     }
-    if (this.#logFailed) {
+    if (this.#logFailed || this.#logStale) {
       const failure = await this.#reopenLog(event.event_id);
       if (failure !== null) {
         return failure;
@@ -331,7 +346,7 @@ export class RawFirstIngestor {
    * persiste el `ConnectionClosed` que le falta a la conexión anterior del log, por un fallo de
    * persistencia o una caída del proceso. Solo se llama sin conexión abierta. En este orden:
    *
-   * 1. reabre el log si había fallado;
+   * 1. reabre el log si había fallado o está desactualizado (`markLogStale`);
    * 2. vuelve a leer del log la conexión anterior. Si no hay ninguna o ya tiene su cierre, no hay nada
    *    que reparar; también si el índice confirmó el cierre original aunque informó error, porque el
    *    log reabierto lo adopta;
@@ -350,10 +365,10 @@ export class RawFirstIngestor {
     /** Símbolos de la sesión, que el cierre da como afectados. */
     readonly affected_symbols: readonly string[];
   }): Promise<CloseRepairOutcome> {
-    // El ID del cierre se genera solo cuando hace falta: con el log fallido, antes de reabrirlo.
+    // El ID del cierre se genera solo cuando hace falta: si hay que reabrir el log, antes.
     let eventId: string | undefined;
     const closeId = () => (eventId ??= this.#input.nextId());
-    if (this.#logFailed) {
+    if (this.#logFailed || this.#logStale) {
       const failure = await this.#reopenLog(closeId());
       if (failure !== null) {
         return failure;
@@ -406,17 +421,22 @@ export class RawFirstIngestor {
   }
 
   /**
-   * El log abierto ya no vale: la reparación del cierre o el evento de conexión siguientes lo vuelven
-   * a abrir desde los almacenes con `reopenLog`, como tras un fallo de persistencia, pero sin
-   * registrar nada. Lo usa la sesión después de tomar un bloqueo nuevo (ADR-0015 §3, «Conexión
-   * anterior»): el log abierto escribe con el bloqueo anterior, y en los segundos que tardó en
-   * notarse la pérdida otro proceso pudo escribir. Hasta reabrirlo, `rotate` no cierra el segmento.
+   * El log abierto ya no vale, aunque no falló. Lo usa la sesión después de tomar un bloqueo nuevo
+   * (ADR-0015 §3, «Conexión anterior»): el log abierto escribe con el bloqueo anterior, y en los
+   * segundos que tardó en notarse la pérdida otro proceso pudo escribir. Lo siguiente que use el log
+   * (un frame, un evento, la reparación del cierre o `rotate`) lo vuelve a abrir antes desde los
+   * almacenes con `reopenLog`, sin registrar nada ni cerrar la entrada. Si un almacén no responde al
+   * reabrirlo, queda `persistence_unavailable`, como tras un fallo. A diferencia de un log fallido,
+   * que sigue cerrado hasta el `ConnectionOpened` o la reparación.
    */
   markLogStale(): void {
-    this.#logFailed = true;
+    this.#logStale = true;
   }
 
-  /** Cierre explícito del segmento abierto (harness, drenaje o apagado). */
+  /**
+   * Cierre explícito del segmento abierto (harness, drenaje o apagado). Con el log fallido no cierra
+   * nada (`input_closed`); uno desactualizado (`markLogStale`) lo reabre antes.
+   */
   async rotate(
     reason: SegmentCloseReason = 'requested',
   ): Promise<
@@ -424,6 +444,12 @@ export class RawFirstIngestor {
   > {
     if (this.#logFailed) {
       return { status: 'input_closed' };
+    }
+    if (this.#logStale) {
+      const failure = await this.#reopenLog(this.#input.nextId());
+      if (failure !== null) {
+        return failure;
+      }
     }
     try {
       return { segment: await this.#log.close(reason), status: 'closed' };

@@ -3,6 +3,7 @@ import { type InvalidFrameReason, type UnflaggedTick } from '@buoh/domain';
 
 import { DERIV_SOURCE } from '../../src/deriv/profile.js';
 import {
+  SourceLockUnavailableError,
   startDerivSession,
   type SessionLock,
   type SessionLockProvider,
@@ -38,10 +39,16 @@ export class FakeSessionLock implements SessionLock {
   readonly #onRelease: (number: number) => void;
   #held = true;
 
-  constructor(number: number, timeline: string[], onRelease: (number: number) => void) {
+  constructor(
+    number: number,
+    timeline: string[],
+    onRelease: (number: number) => void,
+    held = true,
+  ) {
     this.number = number;
     this.#timeline = timeline;
     this.#onRelease = onRelease;
+    this.#held = held;
   }
 
   get held(): boolean {
@@ -62,11 +69,15 @@ export class FakeSessionLock implements SessionLock {
 }
 
 /**
- * Lo que responde cada `acquire`, en orden: `lock` (un bloqueo nuevo), `taken` (lo tiene otro
- * proceso: `null`) o `unavailable` (PostgreSQL no responde: lanza). Después de la lista, siempre un
- * bloqueo nuevo.
+ * Lo que responde cada `acquire`, en orden: `lock` (un bloqueo nuevo), `lost` (un bloqueo que ya se
+ * perdió: `held` es `false`), `taken` (lo tiene otro proceso: `null`), `unavailable` (PostgreSQL no
+ * responde: lanza `SourceLockUnavailableError` con el motivo `ECONNREFUSED`) o `bug` (un error de
+ * programación del proveedor: lanza un `TypeError`). Después de la lista, siempre un bloqueo nuevo.
  */
-export type LockAnswer = 'lock' | 'taken' | 'unavailable';
+export type LockAnswer = 'bug' | 'lock' | 'lost' | 'taken' | 'unavailable';
+
+/** El error de programación que lanza un `acquire` con la respuesta `bug`. */
+export const LOCK_BUG = new TypeError('sintético');
 
 export class FakeLockProvider implements SessionLockProvider {
   readonly locks: FakeSessionLock[] = [];
@@ -102,11 +113,21 @@ export class FakeLockProvider implements SessionLockProvider {
     }
     if (answer === 'unavailable') {
       this.#timeline.push('acquire:unavailable');
-      return Promise.reject(Object.assign(new Error('sintético'), { code: 'ECONNREFUSED' }));
+      const cause = Object.assign(new Error('sintético'), { code: 'ECONNREFUSED' });
+      return Promise.reject(new SourceLockUnavailableError('ECONNREFUSED', { cause }));
     }
-    const lock = new FakeSessionLock(this.locks.length + 1, this.#timeline, (number) => {
-      this.onRelease(number);
-    });
+    if (answer === 'bug') {
+      this.#timeline.push('acquire:bug');
+      return Promise.reject(LOCK_BUG);
+    }
+    const lock = new FakeSessionLock(
+      this.locks.length + 1,
+      this.#timeline,
+      (number) => {
+        this.onRelease(number);
+      },
+      answer === 'lock',
+    );
     this.locks.push(lock);
     this.#timeline.push(`acquire:${String(lock.number)}`);
     return Promise.resolve(lock);
