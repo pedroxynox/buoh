@@ -62,11 +62,15 @@ async function settle(): Promise<void> {
 }
 
 /**
- * Un smoke de 10 s sobre la sesión, con `random` 0: la primera espera antes de reconectar es de
- * 500 ms.
+ * Un smoke de 10 s (o `durationSeconds`) sobre la sesión, con `random` 0: la primera espera antes
+ * de reconectar es de 500 ms.
  */
 function smoke(
-  options: { readonly interruptAfterSeconds?: number; readonly symbol?: string } = {},
+  options: {
+    readonly durationSeconds?: number;
+    readonly interruptAfterSeconds?: number;
+    readonly symbol?: string;
+  } = {},
 ) {
   forbidAmbientEffects();
   const clock = new ManualClock(START);
@@ -81,7 +85,7 @@ function smoke(
       sockets.push(socket);
       return socket;
     },
-    durationSeconds: 10,
+    durationSeconds: options.durationSeconds ?? 10,
     expected: fixture.expected,
     fetch: () => Promise.resolve(new Response(fixture.archive)),
     ...(options.interruptAfterSeconds === undefined
@@ -124,12 +128,13 @@ const pages = (socket: FakeDerivSocket) =>
   socket.requests().filter((request) => 'ticks_history' in request);
 
 /**
- * La primera conexión: abre a las 10:00:00, recibe el catálogo (`req_id` 1), el primer tick de la
- * suscripción (`req_id` 2, de las 10:00:00) a las 10:00:00.200, la hora del servidor (`req_id` 3) y
- * el tick de las 10:00:02 a las 10:00:02.200: dos retrasos de 200 ms y 2 s entre sus horas.
+ * La primera conexión abierta, la del socket `number`: abre ahora (con el primer socket, a las
+ * 10:00:00), recibe el catálogo (`req_id` 1), 200 ms después el primer tick de la suscripción
+ * (`req_id` 2, de las 10:00:00), la hora del servidor (`req_id` 3) y, 2000 ms más tarde, el tick de
+ * las 10:00:02: dos retrasos de 200 ms y 2 s entre sus horas.
  */
-async function firstConnection(run: SmokeRun): Promise<void> {
-  const socket = run.socket(1);
+async function firstConnection(run: SmokeRun, number = 1): Promise<void> {
+  const socket = run.socket(number);
   socket.open();
   await settle();
   socket.text(derivMessages.catalog(1));
@@ -144,14 +149,22 @@ async function firstConnection(run: SmokeRun): Promise<void> {
   await settle();
 }
 
-/**
- * La conexión que sigue a la primera, tras la espera de 500 ms: su suscripción repite el tick de
- * las 10:00:02, el high-watermark del hueco, y responde `time` con las 10:00:03;
- * `newTickAfterMs` después llega el de las 10:00:04, el primero posterior al cierre.
- */
+/** La conexión que sigue a la primera, tras la espera de 500 ms (`resumedConnection`). */
 async function secondConnection(run: SmokeRun, newTickAfterMs = 400): Promise<FakeDerivSocket> {
   await run.clock.advance(500);
-  const socket = run.socket(2);
+  return resumedConnection(run, run.socket(2), newTickAfterMs);
+}
+
+/**
+ * Una conexión después de la pérdida de la primera, que abre ahora: su suscripción repite el tick
+ * de las 10:00:02, el high-watermark del hueco, y responde `time` con las 10:00:03;
+ * `newTickAfterMs` después llega el de las 10:00:04, el primero posterior al cierre.
+ */
+async function resumedConnection(
+  run: SmokeRun,
+  socket: FakeDerivSocket,
+  newTickAfterMs = 400,
+): Promise<FakeDerivSocket> {
   socket.open();
   await settle();
   socket.text(derivMessages.catalog(1));
@@ -167,14 +180,17 @@ async function secondConnection(run: SmokeRun, newTickAfterMs = 400): Promise<Fa
 }
 
 /**
- * 2000 ms después del primer tick posterior al cierre, la segunda conexión pide el hueco entre las
- * 10:00:02 y las 10:00:04 (`req_id` 4) y recibe la página con `prices`; al plazo pide `forget_all`
- * (`req_id` 5) y recibe su respuesta.
+ * 2000 ms después del primer tick posterior al cierre, la conexión pide el hueco entre las 10:00:02
+ * y las 10:00:04 (`req_id` 4) y recibe la página con `prices`; al plazo (`deadline`, por defecto
+ * `DEADLINE`) pide `forget_all` (`req_id` 5) y recibe su respuesta.
  */
 async function recoverAndFinish(
   run: SmokeRun,
   socket: FakeDerivSocket,
-  prices: readonly string[] = ['101.50', '100.75', '100.5'],
+  {
+    deadline = DEADLINE,
+    prices = ['101.50', '100.75', '100.5'],
+  }: { readonly deadline?: string; readonly prices?: readonly string[] } = {},
 ): Promise<SmokeReport> {
   await run.clock.advance(HISTORY_DELAY_MS);
   expect(pages(socket)).toEqual([
@@ -191,7 +207,7 @@ async function recoverAndFinish(
     derivMessages.history(4, [START_EPOCH + 2, START_EPOCH + 3, START_EPOCH + 4], prices),
   );
   await settle();
-  await advanceTo(run, DEADLINE);
+  await advanceTo(run, deadline);
   expect(socket.requests().at(-1)).toEqual({ forget_all: 'ticks', req_id: 5 });
   socket.text(derivMessages.forgetAll(5));
   return run.run;
@@ -342,6 +358,82 @@ describe('runSmoke', () => {
     expect(smokeExitCode(report)).toBe(0);
   });
 
+  it('con --interrupt-after-seconds, un intento que no llega a abrirse después del corte no cuenta como conexión ni como reconexión: pasa', async () => {
+    const run = smoke({ interruptAfterSeconds: 3 });
+    await settle();
+    await firstConnection(run);
+    await run.clock.advance(1000);
+    expect(run.socket(1).ended).toBe('terminate');
+    await settle();
+    // El segundo intento empieza a las 10:00:03.700 y nunca abre: vence a las 10:00:13.700
+    // (`connect_timeout`), pasado el plazo, y la sesión espera otros 1000 ms.
+    await run.clock.advance(500);
+    await advanceTo(run, '2026-03-02T10:00:13.699Z');
+    expect(run.socket(2).ended).toBeNull();
+    await run.clock.advance(1);
+    expect(run.socket(2).ended).toBe('terminate');
+    await settle();
+    await run.clock.advance(1000);
+    const socket = await resumedConnection(run, run.socket(3));
+    await run.clock.advance(HISTORY_DELAY_MS);
+    expect(pages(socket)).toHaveLength(1);
+    socket.text(
+      derivMessages.history(
+        4,
+        [START_EPOCH + 2, START_EPOCH + 3, START_EPOCH + 4],
+        ['101.50', '100.75', '100.5'],
+      ),
+    );
+    await settle();
+    // El plazo ya pasó: el cierre previsto sigue a la recuperación.
+    expect(socket.requests().at(-1)).toEqual({ forget_all: 'ticks', req_id: 5 });
+    socket.text(derivMessages.forgetAll(5));
+    const report = await run.run;
+
+    expect(report).toMatchObject({
+      closure: { closure_type: 'requested', persisted: true, reason: 'requested' },
+      connections: 2,
+      end: { status: 'completed' },
+      reconnect_waits_ms: [500, 1000],
+      reconnections: 1,
+      recovery: { attempts: 1, pages: 1, reason: null, status: 'complete' },
+      status: 'passed',
+    });
+    expect(run.sockets).toHaveLength(3);
+    expect(smokeExitCode(report)).toBe(0);
+  });
+
+  it('con --interrupt-after-seconds, busca el corte en la primera conexión abierta: un primer intento que no abre no cuenta y pasa con una sola reconexión', async () => {
+    const run = smoke({ interruptAfterSeconds: 3 });
+    await settle();
+    // El primer socket falla antes de abrirse (`connect_failed`), y la sesión espera 500 ms.
+    run.socket(1).emit({ code: 'ECONNREFUSED', kind: 'error' });
+    await settle();
+    await run.clock.advance(500);
+    // La primera apertura durable, a las 10:00:00.500, pone el plazo a las 10:00:10.500, y el
+    // primer tick durable, a las 10:00:00.700, el corte a las 10:00:03.700.
+    await firstConnection(run, 2);
+    await run.clock.advance(1000);
+    expect(run.socket(2).ended).toBe('terminate');
+    await settle();
+    // Después del corte, la espera es la del segundo intento: 1000 ms.
+    await run.clock.advance(1000);
+    const socket = await resumedConnection(run, run.socket(3));
+    const report = await recoverAndFinish(run, socket, { deadline: '2026-03-02T10:00:10.500Z' });
+
+    expect(report).toMatchObject({
+      closure: { closure_type: 'requested', persisted: true, reason: 'requested' },
+      connections: 2,
+      end: { status: 'completed' },
+      reconnect_waits_ms: [500, 1000],
+      reconnections: 1,
+      recovery: { status: 'complete' },
+      status: 'passed',
+    });
+    expect(run.sockets).toHaveLength(3);
+    expect(smokeExitCode(report)).toBe(0);
+  });
+
   it('con varias suscripciones, el primer tick de cada una va aparte y los intervalos son entre ticks de la misma suscripción', async () => {
     const run = smoke({ interruptAfterSeconds: 3 });
     await settle();
@@ -446,11 +538,9 @@ describe('runSmoke', () => {
     await run.clock.advance(1000);
     await settle();
     // La página trae otra cotización en el high-watermark: partial, sin reintentos.
-    const report = await recoverAndFinish(run, await secondConnection(run), [
-      '101.25',
-      '100.75',
-      '100.5',
-    ]);
+    const report = await recoverAndFinish(run, await secondConnection(run), {
+      prices: ['101.25', '100.75', '100.5'],
+    });
 
     expect(report).toMatchObject({
       closure: { closure_type: 'requested', persisted: true, reason: 'requested' },
@@ -554,6 +644,38 @@ describe('runSmoke', () => {
       tick_interval_ms: null,
     });
     expect(smokeExitCode(report)).toBe(1);
+    // Terminó antes de la duración: el límite para conectar ya no queda pendiente.
+    expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
+  it('si ningún socket llega a abrirse, para a la duración pedida aunque un intento siga en curso: never_connected con el motivo del último intento que terminó', async () => {
+    const run = smoke({ durationSeconds: 15 });
+    await settle();
+    // El primer socket vence a los 10 000 ms (`connect_timeout`); tras 500 ms, el segundo sigue
+    // intentándolo cuando se cumplen los 15 s.
+    await run.clock.advance(10_000);
+    expect(run.socket(1).ended).toBe('terminate');
+    await run.clock.advance(4999);
+    expect(run.socket(2).ended).toBeNull();
+    await run.clock.advance(1);
+    await settle();
+    expect(run.socket(2).ended).toBe('close');
+    const report = await run.run;
+
+    expect(report).toMatchObject({
+      catalog: null,
+      closure: null,
+      connections: 0,
+      end: { detail: 'connect_timeout', reason: 'never_connected', status: 'failed' },
+      finished_at_utc: '2026-03-02T10:00:15.000Z',
+      frames: { raw: 0, ticks: 0 },
+      reconnect_waits_ms: [500],
+      reconnections: 0,
+      status: 'failed',
+    });
+    expect(run.sockets).toHaveLength(2);
+    expect(smokeExitCode(report)).toBe(1);
+    expect(run.clock.pendingDelays()).toEqual([]);
   });
 
   it('cuenta los frames inválidos y las respuestas pedidas inválidas sin dejar de pasar', async () => {
@@ -699,6 +821,7 @@ describe('smokeCommand', () => {
     const fixture = syntheticSchemaArchive();
     const connections: unknown[] = [];
     return {
+      clock,
       connections,
       deps: {
         alert: () => undefined,
@@ -763,6 +886,66 @@ describe('smokeCommand', () => {
       status: 'failed',
     });
     expect(connections).toEqual([]);
+  });
+
+  it('si nunca llega a conectar, para a la duración pedida desde su inicio: una sola línea failed con never_connected y salida 1, sin temporizadores pendientes', async () => {
+    // Cada intento falla al crear el socket (`connect_failed`), y la sesión espera 500, 1000,
+    // 2000, 4000 y 8000 ms entre ellos.
+    const { clock, connections, deps } = dependencies();
+    let ended = false;
+    const command = smokeCommand(['--live', '--duration-seconds', '10'], deps).finally(() => {
+      ended = true;
+    });
+    await settle();
+    await clock.advance(9999);
+    expect(ended).toBe(false);
+    await clock.advance(1);
+    await settle();
+    expect(ended).toBe(true);
+    const { exitCode, line } = await command;
+
+    expect(exitCode).toBe(1);
+    expect(line).not.toContain('\n');
+    expect(JSON.parse(line)).toMatchObject({
+      closure: null,
+      connections: 0,
+      end: { detail: 'connect_failed', reason: 'never_connected', status: 'failed' },
+      finished_at_utc: '2026-03-02T10:00:10.000Z',
+      reconnect_waits_ms: [500, 1000, 2000, 4000, 8000],
+      reconnections: 0,
+      recovery: null,
+      status: 'failed',
+    });
+    expect(connections).toHaveLength(5);
+    expect(clock.pendingDelays()).toEqual([]);
+  });
+
+  it('si los esquemas llegan después de la duración, un símbolo que el esquema de ticks no admite sigue siendo un error de uso: el límite para conectar no tapa un fin failed de la sesión', async () => {
+    const { clock, connections, deps } = dependencies();
+    // El archivo llega a los 10 500 ms, dentro del tiempo máximo de la descarga.
+    const delayed: typeof fetch = (...args) =>
+      new Promise((resolve) => {
+        clock.scheduler.schedule(10_500, () => {
+          resolve(deps.fetch(...args));
+        });
+      });
+    const command = smokeCommand(['--live', '--symbol', 'R', '--duration-seconds', '10'], {
+      ...deps,
+      fetch: delayed,
+    });
+    await settle();
+    // A los 10 s todavía no hay ninguna apertura: el límite para la sesión, que no corta la carga.
+    await clock.advance(10_000);
+    await clock.advance(500);
+    const { exitCode, line } = await command;
+
+    expect(exitCode).toBe(2);
+    expect(JSON.parse(line)).toMatchObject({
+      end: { detail: 'ticks', reason: 'request_invalid', status: 'failed' },
+      status: 'failed',
+    });
+    expect(connections).toEqual([]);
+    expect(clock.pendingDelays()).toEqual([]);
   });
 
   it('un error inesperado da code UNEXPECTED y salida 1', async () => {

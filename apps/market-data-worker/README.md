@@ -2,7 +2,7 @@
 
 Log raw-first de source events, registro operativo, publicación atómica y replay de datasets (F1.3: `F1-STREAM-001`, `F1-DATASET-001`). Decisiones en [ADR-0004](../../docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md) §7–§12 y [ADR-0005](../../docs/arquitectura/adr/0005-persistencia-local-y-formato-fisico-f1-3.md); operación en el [runbook](../../docs/operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13).
 
-Desde F1.4b tiene el adaptador público de Deriv, solo para escuchar, y su catálogo versionado ([ADR-0012](../../docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md)); `pnpm run data:smoke` lo ejecuta una vez, en memoria. Todavía no reconecta (F1.5).
+Desde F1.4b tiene el adaptador público de Deriv, solo para escuchar, y su catálogo versionado ([ADR-0012](../../docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md)). `pnpm run data:smoke` corre en memoria la sesión de ingesta, que reconecta tras una pérdida y recupera la historia del hueco ([ADR-0015](../../docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md)); con `--interrupt-after-seconds`, corta su propio socket una vez para probarlo.
 
 ## Flujo
 

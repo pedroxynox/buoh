@@ -8,6 +8,7 @@ import { type ExpectedSchemaArchive } from './deriv/schema-archive.js';
 import {
   SMOKE_INTERRUPT_REASON,
   startDerivSession,
+  type DerivSessionConnection,
   type DerivSessionResult,
   type SessionLockProvider,
 } from './deriv/session.js';
@@ -60,19 +61,27 @@ export interface SmokeRecovery {
 export interface SmokeReport {
   /** Catálogo vigente de la última conexión. */
   readonly catalog: { readonly content_sha256: string; readonly entry_count: number } | null;
-  /** Cierre de la última conexión. */
+  /** Cierre del último intento de conexión, o `null` si ese intento no llegó a abrirse. */
   readonly closure: {
     readonly closure_type: ConnectionClosed['closure_type'];
     readonly persisted: boolean;
     readonly reason: string;
   } | null;
-  /** Conexiones de la sesión, también las que no llegaron a abrirse. */
+  /**
+   * Las conexiones que llegaron a abrirse (con `connection_id`). Un intento que no abrió no cuenta;
+   * se ve en `reconnect_waits_ms` y, si fue el último, en `closure` `null`.
+   */
   readonly connections: number;
   readonly connector_version: string;
   /** Recepción menos la hora del tick, sin el primer tick de cada suscripción. */
   readonly delivery_delay_ms: Distribution | null;
   readonly duration_seconds: number;
-  /** Cómo terminó la sesión (`DerivSessionResult.end`). */
+  /**
+   * Cómo terminó la sesión (`DerivSessionResult.end`). Si el smoke la paró porque a la duración
+   * pedida no había abierto ninguna conexión y la sesión terminó `completed`, es `failed` con
+   * `never_connected`, y `detail` es el motivo del último intento que terminó por su cuenta (por
+   * ejemplo `connect_failed` o `connect_timeout`) o `null`.
+   */
   readonly end: DerivSessionResult['end'];
   readonly finished_at_utc: string;
   /**
@@ -103,8 +112,9 @@ export interface SmokeReport {
   /** Las esperas antes de cada reintento, en milisegundos y en orden. */
   readonly reconnect_waits_ms: readonly number[];
   /**
-   * Las conexiones después de la primera. La sesión solo abre otra después de una conexión que
-   * terminó sin el cierre previsto (`disconnected` o `paused`), también la del corte.
+   * Las conexiones abiertas después de la primera. La sesión solo vuelve a conectar después de una
+   * conexión que terminó sin el cierre previsto (`disconnected` o `paused`), también la del corte.
+   * Un intento que no llegó a abrirse no cuenta.
    */
   readonly reconnections: number;
   /** La última recuperación de historia cuyo resultado quedó en el log, o `null`. */
@@ -182,6 +192,18 @@ const SMOKE_LOCK: SessionLockProvider = {
   acquire: () => Promise.resolve({ held: true, release: () => Promise.resolve() }),
 };
 
+/** Motivo del fin cuando el smoke para una sesión que no abrió ninguna conexión a tiempo. */
+const NEVER_CONNECTED = 'never_connected';
+
+/**
+ * El motivo del fin del último intento que terminó por su cuenta, o `null`. Un intento en curso que
+ * corta la parada del smoke termina `completed`, sin motivo, y no cuenta.
+ */
+function lastAttemptReason(connections: readonly DerivSessionConnection[]): string | null {
+  const end = connections.findLast((connection) => connection.end.status !== 'completed')?.end;
+  return end === undefined || end.status === 'completed' ? null : end.reason;
+}
+
 /** Las horas de un tick, en ms desde la época: el precio nunca sale del log en memoria. */
 interface TickTimes {
   readonly event: number;
@@ -191,7 +213,11 @@ interface TickTimes {
 export interface SmokeInput {
   readonly alert?: OperationalAlert;
   readonly connect: SocketFactory;
-  /** Duración de la sesión, desde su primera apertura durable. */
+  /**
+   * Duración de la sesión, desde su primera apertura durable. También es el límite para conectar:
+   * si a esa duración desde el inicio del smoke el log no tiene ningún `ConnectionOpened`, el smoke
+   * para la sesión y falla con `never_connected`.
+   */
   readonly durationSeconds: number;
   /** Archivo de esquemas esperado; por defecto, la release fijada. */
   readonly expected?: ExpectedSchemaArchive;
@@ -218,10 +244,12 @@ export interface SmokeInput {
  * memoria siempre tomado y el cierre previsto a la duración pedida. Nada se escribe en disco,
  * PostgreSQL ni almacenamiento de objetos, y todo se borra al terminar (ADR-0004 §13). Una
  * desconexión no prevista se reconecta y se recupera; con `interruptAfterSeconds`, la sesión
- * corta su propio socket una vez. Pasa si la sesión terminó `completed`, llegó al menos un tick y
- * la última conexión cerró con el cierre previsto, que quedó en el log. Además, sin corte, no hubo
- * ninguna reconexión; con él, hubo exactamente una, la del corte, y la última recuperación que
- * quedó en el log es `complete`.
+ * corta su propio socket una vez. Si a la duración pedida desde su inicio todavía no abrió ninguna
+ * conexión, el smoke para la sesión y falla con `never_connected`. Pasa si la sesión terminó
+ * `completed`, llegó al menos un tick y el último intento cerró con el cierre previsto, que quedó
+ * en el log. Además, sin corte, no hubo ninguna reconexión; con él, hubo exactamente una, la que
+ * siguió al corte de la primera conexión abierta, y la última recuperación que quedó en el log es
+ * `complete`. Un intento que no llegó a abrirse no cuenta como conexión ni como reconexión.
  */
 export async function runSmoke(input: SmokeInput): Promise<SmokeReport> {
   const startedAt = input.now();
@@ -287,12 +315,33 @@ export async function runSmoke(input: SmokeInput): Promise<SmokeReport> {
     },
     symbol: input.symbol,
   });
-  const result = await session.done;
+  // El plazo del cierre previsto solo empieza con la primera apertura durable: sin ella, la sesión
+  // lo intentaría sin fin. Si a la duración pedida desde el inicio del smoke el log todavía no
+  // tiene ningún `ConnectionOpened`, el smoke para la sesión.
+  const connectBound = { fired: false };
+  const cancelConnectBound = input.scheduler.schedule(input.durationSeconds * 1000, () => {
+    if (!sourceLog.rows.some((row) => row.kind === 'connection_opened')) {
+      connectBound.fired = true;
+      session.stop();
+    }
+  });
+  const result = await session.done.finally(cancelConnectBound);
   const finishedAt = input.now();
+  // La parada del límite deja la sesión `completed`; un fin `failed` conserva su motivo.
+  const end: SmokeReport['end'] =
+    connectBound.fired && result.end.status === 'completed'
+      ? {
+          detail: lastAttemptReason(result.connections),
+          reason: NEVER_CONNECTED,
+          status: 'failed',
+        }
+      : result.end;
 
-  const { connections } = result;
-  const closure = connections.at(-1)?.closure ?? null;
-  const reconnections = Math.max(0, connections.length - 1);
+  // Un intento que no llegó a abrirse no es una conexión: no tuvo cierre, así que tampoco deja una
+  // reconexión. El cierre del resultado es el del último intento.
+  const closure = result.connections.at(-1)?.closure ?? null;
+  const opened = result.connections.filter((connection) => connection.connection_id !== null);
+  const reconnections = Math.max(0, opened.length - 1);
   const recovery = lastDurableRecovery(result.recoveries);
   const ticks = subscriptions.reduce((count, times) => count + times.length, 0);
   const plannedClose =
@@ -301,10 +350,9 @@ export async function runSmoke(input: SmokeInput): Promise<SmokeReport> {
     interruptAfterSeconds === null
       ? reconnections === 0
       : reconnections === 1 &&
-        connections[0]?.closure?.reason === SMOKE_INTERRUPT_REASON &&
+        opened[0]?.closure?.reason === SMOKE_INTERRUPT_REASON &&
         recovery?.status === 'complete';
-  const passed =
-    result.end.status === 'completed' && ticks > 0 && plannedClose && reconnectedAsAsked;
+  const passed = end.status === 'completed' && ticks > 0 && plannedClose && reconnectedAsAsked;
   const delay = (tick: TickTimes) => tick.received - tick.event;
   const firstTick = subscriptions[0]?.[0];
   const snapshot = result.catalog?.snapshot ?? null;
@@ -314,11 +362,11 @@ export async function runSmoke(input: SmokeInput): Promise<SmokeReport> {
         ? null
         : { content_sha256: snapshot.content_sha256, entry_count: snapshot.entry_count },
     closure,
-    connections: connections.length,
+    connections: opened.length,
     connector_version: DERIV_CONNECTOR_VERSION,
     delivery_delay_ms: distribution(subscriptions.flatMap((times) => times.slice(1).map(delay))),
     duration_seconds: input.durationSeconds,
-    end: result.end,
+    end,
     finished_at_utc: finishedAt,
     first_tick_delay_ms: firstTick === undefined ? null : delay(firstTick),
     frames: {
