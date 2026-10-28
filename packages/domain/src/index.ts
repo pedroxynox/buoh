@@ -9,7 +9,12 @@ export {
   type CatalogConversionResult,
   type CatalogResponseSchema,
 } from './catalog.js';
-export { CONDITION_HEALTH, deriveHealthReport, type HealthInput } from './health.js';
+export {
+  CONDITION_HEALTH,
+  deriveHealthReport,
+  unobservedHealthReport,
+  type HealthInput,
+} from './health.js';
 export {
   JsonLexemeError,
   parseJsonPreservingNumbers,
@@ -27,6 +32,7 @@ export {
   CANONICALIZATION_VERSION,
   CONTRACT_SCHEMA_VERSION,
   createPipelineProfile,
+  derivationThresholds,
   NORMALIZER_VERSION,
   publicationThresholds,
   QUALITY_RULE_VERSION,
@@ -53,6 +59,7 @@ export {
   deriveMarketData,
   RESOLUTION_REASONS,
   type DerivedMarketData,
+  type PendingGap,
 } from './quality.js';
 export {
   appendSegmentStats,

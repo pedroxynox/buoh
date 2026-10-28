@@ -15,6 +15,7 @@ import {
 import {
   CANONICALIZATION_VERSION,
   CONTRACT_SCHEMA_VERSION,
+  publicationThresholds,
   SEGMENT_POLICY_VERSION,
   type PipelineProfile,
 } from './profile.js';
@@ -124,6 +125,8 @@ function collectSymbols(events: readonly SourceEvent[], derived: DerivedMarketDa
  */
 export function buildDatasetPublication(input: PublicationInput): DatasetPublication {
   const { profile } = input;
+  // Un perfil de medición nunca publica (ADR-0012 §8 y ADR-0015 §2): falla antes de leer nada.
+  publicationThresholds(profile);
   const segments = input.segments.map((segment) =>
     segment.map((event) => sourceEventSchema.parse(event)),
   );
