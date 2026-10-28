@@ -101,12 +101,13 @@ export interface DerivSessionInput extends Pick<
   readonly random: () => number;
   /**
    * Duración prevista de toda la sesión, en milisegundos (ADR-0015 §4 y §9): un entero positivo, o
-   * `startDerivSession` lanza `TypeError`. Cuenta desde el primer `ConnectionOpened` durable de la
-   * sesión, y al cumplirse la sesión pide el cierre previsto (`finish`) a la conexión en curso. Si
-   * queda una recuperación de historia pendiente, lo pide después de su resultado, como mucho
-   * 300 000 ms después del plazo; pasado ese tope, para. Después de `finish` no reconecta ni pide más
-   * historia. Es de la sesión, nunca de una conexión: la sesión no la pasa a sus conexiones. Sin
-   * ella, la sesión sigue hasta la parada o un fallo.
+   * `startDerivSession` lanza `TypeError`. Cuenta desde el primer tick durable de la sesión, como el
+   * corte (`interruptAfterMs`), y al cumplirse la sesión pide el cierre previsto (`finish`) a la
+   * conexión en curso; sin ningún tick durable, no empieza a contar. Si queda una recuperación de
+   * historia pendiente, lo pide después de su resultado, como mucho 300 000 ms después del plazo;
+   * pasado ese tope, para. Después de `finish` no reconecta ni pide más historia. Es de la sesión,
+   * nunca de una conexión: la sesión no la pasa a sus conexiones. Sin ella, la sesión sigue hasta la
+   * parada o un fallo.
    */
   readonly durationMs?: number;
   /**
@@ -115,7 +116,8 @@ export interface DerivSessionInput extends Pick<
    * cumplirse corta una sola vez la conexión en curso con `interrupt('smoke_interrupt')`, como una
    * pérdida (`transport_error`): la sesión reconecta y recupera el hueco como tras cualquier cierre
    * no pedido. No corta nada si entonces no hay conexión en curso, porque espera para reconectar, o
-   * si ya se cumplió el plazo del cierre previsto (`durationMs`). Sin él, la sesión nunca corta su
+   * si ya se cumplió el plazo del cierre previsto (`durationMs`), que cuenta desde el mismo tick: eso
+   * solo pasa con un corte que no es menor que la duración. Sin él, la sesión nunca corta su
    * conexión.
    */
   readonly interruptAfterMs?: number;
@@ -286,7 +288,7 @@ class SessionRun {
   readonly #recoveries: Promise<HistoryRecoveryOutcome>[] = [];
   /** La vigilancia del hueco no pudo seguir: la sesión termina cuando la conexión termine. */
   #failure: GapWatchFailure | null = null;
-  /** Ya empezó a contar el plazo del cierre previsto. */
+  /** Ya empezó a contar el plazo del cierre previsto, con el primer tick durable de la sesión. */
   #deadlineArmed = false;
   #cancelDeadline: (() => void) | null = null;
   /** El plazo ya se cumplió: se pide el cierre previsto en cuanto no quede recuperación pendiente. */
@@ -384,9 +386,6 @@ class SessionRun {
       now: input.now,
       profile: preparation.profile,
       registry: input.registry,
-      onConnectionOpened: () => {
-        this.#onConnectionOpened();
-      },
       // Siempre con el bloqueo vigente: después de perderlo, la sesión toma otro antes de escribir.
       reopenLog: () => input.openLog(this.#heldLock()),
       sink: {
@@ -398,6 +397,7 @@ class SessionRun {
         },
         tick: (tick) => {
           this.#firstTickAt ??= Date.parse(input.now());
+          this.#armDeadline();
           this.#armInterrupt();
           input.sink.tick(tick);
           // Ya durable: si es posterior al high-watermark del hueco, la sesión vuelve a derivar.
@@ -695,10 +695,11 @@ class SessionRun {
   }
 
   /**
-   * El primer `ConnectionOpened` durable de la sesión pone en marcha el plazo del cierre previsto:
-   * `durationMs` después (ADR-0015 §4 y §9).
+   * El primer tick durable de la sesión pone en marcha el plazo del cierre previsto: `durationMs`
+   * después (ADR-0015 §4 y §9). Es el mismo instante desde el que cuenta el corte del smoke, así que
+   * un corte menor que la duración llega siempre antes del plazo.
    */
-  #onConnectionOpened(): void {
+  #armDeadline(): void {
     const { durationMs } = this.#input;
     if (durationMs === undefined || this.#deadlineArmed || this.#stopped) {
       return;

@@ -2,7 +2,6 @@ import {
   connectionClosedSchema,
   rawSourceFrameSchema,
   sha256Hex,
-  type ConnectionOpened,
   type RawSourceFrame,
   type SourceEvent,
 } from '@buoh/contracts';
@@ -118,12 +117,6 @@ export interface RawFirstIngestorInput {
   /** Reabre el log desde los almacenes tras un fallo de persistencia. */
   readonly reopenLog: () => Promise<SourceEventLog>;
   readonly sink: TickSink;
-  /**
-   * Recibe cada `ConnectionOpened` que `receiveEvent` hizo durable, después de resolver con él las
-   * condiciones operativas. La sesión cuenta desde el primero el plazo de su cierre previsto
-   * (ADR-0015 §4 y §9).
-   */
-  readonly onConnectionOpened?: (event: ConnectionOpened) => void;
 }
 
 /**
@@ -341,11 +334,8 @@ export class RawFirstIngestor {
     const outcome = await this.#append(event, event.event_id);
     if (outcome.status === 'durable') {
       const resolution = await this.#input.registry.resolveWith(event);
-      if (event.kind === 'connection_opened') {
-        if (resolution.status === 'recorded') {
-          this.#paused = this.#input.registry.openConditions().length > 0;
-        }
-        this.#input.onConnectionOpened?.(event);
+      if (event.kind === 'connection_opened' && resolution.status === 'recorded') {
+        this.#paused = this.#input.registry.openConditions().length > 0;
       }
     }
     return outcome;

@@ -78,9 +78,9 @@ export interface SmokeReport {
   readonly duration_seconds: number;
   /**
    * Cómo terminó la sesión (`DerivSessionResult.end`). Si el smoke la paró porque a la duración
-   * pedida no había abierto ninguna conexión y la sesión terminó `completed`, es `failed` con
-   * `never_connected`, y `detail` es el motivo del último intento que terminó por su cuenta (por
-   * ejemplo `connect_failed` o `connect_timeout`) o `null`.
+   * pedida no había llegado ningún tick durable y la sesión terminó `completed`, es `failed` con
+   * `no_ticks`, y `detail` es el motivo del último intento que terminó por su cuenta (por ejemplo
+   * `connect_failed`, `connect_timeout` o `remote_closed`) o `null`.
    */
   readonly end: DerivSessionResult['end'];
   readonly finished_at_utc: string;
@@ -192,8 +192,8 @@ const SMOKE_LOCK: SessionLockProvider = {
   acquire: () => Promise.resolve({ held: true, release: () => Promise.resolve() }),
 };
 
-/** Motivo del fin cuando el smoke para una sesión que no abrió ninguna conexión a tiempo. */
-const NEVER_CONNECTED = 'never_connected';
+/** Motivo del fin cuando el smoke para una sesión que no tuvo ningún tick durable a tiempo. */
+const NO_TICKS = 'no_ticks';
 
 /**
  * El motivo del fin del último intento que terminó por su cuenta, o `null`. Un intento en curso que
@@ -214,9 +214,9 @@ export interface SmokeInput {
   readonly alert?: OperationalAlert;
   readonly connect: SocketFactory;
   /**
-   * Duración de la sesión, desde su primera apertura durable. También es el límite para conectar:
-   * si a esa duración desde el inicio del smoke el log no tiene ningún `ConnectionOpened`, el smoke
-   * para la sesión y falla con `never_connected`.
+   * Duración de la sesión, desde su primer tick durable. También es el límite para ese tick: si a
+   * esa duración desde el inicio del smoke no llegó ningún tick durable, el smoke para la sesión y
+   * falla con `no_ticks`.
    */
   readonly durationSeconds: number;
   /** Archivo de esquemas esperado; por defecto, la release fijada. */
@@ -244,8 +244,8 @@ export interface SmokeInput {
  * memoria siempre tomado y el cierre previsto a la duración pedida. Nada se escribe en disco,
  * PostgreSQL ni almacenamiento de objetos, y todo se borra al terminar (ADR-0004 §13). Una
  * desconexión no prevista se reconecta y se recupera; con `interruptAfterSeconds`, la sesión
- * corta su propio socket una vez. Si a la duración pedida desde su inicio todavía no abrió ninguna
- * conexión, el smoke para la sesión y falla con `never_connected`. Pasa si la sesión terminó
+ * corta su propio socket una vez. Si a la duración pedida desde su inicio todavía no llegó ningún
+ * tick durable, el smoke para la sesión y falla con `no_ticks`. Pasa si la sesión terminó
  * `completed`, llegó al menos un tick y el último intento cerró con el cierre previsto, que quedó
  * en el log. Además, sin corte, no hubo ninguna reconexión; con él, hubo exactamente una, la que
  * siguió al corte de la primera conexión abierta, y la última recuperación que quedó en el log es
@@ -315,24 +315,24 @@ export async function runSmoke(input: SmokeInput): Promise<SmokeReport> {
     },
     symbol: input.symbol,
   });
-  // El plazo del cierre previsto solo empieza con la primera apertura durable: sin ella, la sesión
-  // lo intentaría sin fin. Si a la duración pedida desde el inicio del smoke el log todavía no
-  // tiene ningún `ConnectionOpened`, el smoke para la sesión.
-  const connectBound = { fired: false };
-  const cancelConnectBound = input.scheduler.schedule(input.durationSeconds * 1000, () => {
-    if (!sourceLog.rows.some((row) => row.kind === 'connection_opened')) {
-      connectBound.fired = true;
+  // El plazo del cierre previsto solo empieza con el primer tick durable de la sesión: sin él, la
+  // sesión seguiría sin fin. Si a la duración pedida desde el inicio del smoke todavía no llegó
+  // ningún tick durable (cada uno entra en una suscripción), el smoke para la sesión.
+  const tickBound = { fired: false };
+  const cancelTickBound = input.scheduler.schedule(input.durationSeconds * 1000, () => {
+    if (subscriptions.length === 0) {
+      tickBound.fired = true;
       session.stop();
     }
   });
-  const result = await session.done.finally(cancelConnectBound);
+  const result = await session.done.finally(cancelTickBound);
   const finishedAt = input.now();
   // La parada del límite deja la sesión `completed`; un fin `failed` conserva su motivo.
   const end: SmokeReport['end'] =
-    connectBound.fired && result.end.status === 'completed'
+    tickBound.fired && result.end.status === 'completed'
       ? {
           detail: lastAttemptReason(result.connections),
-          reason: NEVER_CONNECTED,
+          reason: NO_TICKS,
           status: 'failed',
         }
       : result.end;

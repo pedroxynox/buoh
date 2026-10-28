@@ -484,16 +484,17 @@ describe('startDerivSession: el cierre previsto por duración (ADR-0015 §4 y §
     },
   );
 
-  it('sin recuperación pendiente, pide forget_all al cumplirse la duración, contada desde el primer ConnectionOpened durable de la sesión y no desde la suscripción', async () => {
+  it('sin recuperación pendiente, pide forget_all al cumplirse la duración, contada desde el primer tick durable de la sesión y no desde la apertura', async () => {
     const run = await sessionHarness({ durationMs: 10_000 });
     run.socket(1).open();
     await settle();
-    // El catálogo responde 300 ms después de la apertura, y la suscripción enseguida.
+    // El catálogo responde 300 ms después de la apertura, y el primer tick llega enseguida: el plazo
+    // vence a las 10:00:10.300.
     await run.clock.advance(300);
     run.socket(1).text(derivMessages.catalog(1));
     await settle();
     await tick(run.socket(1), START_EPOCH, '100.25');
-    await run.clock.advance(9699);
+    await run.clock.advance(9999);
     expect(forgetAll(run.socket(1))).toEqual([]);
     await run.clock.advance(1);
     expect(forgetAll(run.socket(1))).toEqual([{ forget_all: 'ticks', req_id: 3 }]);
@@ -514,11 +515,17 @@ describe('startDerivSession: el cierre previsto por duración (ADR-0015 §4 y §
     expect(run.clock.pendingDelays()).toEqual([]);
   });
 
-  it('con una reconexión antes del plazo, pide forget_all a los 10 000 ms de la primera apertura durable, no de la segunda, y no deja ningún otro plazo pendiente', async () => {
+  it('con una reconexión antes del plazo, pide forget_all a los 10 000 ms del primer tick durable de la sesión, no del primero de la segunda conexión, y no deja ningún otro plazo pendiente', async () => {
     const run = await sessionHarness({ durationMs: 10_000 });
-    // La primera conexión abre a las 10:00:00 y se pierde a las 10:00:03.
-    await run.subscribe(run.socket(1), START_EPOCH, '100.25');
-    await run.clock.advance(3000);
+    // La primera conexión abre a las 10:00:00, su primer tick queda durable a las 10:00:00.200 y se
+    // pierde a las 10:00:03.
+    run.socket(1).open();
+    await settle();
+    run.socket(1).text(derivMessages.catalog(1));
+    await settle();
+    await run.clock.advance(200);
+    await tick(run.socket(1), START_EPOCH, '100.25');
+    await run.clock.advance(2800);
     run.socket(1).emit({ code: 1001, kind: 'closed' });
     await settle();
     // La segunda abre a las 10:00:03.500 y recupera el hueco antes del plazo.
@@ -531,8 +538,8 @@ describe('startDerivSession: el cierre previsto por duración (ADR-0015 §4 y §
       .text(derivMessages.history(3, [START_EPOCH, START_EPOCH + 2], ['100.25', '100.5']));
     await settle();
 
-    // Las 10:00:05.500: el plazo vence a las 10:00:10.
-    await run.clock.advance(4499);
+    // Las 10:00:05.500: el plazo vence a las 10:00:10.200.
+    await run.clock.advance(4699);
     expect(forgetAll(run.socket(2))).toEqual([]);
     await run.clock.advance(1);
     expect(forgetAll(run.socket(2))).toEqual([{ forget_all: 'ticks', req_id: 4 }]);
@@ -558,7 +565,7 @@ describe('startDerivSession: el cierre previsto por duración (ADR-0015 §4 y §
   });
 
   it('si la duración se cumple durante los 2000 ms antes de pedir la historia, la pide igual, espera su resultado y después pide forget_all', async () => {
-    // La conexión abre a las 10:00:00: el plazo vence a las 10:00:01.
+    // El primer tick durable llega a las 10:00:00: el plazo vence a las 10:00:01.
     const run = await sessionHarness({ durationMs: 1000, events: previousConnectionEvents() });
     await run.subscribe(run.socket(1), E, '100.75');
     await run.clock.advance(1000);
@@ -844,16 +851,18 @@ describe('startDerivSession: el corte del smoke de reconexión (ADR-0015 §9)', 
   });
 
   it('si el plazo del cierre previsto ya se cumplió, no corta nada: la conexión termina con el cierre previsto aunque forget_all todavía no haya respondido', async () => {
-    // El plazo vence a las 10:00:10, desde la apertura; el corte, a las 10:00:10.500, desde el
-    // primer tick, que llega a las 10:00:01.
-    const run = await sessionHarness({ durationMs: 10_000, interruptAfterMs: 9500 });
+    // Los dos cuentan desde el primer tick durable, que llega a las 10:00:01: con un corte que no es
+    // menor que la duración, el plazo vence antes, a las 10:00:11, y el corte, a las 10:00:11.500.
+    const run = await sessionHarness({ durationMs: 10_000, interruptAfterMs: 10_500 });
     run.socket(1).open();
     await settle();
     await run.clock.advance(1000);
     run.socket(1).text(derivMessages.catalog(1));
     await settle();
     await tick(run.socket(1), START_EPOCH + 1, '100.25');
-    await run.clock.advance(9000);
+    await run.clock.advance(9999);
+    expect(forgetAll(run.socket(1))).toEqual([]);
+    await run.clock.advance(1);
     expect(forgetAll(run.socket(1))).toEqual([{ forget_all: 'ticks', req_id: 3 }]);
     await run.clock.advance(500);
     expect(run.socket(1).ended).toBeNull();

@@ -715,7 +715,7 @@ describe('startDerivSession: el bloqueo de la fuente (ADR-0015 §3, «Bloqueo»)
     await run.done;
   });
 
-  it('si al tomar uno nuevo lo tiene otro proceso, termina failed con source_lock_taken, sin otro socket ni escribir en el log', async () => {
+  it('si al tomar uno nuevo lo tiene otro proceso, termina failed con source_lock_taken, sin otro socket ni escribir en el log ni en el registro operativo', async () => {
     const run = await sessionHarness({ locks: ['lock', 'taken'] });
     await run.subscribe(run.socket(1), START_EPOCH);
     run.socket(1).emit({ code: 1001, kind: 'closed' });
@@ -729,6 +729,9 @@ describe('startDerivSession: el bloqueo de la fuente (ADR-0015 §3, «Bloqueo»)
     expect(run.timeline).toEqual(['acquire:1', 'connect:1', 'release:1', 'acquire:taken']);
     expect(run.sourceLog.rows).toHaveLength(rows);
     expect(run.sourceLog.closed).toEqual([]);
+    // Sin el bloqueo no intenta cerrar el segmento: esa escritura fallaría y dejaría un
+    // persistence_unavailable que no corresponde a ninguna pérdida.
+    expect(run.operational.incidents).toEqual([]);
     await run.clock.advance(600_000);
     expect(run.sockets).toHaveLength(1);
   });
