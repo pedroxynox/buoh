@@ -71,10 +71,12 @@ export class FakeSessionLock implements SessionLock {
 /**
  * Lo que responde cada `acquire`, en orden: `lock` (un bloqueo nuevo), `lost` (un bloqueo que ya se
  * perdió: `held` es `false`), `taken` (lo tiene otro proceso: `null`), `unavailable` (PostgreSQL no
- * responde: lanza `SourceLockUnavailableError` con el motivo `ECONNREFUSED`) o `bug` (un error de
- * programación del proveedor: lanza un `TypeError`). Después de la lista, siempre un bloqueo nuevo.
+ * responde: lanza `SourceLockUnavailableError` con una causa de código `ECONNREFUSED`),
+ * `{ unavailable: causa }` (igual, con esa causa) o `bug` (un error de programación del proveedor:
+ * lanza un `TypeError`). Después de la lista, siempre un bloqueo nuevo.
  */
-export type LockAnswer = 'bug' | 'lock' | 'lost' | 'taken' | 'unavailable';
+export type LockAnswer =
+  'bug' | 'lock' | 'lost' | 'taken' | 'unavailable' | { readonly unavailable: unknown };
 
 /** El error de programación que lanza un `acquire` con la respuesta `bug`. */
 export const LOCK_BUG = new TypeError('sintético');
@@ -111,10 +113,13 @@ export class FakeLockProvider implements SessionLockProvider {
       this.#timeline.push('acquire:taken');
       return Promise.resolve(null);
     }
-    if (answer === 'unavailable') {
+    if (typeof answer === 'object' || answer === 'unavailable') {
       this.#timeline.push('acquire:unavailable');
-      const cause = Object.assign(new Error('sintético'), { code: 'ECONNREFUSED' });
-      return Promise.reject(new SourceLockUnavailableError('ECONNREFUSED', { cause }));
+      const cause =
+        typeof answer === 'object'
+          ? answer.unavailable
+          : Object.assign(new Error('sintético'), { code: 'ECONNREFUSED' });
+      return Promise.reject(new SourceLockUnavailableError(cause));
     }
     if (answer === 'bug') {
       this.#timeline.push('acquire:bug');

@@ -6,7 +6,14 @@ import { contentKey } from '../src/object-keys.js';
 import { settle, START_EPOCH, syntheticSchemas, uuid } from './support/connection-harness.js';
 import { derivMessages, type FakeDerivSocket } from './support/deriv-fixtures.js';
 import { type MemoryObjectStore } from './support/memory-stores.js';
-import { E, PREVIOUS, previousConnectionEvents, REQUEST, S } from './support/recovery-harness.js';
+import {
+  E,
+  PREVIOUS,
+  previousConnectionEvents,
+  REQUEST,
+  S,
+  stoppedBeforeRecoveryEvents,
+} from './support/recovery-harness.js';
 import { sessionHarness, type SessionRun } from './support/session-harness.js';
 
 // La sesión pide la historia de un hueco (ADR-0015 §4, «Cuándo» y «Conexión perdida o parada») y
@@ -201,6 +208,36 @@ describe('startDerivSession: cuándo pide la historia (ADR-0015 §4, «Cuándo»
     ]);
   });
 
+  it('un hueco cuyo fin ya se conoce al empezar la conexión, porque la ejecución anterior paró tras el primer tick posterior al cierre, se pide 2000 ms después del primer tick de la conexión nueva, con el rango de entonces', async () => {
+    const run = await sessionHarness({ events: stoppedBeforeRecoveryEvents() });
+    // Desde S + 1 ms hasta el primer tick posterior al cierre, S + 50, − 1 ms.
+    const known = { ...GAP, to_event_time_utc: '2026-03-02T09:59:49.999Z' };
+    expect(await pendingGaps(run)).toEqual([known]);
+    // Un segundo sin ticks: la conexión no pide nada al empezar.
+    await run.clock.advance(1000);
+    await run.subscribe(run.socket(1), E, '100.75');
+    await run.clock.advance(HISTORY_DELAY_MS - 1);
+    expect(pages(run.socket(1))).toEqual([]);
+    await run.clock.advance(1);
+    expect(pages(run.socket(1))).toEqual([page(3, S, S + 50)]);
+
+    run.socket(1).text(derivMessages.history(3, [S, S + 50], ['100.25', '100.5']));
+    await settle();
+    expect(await pendingGaps(run)).toEqual([]);
+    const result = await stopSession(run, run.socket(1), 4);
+    expect(result.recoveries).toEqual([
+      expect.objectContaining({
+        result: expect.objectContaining({
+          connection_id: uuid(1),
+          from_event_time_utc: known.from_event_time_utc,
+          status: 'complete',
+          to_event_time_utc: known.to_event_time_utc,
+        }) as unknown,
+        status: 'finished',
+      }),
+    ]);
+  });
+
   it('si el primer tick posterior llega mientras todavía deriva el log al empezar la conexión, lo vuelve a derivar al terminar: no espera al tick siguiente', async () => {
     let reads = 0;
     const gate = Promise.withResolvers<undefined>();
@@ -275,6 +312,45 @@ describe('startDerivSession: la recuperación y el fin de la conexión (ADR-0015
         status: 'finished',
       }),
     ]);
+  });
+
+  it('si la conexión termina mientras vuelve a derivar el log por un tick posterior, esa lectura ya no pide nada al acabar: ni página ni recuperación abandonada, y solo queda la espera antes de reconectar', async () => {
+    let reads = 0;
+    const gate = Promise.withResolvers<undefined>();
+    const run = await sessionHarness({
+      beforeStart: ({ sourceLog }) => {
+        const list = sourceLog.listClosedSegments.bind(sourceLog);
+        vi.spyOn(sourceLog, 'listClosedSegments').mockImplementation(async (...args) => {
+          reads += 1;
+          // La cuarta lectura, tras la del arranque, la de la reparación y la del principio de la
+          // conexión, es la que pide el tick posterior al cierre.
+          if (reads === 4) {
+            await gate.promise;
+          }
+          return list(...args);
+        });
+      },
+      closeSegment: true,
+      events: previousConnectionEvents(),
+    });
+    // La suscripción repite el tick del high-watermark; el de E vuelve a derivar el log.
+    await run.subscribe(run.socket(1), S, '100.25');
+    await tick(run.socket(1), E, '100.75');
+    expect(reads).toBe(4);
+    run.socket(1).emit({ code: 1001, kind: 'closed' });
+    await settle();
+    // La lectura acaba con la conexión ya terminada; con ella, el hueco tenía fin.
+    gate.resolve(undefined);
+    await settle();
+
+    expect(run.clock.pendingDelays()).toEqual([500]);
+    // Reconecta, y pasan los 2000 ms que habría esperado.
+    await run.clock.advance(HISTORY_DELAY_MS);
+    expect(pages(run.socket(1))).toEqual([]);
+    run.session.stop();
+    const result = await run.done;
+    expect(result.end).toEqual({ status: 'completed' });
+    expect(result.recoveries).toEqual([]);
   });
 
   it('una parada durante los 2000 ms no pide ninguna página ni deja recuperación en el resultado, y el hueco sigue pendiente', async () => {
@@ -438,6 +514,49 @@ describe('startDerivSession: el cierre previsto por duración (ADR-0015 §4 y §
     expect(run.clock.pendingDelays()).toEqual([]);
   });
 
+  it('con una reconexión antes del plazo, pide forget_all a los 10 000 ms de la primera apertura durable, no de la segunda, y no deja ningún otro plazo pendiente', async () => {
+    const run = await sessionHarness({ durationMs: 10_000 });
+    // La primera conexión abre a las 10:00:00 y se pierde a las 10:00:03.
+    await run.subscribe(run.socket(1), START_EPOCH, '100.25');
+    await run.clock.advance(3000);
+    run.socket(1).emit({ code: 1001, kind: 'closed' });
+    await settle();
+    // La segunda abre a las 10:00:03.500 y recupera el hueco antes del plazo.
+    await run.clock.advance(500);
+    await run.subscribe(run.socket(2), START_EPOCH + 2, '100.5');
+    await run.clock.advance(HISTORY_DELAY_MS);
+    expect(pages(run.socket(2))).toEqual([page(3, START_EPOCH, START_EPOCH + 2)]);
+    run
+      .socket(2)
+      .text(derivMessages.history(3, [START_EPOCH, START_EPOCH + 2], ['100.25', '100.5']));
+    await settle();
+
+    // Las 10:00:05.500: el plazo vence a las 10:00:10.
+    await run.clock.advance(4499);
+    expect(forgetAll(run.socket(2))).toEqual([]);
+    await run.clock.advance(1);
+    expect(forgetAll(run.socket(2))).toEqual([{ forget_all: 'ticks', req_id: 4 }]);
+    run.socket(2).text(derivMessages.forgetAll(4));
+    const result = await run.done;
+    expect(result.end).toEqual({ status: 'completed' });
+    expect(result.recoveries).toEqual([
+      expect.objectContaining({ durable: true, status: 'finished' }),
+    ]);
+    expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
+  it('una parada antes del plazo lo cancela: después de done no queda ningún temporizador', async () => {
+    const run = await sessionHarness({ durationMs: 10_000 });
+    await run.subscribe(run.socket(1), START_EPOCH, '100.25');
+    await run.clock.advance(1000);
+    run.session.stop();
+    expect(forgetAll(run.socket(1))).toEqual([{ forget_all: 'ticks', req_id: 3 }]);
+    run.socket(1).text(derivMessages.forgetAll(3));
+
+    expect((await run.done).end).toEqual({ status: 'completed' });
+    expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
   it('si la duración se cumple durante los 2000 ms antes de pedir la historia, la pide igual, espera su resultado y después pide forget_all', async () => {
     // La conexión abre a las 10:00:00: el plazo vence a las 10:00:01.
     const run = await sessionHarness({ durationMs: 1000, events: previousConnectionEvents() });
@@ -517,6 +636,52 @@ describe('startDerivSession: el cierre previsto por duración (ADR-0015 §4 y §
         status: 'finished',
       }),
     ]);
+    expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
+  it('si la duración se cumple justo después de un cierre no pedido, antes de que esa conexión termine, finish no hace nada: reconecta, recupera el hueco que dejó ese cierre y después pide forget_all', async () => {
+    const run = await sessionHarness({ deferClose: true, durationMs: 5000 });
+    await run.subscribe(run.socket(1), START_EPOCH, '100.25');
+    await run.clock.advance(4999);
+    // Un error del transporte decide el cierre; el aviso de ws llega más tarde.
+    run.socket(1).emit({ code: 'ECONNRESET', kind: 'error' });
+    await settle();
+    // El plazo vence con ese cierre ya decidido: la conexión no pide forget_all.
+    await run.clock.advance(1);
+    expect(forgetAll(run.socket(1))).toEqual([]);
+    run.socket(1).finishClose();
+    await settle();
+
+    // Reconecta tras la espera del primer intento, con el tope del cierre previsto en marcha.
+    expect(run.clock.pendingDelays()).toEqual([500, PLANNED_CLOSE_BOUND_MS]);
+    await run.clock.advance(500);
+    await run.subscribe(run.socket(2), START_EPOCH + 6, '100.5');
+    await run.clock.advance(HISTORY_DELAY_MS);
+    expect(pages(run.socket(2))).toEqual([page(3, START_EPOCH, START_EPOCH + 6)]);
+    expect(forgetAll(run.socket(2))).toEqual([]);
+    run
+      .socket(2)
+      .text(derivMessages.history(3, [START_EPOCH, START_EPOCH + 6], ['100.25', '100.5']));
+    await settle();
+    expect(forgetAll(run.socket(2))).toEqual([{ forget_all: 'ticks', req_id: 4 }]);
+
+    run.socket(2).text(derivMessages.forgetAll(4));
+    await settle();
+    run.socket(2).finishClose();
+    const result = await run.done;
+    expect(result.end).toEqual({ status: 'completed' });
+    expect(result.connections.map((connection) => connection.end)).toEqual([
+      { detail: 'ECONNRESET', reason: 'transport_error', status: 'disconnected' },
+      { status: 'completed' },
+    ]);
+    expect(result.waits_ms).toEqual([500]);
+    expect(result.recoveries).toEqual([
+      expect.objectContaining({
+        result: expect.objectContaining({ status: 'complete' }) as unknown,
+        status: 'finished',
+      }),
+    ]);
+    expect(await pendingGaps(run)).toEqual([]);
     expect(run.clock.pendingDelays()).toEqual([]);
   });
 

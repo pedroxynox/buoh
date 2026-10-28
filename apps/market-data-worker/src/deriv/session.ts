@@ -36,14 +36,17 @@ export interface SessionLock {
 
 /**
  * PostgreSQL no respondió al tomar el bloqueo de la fuente: no dice nada de quién lo tiene, así que
- * la sesión espera y lo intenta otra vez (ADR-0015 §3, «Bloqueo»). `reason` es el motivo saneado de
- * la causa (`failureReason`), nunca su mensaje.
+ * la sesión espera y lo intenta otra vez (ADR-0015 §3, «Bloqueo»). Se crea con la causa, el error
+ * de la conexión o de la consulta, y la guarda como `cause`. `reason` sale de ella saneado
+ * (`failureReason`: su código o su nombre, nunca su mensaje, que puede llevar el rol, la base de
+ * datos o el host), y el mensaje solo lleva ese motivo.
  */
 export class SourceLockUnavailableError extends Error {
   readonly reason: string;
 
-  constructor(reason: string, options?: { cause?: unknown }) {
-    super(`Bloqueo de la fuente no disponible: ${reason}`, options);
+  constructor(cause: unknown) {
+    const reason = failureReason(cause);
+    super(`Bloqueo de la fuente no disponible: ${reason}`, { cause });
     this.name = 'SourceLockUnavailableError';
     this.reason = reason;
   }
@@ -51,7 +54,7 @@ export class SourceLockUnavailableError extends Error {
 
 /**
  * Toma el bloqueo de la fuente. En PostgreSQL envuelve `SourceLock.acquire`: un fallo de la conexión
- * o de la consulta lo convierte en `SourceLockUnavailableError`, con su motivo saneado.
+ * o de la consulta lo convierte en `new SourceLockUnavailableError(causa)`, que sanea el motivo.
  */
 export interface SessionLockProvider {
   /**
@@ -276,8 +279,8 @@ class SessionRun {
   /** El plazo ya se cumplió: se pide el cierre previsto en cuanto no quede recuperación pendiente. */
   #due = false;
   /**
-   * Ya se pidió el cierre previsto a una conexión (`finish`): desde entonces la sesión no reconecta ni
-   * empieza ninguna recuperación de historia.
+   * Una conexión aceptó el cierre previsto (`finish` devolvió `true`): desde entonces la sesión no
+   * reconecta ni empieza ninguna recuperación de historia.
    */
   #finishAsked = false;
   /** Cancela el tope de la espera a la recuperación pendiente después del plazo. */
@@ -319,9 +322,15 @@ class SessionRun {
     try {
       // Con el log sano y el bloqueo vigente, cierra el segmento abierto (ADR-0015 §3, «Parada»).
       // Un log que no pasa sus comprobaciones no se toca, uno fallido no lo cierra `rotate`, y uno
-      // desactualizado tras volver a tomar el bloqueo lo reabre antes con el bloqueo nuevo.
+      // desactualizado tras volver a tomar el bloqueo lo reabre antes con el bloqueo nuevo: si
+      // entonces su contenido no pasa las comprobaciones, el fin es `log_not_derivable` y el
+      // segmento queda abierto.
       if (this.#ingestor !== null && this.#lock?.held === true && !isNotDerivable(end)) {
-        await this.#ingestor.rotate('requested');
+        try {
+          await this.#ingestor.rotate('requested');
+        } catch (error) {
+          end = integrityEnd(error);
+        }
       }
     } finally {
       await this.#releaseLock();
@@ -656,12 +665,15 @@ class SessionRun {
     }
   }
 
-  /** Pide el cierre previsto a la conexión en curso; desde entonces la sesión ya no reconecta. */
+  /**
+   * Pide el cierre previsto a la conexión en curso; desde entonces la sesión ya no reconecta. Si
+   * esa conexión ya había decidido otro cierre, `finish` no hace nada: la sesión la trata como
+   * cualquier cierre no pedido, reconecta y pide el cierre previsto a la conexión siguiente cuando
+   * termina su recuperación (`#onSettled`).
+   */
   #finish(): void {
-    const connection = this.#connection;
-    if (connection !== null) {
+    if (this.#connection?.finish() === true) {
       this.#finishAsked = true;
-      connection.finish();
     }
   }
 

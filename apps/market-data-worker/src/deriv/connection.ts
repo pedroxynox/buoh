@@ -380,11 +380,13 @@ export class DerivConnection {
    * reintentos (ADR-0015 §4). Sin suscripción no hay nada que olvidar: cierra enseguida con
    * `requested` y motivo `requested`, también `completed`. Cancela la duración, y desde entonces no
    * empieza ninguna recuperación nueva. No hace nada si el cierre ya está decidido o si el cierre
-   * previsto ya se pidió.
+   * previsto ya se pidió. Devuelve `true` si el cierre previsto quedó pedido, ahora o antes, y
+   * `false` si no hizo nada porque el cierre ya estaba decidido: la conexión termina con ese
+   * cierre, que puede no ser el previsto (por ejemplo, el servidor cerró justo antes).
    */
-  finish(): void {
+  finish(): boolean {
     if (this.#closing !== null) {
-      return;
+      return false;
     }
     this.#closeAsked = true;
     this.#cancelDuration?.();
@@ -397,6 +399,7 @@ export class DerivConnection {
       // El cierre previsto espera a la recuperación en curso, con sus reintentos (ADR-0015 §4).
       this.#forgetAfterRecovery = true;
     }
+    return true;
   }
 
   /**

@@ -433,23 +433,32 @@ export class RawFirstIngestor {
   /**
    * Los source events durables del log (`SourceEventLog.readDurableSegments`), o `null` si el log tuvo
    * un fallo de persistencia y todavía no se reabrió: lo que tiene en memoria podría no ser lo
-   * durable, y la entrada sigue cerrada. No reabre nada. La sesión lo deriva durante una conexión
-   * para seguir el hueco pendiente (ADR-0015 §4); un fallo del log cierra esa conexión. Como
-   * `SourceEventLog.readDurableSegments`, lanza `LogReadError` si un almacén no responde y
-   * `LogIntegrityError` si el contenido no pasa sus comprobaciones.
+   * durable, y la entrada sigue cerrada. Un log fallido no lo reabre. Uno desactualizado
+   * (`markLogStale`) lo reabre antes, como las demás operaciones: si un almacén no responde al
+   * reabrirlo, queda `persistence_unavailable` con un ID nuevo como `observed_ref`, como tras un
+   * fallo, y da `null`. La sesión lo deriva durante una conexión para seguir el hueco pendiente
+   * (ADR-0015 §4); un fallo del log cierra esa conexión. Como `SourceEventLog.readDurableSegments`,
+   * lanza `LogReadError` si un almacén no responde al leer y `LogIntegrityError` si el contenido no
+   * pasa sus comprobaciones, también al reabrirlo.
    */
-  readDurableSegments(): Promise<SourceEvent[][] | null> {
-    return this.#logFailed ? Promise.resolve(null) : this.#log.readDurableSegments();
+  async readDurableSegments(): Promise<SourceEvent[][] | null> {
+    if (this.#logFailed) {
+      return null;
+    }
+    if (this.#logStale && (await this.#reopenLog(this.#input.nextId())) !== null) {
+      return null;
+    }
+    return this.#log.readDurableSegments();
   }
 
   /**
    * El log abierto ya no vale, aunque no falló. Lo usa la sesión después de tomar un bloqueo nuevo
    * (ADR-0015 §3, «Conexión anterior»): el log abierto escribe con el bloqueo anterior, y en los
    * segundos que tardó en notarse la pérdida otro proceso pudo escribir. Lo siguiente que use el log
-   * (un frame, un evento, la reparación del cierre o `rotate`) lo vuelve a abrir antes desde los
-   * almacenes con `reopenLog`, sin registrar nada ni cerrar la entrada. Si un almacén no responde al
-   * reabrirlo, queda `persistence_unavailable`, como tras un fallo. A diferencia de un log fallido,
-   * que sigue cerrado hasta el `ConnectionOpened` o la reparación.
+   * (un frame, un evento, la reparación del cierre, `readDurableSegments` o `rotate`) lo vuelve a
+   * abrir antes desde los almacenes con `reopenLog`, sin registrar nada ni cerrar la entrada. Si un
+   * almacén no responde al reabrirlo, queda `persistence_unavailable`, como tras un fallo. A
+   * diferencia de un log fallido, que sigue cerrado hasta el `ConnectionOpened` o la reparación.
    */
   markLogStale(): void {
     this.#logStale = true;
@@ -457,7 +466,10 @@ export class RawFirstIngestor {
 
   /**
    * Cierre explícito del segmento abierto (harness, drenaje o apagado). Con el log fallido no cierra
-   * nada (`input_closed`); uno desactualizado (`markLogStale`) lo reabre antes.
+   * nada (`input_closed`); uno desactualizado (`markLogStale`) lo reabre antes. Si al reabrirlo un
+   * almacén no responde, queda `persistence_unavailable` y no cierra nada; si su contenido no pasa
+   * sus comprobaciones, se rechaza con `LogIntegrityError` sin registrar nada ni cerrar el
+   * segmento, igual que con cualquier otro error al reabrirlo (ver `#reopenLog`).
    */
   async rotate(
     reason: SegmentCloseReason = 'requested',

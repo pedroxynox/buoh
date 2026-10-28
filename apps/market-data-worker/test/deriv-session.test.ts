@@ -553,6 +553,31 @@ describe('startDerivSession: el bloqueo de la fuente (ADR-0015 §3, «Bloqueo»)
     expect((await run.done).waits_ms).toEqual([500]);
   });
 
+  it.each<[string, unknown, string]>([
+    [
+      'su código',
+      Object.assign(
+        new Error('password authentication failed for user "buoh_owner" at db.internal:5432'),
+        { code: '28P01' },
+      ),
+      '28P01',
+    ],
+    [
+      'sin código, su nombre',
+      new Error('connect ECONNREFUSED 10.0.0.5:5432 (role "buoh_owner", database "buoh")'),
+      'Error',
+    ],
+  ])(
+    'el motivo de la alerta sale saneado de la causa del proveedor, nunca de su mensaje, aunque sea el texto de un error de PostgreSQL: %s',
+    async (_label, cause, reason) => {
+      const run = await sessionHarness({ locks: [{ unavailable: cause }] });
+
+      expect(run.alerts).toEqual([{ event: 'source_lock_unavailable', reason }]);
+      run.session.stop();
+      expect((await run.done).end).toEqual({ status: 'completed' });
+    },
+  );
+
   it('un rechazo de acquire que no es SourceLockUnavailableError es de programación: la sesión se rechaza con él, sin esperar ni abrir el log', async () => {
     const run = await sessionHarness({ locks: ['bug'] });
 
@@ -915,6 +940,27 @@ describe('startDerivSession: la parada fuera de una conexión (ADR-0015 §3, «P
     expect(run.openedWith).toEqual([run.provider.lock(1), run.provider.lock(2)]);
     await run.clock.advance(600_000);
     expect(run.sockets).toHaveLength(1);
+  });
+
+  it('mientras vuelve a tomar el bloqueo, si al reabrir el log con el bloqueo nuevo su contenido no pasa las comprobaciones, termina failed con log_not_derivable sin cerrar el segmento, y suelta el bloqueo', async () => {
+    const run = await sessionHarness({ stopOnAcquire: 2 });
+    await run.subscribe(run.socket(1), START_EPOCH);
+    run.socket(1).emit({ code: 1001, kind: 'closed' });
+    await settle();
+    run.provider.lock(1).lose();
+    // Mientras la sesión espera, cambia el objeto del primer tick, en el segmento abierto.
+    alterObject(run.objects, contentKey(run.sourceLog.rows[2]?.object_sha256 ?? ''));
+    await run.clock.advance(500);
+
+    expect((await run.done).end).toEqual({
+      detail: 'LogIntegrityError',
+      reason: 'log_not_derivable',
+      status: 'failed',
+    });
+    expect(run.sourceLog.closed).toEqual([]);
+    expect(run.timeline).toEqual(['acquire:1', 'connect:1', 'release:1', 'acquire:2', 'release:2']);
+    expect(run.openedWith).toEqual([run.provider.lock(1), run.provider.lock(2)]);
+    expect(run.clock.pendingDelays()).toEqual([]);
   });
 
   it('si llega mientras se crea el socket, la conexión nueva se cierra enseguida con requested', async () => {

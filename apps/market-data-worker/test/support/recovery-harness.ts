@@ -73,6 +73,54 @@ export function previousConnectionEvents(): SourceEvent[] {
   ];
 }
 
+/** La conexión de una ejecución anterior que vio el primer tick posterior al cierre y paró. */
+export const STOPPED = uuid(9101);
+
+/**
+ * El log de una ejecución anterior que paró antes de recuperar el hueco: la conexión anterior
+ * (`previousConnectionEvents`) y otra que la supera, con el primer tick posterior al cierre en
+ * S + 50 (100.5) y un cierre pedido. Un cierre pedido no cambia el hueco, que ya tiene fin: desde
+ * S + 1 ms hasta S + 50 s − 1 ms.
+ */
+export function stoppedBeforeRecoveryEvents(): SourceEvent[] {
+  const profile = createDerivMeasurementProfile({
+    schemas: syntheticSchemas(),
+    symbol: 'SYNTH_100',
+  });
+  return [
+    ...previousConnectionEvents(),
+    connectionOpenedSchema.parse({
+      connection_id: STOPPED,
+      event_id: uuid(9102),
+      kind: 'connection_opened',
+      occurred_at_utc: '2026-03-02T09:59:40.000Z',
+      schema_version: '1.0.0',
+      source: DERIV_SOURCE,
+      supersedes_connection_id: PREVIOUS,
+    }),
+    buildRawSourceFrame(
+      {
+        connection_id: STOPPED,
+        observation_id: uuid(9103),
+        payload_utf8: derivMessages.tick(2, S + 50, '100.5'),
+        received_at_utc: '2026-03-02T09:59:50.000Z',
+      },
+      profile,
+    ),
+    connectionClosedSchema.parse({
+      affected_symbols: ['SYNTH_100'],
+      closure_type: 'requested',
+      connection_id: STOPPED,
+      event_id: uuid(9104),
+      kind: 'connection_closed',
+      occurred_at_utc: '2026-03-02T09:59:55.000Z',
+      reason: 'requested',
+      schema_version: '1.0.0',
+      source: DERIV_SOURCE,
+    }),
+  ];
+}
+
 /**
  * La conexión nueva, que supera a la anterior, suscrita y con su primer tick (E, 100.75) durable.
  * Después avanza 2000 ms, la espera que hará la sesión antes de pedir la historia. IDs: 1 la

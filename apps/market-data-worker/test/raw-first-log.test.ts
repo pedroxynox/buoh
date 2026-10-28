@@ -1553,6 +1553,13 @@ describe('RawFirstIngestor.markLogStale: el log desactualizado se reabre antes d
       0,
     ],
     [
+      'readDurableSegments da también el evento del otro escritor',
+      (run) => run.ingestor.readDurableSegments(),
+      [[openedEvent(CONNECTION_A, id(1), OPENED_AT), closedEvent(CONNECTION_A, id(2), OTHER_AT)]],
+      [id(1), id(2)],
+      0,
+    ],
+    [
       'rotate cierra el segmento con el evento del otro escritor',
       (run) => run.ingestor.rotate('requested'),
       {
@@ -1599,5 +1606,26 @@ describe('RawFirstIngestor.markLogStale: el log desactualizado se reabre antes d
       }),
     ]);
     expect(run.ingestor.state).toBe('paused');
+  });
+
+  it('si un almacén no responde al reabrirlo, readDurableSegments da null y registra persistence_unavailable, como tras un fallo: la lectura siguiente ya no lo reabre', async () => {
+    const run = await staleLog();
+    run.objects.onRead = () => {
+      throw Object.assign(new Error('sintético'), { code: 'ECONNREFUSED' });
+    };
+
+    expect(await run.ingestor.readDurableSegments()).toBeNull();
+    expect(run.operational.incidents).toEqual([
+      expect.objectContaining({
+        evidence: { reason: 'ECONNREFUSED', stage: 'source_event_index' },
+        incident_type: 'persistence_unavailable',
+        // La lectura no tiene evento propio: el ID del intento.
+        observed_ref: id(9001),
+      }),
+    ]);
+    expect(run.ingestor.state).toBe('paused');
+    const open = vi.spyOn(SourceEventLog, 'open');
+    expect(await run.ingestor.readDurableSegments()).toBeNull();
+    expect(open).not.toHaveBeenCalled();
   });
 });

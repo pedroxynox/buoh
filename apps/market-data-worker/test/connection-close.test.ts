@@ -134,10 +134,10 @@ describe('DerivConnection.finish: el cierre previsto a pedido', () => {
     ]);
   });
 
-  it('pide forget_all una sola vez: ni otra llamada ni la duración, que se cumple después, piden otro', async () => {
+  it('pide forget_all una sola vez: ni otra llamada ni la duración, que se cumple después, piden otro; las dos llamadas dicen que el cierre previsto quedó pedido', async () => {
     const run = await recovering({ durationMs: 10_000 });
-    run.connection.finish();
-    run.connection.finish();
+    expect(run.connection.finish()).toBe(true);
+    expect(run.connection.finish()).toBe(true);
     // Quedan el tiempo de espera de forget_all y el keepalive; la duración, que vencía en 8000 ms, no.
     expect(run.clock.pendingDelays()).toEqual([15_000, 43_000]);
     await run.clock.advance(8000);
@@ -360,11 +360,11 @@ describe('DerivConnection.interrupt: el corte del propio transporte (ADR-0015 §
 });
 
 describe('DerivConnection con el cierre ya decidido', () => {
-  it('finish, stop e interrupt no hacen nada: manda el primer cierre', async () => {
+  it('finish, stop e interrupt no hacen nada: manda el primer cierre, y finish dice que no quedó pedido', async () => {
     const run = await recovering({ deferClose: true, durationMs: null });
     // Un error del transporte decide el cierre; el aviso de ws llega más tarde.
     run.socket().emit({ code: 'ECONNRESET', kind: 'error' });
-    run.connection.finish();
+    expect(run.connection.finish()).toBe(false);
     run.connection.stop();
     run.connection.interrupt('smoke_interrupt');
     run.socket().finishClose();
