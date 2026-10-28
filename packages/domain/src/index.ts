@@ -23,6 +23,8 @@ export {
 } from './json-lexeme.js';
 export {
   canonicalQuoteDecimal,
+  isEpochSecondsLexeme,
+  isPipSizeLexeme,
   normalizeRawFrame,
   SymbolAttributionError,
   type InvalidFrameReason,

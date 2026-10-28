@@ -101,6 +101,24 @@ export function canonicalQuoteDecimal(lexeme: string, pipSize: number): QuoteDec
   return { ok: true, value: pipSize === 0 ? integerPart : `${integerPart}.${padded}` };
 }
 
+/**
+ * `pip_size` válido (ADR-0004 §4): el lexema de un entero de 0 a 18, sin signo, fracción, exponente
+ * ni ceros a la izquierda. Es la regla del normalizador para un tick, y la usa también quien lee
+ * otra respuesta con cotizaciones, como la recuperación de historia del worker (ADR-0015 §4).
+ */
+export function isPipSizeLexeme(lexeme: string): boolean {
+  return /^(?:0|[1-9]\d*)$/u.test(lexeme) && Number(lexeme) <= 18;
+}
+
+/**
+ * Epoch en segundos enteros (ADR-0004 §4): el lexema de un entero, sin fracción, exponente ni ceros
+ * a la izquierda, para no inventar fracciones. No comprueba el rango de la hora. Como
+ * `isPipSizeLexeme`, es una regla del normalizador que comparte la recuperación de historia.
+ */
+export function isEpochSecondsLexeme(lexeme: string): boolean {
+  return /^-?(?:0|[1-9]\d*)$/u.test(lexeme);
+}
+
 function epochSecondsToUtc(seconds: number): string | null {
   const milliseconds = seconds * 1000;
   if (!Number.isSafeInteger(milliseconds)) {
@@ -180,10 +198,10 @@ export function normalizeRawFrame(
 
   // ADR-0004 §4: epoch entero en segundos, sin fracciones inventadas; pip_size 0..18. Se exigen
   // aquí además del esquema de fuente para no depender de un esquema más laxo.
-  if (!/^(?:0|[1-9]\d*)$/u.test(pipNode.lexeme) || Number(pipNode.lexeme) > 18) {
+  if (!isPipSizeLexeme(pipNode.lexeme)) {
     return invalid('schema_validation_failed');
   }
-  if (!/^-?(?:0|[1-9]\d*)$/u.test(epochNode.lexeme)) {
+  if (!isEpochSecondsLexeme(epochNode.lexeme)) {
     return invalid('event_time_out_of_range');
   }
   const eventTime = epochSecondsToUtc(Number(epochNode.lexeme));

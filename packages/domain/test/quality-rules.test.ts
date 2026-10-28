@@ -11,6 +11,8 @@ import {
   deriveMarketData,
   evaluateSourceLimit,
   ingestSyntheticStimuli,
+  isEpochSecondsLexeme,
+  isPipSizeLexeme,
   normalizeRawFrame,
   parseJsonPreservingNumbers,
   type PipelineProfile,
@@ -129,6 +131,46 @@ describe('canonicalQuoteDecimal (la regla de quote_decimal)', () => {
     ['1E2', 2, 'quote_exponent_not_supported'],
   ])('rechaza %s con pip_size %d (%s)', (lexeme, pipSize, reason) => {
     expect(canonicalQuoteDecimal(lexeme, pipSize)).toEqual({ ok: false, reason });
+  });
+});
+
+describe('isPipSizeLexeme e isEpochSecondsLexeme (reglas de lexema de ADR-0004 §4)', () => {
+  it.each(['0', '2', '18'])('acepta el pip_size %s: entero de 0 a 18', (lexeme) => {
+    expect(isPipSizeLexeme(lexeme)).toBe(true);
+  });
+
+  it.each(['19', '-1', '2.0', '2.5', '02', '2e0', '1E1', ''])(
+    'rechaza el pip_size %s',
+    (lexeme) => {
+      expect(isPipSizeLexeme(lexeme)).toBe(false);
+    },
+  );
+
+  it.each(['0', '1767225600', '-1'])('acepta el epoch %s: entero de segundos', (lexeme) => {
+    expect(isEpochSecondsLexeme(lexeme)).toBe(true);
+  });
+
+  it.each(['1767225600.0', '1767225600.5', '01767225600', '1.7672256e9', '-0.0', ''])(
+    'rechaza el epoch %s: sin fracción, exponente ni ceros a la izquierda',
+    (lexeme) => {
+      expect(isEpochSecondsLexeme(lexeme)).toBe(false);
+    },
+  );
+
+  it('el normalizador aplica las mismas reglas a un tick, aunque el esquema de fuente los admita', () => {
+    // El esquema pide enteros, y 3.0 y 1767225600.0 lo son; sus lexemas no.
+    const pipFraction = `{"msg_type":"tick","tick":{"epoch":1767225600,"pip_size":3.0,"quote":1,"symbol":"SYNTH_100"}}`;
+    expect(normalizeRawFrame(rawFrame(pipFraction), profile)).toEqual({
+      ok: false,
+      reason: 'schema_validation_failed',
+      symbol: 'SYNTH_100',
+    });
+    const fraction = `{"msg_type":"tick","tick":{"epoch":1767225600.0,"pip_size":3,"quote":1,"symbol":"SYNTH_100"}}`;
+    expect(normalizeRawFrame(rawFrame(fraction), profile)).toEqual({
+      ok: false,
+      reason: 'event_time_out_of_range',
+      symbol: 'SYNTH_100',
+    });
   });
 });
 

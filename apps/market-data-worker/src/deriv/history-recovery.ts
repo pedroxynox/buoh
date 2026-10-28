@@ -2,15 +2,18 @@ import { type HistoryRecoveryResult } from '@buoh/contracts';
 import {
   canonicalQuoteDecimal,
   checkRequestedResponse,
+  isEpochSecondsLexeme,
+  isPipSizeLexeme,
   type JsonNode,
   type RequestedResponseInvalidReason,
 } from '@buoh/domain';
 
 import { EXPECTED_MSG_TYPE } from './requests.js';
 
-// Partes puras de la recuperación de historia (ADR-0015 §4): el rango que se pide, la lectura de
-// cada página, la página siguiente y la decisión del intento. `DerivConnection` hace el resto: envía
-// las páginas, espera sus respuestas y persiste el resultado.
+// Recuperación de historia (ADR-0015 §4). Las partes puras: el rango que se pide, la lectura de cada
+// página, la página siguiente y la decisión del intento. `HistoryRecovery` sigue una recuperación:
+// sus páginas y su resultado. `DerivConnection` hace el resto: envía las páginas, espera sus
+// respuestas y persiste el resultado.
 
 /** Páginas como máximo por intento: unas 27 horas de `R_100`. */
 export const HISTORY_PAGE_LIMIT = 50;
@@ -142,12 +145,8 @@ export function readHistoryPage(
   ) {
     return { incident: 'schema_validation_failed', status: 'invalid' };
   }
-  // Como el `pip_size` de un tick (ADR-0004 §4): entero, sin fracción ni exponente, de 0 a 18.
-  if (
-    pipSize.type !== 'number' ||
-    !/^(?:0|[1-9]\d*)$/u.test(pipSize.lexeme) ||
-    Number(pipSize.lexeme) > 18
-  ) {
+  // Con las reglas de lexema de un tick (ADR-0004 §4): `pip_size` y tiempos enteros.
+  if (pipSize.type !== 'number' || !isPipSizeLexeme(pipSize.lexeme)) {
     return inconsistent;
   }
   if (times.items.length !== prices.items.length) {
@@ -157,7 +156,7 @@ export function readHistoryPage(
   const ticks: HistoryTick[] = [];
   for (const [index, timeNode] of times.items.entries()) {
     const priceNode = prices.items[index];
-    if (timeNode.type !== 'number' || !/^-?(?:0|[1-9]\d*)$/u.test(timeNode.lexeme)) {
+    if (timeNode.type !== 'number' || !isEpochSecondsLexeme(timeNode.lexeme)) {
       return inconsistent;
     }
     const time = Number(timeNode.lexeme);
@@ -277,4 +276,127 @@ export function decideHistoryRecovery(input: {
     return partial('history_boundary_missing');
   }
   return { recovered_event_count: recovered, status: 'complete' };
+}
+
+/** Lo que una recuperación necesita de su conexión. */
+export interface HistoryRecoveryHooks {
+  /** Pide la página `page` por la conexión: devuelve su `req_id`, o `null` si no la envió. */
+  readonly sendPage: (page: HistoryRange) => number | null;
+  /** Encola la decisión del intento, para persistir su resultado detrás de lo que ya espera. */
+  readonly queueResult: (decision: HistoryRecoveryDecision) => void;
+}
+
+/**
+ * Una recuperación de historia en curso en una conexión: pide las páginas de su intento con
+ * `sendPage`, recibe sus respuestas o vencimientos con `onPage` y, al terminar el intento, encola su
+ * decisión con `queueResult`. Termina con `finish`, cuando el resultado pasó por la cola, o con
+ * `abandon`.
+ */
+export class HistoryRecovery {
+  readonly request: HistoryRecoveryRequest;
+  readonly range: HistoryRange;
+  readonly #hooks: HistoryRecoveryHooks;
+  readonly #done = Promise.withResolvers<HistoryRecoveryOutcome>();
+  /** Páginas válidas recibidas, en orden: cada una termina antes de la anterior. */
+  #pages: (readonly HistoryTick[])[] = [];
+  /** Páginas pedidas. */
+  #requested = 0;
+  /** `req_id` de la página que espera respuesta, o `null`. */
+  #pendingReqId: number | null = null;
+  /** `queued`: el resultado ya está en la cola; `abandoned` y `finished` son finales. */
+  #state: 'abandoned' | 'finished' | 'queued' | 'running' = 'running';
+
+  constructor(input: {
+    readonly hooks: HistoryRecoveryHooks;
+    /** `historyRange(request)`, ya comprobado. */
+    readonly range: HistoryRange;
+    readonly request: HistoryRecoveryRequest;
+  }) {
+    this.request = input.request;
+    this.range = input.range;
+    this.#hooks = input.hooks;
+  }
+
+  /** Se resuelve al terminar: `finished` con el resultado, o `abandoned`. */
+  get outcome(): Promise<HistoryRecoveryOutcome> {
+    return this.#done.promise;
+  }
+
+  /** Terminó con `abandoned`: su resultado no se persiste, aunque ya estuviera en la cola. */
+  get abandoned(): boolean {
+    return this.#state === 'abandoned';
+  }
+
+  /** Pide la primera página: termina en el fin del hueco y empieza, como todas, en su inicio. */
+  start(): void {
+    this.#requestPage(this.range.end);
+  }
+
+  /** Respuesta, o vencimiento, de la página `reqId`. Si ya no es la que espera, no hace nada. */
+  onPage(reqId: number, page: HistoryPage | { readonly status: 'timeout' }): void {
+    if (this.#state !== 'running' || this.#pendingReqId !== reqId) {
+      return;
+    }
+    this.#pendingReqId = null;
+    if (page.status !== 'valid') {
+      this.#endAttempt(page.status);
+      return;
+    }
+    this.#pages.push(page.ticks);
+    const end = nextHistoryPageEnd(this.range, this.#pages);
+    if (end === null) {
+      this.#endAttempt(null);
+    } else {
+      this.#requestPage(end);
+    }
+  }
+
+  /**
+   * Termina con `abandoned` si su resultado no está en la cola, o aunque esté si `force`: la cola
+   * falló y ya no lo procesará. Devuelve si la abandonó.
+   */
+  abandon(force = false): boolean {
+    if (this.#state === 'abandoned' || this.#state === 'finished') {
+      return false;
+    }
+    if (this.#state === 'queued' && !force) {
+      return false;
+    }
+    this.#state = 'abandoned';
+    this.#pendingReqId = null;
+    this.#done.resolve({ status: 'abandoned' });
+    return true;
+  }
+
+  /** El resultado pasó por la cola: termina con `finished`. */
+  finish(durable: boolean, result: HistoryRecoveryResult): void {
+    if (this.#state !== 'queued') {
+      return;
+    }
+    this.#state = 'finished';
+    this.#done.resolve({
+      attempts: 1,
+      durable,
+      pages: this.#requested,
+      result,
+      status: 'finished',
+    });
+  }
+
+  #requestPage(end: number): void {
+    this.#requested += 1;
+    this.#pendingReqId = this.#hooks.sendPage({ end, start: this.range.start });
+  }
+
+  #endAttempt(failure: HistoryPageFailure | null): void {
+    const decision = decideHistoryRecovery({
+      end_quote: this.request.end_quote,
+      failure,
+      pages: this.#pages,
+      range: this.range,
+      start_quote: this.request.start_quote,
+    });
+    this.#state = 'queued';
+    this.#hooks.queueResult(decision);
+  }
 }

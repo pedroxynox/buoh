@@ -46,14 +46,22 @@ export async function settle(): Promise<void> {
   }
 }
 
-/** El conjunto de esquemas sintético ya abierto. */
+let openedSchemas: DerivSchemaSet | null = null;
+
+/**
+ * El conjunto de esquemas sintético ya abierto. Se arma y se abre una vez por archivo de pruebas:
+ * comprimir y abrir el archivo es lo más lento de cada prueba, y el conjunto no cambia.
+ */
 export function syntheticSchemas(): DerivSchemaSet {
-  const fixture = syntheticSchemaArchive();
-  const result = openSchemaArchive(fixture.archive, fixture.expected);
-  if (result.status !== 'loaded') {
-    throw new TypeError(`Esquemas sintéticos inválidos: ${result.reason}`);
+  if (openedSchemas === null) {
+    const fixture = syntheticSchemaArchive();
+    const result = openSchemaArchive(fixture.archive, fixture.expected);
+    if (result.status !== 'loaded') {
+      throw new TypeError(`Esquemas sintéticos inválidos: ${result.reason}`);
+    }
+    openedSchemas = result.schemas;
   }
-  return result.schemas;
+  return openedSchemas;
 }
 
 export interface ConnectionHarnessOptions {

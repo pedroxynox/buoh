@@ -31,16 +31,13 @@ import {
 import { type OperationalAlert } from '../operational/registry.js';
 import { failureReason } from '../source-log/source-event-log.js';
 import {
-  decideHistoryRecovery,
   historyRange,
-  nextHistoryPageEnd,
+  HistoryRecovery,
   readHistoryPage,
   type HistoryPage,
-  type HistoryPageFailure,
-  type HistoryRange,
+  type HistoryRecoveryDecision,
   type HistoryRecoveryOutcome,
   type HistoryRecoveryRequest,
-  type HistoryTick,
 } from './history-recovery.js';
 import { IngestQueue } from './ingest-queue.js';
 import {
@@ -138,22 +135,6 @@ export interface DerivConnectionInput {
   readonly symbol: string;
 }
 
-/** Recuperación de historia en curso en la conexión (ADR-0015 §4). */
-interface Recovery {
-  readonly connection_id: string;
-  readonly done: PromiseWithResolvers<HistoryRecoveryOutcome>;
-  /** Páginas válidas recibidas, en orden: cada una termina antes de la anterior. */
-  readonly pages: (readonly HistoryTick[])[];
-  readonly range: HistoryRange;
-  readonly request: HistoryRecoveryRequest;
-  /** `req_id` de la página que espera respuesta, o `null`. */
-  pendingReqId: number | null;
-  /** El resultado ya está en la cola: desde ahí, un cierre ya no abandona la recuperación. */
-  queued: boolean;
-  /** Páginas pedidas. */
-  requested: number;
-}
-
 /** Trabajo del único consumidor de la cola, en orden de llegada. */
 type Work =
   | { readonly event: ConnectionClosed; readonly kind: 'closed' }
@@ -168,7 +149,7 @@ type Work =
   | {
       readonly event: HistoryRecoveryResult;
       readonly kind: 'recovery';
-      readonly recovery: Recovery;
+      readonly recovery: HistoryRecovery;
     };
 
 interface ClosePlan {
@@ -266,7 +247,7 @@ export class DerivConnection {
   #subscribed = false;
   #subscriptionId: string | null = null;
   #serverTimeOffsetMs: number | null = null;
-  #recovery: Recovery | null = null;
+  #recovery: HistoryRecovery | null = null;
 
   constructor(input: DerivConnectionInput) {
     this.#input = input;
@@ -335,64 +316,37 @@ export class DerivConnection {
     if (!this.#subscribed || this.#closing !== null || connectionId === null) {
       return Promise.resolve({ status: 'abandoned' });
     }
-    const recovery: Recovery = {
-      connection_id: connectionId,
-      done: Promise.withResolvers<HistoryRecoveryOutcome>(),
-      pages: [],
-      pendingReqId: null,
-      queued: false,
+    const recovery: HistoryRecovery = new HistoryRecovery({
+      hooks: {
+        queueResult: (decision) => {
+          this.#queueRecoveryResult(recovery, connectionId, decision);
+        },
+        sendPage: (page) =>
+          this.#send({
+            end: page.end,
+            operation: 'ticks_history',
+            start: page.start,
+            symbol: request.symbol,
+          }),
+      },
       range,
       request,
-      requested: 0,
-    };
-    this.#recovery = recovery;
-    this.#requestPage(recovery, range.end);
-    return recovery.done.promise;
-  }
-
-  /** Pide la página que termina en `end`; empieza siempre en el inicio del hueco. */
-  #requestPage(recovery: Recovery, end: number): void {
-    recovery.requested += 1;
-    recovery.pendingReqId = this.#send({
-      end,
-      operation: 'ticks_history',
-      start: recovery.range.start,
-      symbol: recovery.request.symbol,
     });
+    this.#recovery = recovery;
+    recovery.start();
+    return recovery.outcome;
   }
 
-  /** Respuesta, o vencimiento, de la página `reqId`. Si ya no es la que espera, no hace nada. */
-  #onPage(reqId: number, page: HistoryPage | { readonly status: 'timeout' }): void {
-    const recovery = this.#recovery;
-    if (recovery?.pendingReqId !== reqId) {
-      return;
-    }
-    recovery.pendingReqId = null;
-    if (page.status !== 'valid') {
-      this.#queueRecoveryResult(recovery, page.status);
-      return;
-    }
-    recovery.pages.push(page.ticks);
-    const end = nextHistoryPageEnd(recovery.range, recovery.pages);
-    if (end === null) {
-      this.#queueRecoveryResult(recovery, null);
-    } else {
-      this.#requestPage(recovery, end);
-    }
-  }
-
-  /** Decide el intento y encola su resultado, como un evento de control más. */
-  #queueRecoveryResult(recovery: Recovery, failure: HistoryPageFailure | null): void {
+  /** Encola el resultado de la recuperación, como un evento de control más. */
+  #queueRecoveryResult(
+    recovery: HistoryRecovery,
+    connectionId: string,
+    decision: HistoryRecoveryDecision,
+  ): void {
     const { request } = recovery;
     const event = historyRecoveryResultSchema.parse({
-      ...decideHistoryRecovery({
-        end_quote: request.end_quote,
-        failure,
-        pages: recovery.pages,
-        range: recovery.range,
-        start_quote: request.start_quote,
-      }),
-      connection_id: recovery.connection_id,
+      ...decision,
+      connection_id: connectionId,
       event_id: this.#input.nextId(),
       from_event_time_utc: request.from_event_time_utc,
       kind: 'history_recovery_result',
@@ -402,7 +356,6 @@ export class DerivConnection {
       symbol: request.symbol,
       to_event_time_utc: request.to_event_time_utc,
     });
-    recovery.queued = true;
     this.#queue.pushControl({ event, kind: 'recovery', recovery });
   }
 
@@ -411,12 +364,9 @@ export class DerivConnection {
    * `force`: la cola falló y ya no lo procesará.
    */
   #abandonRecovery(force = false): void {
-    const recovery = this.#recovery;
-    if (recovery === null || (recovery.queued && !force)) {
-      return;
+    if (this.#recovery?.abandon(force) === true) {
+      this.#recovery = null;
     }
-    this.#recovery = null;
-    recovery.done.resolve({ status: 'abandoned' });
   }
 
   #onSignal(signal: SocketSignal): void {
@@ -677,13 +627,7 @@ export class DerivConnection {
         if (this.#recovery === work.recovery) {
           this.#recovery = null;
         }
-        work.recovery.done.resolve({
-          attempts: 1,
-          durable: outcome.status === 'durable',
-          pages: work.recovery.requested,
-          result: work.event,
-          status: 'finished',
-        });
+        work.recovery.finish(outcome.status === 'durable', work.event);
         return;
       }
       case 'closed': {
@@ -807,7 +751,8 @@ export class DerivConnection {
       if (page !== null) {
         this.#settle(reqId);
         await this.#recordPageIncident(frame, page);
-        this.#onPage(reqId, page);
+        // Después de esperar: si la recuperación se abandonó mientras tanto, ya no la hay.
+        this.#recovery?.onPage(reqId, page);
       }
       return;
     }
@@ -1071,7 +1016,7 @@ export class DerivConnection {
           // Una página vencida no cierra la conexión (ADR-0015 §4): deja de esperar su respuesta,
           // que si llega se guarda raw como cualquier frame y no se interpreta.
           this.#pending.delete(reqId);
-          this.#onPage(reqId, { status: 'timeout' });
+          this.#recovery?.onPage(reqId, { status: 'timeout' });
           return;
         }
         this.#close({
