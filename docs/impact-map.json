@@ -28,7 +28,12 @@
     {
       "id": "market-data-worker",
       "description": "La operación del worker debe conservar un runbook vigente.",
-      "includes": ["apps/market-data-worker/**", "scripts/data-replay.*", "scripts/data-smoke.*"],
+      "includes": [
+        "apps/market-data-worker/**",
+        "scripts/data-health.*",
+        "scripts/data-replay.*",
+        "scripts/data-smoke.*"
+      ],
       "requires_any": [
         "docs/operacion/runbook-ingesta-de-datos.md",
         "docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md"

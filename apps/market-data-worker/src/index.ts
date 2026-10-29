@@ -142,5 +142,32 @@ export {
   type IngestReport,
   type IngestStores,
 } from './ingest.js';
-export { openStores, type OpenStoresOptions } from './runtime.js';
+export {
+  evaluateDataHealth,
+  type HealthAlert,
+  type HealthEvaluation,
+  type HealthObservation,
+  type ObservedSource,
+} from './health/evaluate.js';
+export {
+  observeDataHealth,
+  type HealthStores,
+  type ObserveDataHealthInput,
+} from './health/observe.js';
+export {
+  HEALTH_CLOSE_DEADLINE_MS,
+  HEALTH_DEADLINE_MS,
+  healthCommand,
+  type HealthCommandResult,
+  type HealthCommandStores,
+  type HealthDependencies,
+} from './health/command.js';
+export { HEALTH_USAGE, parseHealthArgs, type HealthOptions } from './health-args.js';
+export {
+  HEALTH_CONNECTION_TIMEOUT_MS,
+  HEALTH_REQUEST_TIMEOUT_MS,
+  openHealthStores,
+  openStores,
+  type OpenStoresOptions,
+} from './runtime.js';
 export { S3ObjectStore } from './s3/object-store.js';

@@ -1,5 +1,4 @@
 import {
-  connectionClosedSchema,
   rawSourceFrameSchema,
   sha256Hex,
   type RawSourceFrame,
@@ -19,7 +18,7 @@ import {
 
 import { type OperationalRegistry } from '../operational/registry.js';
 import { type ClosedSourceSegment } from '../source-log/ports.js';
-import { previousConnection } from '../source-log/previous-connection.js';
+import { previousConnection, unrecordedClose } from '../source-log/previous-connection.js';
 import {
   LogPersistenceError,
   LogReadError,
@@ -406,15 +405,11 @@ export class RawFirstIngestor {
         status: 'nothing_to_repair',
       };
     }
-    const event = connectionClosedSchema.parse({
-      affected_symbols: [...new Set(input.affected_symbols)].sort(),
-      closure_type: 'transport_error',
+    const event = unrecordedClose({
+      affected_symbols: input.affected_symbols,
       connection_id: previous.connection_id,
       event_id: closeId(),
-      kind: 'connection_closed',
       occurred_at_utc: this.#input.now(),
-      reason: 'close_not_recorded',
-      schema_version: CONTRACT_SCHEMA_VERSION,
       source: this.#input.profile.source,
     });
     const outcome = await this.#append(event, event.event_id);

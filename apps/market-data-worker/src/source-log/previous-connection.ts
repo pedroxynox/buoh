@@ -1,4 +1,5 @@
-import { type SourceEvent } from '@buoh/contracts';
+import { connectionClosedSchema, type ConnectionClosed, type SourceEvent } from '@buoh/contracts';
+import { CONTRACT_SCHEMA_VERSION } from '@buoh/domain';
 
 /** La conexión anterior del log (ADR-0015 §3, «Conexión anterior»). */
 export interface PreviousConnection {
@@ -34,4 +35,31 @@ export function previousConnection(
   return connectionId === null
     ? null
     : { closed: closedAt !== null, closed_at_utc: closedAt, connection_id: connectionId };
+}
+
+/**
+ * El `ConnectionClosed` que repara una conexión anterior sin cierre durable (ADR-0015 §3, «Cierre no
+ * registrado»): `transport_error`, motivo `close_not_recorded`, los símbolos de la sesión como
+ * afectados, ordenados y sin repetir, y la hora de la detección. Lo persiste
+ * `RawFirstIngestor.repairUnrecordedClose`; `data:health` deriva con él sin persistirlo (ADR-0015
+ * §8, regla 4).
+ */
+export function unrecordedClose(input: {
+  readonly affected_symbols: readonly string[];
+  readonly connection_id: string;
+  readonly event_id: string;
+  readonly occurred_at_utc: string;
+  readonly source: string;
+}): ConnectionClosed {
+  return connectionClosedSchema.parse({
+    affected_symbols: [...new Set(input.affected_symbols)].sort(),
+    closure_type: 'transport_error',
+    connection_id: input.connection_id,
+    event_id: input.event_id,
+    kind: 'connection_closed',
+    occurred_at_utc: input.occurred_at_utc,
+    reason: 'close_not_recorded',
+    schema_version: CONTRACT_SCHEMA_VERSION,
+    source: input.source,
+  });
 }

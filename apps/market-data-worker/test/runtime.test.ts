@@ -1,6 +1,40 @@
+import type * as S3Module from '@aws-sdk/client-s3';
+import type * as PgModule from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { loadConfig, openStores, type OperationalAlert } from '../src/index.js';
+import {
+  HEALTH_CONNECTION_TIMEOUT_MS,
+  HEALTH_REQUEST_TIMEOUT_MS,
+  loadConfig,
+  openHealthStores,
+  openStores,
+  type OperationalAlert,
+} from '../src/index.js';
+
+/** La configuración con la que se crea cada pool de PostgreSQL y cada cliente S3, en orden. */
+const created = vi.hoisted(() => ({ pools: [] as unknown[], s3: [] as unknown[] }));
+
+// El pool y el cliente S3 reales, que además anotan la configuración que reciben.
+vi.mock('pg', async (importOriginal) => {
+  const actual = await importOriginal<typeof PgModule>();
+  class RecordingPool extends actual.default.Pool {
+    constructor(config?: ConstructorParameters<typeof actual.default.Pool>[0]) {
+      created.pools.push(config);
+      super(config);
+    }
+  }
+  return { ...actual, default: { ...actual.default, Pool: RecordingPool } };
+});
+vi.mock('@aws-sdk/client-s3', async (importOriginal) => {
+  const actual = await importOriginal<typeof S3Module>();
+  class RecordingS3Client extends actual.S3Client {
+    constructor(...args: ConstructorParameters<typeof actual.S3Client>) {
+      created.s3.push(args[0]);
+      super(...args);
+    }
+  }
+  return { ...actual, S3Client: RecordingS3Client };
+});
 
 // `openStores` (src/runtime.ts) sin servicios: crear el pool de PostgreSQL y el cliente S3 no abre
 // ninguna conexión, y la prueba emite en el pool el error de una conexión libre igual que pg-pool,
@@ -87,6 +121,54 @@ describe('openStores: una conexión libre de PostgreSQL que se pierde', () => {
       const calls = write.mock.calls.map(([chunk]) => chunk);
       write.mockRestore();
       expect(calls).toStrictEqual(['{"event":"postgres_connection_lost","reason":"57P01"}\n']);
+    } finally {
+      await stores.close();
+    }
+  });
+});
+
+describe('openHealthStores: cada lectura de data:health tiene plazo (ADR-0015 §8, regla 3)', () => {
+  it('crea su pool con connectionTimeoutMillis de 5000 ms y query_timeout de 10 000 ms, y su cliente S3 con connectionTimeout de 5000 ms y requestTimeout de 10 000 ms que corta la petición', async () => {
+    forbidAmbientEffects();
+    created.pools.length = 0;
+    created.s3.length = 0;
+    const stores = openHealthStores(CONFIG);
+    try {
+      expect(HEALTH_CONNECTION_TIMEOUT_MS).toBe(5_000);
+      expect(HEALTH_REQUEST_TIMEOUT_MS).toBe(10_000);
+      expect(created.pools).toHaveLength(1);
+      expect(created.pools[0]).toMatchObject({
+        connectionTimeoutMillis: 5_000,
+        database: DATABASE,
+        host: HOST,
+        query_timeout: 10_000,
+        user: ROLE,
+      });
+      expect(created.s3).toHaveLength(1);
+      expect(created.s3[0]).toMatchObject({
+        maxAttempts: 1,
+        requestHandler: {
+          connectionTimeout: 5_000,
+          requestTimeout: 10_000,
+          throwOnRequestTimeout: true,
+        },
+      });
+    } finally {
+      await stores.close();
+    }
+  });
+
+  it('openStores, el de ingest, data:replay y fixture:publish, sigue sin esos plazos', async () => {
+    forbidAmbientEffects();
+    created.pools.length = 0;
+    created.s3.length = 0;
+    const stores = openStores(CONFIG);
+    try {
+      expect(created.pools).toHaveLength(1);
+      expect(created.pools[0]).not.toHaveProperty('connectionTimeoutMillis');
+      expect(created.pools[0]).not.toHaveProperty('query_timeout');
+      expect(created.s3).toHaveLength(1);
+      expect(created.s3[0]).not.toHaveProperty('requestHandler');
     } finally {
       await stores.close();
     }

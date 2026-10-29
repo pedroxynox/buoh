@@ -15,7 +15,6 @@ import {
   failureReason,
   LogIntegrityError,
   LogReadError,
-  sourceEventId,
   writeVerified,
   type SourceEventLog,
 } from '../source-log/source-event-log.js';
@@ -35,6 +34,7 @@ import {
 } from './connection.js';
 import { GapWatch, type GapWatchFailure } from './gap-watch.js';
 import { type HistoryRecoveryOutcome } from './history-recovery.js';
+import { checkLogContent, isCursorAheadOfLog } from './log-check.js';
 import { DERIV_SCHEMA_RELEASE, schemaEntryName } from './schema-archive.js';
 
 /** El bloqueo de la fuente que tiene la sesión (ADR-0012 §9): `SourceLock` en PostgreSQL. */
@@ -172,8 +172,11 @@ export interface DerivSessionInput extends Pick<
   readonly schemaObjects?: ObjectStore;
 }
 
-/** La entrada de la release que es el esquema de fuente del perfil de medición (`profile.ts`). */
-const SOURCE_SCHEMA_ENTRY = schemaEntryName('ticks', 'response');
+/**
+ * La entrada de la release que es el esquema de fuente del perfil de medición (`profile.ts`): la que
+ * la sesión guarda y `data:health` lee (ADR-0015 §7 y §8).
+ */
+export const SOURCE_SCHEMA_ENTRY = schemaEntryName('ticks', 'response');
 
 /** Motivo del corte del smoke de reconexión (ADR-0015 §9). */
 export const SMOKE_INTERRUPT_REASON = 'smoke_interrupt';
@@ -365,13 +368,13 @@ function latestTickTime(ticks: DerivedMarketData['ticks'], symbol: string): stri
 /**
  * Las comprobaciones del log antes de conectar (ADR-0015 §5), en este orden:
  *
- * 1. todos sus frames son de este conector (`connector_version_mismatch`);
- * 2. se deriva con el perfil de medición (`log_not_derivable`);
- * 3. es del símbolo pedido (`symbol_mismatch`): ningún cursor de la fuente es de otro símbolo y
- *    ningún tick tampoco. Un log lo escribe una sesión de un solo símbolo, así que sus cursores dan
- *    su símbolo, también si no tiene ticks;
- * 4. el último cursor del símbolo apunta a un evento del log (`cursor_ahead_of_log`): si no, el log
- *    perdió datos confirmados;
+ * 1. a 3. las del contenido del log, que comparte con `data:health` (`checkLogContent`): todos sus
+ *    frames son de este conector (`connector_version_mismatch`), se deriva con el perfil de
+ *    medición (`log_not_derivable`) y es del símbolo pedido (`symbol_mismatch`), con los símbolos
+ *    de los cursores de la fuente;
+ * 4. el último cursor del símbolo apunta a un evento del log (`cursor_ahead_of_log`,
+ *    `isCursorAheadOfLog`, que también comparte con `data:health`): si no, el log perdió datos
+ *    confirmados;
  * 5. con `retentionMs`, el evento durable más antiguo, el primero del log, no la cumplió todavía
  *    (`retention_expired`, ADR-0015 §7). Su hora es la de `sourceEventTime`: la recepción de un
  *    frame y `occurred_at_utc` de los demás.
@@ -389,39 +392,19 @@ function checkLog(
   },
 ): { readonly end: SessionEnd } | { readonly log: StartupLog } {
   const { profile, symbol } = preparation;
-  const foreign = segments.some((segment) =>
-    segment.some(
-      (event) =>
-        event.kind === 'raw_source_frame' && event.connector_version !== profile.connector_version,
-    ),
-  );
-  if (foreign) {
-    return { end: failed('connector_version_mismatch') };
-  }
-  let derived: DerivedMarketData;
-  try {
-    derived = deriveMarketData(segments, profile);
-  } catch (error) {
-    return { end: notDerivable(error) };
-  }
-  // El perfil admite solo el símbolo pedido, así que todo tick derivado es de ese símbolo: un tick de
-  // otro símbolo queda como frame inválido con `symbol_not_allowed`.
-  const otherTicks = derived.incidents.some(
-    (incident) =>
-      incident.incident_type === 'invalid_source_frame' &&
-      incident.evidence.reason === 'symbol_not_allowed',
-  );
   const { cursors } = startup;
-  const otherCursor = cursors?.symbols.some((item) => item !== symbol) === true;
-  if (otherCursor || otherTicks) {
-    return { end: failed('symbol_mismatch') };
+  const checked = checkLogContent({
+    cursorSymbols: cursors?.symbols ?? [],
+    profile,
+    segments,
+    symbol,
+  });
+  if (checked.status === 'failed') {
+    return { end: failed(checked.reason, checked.detail) };
   }
+  const { derived } = checked;
   const events = segments.flat();
-  const latest = cursors?.latest ?? null;
-  if (
-    latest !== null &&
-    !events.some((event) => sourceEventId(event) === latest.last_durable_source_event_id)
-  ) {
+  if (isCursorAheadOfLog({ cursor: cursors?.latest ?? null, segments })) {
     return { end: failed('cursor_ahead_of_log') };
   }
   const oldest = events[0];
