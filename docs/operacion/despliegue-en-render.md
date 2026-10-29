@@ -2,7 +2,7 @@
 
 ## Alcance
 
-`render.yaml` solo define el sitio oficial (`apps/site`), como sitio estático gratuito ([ADR-0013](../arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). La API, el worker y PostgreSQL todavía no están en `render.yaml`: llegarán con un incremento del plan de la Fase 2. El propietario ya decidió los proveedores y el presupuesto ([ADR-0016](../arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)), y el almacenamiento de objetos irá en Cloudflare R2, fuera de Render y de `render.yaml`.
+`render.yaml` solo define el sitio oficial (`apps/site`), como sitio estático gratuito ([ADR-0013](../arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). La API, el worker y PostgreSQL todavía no están en `render.yaml`: llegarán con los incrementos del [plan de Fase 2](../plan/fase-2-laboratorio-y-bot-shadow.md), el sistema de datos en F2.2, la API con la web en F2.3 y el motor de señales `shadow` en F2.9. El propietario ya decidió los proveedores y el presupuesto ([ADR-0016](../arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)), y el almacenamiento de objetos irá en Cloudflare R2, fuera de Render y de `render.yaml`.
 
 ## Qué define `render.yaml`
 
@@ -67,4 +67,4 @@ Gratis en el plan Hobby. Cuenta contra lo incluido: 5 GB de tráfico de salida y
 ## Pendiente
 
 - Dominio propio y revisión legal antes de quitar el `noindex` o anunciar el sitio (ADR-0013 §4). El PR que lo quite borra el `noindex` de la página y la regla `X-Robots-Tag` de `render.yaml`. Después, alguien con acceso a Render borra esa regla en el panel, que conserva las reglas de cabecera que ya no están en el Blueprint, y comprueba con `curl -sI` que ya no sale.
-- El resto del sistema llega con un incremento del plan de la Fase 2, con los proveedores y el presupuesto de [ADR-0016](../arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md).
+- El resto del sistema llega con los incrementos F2.2, F2.3 y F2.9 del [plan de Fase 2](../plan/fase-2-laboratorio-y-bot-shadow.md), con los proveedores y el presupuesto de [ADR-0016](../arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md).

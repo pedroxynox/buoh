@@ -60,7 +60,7 @@ Este roadmap ordena el trabajo por evidencia y reducción de riesgo, no por fech
 
 ## Fase 2 — Laboratorio y bot shadow para uso propio
 
-Es la fase actual desde el 2026-10-29. El estado vigente se consulta únicamente en [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md). Su plan ejecutable, que fijará el alcance y la aceptación, es la siguiente tarea.
+Es la fase actual desde el 2026-10-29. El estado vigente se consulta únicamente en [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md). El alcance y la aceptación están en el [plan ejecutable de Fase 2](../plan/fase-2-laboratorio-y-bot-shadow.md), que antes de estos incrementos lleva el sistema de datos a un servidor y publica datasets de la captura viva.
 
 **Objetivo:** transformar una hipótesis en una estrategia viva, explicable y no ejecutora.
 
