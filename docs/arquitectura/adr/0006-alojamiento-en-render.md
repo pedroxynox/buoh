@@ -1,6 +1,6 @@
 # ADR-0006: Alojamiento productivo en Render
 
-- **Estado:** Aceptada; complementada por [ADR-0013](0013-publicacion-del-sitio-en-render.md) (publicación del sitio oficial)
+- **Estado:** Aceptada; complementada por [ADR-0013](0013-publicacion-del-sitio-en-render.md) (publicación del sitio oficial) y por [ADR-0016](0016-alojamiento-del-sistema-de-datos.md) (alojamiento del worker y almacenamiento de objetos)
 - **Fecha:** 2026-10-23
 - **Ámbito:** Despliegue posterior a Fase 1
 - **Decisores:** Propietario de buoh
@@ -21,6 +21,8 @@ Siguen pendientes, sin decidir en esta ADR:
 - dónde se aloja `market-data-worker` (Render ofrece background workers, pero el propietario no lo ha confirmado);
 - el proveedor S3-compatible productivo, que Render no cubre, y su región;
 - la compilación y distribución de la app móvil.
+
+Desde el 2026-10-29, [ADR-0016](0016-alojamiento-del-sistema-de-datos.md) decide los dos primeros: el worker va en un background worker de Render, y el almacenamiento de objetos es Cloudflare R2. Las regiones se eligen en el PR de despliegue.
 
 Esta ADR no autoriza a desplegar ni a crear `apps/api`, `apps/web`, `apps/mobile` o `render.yaml` en Fase 1: siguen diferidos por el plan. Desde el 2026-10-26, [ADR-0013](0013-publicacion-del-sitio-en-render.md) autoriza `render.yaml` solo para publicar el sitio oficial como sitio estático gratuito; para todo lo demás, esta frase sigue valiendo.
 

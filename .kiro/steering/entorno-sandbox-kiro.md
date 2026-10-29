@@ -40,16 +40,27 @@ Si una sesión empieza sin seguir estos pasos, el propietario puede pedirlo en s
 - Ante conflicto o decisión ausente, seguir el protocolo de `AGENTS.md`. Los detalles técnicos que ese protocolo deja al agente se resuelven investigando, sin trasladarlos al propietario.
 - Cuando el protocolo pida una decisión humana (producto, dinero, riesgo o seguridad), explicar al propietario las opciones y la recomendación en palabras simples. Las preguntas y los avisos de seguridad van en frases completas.
 - Actualizar el estado de la sesión de Kiro cada vez que cambie la tarea: el propietario lo mira para saber qué pasa.
+- Antes de un paso que tarde más de un minuto (pruebas, CI, una revisión o una medición), decir en una línea qué se hace y para qué. El propietario no ve las herramientas, y un silencio largo le parece que el agente se paró.
 - Al terminar, dejar el PR listo con las condiciones de `AGENTS.md` («Fusión») y dar al propietario el enlace y un resumen corto de lo que cambia y de si necesita algo más que su fusión. El agente no fusiona: fusiona el propietario.
 
 ## Comandos y GitHub
 
 - El Node global del sandbox puede no ser el fijado, y dentro del repositorio `npm` y `npx` fallan con `EBADDEVENGINES`. Ejecutar todo con `pnpm`, que descarga y usa el Node de `devEngines` en `package.json`.
 - Si una herramienta larga se corta, por ejemplo la revisión semántica, volver a lanzarla y avisar al propietario en una línea. Relanzar una revisión que se cortó no cuenta como una segunda revisión semántica.
+- Una llamada a una herramienta que pasa de 10 a 15 minutos puede cortarse. Esperar CI como mucho unos 8 minutos por llamada, dar a los subagentes tareas cortas y hacer commit pronto.
+- Tras un `git commit`, la llamada siguiente puede ver todavía el commit anterior. Antes de `git push`, comprobarlo con `sleep 5; git log --oneline -3`, y después del push, la rama remota con `git ls-remote origin refs/heads/<rama>`.
+- Las llamadas en paralelo pueden leer un archivo a medio cambiar: leerlo otra vez después de editarlo, en una llamada aparte.
 - Antes de cada commit, ejecutar `DOCS_BASE_REF=origin/main pnpm run verify:pr` y confirmar que el código de salida es 0. El final del log no basta: un fallo de tipos puede quedar más arriba.
 - Los subcomandos `gh pr` y `gh issue` no funcionan aquí, y `gh run list` tampoco. Crear el PR con `gh api repos/pedroxynox/buoh/pulls -f title=… -F body=@<archivo> -f head=<rama> -f base=main` y revisar CI con `gh api repos/pedroxynox/buoh/commits/<sha>/check-runs`.
 - El comentario de PR listo se deja con `gh api repos/pedroxynox/buoh/issues/<n>/comments -F body=@<archivo>`. El agente no llama a la API de fusión (`PUT …/pulls/<n>/merge`). Para saber si el propietario ya fusionó: `gh api repos/pedroxynox/buoh/pulls/<n> --jq .merged_at`.
 - Guardar cuerpos de PR, logs y binarios auxiliares fuera del repo, por ejemplo en `/projects/sandbox/.buoh-local/`.
+
+## Cambio de sesión
+
+Una sesión nueva no ve la conversación anterior, y puede no ver lo guardado fuera del repositorio, como `/projects/sandbox/.buoh-local/`. Cuando el propietario va a cambiar de sesión:
+
+1. Llevar a un PR lo que el repositorio todavía no recoge: las decisiones del propietario, con sus palabras y su fecha, las mediciones y los pendientes.
+2. Darle un mensaje para la sesión nueva que remita al repositorio, nombre los PR abiertos y diga cuál es la siguiente tarea. Si ese mensaje y el repositorio difieren, manda el repositorio.
 
 ## PostgreSQL y SeaweedFS sin Docker
 

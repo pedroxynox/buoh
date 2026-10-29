@@ -245,8 +245,8 @@ Solo se listan; sus planes no existen todavía y el roadmap describe el destino.
   No existe código MT5, como manda el plan. La Fase 2 va antes, y la Fase 1B no tiene fecha (P-F1-06).
 - **Fase 2.** Es la fase actual desde el 2026-10-29 (P-F1-06). Su plan es la siguiente tarea de `PROJECT_STATUS.md`, y hasta que se fusione no autoriza código.
 - **Fases 3 a 7.** Roadmap. No están autorizadas.
-- **Despliegue.** ADR-0006, ADR-0013 y arquitectura objetivo. Solo el sitio oficial tiene `render.yaml` (ADR-0013). Siguen pendientes:
-  - el costo del alojamiento del sistema de datos (PostgreSQL y API en Render, ADR-0006), dónde se aloja el worker y el proveedor S3 productivo, que Render no ofrece; el único marcador en código es un comentario en `apps/market-data-worker/src/s3/object-store.ts`;
+- **Despliegue.** ADR-0006, ADR-0013, ADR-0016 y arquitectura objetivo. Solo el sitio oficial tiene `render.yaml` (ADR-0013). El 2026-10-29 el propietario decidió el alojamiento del sistema de datos: el worker en un background worker de Render, PostgreSQL en Render Postgres y los objetos en Cloudflare R2, por unos 15 USD al mes, y nada se compra hasta el PR de despliegue ([ADR-0016](../arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)). Siguen pendientes:
+  - las regiones de Render y de R2, y las condiciones de ADR-0016 §4 antes de desplegar: el punto de control de la memoria, el rol de PostgreSQL de solo inserción y lectura, la retención de producción y las comprobaciones contra R2;
   - la distribución de la app móvil.
 
 ## 5. Documentos desactualizados
@@ -272,7 +272,7 @@ Solo se listan; sus planes no existen todavía y el roadmap describe el destino.
 
 ## 6. Decisiones humanas abiertas
 
-P-V1-01, P-V1-03 y P-GOV-01 ya no figuran aquí, ni lo que el propietario llama «operar desde el celular» (P-V1-05): las resolvió el 2026-10-25, y cada entrada registra su decisión. Tampoco el orden entre la Fase 1B y la Fase 2 (P-F1-06), que decidió el 2026-10-29.
+P-V1-01, P-V1-03 y P-GOV-01 ya no figuran aquí, ni lo que el propietario llama «operar desde el celular» (P-V1-05): las resolvió el 2026-10-25, y cada entrada registra su decisión. Tampoco el orden entre la Fase 1B y la Fase 2 (P-F1-06) ni el costo y los proveedores del alojamiento del sistema de datos (§4, ADR-0016), que decidió el 2026-10-29.
 
 | Decisión | Pendiente | Dónde se registra hoy |
 |---|---|---|
@@ -282,4 +282,4 @@ P-V1-01, P-V1-03 y P-GOV-01 ya no figuran aquí, ni lo que el propietario llama 
 | Dominio propio y revisión legal del sitio | P-V1-07 | `PROJECT_STATUS.md` |
 | Universo de índices y tipos de contrato | P-F1-01 | `PROJECT_STATUS.md` |
 | Equipo de la terminal MT5 y revisión de términos | §4 | `PROJECT_STATUS.md` |
-| Costo del alojamiento del sistema de datos, alojamiento del worker y proveedor S3 productivo | §4 | `PROJECT_STATUS.md` |
+| Región de Render y de R2 para el sistema de datos | §4 | `PROJECT_STATUS.md` y ADR-0016 |
