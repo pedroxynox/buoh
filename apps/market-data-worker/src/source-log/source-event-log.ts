@@ -115,7 +115,12 @@ function verified<T>(check: () => T): T {
 
 const decoder = new TextDecoder('utf-8', { fatal: true });
 
-function eventId(event: SourceEvent): string {
+/**
+ * El ID de un source event en el índice (`source_event_index.event_id`): el `observation_id` de un
+ * frame y el `event_id` de los demás. Es la regla de las filas del log; la usan también la
+ * comprobación del cursor al arrancar (ADR-0015 §5) y el registro operativo.
+ */
+export function sourceEventId(event: SourceEvent): string {
   return event.kind === 'raw_source_frame' ? event.observation_id : event.event_id;
 }
 
@@ -185,6 +190,7 @@ export class SourceEventLog {
   #segmentIndex: number;
   #lines: Uint8Array[];
   #stats: SegmentStats;
+  #firstEventTime: string | null;
   #lastEventTime: string | null;
   #lastEventId: string | null;
   #lastRawObservationId: string | null;
@@ -194,6 +200,7 @@ export class SourceEventLog {
   private constructor(
     input: OpenSourceEventLogInput,
     state: {
+      firstEventTime: string | null;
       lastEventId: string | null;
       lastEventTime: string | null;
       lastRawObservationId: string | null;
@@ -210,6 +217,7 @@ export class SourceEventLog {
     this.#segmentIndex = state.segmentIndex;
     this.#lines = state.lines;
     this.#stats = state.stats;
+    this.#firstEventTime = state.firstEventTime;
     this.#lastEventTime = state.lastEventTime;
     this.#lastEventId = state.lastEventId;
     this.#lastRawObservationId = state.lastRawObservationId;
@@ -248,7 +256,7 @@ export class SourceEventLog {
         );
       }
       const event = verified(() => parseLine(bytes));
-      if (eventId(event) !== row.event_id || event.source !== input.source) {
+      if (sourceEventId(event) !== row.event_id || event.source !== input.source) {
         throw new LogIntegrityError(`El objeto no corresponde al source event ${row.event_id}.`);
       }
       lines.push(bytes);
@@ -256,6 +264,7 @@ export class SourceEventLog {
       lastEventTime = sourceEventTime(event);
     }
     return new SourceEventLog(input, {
+      firstEventTime: state.firstEventTimeUtc,
       lastEventId: state.lastEventId,
       lastEventTime,
       lastRawObservationId: state.lastRawObservationId,
@@ -264,6 +273,16 @@ export class SourceEventLog {
       stats,
       totalEventCount: state.totalEventCount,
     });
+  }
+
+  /**
+   * La hora del evento durable más antiguo del log, el primero (segmento 0, posición 0), o `null`
+   * si no tiene ninguno: la de recepción de un frame y `occurred_at_utc` de los demás. Tras
+   * reabrirse incluye un evento que el índice confirmó aunque informó error, que el log adopta. La
+   * sesión de ingesta cuenta desde ella la retención de un log vacío al arrancar (ADR-0015 §7).
+   */
+  get firstEventTimeUtc(): string | null {
+    return this.#firstEventTime;
   }
 
   get lastEventId(): string | null {
@@ -323,7 +342,7 @@ export class SourceEventLog {
     }
     const row: SourceEventIndexRow = {
       byte_length: line.byteLength,
-      event_id: eventId(event),
+      event_id: sourceEventId(event),
       event_time_utc: sourceEventTime(event),
       kind: event.kind,
       object_sha256: digest,
@@ -340,6 +359,7 @@ export class SourceEventLog {
 
     this.#lines.push(line);
     this.#stats = appendSegmentStats(this.#stats, event);
+    this.#firstEventTime ??= row.event_time_utc;
     this.#lastEventTime = row.event_time_utc;
     this.#lastEventId = row.event_id;
     if (event.kind === 'raw_source_frame') {

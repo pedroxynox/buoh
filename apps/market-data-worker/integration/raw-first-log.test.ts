@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
 import { type SourceEvent } from '@buoh/contracts';
+import { sourceEventTime } from '@buoh/domain';
 import { type Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -124,11 +125,12 @@ afterAll(async () => {
 });
 
 describe('integración del log raw-first y el registro operativo', () => {
-  it('aplica las tres migraciones', () => {
+  it('aplica las cuatro migraciones', () => {
     expect(applied).toEqual([
       '0001_publicaciones.sql',
       '0002_log_raw_first.sql',
       '0003_catalogo_y_respuestas_pedidas.sql',
+      '0004_cursor_y_latido.sql',
     ]);
   });
 
@@ -192,6 +194,10 @@ describe('integración del log raw-first y el registro operativo', () => {
     expect(log.openSegmentIndex).toBe(3);
     expect(log.openSegmentStats.event_count).toBe(0);
     expect(log.totalEventCount).toBe(12);
+    // La hora del evento más antiguo sale del índice, aunque su segmento ya esté cerrado.
+    const [first] = (await log.readDurableSegments()).flat();
+    expect(first).toBeDefined();
+    expect(log.firstEventTimeUtc).toBe(first === undefined ? null : sourceEventTime(first));
   });
 
   it('un fallo de escritura raw queda en el registro operativo y un ConnectionOpened lo resuelve', async () => {

@@ -44,14 +44,16 @@ export class SourceLock {
   readonly source: string;
   readonly #client: pg.Client;
   readonly #key: string;
+  readonly #backendPid: number;
   #held = true;
   #heartbeat: ReturnType<typeof setInterval> | null = null;
   #beating = false;
 
-  private constructor(source: string, client: pg.Client, key: string) {
+  private constructor(source: string, client: pg.Client, key: string, backendPid: number) {
     this.source = source;
     this.#client = client;
     this.#key = key;
+    this.#backendPid = backendPid;
   }
 
   /** Toma el bloqueo, o devuelve `null` sin esperar si otro proceso ya lo tiene. */
@@ -81,22 +83,26 @@ export class SourceLock {
       }
     });
     await client.connect();
-    let locked: boolean;
+    let row: { backend_pid: number; locked: boolean };
     try {
-      const { rows } = await client.query<{ locked: boolean }>(
-        'SELECT pg_try_advisory_lock($1::bigint) AS locked',
+      // El PID sale de la misma consulta que toma el bloqueo: es el de la sesión que lo tiene.
+      const { rows } = await client.query<{ backend_pid: number; locked: boolean }>(
+        'SELECT pg_try_advisory_lock($1::bigint) AS locked, pg_backend_pid() AS backend_pid',
         [key],
       );
-      locked = rows[0]?.locked === true;
+      if (rows[0] === undefined) {
+        throw new TypeError('La consulta del bloqueo no devolvió ninguna fila.');
+      }
+      row = rows[0];
     } catch (error) {
       await client.end().catch(() => undefined);
       throw error;
     }
-    if (!locked) {
+    if (!row.locked) {
       await client.end();
       return null;
     }
-    const acquired = new SourceLock(input.source, client, key);
+    const acquired = new SourceLock(input.source, client, key, row.backend_pid);
     lock = acquired;
     client.on('end', () => {
       acquired.#markLost();
@@ -112,6 +118,16 @@ export class SourceLock {
   /** `true` mientras la sesión que tiene el bloqueo siga viva. */
   get held(): boolean {
     return this.#held;
+  }
+
+  /**
+   * El PID de PostgreSQL de la sesión que tiene el bloqueo (`pg_backend_pid()`), leído una vez al
+   * tomarlo. Es el que `pg_locks` muestra para el bloqueo y el que la sesión de ingesta escribe en
+   * cada latido (ADR-0015 §6), para que `data:health` (ADR-0015 §8, PR 6) reconozca al escritor vivo
+   * de este esquema.
+   */
+  get backendPid(): number {
+    return this.#backendPid;
   }
 
   async #beat(): Promise<void> {

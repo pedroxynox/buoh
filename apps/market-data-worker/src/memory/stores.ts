@@ -1,6 +1,7 @@
 import {
   sourceCatalogSnapshotSchema,
   type DataQualityIncident,
+  type IngestionCursor,
   type OperationalConditionEvent,
   type SourceCatalogSnapshot,
 } from '@buoh/contracts';
@@ -12,6 +13,13 @@ import {
   type RequestedResponseIncidentStore,
 } from '../deriv/ports.js';
 import { ObjectReadError } from '../errors.js';
+import {
+  ingestionHeartbeatSchema,
+  parseIngestionCursor,
+  type IngestionCursorVersion,
+  type IngestionHeartbeat,
+  type IngestionStatusStore,
+} from '../ingestion/status.js';
 import { type OperationalStore } from '../operational/registry.js';
 import { type ObjectStore } from '../ports.js';
 import {
@@ -23,7 +31,7 @@ import {
 
 /**
  * Almacenes en memoria con las mismas reglas que los de PostgreSQL y almacenamiento de objetos:
- * triggers de `0002` y `0003`, claves únicas y validación de lo que se guarda. Los usa
+ * triggers de `0002`, `0003` y `0004`, claves únicas y validación de lo que se guarda. Los usa
  * `data:smoke`, que no escribe nada fuera de su proceso (ADR-0012 §10): todo se borra al terminar.
  * Las pruebas les añaden fallos inyectables en `test/support/memory-stores.ts`.
  */
@@ -70,6 +78,8 @@ export class InMemorySourceLogStore implements SourceLogStore {
     const openIndex = lastClosed === null ? 0 : lastClosed.segment_index + 1;
     const rows = this.rows.filter((row) => row.source === source);
     return Promise.resolve({
+      // Las filas entran en orden de segmento y posición: la primera es la del segmento 0.
+      firstEventTimeUtc: rows[0]?.event_time_utc ?? null,
       lastClosed,
       lastEventId: rows.at(-1)?.event_id ?? null,
       lastRawObservationId:
@@ -208,5 +218,60 @@ export class InMemoryRequestedResponseIncidentStore implements RequestedResponse
         this.incidents.push(incident);
       }
     });
+  }
+}
+
+/**
+ * Cursor y latido con las reglas de `ingestion_cursors` e `ingestion_heartbeats` (migración `0004`,
+ * ADR-0015 §6): versiones del cursor contiguas desde 1 por fuente y símbolo, un `heartbeat_id` como
+ * mucho una vez, y el último latido es el último escrito.
+ */
+export class InMemoryIngestionStatusStore implements IngestionStatusStore {
+  readonly cursors: IngestionCursorVersion[] = [];
+  readonly heartbeats: IngestionHeartbeat[] = [];
+
+  #latestCursor(source: string, symbol: string): IngestionCursorVersion | null {
+    return (
+      this.cursors
+        .filter((item) => item.cursor.source === source && item.cursor.symbol === symbol)
+        .at(-1) ?? null
+    );
+  }
+
+  appendCursor(input: IngestionCursor): Promise<IngestionCursorVersion> {
+    return Promise.resolve().then(() => {
+      // Como `PostgresIngestionStatusStore`: solo un IngestionCursor 1.0.0 válido.
+      const cursor = parseIngestionCursor(input);
+      const last = this.#latestCursor(cursor.source, cursor.symbol);
+      const stored = { cursor, version: (last?.version ?? 0) + 1 };
+      this.cursors.push(stored);
+      return stored;
+    });
+  }
+
+  latestCursor(source: string, symbol: string): Promise<IngestionCursorVersion | null> {
+    return Promise.resolve(this.#latestCursor(source, symbol));
+  }
+
+  cursorSymbols(source: string): Promise<string[]> {
+    const symbols = this.cursors
+      .filter((item) => item.cursor.source === source)
+      .map((item) => item.cursor.symbol);
+    return Promise.resolve([...new Set(symbols)].sort());
+  }
+
+  appendHeartbeat(input: IngestionHeartbeat): Promise<void> {
+    return Promise.resolve().then(() => {
+      const heartbeat = ingestionHeartbeatSchema.parse(input);
+      // Como la clave primaria `heartbeat_id` de `ingestion_heartbeats`.
+      if (this.heartbeats.some((item) => item.heartbeat_id === heartbeat.heartbeat_id)) {
+        throw Object.assign(new Error('Latido ya guardado'), { code: '23505' });
+      }
+      this.heartbeats.push(heartbeat);
+    });
+  }
+
+  latestHeartbeat(source: string): Promise<IngestionHeartbeat | null> {
+    return Promise.resolve(this.heartbeats.filter((item) => item.source === source).at(-1) ?? null);
   }
 }

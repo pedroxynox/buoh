@@ -156,7 +156,7 @@ updated_at_utc: UtcTimestampMs
 
 El procedimiento de desconexión persiste primero `ConnectionClosed` y luego consulta/snapshot el cursor por símbolo. Un cursor nunca avanza por un evento no confirmado como durable.
 
-Decidido en [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §6, y llega con el PR 5 de su secuencia: se persistirá en la tabla append-only `ingestion_cursors`, en versiones contiguas por fuente y símbolo, después de cada `ConnectionClosed` durable y al parar. `active_segment_index`, `source_event_count`, `last_durable_source_event_id` y `last_durable_observation_id` serán los del log de la fuente en ese momento: segmento abierto, eventos durables, último evento y último raw. `high_watermark_event_time_utc` será el del símbolo. Al arrancar, el último evento del cursor tendrá que estar en el índice del log, y su símbolo, coincidir con el pedido.
+Decidido en [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §6 y persistido desde el PR 5 de su secuencia: la sesión de ingesta lo guarda en la tabla append-only `ingestion_cursors`, en versiones contiguas por fuente y símbolo, después de cada `ConnectionClosed` durable, también uno reparado, y al parar. `connection_id` es la conexión del último evento durable. `active_segment_index`, `source_event_count`, `last_durable_source_event_id` y `last_durable_observation_id` son los del log de la fuente en ese momento: segmento abierto, eventos durables, último evento y último raw. `high_watermark_event_time_utc` es el del símbolo: la hora de su tick durable más tardío. Al arrancar, el último evento del cursor del símbolo tiene que estar en el índice del log, y ningún cursor de la fuente puede ser de otro símbolo: un log lo escribe una sesión de un solo símbolo.
 
 ## `MarketTick`
 
@@ -606,7 +606,7 @@ El perfil de Deriv no declara `ticks` ni `error`. Una suscripción fallida (`msg
 
 Desde el PR 3 de [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13 (§4), quien pide `ticks_history` comprueba igual su respuesta `history`, con `checkRequestedResponse`; `schema_validation_failed` es solo para la que no cumple el esquema de respuesta. Además, la página tiene que ser coherente: traer el objeto `history`, sus arrays `times` y `prices`, y `pip_size`, con `pip_size` entero de 0 a 18, `times` y `prices` de la misma longitud, tiempos enteros estrictamente crecientes dentro del rango pedido y precios que acepta con ese `pip_size` la regla de `quote_decimal` (`canonicalQuoteDecimal`, en `packages/domain`); si no, el motivo es `history_inconsistent`, también cuando cumple el esquema pero le falta uno de esos miembros. Una petición de historia rechazada llega con `msg_type` `ticks_history` y un objeto `error`; el perfil v2 no lo declara, así que la registran las reglas 2.0.0 y no deja incidencia de respuesta pedida.
 
-`history_inconsistent` (una página de historia incoherente) existe en `packages/domain` desde el PR 3 y es solo para las respuestas de historia. En PostgreSQL, `requested_response_incidents` lo admitirá desde la migración `0004`, que llega con el PR 5 de ADR-0015 §13; la `0003`, la vigente, no lo admite.
+`history_inconsistent` (una página de historia incoherente) existe en `packages/domain` desde el PR 3 y es solo para las respuestas de historia. En PostgreSQL, `requested_response_incidents` lo admite desde la migración `0004`, del PR 5 de ADR-0015 §13; la `0003` no lo admitía.
 
 ## Contratos futuros
 

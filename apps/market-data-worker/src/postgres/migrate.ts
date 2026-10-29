@@ -30,6 +30,32 @@ export async function loadMigrations(): Promise<Migration[]> {
   );
 }
 
+/** La tabla no existe (`undefined_table`): el esquema nunca recibió `db:migrate`. */
+const UNDEFINED_TABLE = '42P01';
+
+/**
+ * Las migraciones del worker que el esquema del pool todavía no tiene, en orden, sin aplicar nada:
+ * las que faltan en `buoh_schema_migrations`, o todas si esa tabla no existe. La usa `ingest`, que
+ * no arranca sin ellas (runbook, «Captura viva continua»). Cualquier otro error de la consulta, como
+ * un PostgreSQL que no responde, la rechaza con él.
+ */
+export async function pendingMigrations(pool: Pick<Pool, 'query'>): Promise<string[]> {
+  const migrations = await loadMigrations();
+  let applied: ReadonlySet<string>;
+  try {
+    const { rows } = await pool.query<{ name: string }>(
+      'SELECT name FROM buoh_schema_migrations ORDER BY name',
+    );
+    applied = new Set(rows.map((row) => row.name));
+  } catch (error) {
+    if ((error as { code?: unknown }).code !== UNDEFINED_TABLE) {
+      throw error;
+    }
+    applied = new Set();
+  }
+  return migrations.map((migration) => migration.name).filter((name) => !applied.has(name));
+}
+
 /**
  * Aplica migraciones en orden, cada una en su transacción. Una migración ya aplicada cuyo contenido
  * cambió aborta: las migraciones son append-only igual que los datos.

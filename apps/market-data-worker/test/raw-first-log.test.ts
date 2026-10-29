@@ -32,6 +32,7 @@ import {
   failureReason,
   loadSyntheticFixture,
   LogIntegrityError,
+  LogPersistenceError,
   LogReadError,
   OperationalRegistry,
   previousConnection,
@@ -110,6 +111,8 @@ async function harness(
   options: {
     /** Reloj del ingestor; por defecto, fijo en `DETECTED_AT`. */
     now?: () => string;
+    /** Recibe cada source event que el ingestor hizo durable; por defecto, ninguno. */
+    onDurable?: (event: SourceEvent) => void;
     operational?: MemoryOperationalStore;
     profile?: PipelineProfile;
   } = {},
@@ -140,6 +143,7 @@ async function harness(
     log: await openLog(),
     nextId: () => id((counter += 1)),
     now: options.now ?? (() => DETECTED_AT),
+    ...(options.onDurable === undefined ? {} : { onDurable: options.onDurable }),
     profile,
     registry,
     reopenLog: openLog,
@@ -712,6 +716,30 @@ describe('log de source events: rotación 1.0.0 y reinicio', () => {
       Buffer.from(ndjsonBytes(segment ?? [])).equals(Buffer.from(ndjsonBytes([...events, fourth]))),
     ).toBe(true);
     expect(store.rows.map((row) => row.position)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('firstEventTimeUtc es la hora del evento durable más antiguo, el primero del log: null sin eventos, la del primero al escribirlo y la misma al reabrirlo, también con su segmento ya cerrado', async () => {
+    const { log, open } = await freshLog();
+    expect(log.firstEventTimeUtc).toBeNull();
+    expect((await open()).firstEventTimeUtc).toBeNull();
+    await log.append(raw(1, '2026-01-01T00:00:01.000Z'));
+    await log.append(raw(2, '2026-01-01T00:00:02.000Z'));
+    expect(log.firstEventTimeUtc).toBe('2026-01-01T00:00:01.000Z');
+    expect((await open()).firstEventTimeUtc).toBe('2026-01-01T00:00:01.000Z');
+    await log.close('requested');
+    await log.append(raw(3, '2026-01-01T00:00:03.000Z'));
+    expect((await open()).firstEventTimeUtc).toBe('2026-01-01T00:00:01.000Z');
+  });
+
+  it('firstEventTimeUtc incluye un evento que el índice confirmó aunque informó error: el log reabierto lo adopta', async () => {
+    const { log, open, store } = await freshLog();
+    store.failIndexAfterInsert = () => true;
+    await expect(log.append(raw(1, '2026-01-01T00:00:01.000Z'))).rejects.toThrow(
+      LogPersistenceError,
+    );
+    expect(log.firstEventTimeUtc).toBeNull();
+    store.failIndexAfterInsert = () => false;
+    expect((await open()).firstEventTimeUtc).toBe('2026-01-01T00:00:01.000Z');
   });
 
   type Stores = Pick<Awaited<ReturnType<typeof freshLog>>, 'objects' | 'store'>;
@@ -1351,6 +1379,57 @@ describe('RawFirstIngestor.repairUnrecordedClose: cierre no registrado (ADR-0015
     await run.ingestor.receiveEvent(openedEvent(CONNECTION_B, id(3), REOPENED_AT, CONNECTION_A));
     expect(run.registry.openConditionTypes()).toEqual([]);
     expect(run.ingestor.state).toBe('accepting');
+  });
+});
+
+// Lo que la sesión sigue para su cursor, su latido y la retención (ADR-0015 §6 y §7).
+describe('RawFirstIngestor: onDurable', () => {
+  const OPENED_AT = '2026-01-01T00:00:01.000Z';
+  const DETECTION = '2026-01-01T00:00:30.000Z';
+
+  const tickFrame = (observationId: string) => ({
+    connection_id: CONNECTION_A,
+    observation_id: observationId,
+    payload_utf8: tickPayload(1767225601),
+    received_at_utc: '2026-01-01T00:00:01.100Z',
+  });
+
+  it('recibe en orden cada source event que el ingestor hizo durable, también el cierre reparado, y nunca uno que no quedó durable', async () => {
+    let now = OPENED_AT;
+    const durable: SourceEvent[] = [];
+    const run = await harness({ now: () => now, onDurable: (event) => durable.push(event) });
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+    await run.ingestor.receiveFrame(tickFrame(id(2)));
+    run.objects.armNextPutFailure('synthetic_injected_failure');
+    await run.ingestor.receiveFrame(tickFrame(id(3)));
+    now = DETECTION;
+    await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] });
+
+    expect(durable).toEqual((await storedEvents(run)).map((item) => item.event));
+    expect(
+      durable.map((event) =>
+        event.kind === 'raw_source_frame' ? event.observation_id : event.event_id,
+      ),
+    ).toEqual([id(1), id(2), id(9001)]);
+  });
+
+  it('un evento que el índice confirmó aunque informó error no pasa por él: el log lo adopta al reabrirse', async () => {
+    let now = OPENED_AT;
+    const durable: string[] = [];
+    const run = await harness({
+      now: () => now,
+      onDurable: (event) =>
+        durable.push(event.kind === 'raw_source_frame' ? event.observation_id : event.event_id),
+    });
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), OPENED_AT));
+    run.sourceLog.failIndexAfterInsert = (row) => row.event_id === id(2);
+    await run.ingestor.receiveFrame(tickFrame(id(2)));
+    run.sourceLog.failIndexAfterInsert = () => false;
+    now = DETECTION;
+    await run.ingestor.repairUnrecordedClose({ affected_symbols: ['SYNTH_100'] });
+
+    expect(run.sourceLog.rows.map((row) => row.event_id)).toEqual([id(1), id(2), id(9001)]);
+    expect(durable).toEqual([id(1), id(9001)]);
   });
 });
 

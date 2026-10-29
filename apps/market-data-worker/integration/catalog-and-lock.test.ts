@@ -34,7 +34,6 @@ import {
   SOURCE_LOCK_LOST,
   SOURCE_LOCK_QUERY_TIMEOUT_MS,
   SourceLock,
-  sourceLockKey,
   type ObjectStore,
   type WorkerConfig,
 } from '../src/index.js';
@@ -45,6 +44,7 @@ import {
   SYNTH_100,
   syntheticSchemaArchive,
 } from '../test/support/deriv-fixtures.js';
+import { sourceLockHolder } from '../test/support/pg-locks.js';
 
 /**
  * Catálogo, incidencias de respuestas pedidas y bloqueo por fuente (ADR-0012 §6, §7 y §9) contra
@@ -119,12 +119,13 @@ afterAll(async () => {
   await admin.end();
 });
 
-describe('migración 0003', () => {
-  it('se aplica después de las dos anteriores', () => {
+describe('migraciones', () => {
+  it('aplica la 0003 después de las dos anteriores, y la 0004', () => {
     expect(applied).toEqual([
       '0001_publicaciones.sql',
       '0002_log_raw_first.sql',
       '0003_catalogo_y_respuestas_pedidas.sql',
+      '0004_cursor_y_latido.sql',
     ]);
   });
 });
@@ -361,7 +362,7 @@ describe('PostgresRequestedResponseIncidentStore (ADR-0012 §6)', () => {
     expect(rowCount).toBe(0);
   });
 
-  it('la tabla solo admite los seis motivos de una respuesta pedida', async () => {
+  it('la tabla solo admite los motivos de una respuesta pedida', async () => {
     expect(
       await errorCode(
         stores.pool.query(
@@ -377,16 +378,7 @@ describe('PostgresRequestedResponseIncidentStore (ADR-0012 §6)', () => {
 
 describe('SourceLock (ADR-0012 §9)', () => {
   /** Backend que tiene el bloqueo de la fuente según `pg_locks`, o `null`. */
-  async function holder(source: string): Promise<number | null> {
-    const key = BigInt.asUintN(64, BigInt(sourceLockKey(source)));
-    const { rows } = await admin.query<{ pid: number }>(
-      `SELECT pid FROM pg_locks
-        WHERE locktype = 'advisory' AND granted AND objsubid = 1
-          AND classid = $1::bigint::oid AND objid = $2::bigint::oid`,
-      [(key >> 32n).toString(), (key & 0xffff_ffffn).toString()],
-    );
-    return rows[0]?.pid ?? null;
-  }
+  const holder = (source: string): Promise<number | null> => sourceLockHolder(admin, source);
 
   it('una sola instancia por fuente: la segunda no arranca hasta que la primera suelta', async () => {
     const first = await SourceLock.acquire({ postgres: config.postgres, source: DERIV_SOURCE });

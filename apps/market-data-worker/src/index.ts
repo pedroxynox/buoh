@@ -1,4 +1,10 @@
-export { ConfigError, loadConfig, type WorkerConfig } from './config.js';
+export {
+  ConfigError,
+  DEFAULT_POSTGRES_SCHEMA,
+  DEFAULT_S3_BUCKET,
+  loadConfig,
+  type WorkerConfig,
+} from './config.js';
 export {
   createStorageEncoder,
   decodeObject,
@@ -26,6 +32,14 @@ export {
   type TickSink,
 } from './ingestion/raw-first-ingestor.js';
 export {
+  INGESTION_CURSOR_SCHEMA_VERSION,
+  ingestionHeartbeatSchema,
+  parseIngestionCursor,
+  type IngestionCursorVersion,
+  type IngestionHeartbeat,
+  type IngestionStatusStore,
+} from './ingestion/status.js';
+export {
   OPERATIONAL_RESOLUTION_REASONS,
   OperationalRegistry,
   stderrAlert,
@@ -37,6 +51,8 @@ export {
 export { PostgresCatalogStore } from './postgres/catalog-store.js';
 export { PostgresOperationalStore } from './postgres/operational-store.js';
 export { PostgresRequestedResponseIncidentStore } from './postgres/requested-response-store.js';
+export { PostgresIngestionStatusStore } from './postgres/ingestion-status-store.js';
+export { openLockedSourceLog, PostgresSessionLockProvider } from './postgres/session-lock.js';
 export {
   lockedSourceLogStore,
   SOURCE_LOCK_HEARTBEAT_MS,
@@ -66,7 +82,7 @@ export {
 export { driveSyntheticStimuli, type SyntheticDriverHooks } from './synthetic-driver.js';
 export { contentKey, keyFromUri, manifestKey, objectUri } from './object-keys.js';
 export { type CommitPublicationInput, type MetadataStore, type ObjectStore } from './ports.js';
-export { migrate } from './postgres/migrate.js';
+export { migrate, pendingMigrations } from './postgres/migrate.js';
 export { createPool, PostgresMetadataStore } from './postgres/metadata-store.js';
 export { publishDataset, type PublishDatasetInput } from './publication.js';
 export {
@@ -80,6 +96,7 @@ export {
 export { parseReplayArgs, REPLAY_USAGE, UsageError } from './replay-args.js';
 export {
   InMemoryCatalogStore,
+  InMemoryIngestionStatusStore,
   InMemoryObjectStore,
   InMemoryOperationalStore,
   InMemoryRequestedResponseIncidentStore,
@@ -104,7 +121,26 @@ export {
   SMOKE_DEFAULT_SYMBOL,
   SMOKE_MAX_DURATION_SECONDS,
   SMOKE_USAGE,
+  symbolOption,
   type SmokeOptions,
 } from './smoke-args.js';
-export { openStores } from './runtime.js';
+export {
+  checkIngestConfig,
+  IngestConfigError,
+  INGEST_USAGE,
+  parseIngestArgs,
+  type IngestOptions,
+} from './ingest-args.js';
+export {
+  INGEST_RETENTION_MS,
+  ingestCommand,
+  ingestExitCode,
+  runIngest,
+  type IngestDependencies,
+  type IngestInput,
+  type IngestRecovery,
+  type IngestReport,
+  type IngestStores,
+} from './ingest.js';
+export { openStores, type OpenStoresOptions } from './runtime.js';
 export { S3ObjectStore } from './s3/object-store.js';

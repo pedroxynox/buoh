@@ -9,7 +9,12 @@ import {
 import { type CatalogVersion } from '../../src/deriv/ports.js';
 import { PublicationConflictError, PublicationError } from '../../src/errors.js';
 import {
+  type IngestionCursorVersion,
+  type IngestionHeartbeat,
+} from '../../src/ingestion/status.js';
+import {
   InMemoryCatalogStore,
+  InMemoryIngestionStatusStore,
   InMemoryObjectStore,
   InMemoryOperationalStore,
   InMemoryRequestedResponseIncidentStore,
@@ -195,5 +200,70 @@ export class MemoryRequestedResponseIncidentStore extends InMemoryRequestedRespo
       return Promise.reject(Object.assign(new Error('Fallo inyectado'), { code: 'ECONNREFUSED' }));
     }
     return super.append(incident);
+  }
+}
+
+/**
+ * Cursor y latido en memoria (`InMemoryIngestionStatusStore`), con fallos inyectables: cada uno
+ * simula que PostgreSQL no responde, con el error de `failure`.
+ */
+export class MemoryIngestionStatusStore extends InMemoryIngestionStatusStore {
+  /** El error de cada fallo inyectado; por defecto, uno con el código `ECONNREFUSED`. */
+  failure: () => Error = () =>
+    Object.assign(new Error('Fallo inyectado'), { code: 'ECONNREFUSED' });
+  /** Cada `appendCursor` falla mientras sea `true`. */
+  failCursorWrites = false;
+  /** Cada `appendHeartbeat` falla mientras sea `true`. */
+  failHeartbeatWrites = false;
+  /** Las próximas `n` lecturas (`latestCursor` o `cursorSymbols`) fallan. */
+  failReads = 0;
+  #gate: Promise<void> | null = null;
+
+  /** Retiene las escrituras hasta `release`: cada una espera y después se guarda o falla. */
+  holdWrites(): { readonly release: () => void } {
+    const gate = Promise.withResolvers<undefined>();
+    this.#gate = gate.promise;
+    return {
+      release: () => {
+        this.#gate = null;
+        gate.resolve(undefined);
+      },
+    };
+  }
+
+  #read(): Promise<void> {
+    if (this.failReads === 0) {
+      return Promise.resolve();
+    }
+    this.failReads -= 1;
+    return Promise.reject(this.failure());
+  }
+
+  override async appendCursor(
+    ...args: Parameters<InMemoryIngestionStatusStore['appendCursor']>
+  ): Promise<IngestionCursorVersion> {
+    await this.#gate;
+    if (this.failCursorWrites) {
+      throw this.failure();
+    }
+    return super.appendCursor(...args);
+  }
+
+  override async appendHeartbeat(heartbeat: IngestionHeartbeat): Promise<void> {
+    await this.#gate;
+    if (this.failHeartbeatWrites) {
+      throw this.failure();
+    }
+    await super.appendHeartbeat(heartbeat);
+  }
+
+  override async latestCursor(source: string, symbol: string) {
+    await this.#read();
+    return super.latestCursor(source, symbol);
+  }
+
+  override async cursorSymbols(source: string) {
+    await this.#read();
+    return super.cursorSymbols(source);
   }
 }

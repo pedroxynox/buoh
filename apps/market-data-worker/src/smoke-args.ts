@@ -23,6 +23,19 @@ function seconds(text: string): number {
 }
 
 /**
+ * El símbolo de `--symbol`, o `R_100` sin él. Solo descarta lo que nunca es un código; el esquema
+ * de la petición `ticks` decide el resto. Si no lo es, lanza `UsageError` con el uso del comando
+ * (`usage`). Lo usan `data:smoke` e `ingest`.
+ */
+export function symbolOption(value: string | undefined, usage: string): string {
+  const symbol = value ?? SMOKE_DEFAULT_SYMBOL;
+  if (!/^[A-Za-z0-9_]{1,64}$/u.test(symbol)) {
+    throw new UsageError(`--symbol requiere un código como R_100. ${usage}`);
+  }
+  return symbol;
+}
+
+/**
  * Interpreta `--live [--symbol <código>] [--duration-seconds <n>] [--interrupt-after-seconds <n>]`;
  * tolera el separador `--` que reenvía pnpm. Sin `--live` no se abre ninguna conexión: es un error
  * de uso (salida 2), para que ningún `verify` ni CI toque la red. El corte (ADR-0015 §9) tiene que
@@ -58,11 +71,7 @@ export function parseSmokeArgs(argv: readonly string[]): SmokeOptions {
       `data:smoke se conecta a Deriv: pasa --live para confirmarlo. ${SMOKE_USAGE}`,
     );
   }
-  const symbol = values.symbol ?? SMOKE_DEFAULT_SYMBOL;
-  // Solo descarta lo que nunca es un código; el esquema de la petición `ticks` decide el resto.
-  if (!/^[A-Za-z0-9_]{1,64}$/u.test(symbol)) {
-    throw new UsageError(`--symbol requiere un código como R_100. ${SMOKE_USAGE}`);
-  }
+  const symbol = symbolOption(values.symbol, SMOKE_USAGE);
   const durationSeconds = seconds(
     values['duration-seconds'] ?? String(SMOKE_DEFAULT_DURATION_SECONDS),
   );

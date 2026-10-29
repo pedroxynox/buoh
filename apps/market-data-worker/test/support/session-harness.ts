@@ -1,4 +1,4 @@
-import { type SourceEvent } from '@buoh/contracts';
+import { type IngestionCursor, type SourceEvent } from '@buoh/contracts';
 import { type InvalidFrameReason, type UnflaggedTick } from '@buoh/domain';
 
 import { DERIV_SOURCE } from '../../src/deriv/profile.js';
@@ -20,6 +20,7 @@ import {
 } from './deriv-fixtures.js';
 import {
   MemoryCatalogStore,
+  MemoryIngestionStatusStore,
   MemoryObjectStore,
   MemoryOperationalStore,
   MemoryRequestedResponseIncidentStore,
@@ -28,12 +29,20 @@ import {
 
 // La sesión de ingesta armada sobre almacenes en memoria (ADR-0015 §3): reloj y temporizador
 // manuales, sockets falsos, IDs secuenciales desde 1, esquemas sintéticos descargados de un `fetch`
-// falso y un bloqueo en memoria. Ningún precio es de mercado.
+// falso y un bloqueo en memoria. Con `status`, también el cursor y el latido (ADR-0015 §6). Ningún
+// precio es de mercado.
 
-/** Bloqueo en memoria. `lose` lo da por perdido, como cuando PostgreSQL corta la sesión que lo tiene. */
+/** El PID de PostgreSQL del bloqueo número `number`, desde 1: 4000 + `number`. */
+export const lockPid = (number: number): number => 4000 + number;
+
+/**
+ * Bloqueo en memoria. `lose` lo da por perdido, como cuando PostgreSQL corta la sesión que lo tiene.
+ * Su `backendPid` es `lockPid(number)`, salvo que se cree sin PID, como el del smoke.
+ */
 export class FakeSessionLock implements SessionLock {
   /** Orden del bloqueo entre los que tomó la sesión, desde 1. */
   readonly number: number;
+  readonly backendPid?: number;
   released = false;
   readonly #timeline: string[];
   readonly #onRelease: (number: number) => void;
@@ -44,8 +53,12 @@ export class FakeSessionLock implements SessionLock {
     timeline: string[],
     onRelease: (number: number) => void,
     held = true,
+    withPid = true,
   ) {
     this.number = number;
+    if (withPid) {
+      this.backendPid = lockPid(number);
+    }
     this.#timeline = timeline;
     this.#onRelease = onRelease;
     this.#held = held;
@@ -89,11 +102,14 @@ export class FakeLockProvider implements SessionLockProvider {
   onRelease: (number: number) => void = () => undefined;
   readonly #answers: LockAnswer[];
   readonly #timeline: string[];
+  readonly #withPid: boolean;
   #calls = 0;
 
-  constructor(answers: readonly LockAnswer[], timeline: string[]) {
+  /** Con `withPid` en `false`, sus bloqueos no exponen `backendPid`, como el del smoke. */
+  constructor(answers: readonly LockAnswer[], timeline: string[], withPid = true) {
     this.#answers = [...answers];
     this.#timeline = timeline;
+    this.#withPid = withPid;
   }
 
   /** El bloqueo número `number`, desde 1; falla si la sesión no lo tomó. */
@@ -132,6 +148,7 @@ export class FakeLockProvider implements SessionLockProvider {
         this.onRelease(number);
       },
       answer === 'lock',
+      this.#withPid,
     );
     this.locks.push(lock);
     this.#timeline.push(`acquire:${String(lock.number)}`);
@@ -160,11 +177,31 @@ export interface SessionHarnessOptions {
   readonly expectedSha256?: string;
   /** Además de anotarlo, recibe cada tick durable: para hacer fallar el sink. */
   readonly onTick?: (tick: UnflaggedTick) => void;
-  /** Cambia los almacenes después de escribir `events` y antes de arrancar la sesión. */
+  /**
+   * Cambia los almacenes después de escribir `events` y `cursors` y antes de arrancar la sesión.
+   * `status` es el almacén del cursor y del latido, o `null` si la sesión no lo tiene.
+   */
   readonly beforeStart?: (stores: {
     readonly objects: MemoryObjectStore;
     readonly sourceLog: MemorySourceLogStore;
+    readonly status: MemoryIngestionStatusStore | null;
   }) => void;
+  /**
+   * La sesión escribe el cursor y el latido en un almacén en memoria (`status` del resultado del
+   * harness); por defecto, no lo tiene, como el smoke.
+   */
+  readonly status?: boolean;
+  /** Cursores que el almacén ya tiene, de ejecuciones anteriores, en orden; implica `status`. */
+  readonly cursors?: readonly IngestionCursor[];
+  /** Los bloqueos no exponen `backendPid`, como el del smoke; por defecto, sí. */
+  readonly pidlessLocks?: boolean;
+  /**
+   * La sesión guarda el esquema de fuente en el almacenamiento de objetos del log (`objects`), como
+   * `ingest`; por defecto, no, como el smoke.
+   */
+  readonly schemaObjects?: boolean;
+  /** La retención de la sesión, en milisegundos; por defecto, ninguna. */
+  readonly retentionMs?: number;
   /** Pide la parada dentro de la llamada número `n` a `connect`, mientras se crea el socket. */
   readonly stopOnConnect?: number;
   /** Pide la parada durante la descarga de los esquemas. */
@@ -218,7 +255,14 @@ export async function sessionHarness(options: SessionHarnessOptions = {}) {
   if (options.closeSegment === true) {
     await seed.close('requested');
   }
-  options.beforeStart?.({ objects, sourceLog });
+  const status =
+    options.status === true || options.cursors !== undefined
+      ? new MemoryIngestionStatusStore()
+      : null;
+  for (const cursor of options.cursors ?? []) {
+    await status?.appendCursor(cursor);
+  }
+  options.beforeStart?.({ objects, sourceLog, status });
 
   archive ??= syntheticSchemaArchive();
   const fixture = archive;
@@ -227,7 +271,11 @@ export async function sessionHarness(options: SessionHarnessOptions = {}) {
     source: DERIV_SOURCE,
     store: operational,
   });
-  const provider = new FakeLockProvider(options.locks ?? [], timeline);
+  const provider = new FakeLockProvider(
+    options.locks ?? [],
+    timeline,
+    options.pidlessLocks !== true,
+  );
   let stopSession = (): void => undefined;
   provider.onAcquire = (call) => {
     if (options.stopOnAcquire === call) {
@@ -298,9 +346,12 @@ export async function sessionHarness(options: SessionHarnessOptions = {}) {
     random: options.random ?? (() => 0),
     registry,
     requestedResponses: new MemoryRequestedResponseIncidentStore(),
+    ...(options.retentionMs === undefined ? {} : { retentionMs: options.retentionMs }),
     scheduler: clock.scheduler,
+    ...(options.schemaObjects === true ? { schemaObjects: objects } : {}),
     schemaUrl: SCHEMA_URL,
     serverTime: options.serverTime ?? false,
+    ...(status === null ? {} : { status }),
     sink: {
       invalidFrame: (item) => invalid.push(item),
       tick: (tick) => {
@@ -364,6 +415,7 @@ export async function sessionHarness(options: SessionHarnessOptions = {}) {
     socket,
     sockets,
     sourceLog,
+    status,
     subscribe,
     ticks,
     timeline,

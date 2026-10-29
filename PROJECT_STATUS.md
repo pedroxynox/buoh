@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 26
-updated_at_utc: "2026-10-28T23:56:11.000Z"
+status_version: 28
+updated_at_utc: "2026-10-29T04:46:05.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -30,8 +30,8 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
   - F1.3a: `infra/compose.yaml` (PostgreSQL 18 y SeaweedFS S3-compatible), `apps/market-data-worker` con publicación atómica y `pnpm run data:replay` en modos recomputación y `--verify-only` (`F1-DATASET-001`);
   - F1.3b: log raw-first durable con rotación `segment_policy_version = 1.0.0`, registro operativo de `persistence_unavailable`/`source_limit_exceeded` y publicación desde segmentos cerrados del log (`F1-STREAM-001`).
 - F1.4 se entrega en dos partes. F1.4a añade las reglas de calidad 2.0.0 para fuentes que mezclan varios tipos de mensaje, como Deriv: mensajes que no son ticks, errores de la fuente, atribución por `echo_req` e incidencia sin símbolo con el esquema de incidencias 2.0.0 ([contratos de dominio](docs/arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-200)).
-- F1.4b entregó el catálogo versionado de Deriv (`F1-CATALOG-001`) y el adaptador público, solo para escuchar (`F1-SOURCE-001`), con el smoke opt-in `pnpm run data:smoke` ([ADR-0012](docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md)): esquemas fijados, transporte `ws` con sus límites, cola en memoria, correlación, keepalive, versiones del catálogo e incidencias de respuestas pedidas en PostgreSQL, y bloqueo por fuente. La sesión de ingesta reconecta con espera, repara los cierres no registrados y recupera la historia del hueco ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md)); todavía faltan el comando continuo `ingest`, el cursor y el latido, y `data:health`.
-- No existe todavía persistencia del `IngestionCursor`, un proceso que ingiera de forma continua ni despliegue del sistema de datos.
+- F1.4b entregó el catálogo versionado de Deriv (`F1-CATALOG-001`) y el adaptador público, solo para escuchar (`F1-SOURCE-001`), con el smoke opt-in `pnpm run data:smoke` ([ADR-0012](docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md)): esquemas fijados, transporte `ws` con sus límites, cola en memoria, correlación, keepalive, versiones del catálogo e incidencias de respuestas pedidas en PostgreSQL, y bloqueo por fuente. La sesión de ingesta reconecta con espera, repara los cierres no registrados y recupera la historia del hueco ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md)).
+- La sesión de ingesta persiste el `IngestionCursor` y el latido en PostgreSQL (migración `0004`), y `pnpm --filter @buoh/market-data-worker run ingest -- --live` la ejecuta de forma continua sobre PostgreSQL y el almacenamiento de objetos, con un esquema y un bucket propios, y para sola a las 23 horas para borrar la captura antes de las 24 ([runbook](docs/operacion/runbook-ingesta-de-datos.md), «Captura viva continua»). Todavía faltan `data:health` y la evidencia de la puerta de salida de Fase 1, y no hay despliegue del sistema de datos.
 - MetaTrader 5 (Deriv MT5 y Vantage) queda decidido como segunda integración ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)): sus datos llegan en una Fase 1B posterior a Fase 1, y operar en MT5 empieza en Fase 4 (demo). No existe código de MT5.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
 - El sitio oficial está en internet desde el 2026-10-27, como sitio estático gratuito de Render, en `https://buoh-sitio.onrender.com` y sin indexar ni anunciar ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). Es lo único desplegado. El propietario conectó el repositorio, y la comprobación de [despliegue en Render](docs/operacion/despliegue-en-render.md) («Comprobar un despliegue») pasó ese día: cabeceras de seguridad y `noindex` en todas las respuestas, ninguna cookie, `404` propio y las seis páginas abren con el texto de `main` (detalle en P-V1-07 de la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md)).
@@ -165,7 +165,9 @@ Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la li
 3. Los nombres de `PublicationStep` no coinciden con `PersistenceStage`; los fallos de publicación todavía no entran en el registro operativo.
 4. El worker usa un único rol PostgreSQL dueño de las tablas. Antes de desplegar (ADR-0006) hace falta un rol de ejecución que solo pueda insertar y leer.
 5. SeaweedFS `mini` arranca componentes internos que no se usan (Iceberg, Lance, servidor de administración).
-6. Un solo escritor por fuente: resuelto en parte en F1.4b. El transporte entrega una llamada a la vez, y `fixture:publish`, el único proceso que hoy escribe el log en PostgreSQL, toma antes el bloqueo de su fuente, que nota una sesión perdida en unos 10 s (ADR-0012 §9). El primer proceso que escriba el log de forma continua debe además usar el log protegido (`lockedSourceLogStore`), porque `openStores()` entrega el log sin proteger, y volver a tomar el bloqueo tras perderlo o terminar si ya lo tiene otro proceso.
+
+El antiguo pendiente 6 (un solo escritor por fuente) quedó resuelto en F1.5 con `ingest` (PR #38), el primer proceso que escribe el log de forma continua: escribe con el log protegido por el bloqueo (`openLockedSourceLog`), vuelve a tomar el bloqueo antes de reconectar si lo perdió y termina con `source_lock_taken` si lo tiene otro proceso ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §3, «Bloqueo»). F1.4b lo había resuelto en parte: el transporte entrega una llamada a la vez, y `fixture:publish` toma antes el bloqueo de su fuente, que nota una sesión perdida en unos 10 s (ADR-0012 §9).
+
 7. Tras un fallo de persistencia, el `ConnectionClosed` del cierre no se guarda en el log, así que un dataset que abarque la caída no lleva marca de la interrupción. Un índice que confirma pero informa error se trata como no durable y se adopta al reabrir sin reconciliar el tick.
 
 ## Pendientes registrados de F1.2
