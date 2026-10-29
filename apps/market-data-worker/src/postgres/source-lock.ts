@@ -122,8 +122,9 @@ export class SourceLock {
 
   /**
    * El PID de PostgreSQL de la sesión que tiene el bloqueo (`pg_backend_pid()`), leído una vez al
-   * tomarlo. Es el que `pg_locks` muestra para el bloqueo y el que lleva el latido de la ingesta
-   * (ADR-0015 §6), con el que `data:health` reconoce al escritor vivo (ADR-0015 §8).
+   * tomarlo. Es el que `pg_locks` muestra para el bloqueo y el que la sesión de ingesta escribe en
+   * cada latido (ADR-0015 §6), para que `data:health` (ADR-0015 §8, PR 6) reconozca al escritor vivo
+   * de este esquema.
    */
   get backendPid(): number {
     return this.#backendPid;

@@ -2,7 +2,11 @@ import { type IngestionCursor, type SourceEvent } from '@buoh/contracts';
 import { deriveMarketData, sourceEventTime, type DerivedMarketData } from '@buoh/domain';
 
 import { RawFirstIngestor } from '../ingestion/raw-first-ingestor.js';
-import { type IngestionStatusStore } from '../ingestion/status.js';
+import {
+  INGESTION_CURSOR_SCHEMA_VERSION,
+  type IngestionHeartbeat,
+  type IngestionStatusStore,
+} from '../ingestion/status.js';
 import { stderrAlert, type OperationalAlert } from '../operational/registry.js';
 import {
   failureReason,
@@ -30,8 +34,10 @@ import { type HistoryRecoveryOutcome } from './history-recovery.js';
 /** El bloqueo de la fuente que tiene la sesión (ADR-0012 §9): `SourceLock` en PostgreSQL. */
 export interface SessionLock {
   /**
-   * El PID de PostgreSQL de la sesión que lo tiene (`pg_backend_pid()`), el que va en el latido de
-   * la ingesta (ADR-0015 §6). El bloqueo en memoria del smoke no lo tiene.
+   * El PID de PostgreSQL de la sesión que lo tiene (`pg_backend_pid()`). La sesión de ingesta lo
+   * escribe en cada latido (ADR-0015 §6), para que `data:health` (ADR-0015 §8, PR 6) reconozca al
+   * escritor vivo de este esquema. Sin él, la sesión no escribe latidos: el bloqueo en memoria del
+   * smoke no lo tiene.
    */
   readonly backendPid?: number;
   /** `false` desde que se perdió: las escrituras del log protegido por él fallan. */
@@ -132,7 +138,10 @@ export interface DerivSessionInput extends Pick<
    * PostgreSQL. Al arrancar, después de leer el log, la sesión lee de él el último cursor del símbolo
    * y los símbolos con algún cursor de la fuente, y comprueba el log con ellos (ADR-0015 §5). Si no
    * responde, avisa con `ingestion_status_unavailable` y el motivo saneado, espera y lo intenta otra
-   * vez, como con el log. Sin él, como en el smoke, la sesión no lee ni escribe cursor ni latido.
+   * vez, como con el log. Después escribe en él el cursor del símbolo, tras cada `ConnectionClosed`
+   * durable y al terminar, y, si el bloqueo expone su `backendPid`, el latido. Una escritura que
+   * falla deja la misma alerta, y la ingesta sigue. Sin él, como en el smoke, la sesión no lee ni
+   * escribe cursor ni latido.
    */
   readonly status?: IngestionStatusStore;
   /**
@@ -147,6 +156,9 @@ export interface DerivSessionInput extends Pick<
 
 /** Motivo del corte del smoke de reconexión (ADR-0015 §9). */
 export const SMOKE_INTERRUPT_REASON = 'smoke_interrupt';
+
+/** Cada cuánto escribe la sesión su latido mientras tiene el bloqueo (ADR-0015 §6). */
+export const INGESTION_HEARTBEAT_INTERVAL_MS = 15_000;
 
 /** Una conexión de la sesión: su ID (`null` si no llegó a abrirse), su cierre y cómo terminó. */
 export interface DerivSessionConnection {
@@ -295,8 +307,20 @@ async function readCursors(
 
 /** Lo que la sesión toma del log al arrancar, cuando pasa sus comprobaciones. */
 interface StartupLog {
+  /** La conexión del último evento del log, o `null` si está vacío. */
+  readonly connection_id: string | null;
+  /** La hora del último tick del símbolo en la derivación, la mayor, o `null` si no tiene ninguno. */
+  readonly high_watermark_utc: string | null;
   /** La hora del evento durable más antiguo, el primero del log, o `null` si está vacío. */
   readonly oldest_utc: string | null;
+}
+
+/**
+ * La hora del último tick derivado del símbolo: los ticks van en orden canónico, por su hora, así
+ * que es la mayor, el high-watermark del símbolo. `null` si no tiene ninguno.
+ */
+function latestTickTime(ticks: DerivedMarketData['ticks'], symbol: string): string | null {
+  return ticks.findLast((tick) => tick.symbol === symbol)?.event_time_utc ?? null;
 }
 
 /**
@@ -370,7 +394,13 @@ function checkLog(
   ) {
     return { end: failed('retention_expired') };
   }
-  return { log: { oldest_utc: oldestUtc } };
+  return {
+    log: {
+      connection_id: events.at(-1)?.connection_id ?? null,
+      high_watermark_utc: latestTickTime(derived.ticks, symbol),
+      oldest_utc: oldestUtc,
+    },
+  };
 }
 
 /** Una sesión en curso: su estado vive aquí, y `startDerivSession` expone `done` y `stop`. */
@@ -419,9 +449,25 @@ class SessionRun {
   #cancelRetention: (() => void) | null = null;
   /** La retención paró la sesión. */
   #stoppedForRetention = false;
+  /** La preparación, para el cursor y el latido: se conoce después de cargar los esquemas. */
+  #preparation: DerivPreparation | null = null;
+  /** La ejecución que va en cada latido: un UUIDv7 del arranque, solo con `status`. */
+  readonly #runId: string | null;
+  /** El estado de la conexión que va en el latido. */
+  #connectionState: IngestionHeartbeat['connection_state'] = 'connecting';
+  #heartbeatsStarted = false;
+  #cancelHeartbeat: (() => void) | null = null;
+  /** Las escrituras del cursor y del latido, en orden. Nunca se rechaza: un fallo solo avisa. */
+  #statusWrites: Promise<void> = Promise.resolve();
+  /** La conexión del último evento durable del log: la del cursor. */
+  #lastConnectionId: string | null = null;
+  /** El high-watermark del símbolo: la hora del último tick durable, la mayor, o `null`. */
+  #highWatermark: string | null = null;
 
   constructor(input: DerivSessionInput) {
     this.#input = input;
+    // Lo primero que pide al generador: así la ejecución es el primer ID de la sesión.
+    this.#runId = input.status === undefined ? null : input.nextId();
     this.done = this.#run();
   }
 
@@ -449,6 +495,7 @@ class SessionRun {
       end = await this.#session();
     } catch (error) {
       this.#cancelTimers();
+      await this.#settleStatus();
       await this.#releaseLock();
       throw error;
     }
@@ -465,8 +512,15 @@ class SessionRun {
         } catch (error) {
           end = integrityEnd(error);
         }
+        // El cursor al parar, después de cerrar el segmento (ADR-0015 §6), mientras el bloqueo
+        // sigue tomado: otro proceso todavía no puede haber escrito el log.
+        if (!isNotDerivable(end)) {
+          this.#persistCursor();
+        }
       }
     } finally {
+      // Antes de soltar el bloqueo: después de `done` no se escribe nada más.
+      await this.#settleStatus();
       await this.#releaseLock();
     }
     const last = this.#last;
@@ -492,11 +546,15 @@ class SessionRun {
     if (preparation.status === 'failed') {
       return preparation.end;
     }
+    this.#preparation = preparation;
     const opened = await this.#openLog(preparation);
     if ('end' in opened) {
       return opened.end;
     }
     const { log, startup } = opened;
+    // El cursor parte de lo que el arranque derivó del log (ADR-0015 §5 y §6).
+    this.#lastConnectionId = startup.connection_id;
+    this.#raiseWatermark(startup.high_watermark_utc);
     const ingestor = new RawFirstIngestor({
       log,
       nextId: input.nextId,
@@ -519,6 +577,9 @@ class SessionRun {
           this.#firstTickAt ??= Date.parse(input.now());
           this.#armDeadline();
           this.#armInterrupt();
+          if (tick.symbol === preparation.symbol) {
+            this.#raiseWatermark(tick.event_time_utc);
+          }
           input.sink.tick(tick);
           // Ya durable: si es posterior al high-watermark del hueco, la sesión vuelve a derivar.
           this.#watch?.onTick(tick);
@@ -575,6 +636,8 @@ class SessionRun {
         if (taken !== null) {
           return { end: taken };
         }
+        // El latido de arranque, con el primer bloqueo (ADR-0015 §6).
+        this.#startHeartbeats();
         continue;
       }
       let log: SourceEventLog;
@@ -679,11 +742,25 @@ class SessionRun {
   }
 
   /**
-   * Un intento y su conexión. Devuelve el fin de la sesión según cómo terminó la conexión
-   * (ADR-0015 §3), o `null` para esperar y reconectar: no conectó, o la conexión terminó
+   * Un intento y su conexión, entre el latido `connecting`, al empezarlo, y el `disconnected`, al
+   * terminar, de cualquier forma (ADR-0015 §6). Devuelve el fin de la sesión según cómo terminó la
+   * conexión (ADR-0015 §3), o `null` para esperar y reconectar: no conectó, o la conexión terminó
    * `disconnected` o `paused`.
    */
   async #connect(
+    ingestor: RawFirstIngestor,
+    preparation: DerivPreparation,
+  ): Promise<SessionEnd | null> {
+    this.#setConnectionState('connecting');
+    try {
+      return await this.#runAttempt(ingestor, preparation);
+    } finally {
+      this.#setConnectionState('disconnected');
+    }
+  }
+
+  /** El intento de `#connect`. */
+  async #runAttempt(
     ingestor: RawFirstIngestor,
     preparation: DerivPreparation,
   ): Promise<SessionEnd | null> {
@@ -775,8 +852,9 @@ class SessionRun {
   /**
    * Vigila durante la conexión el hueco pendiente del símbolo y pide su historia por ella, una vez
    * como mucho (ADR-0015 §4, «Cuándo»; ver `GapWatch`). Lee el log del ingestor de la sesión, ya con
-   * el cierre reparado del intento, y lo deriva con el perfil de medición. Cada recuperación pedida
-   * entra en el resultado de la sesión.
+   * el cierre reparado del intento, y lo deriva con el perfil de medición; cada derivación sube
+   * también el high-watermark del cursor. Cada recuperación pedida entra en el resultado de la
+   * sesión.
    */
   #watchGap(
     connection: DerivConnection,
@@ -787,7 +865,13 @@ class SessionRun {
       alert: (payload) => {
         this.#alert(payload);
       },
-      derive: (segments) => deriveMarketData(segments, preparation.profile),
+      derive: (segments) => {
+        const derived = deriveMarketData(segments, preparation.profile);
+        // Todo lo derivado es durable, también un tick que el log adoptó al reabrirse, que no pasó
+        // por el sink: el high-watermark del cursor sale también del log (ADR-0015 §3).
+        this.#raiseWatermark(latestTickTime(derived.ticks, preparation.symbol));
+        return derived;
+      },
       onFailure: (failure) => {
         this.#onWatchFailure(watch, failure);
       },
@@ -900,11 +984,158 @@ class SessionRun {
   }
 
   /**
-   * Un source event que el ingestor de la sesión acaba de hacer durable: con un log vacío al
-   * arrancar, el primero pone en marcha la retención.
+   * Un source event que el ingestor de la sesión acaba de hacer durable. Su conexión es la del
+   * cursor; con un log vacío al arrancar, el primero pone en marcha la retención; un
+   * `ConnectionOpened` cambia el latido a `connected`, y un `ConnectionClosed`, también uno
+   * reparado, escribe el cursor (ADR-0015 §6 y §7).
    */
   #onDurable(event: SourceEvent): void {
+    this.#lastConnectionId = event.connection_id;
     this.#armRetention(sourceEventTime(event));
+    if (event.kind === 'connection_opened') {
+      this.#setConnectionState('connected');
+    } else if (event.kind === 'connection_closed') {
+      this.#persistCursor();
+    }
+  }
+
+  /** Sube el high-watermark del cursor a `eventTimeUtc`, si es posterior; nunca lo baja. */
+  #raiseWatermark(eventTimeUtc: string | null): void {
+    if (
+      eventTimeUtc !== null &&
+      (this.#highWatermark === null || eventTimeUtc > this.#highWatermark)
+    ) {
+      this.#highWatermark = eventTimeUtc;
+    }
+  }
+
+  /**
+   * El cursor del símbolo con el estado durable (ADR-0015 §6): la conexión del último evento
+   * durable; el segmento abierto, los eventos, el último evento y el último raw del log del
+   * ingestor, que tras reabrirse incluye los eventos que adoptó; el high-watermark del símbolo; y la
+   * hora. `null` mientras el log no tenga ningún evento.
+   */
+  #cursor(): IngestionCursor | null {
+    const log = this.#ingestor?.log;
+    const connectionId = this.#lastConnectionId;
+    const preparation = this.#preparation;
+    const lastEventId = log?.lastEventId ?? null;
+    if (
+      log === undefined ||
+      lastEventId === null ||
+      connectionId === null ||
+      preparation === null
+    ) {
+      return null;
+    }
+    return {
+      active_segment_index: log.openSegmentIndex,
+      connection_id: connectionId,
+      high_watermark_event_time_utc: this.#highWatermark,
+      last_durable_observation_id: log.lastRawObservationId,
+      last_durable_source_event_id: lastEventId,
+      schema_version: INGESTION_CURSOR_SCHEMA_VERSION,
+      source: log.source,
+      source_event_count: log.totalEventCount,
+      symbol: preparation.symbol,
+      updated_at_utc: this.#input.now(),
+    };
+  }
+
+  /** Escribe el cursor, si hay almacén y el log ya tiene un evento. */
+  #persistCursor(): void {
+    const { status } = this.#input;
+    const cursor = this.#cursor();
+    if (status !== undefined && cursor !== null) {
+      this.#writeStatus(() => status.appendCursor(cursor));
+    }
+  }
+
+  /**
+   * El latido de arranque y, desde él, uno cada 15 000 ms hasta el final de la sesión (ADR-0015
+   * §6). Solo la primera vez, con `status` y un bloqueo que expone su `backendPid`.
+   */
+  #startHeartbeats(): void {
+    if (
+      this.#heartbeatsStarted ||
+      this.#input.status === undefined ||
+      this.#lock?.backendPid === undefined
+    ) {
+      return;
+    }
+    this.#heartbeatsStarted = true;
+    this.#writeHeartbeat();
+    const next = (): void => {
+      this.#cancelHeartbeat = this.#input.scheduler.schedule(
+        INGESTION_HEARTBEAT_INTERVAL_MS,
+        () => {
+          this.#writeHeartbeat();
+          next();
+        },
+      );
+    };
+    next();
+  }
+
+  /** Un cambio del estado de la conexión, con su latido (ADR-0015 §6). */
+  #setConnectionState(state: IngestionHeartbeat['connection_state']): void {
+    this.#connectionState = state;
+    this.#writeHeartbeat();
+  }
+
+  /**
+   * Escribe el latido: la fuente, la ejecución, la hora, el PID del bloqueo, el estado de la
+   * conexión y el backlog de la cola de la conexión en curso, o 0 sin ella (ADR-0015 §6). Nunca sin
+   * ese bloqueo tomado: lo mira justo antes de escribir, detrás de las escrituras anteriores, así que
+   * tampoco si se pierde mientras espera. Un bloqueo perdido no vuelve a estar tomado.
+   */
+  #writeHeartbeat(): void {
+    const { status } = this.#input;
+    const lock = this.#lock;
+    const pid = lock?.backendPid;
+    const source = this.#preparation?.profile.source;
+    if (
+      status === undefined ||
+      this.#runId === null ||
+      source === undefined ||
+      lock === null ||
+      pid === undefined
+    ) {
+      return;
+    }
+    const heartbeat: IngestionHeartbeat = {
+      backlog_bytes: this.#connection?.backlogBytes ?? 0,
+      backlog_count: this.#connection?.backlogCount ?? 0,
+      connection_state: this.#connectionState,
+      heartbeat_id: this.#input.nextId(),
+      observed_at_utc: this.#input.now(),
+      pg_backend_pid: pid,
+      run_id: this.#runId,
+      source,
+    };
+    this.#writeStatus(() => (lock.held ? status.appendHeartbeat(heartbeat) : Promise.resolve()));
+  }
+
+  /**
+   * Encadena una escritura del cursor o del latido detrás de las anteriores, para que se guarden en
+   * orden. Un fallo no detiene la ingesta, porque no es la durabilidad de los datos: deja la alerta
+   * `ingestion_status_unavailable` con el motivo saneado, nunca el mensaje, que en PostgreSQL puede
+   * llevar texto del servidor (ADR-0015 §6).
+   */
+  #writeStatus(write: () => Promise<unknown>): void {
+    this.#statusWrites = this.#statusWrites.then(write).then(
+      () => undefined,
+      (error: unknown) => {
+        this.#alert({ event: 'ingestion_status_unavailable', reason: failureReason(error) });
+      },
+    );
+  }
+
+  /** Al terminar: cancela el latido periódico y espera a las escrituras pendientes. */
+  async #settleStatus(): Promise<void> {
+    this.#cancelHeartbeat?.();
+    this.#cancelHeartbeat = null;
+    await this.#statusWrites;
   }
 
   /**
@@ -995,8 +1226,10 @@ class SessionRun {
  * historia del hueco pendiente, 2000 ms después del primer tick durable posterior al cierre. Termina
  * con la parada, la retención (`retentionMs`, ADR-0015 §7) o el cierre previsto por `durationMs`
  * (`completed`), o cuando no puede seguir sin intervención (`failed`). Con `interruptAfterMs`, corta
- * una vez su conexión, como el smoke de reconexión (ADR-0015 §9). Al terminar cierra el segmento
- * abierto, si el log está sano y el bloqueo sigue tomado, y suelta el bloqueo. Un `durationMs`, un
+ * una vez su conexión, como el smoke de reconexión (ADR-0015 §9). Con `status`, comprueba el log
+ * contra el cursor al arrancar y escribe el cursor y el latido (ADR-0015 §5 y §6). Al terminar
+ * cierra el segmento abierto, si el log está sano y el bloqueo sigue tomado, escribe el cursor una
+ * última vez, espera a las escrituras pendientes y suelta el bloqueo. Un `durationMs`, un
  * `interruptAfterMs` o un `retentionMs` que no es un entero positivo de milisegundos es un error de
  * programación: lanza `TypeError` sin empezar nada.
  */

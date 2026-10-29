@@ -23,10 +23,10 @@ import {
   PostgresSessionLockProvider,
   SOURCE_LOCK_LOST,
   SourceLock,
-  sourceLockKey,
   type WorkerConfig,
 } from '../src/index.js';
 import { derivMessages, syntheticSchemaArchive } from '../test/support/deriv-fixtures.js';
+import { sourceLockHolder } from '../test/support/pg-locks.js';
 import {
   cursorOf,
   heartbeatOf,
@@ -59,16 +59,7 @@ async function errorCode(promise: Promise<unknown>): Promise<unknown> {
 }
 
 /** Backend que tiene el bloqueo de la fuente según `pg_locks`, o `null`. */
-async function holder(source: string): Promise<number | null> {
-  const key = BigInt.asUintN(64, BigInt(sourceLockKey(source)));
-  const { rows } = await admin.query<{ pid: number }>(
-    `SELECT pid FROM pg_locks
-      WHERE locktype = 'advisory' AND granted AND objsubid = 1
-        AND classid = $1::bigint::oid AND objid = $2::bigint::oid`,
-    [(key >> 32n).toString(), (key & 0xffff_ffffn).toString()],
-  );
-  return rows[0]?.pid ?? null;
-}
+const holder = (source: string): Promise<number | null> => sourceLockHolder(admin, source);
 
 beforeAll(async () => {
   config = loadConfig(environment);

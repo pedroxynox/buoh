@@ -14,9 +14,10 @@ export const INGESTION_CURSOR_SCHEMA_VERSION = '1.0.0';
 /**
  * Latido de una ejecución de la ingesta (ADR-0015 §6), una fila de `ingestion_heartbeats`: la
  * fuente, la ejecución (`run_id`), la hora, el PID de PostgreSQL de la sesión que tiene el bloqueo
- * (`pg_backend_pid()`), el estado de la conexión y el backlog. `data:health` lo lee para saber si
- * el escritor vivo es el de este esquema y para tomar de él la conexión y el backlog (ADR-0015 §8).
- * No es un contrato entre paquetes: es estado operativo del worker, como el registro operativo.
+ * (`pg_backend_pid()`), el estado de la conexión y el backlog. Lo escribe la sesión de ingesta
+ * (`startDerivSession`), para que `data:health` (ADR-0015 §8, PR 6) sepa si el escritor vivo es el
+ * de este esquema y tome de él la conexión y el backlog. No es un contrato entre paquetes: es estado
+ * operativo del worker, como el registro operativo.
  */
 export const ingestionHeartbeatSchema = z.strictObject({
   heartbeat_id: uuidV7Schema,
@@ -42,7 +43,8 @@ export interface IngestionCursorVersion {
 /**
  * Cursor y latido de la ingesta (ADR-0015 §6), append-only. En PostgreSQL:
  * `PostgresIngestionStatusStore` (tablas `ingestion_cursors` e `ingestion_heartbeats`, migración
- * `0004`); en memoria, `InMemoryIngestionStatusStore`, con las mismas reglas.
+ * `0004`); en memoria, `InMemoryIngestionStatusStore`, con las mismas reglas. La sesión de ingesta
+ * lee el cursor al arrancar y escribe el cursor y el latido (`startDerivSession`, `status`).
  */
 export interface IngestionStatusStore {
   /**

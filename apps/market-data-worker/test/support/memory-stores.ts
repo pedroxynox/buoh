@@ -217,6 +217,19 @@ export class MemoryIngestionStatusStore extends InMemoryIngestionStatusStore {
   failHeartbeatWrites = false;
   /** Las próximas `n` lecturas (`latestCursor` o `cursorSymbols`) fallan. */
   failReads = 0;
+  #gate: Promise<void> | null = null;
+
+  /** Retiene las escrituras hasta `release`: cada una espera y después se guarda o falla. */
+  holdWrites(): { readonly release: () => void } {
+    const gate = Promise.withResolvers<undefined>();
+    this.#gate = gate.promise;
+    return {
+      release: () => {
+        this.#gate = null;
+        gate.resolve(undefined);
+      },
+    };
+  }
 
   #read(): Promise<void> {
     if (this.failReads === 0) {
@@ -226,16 +239,22 @@ export class MemoryIngestionStatusStore extends InMemoryIngestionStatusStore {
     return Promise.reject(this.failure());
   }
 
-  override appendCursor(...args: Parameters<InMemoryIngestionStatusStore['appendCursor']>) {
-    return this.failCursorWrites
-      ? Promise.reject<IngestionCursorVersion>(this.failure())
-      : super.appendCursor(...args);
+  override async appendCursor(
+    ...args: Parameters<InMemoryIngestionStatusStore['appendCursor']>
+  ): Promise<IngestionCursorVersion> {
+    await this.#gate;
+    if (this.failCursorWrites) {
+      throw this.failure();
+    }
+    return super.appendCursor(...args);
   }
 
-  override appendHeartbeat(heartbeat: IngestionHeartbeat): Promise<void> {
-    return this.failHeartbeatWrites
-      ? Promise.reject(this.failure())
-      : super.appendHeartbeat(heartbeat);
+  override async appendHeartbeat(heartbeat: IngestionHeartbeat): Promise<void> {
+    await this.#gate;
+    if (this.failHeartbeatWrites) {
+      throw this.failure();
+    }
+    await super.appendHeartbeat(heartbeat);
   }
 
   override async latestCursor(source: string, symbol: string) {

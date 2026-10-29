@@ -278,6 +278,19 @@ export class DerivConnection {
   }
 
   /**
+   * El backlog por conteo: los frames de la fuente en la cola o en curso (ADR-0012 §4), los que el
+   * latido de la ingesta informa (ADR-0015 §6).
+   */
+  get backlogCount(): number {
+    return this.#queue.frameCount;
+  }
+
+  /** El backlog por bytes: los de esos frames. */
+  get backlogBytes(): number {
+    return this.#queue.byteCount;
+  }
+
+  /**
    * Abre la conexión y la sigue hasta el final. Se resuelve cuando la entrada está cerrada y el
    * socket también; se rechaza solo con un error inesperado, después de cortar el socket: por
    * ejemplo, el `LogIntegrityError` de un log que, al reabrirse, no pasa sus comprobaciones.

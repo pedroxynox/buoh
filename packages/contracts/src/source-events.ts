@@ -140,8 +140,8 @@ export const sourceEventSchema = z.union([
   historyRecoveryResultSchema,
 ]);
 
-// Estado de avance por fuente y símbolo. El esquema existe desde F1.1, pero todavía no se
-// persiste: llega con la reconexión (F1.5, ADR-0005).
+// Estado de avance por fuente y símbolo. El esquema existe desde F1.1; desde F1.5 lo persiste la
+// sesión de ingesta del worker (ADR-0015 §6).
 export const ingestionCursorSchema = z
   .strictObject({
     schema_version: schemaVersionSchema,
