@@ -12,6 +12,7 @@ import {
   failureReason,
   LogIntegrityError,
   LogReadError,
+  sourceEventId,
   type SourceEventLog,
 } from '../source-log/source-event-log.js';
 import {
@@ -148,8 +149,9 @@ export interface DerivSessionInput extends Pick<
    * La retención del log, en milisegundos (ADR-0015 §7): un entero positivo, o `startDerivSession`
    * lanza `TypeError`; `ingest` pasa 23 horas. Si el evento durable más antiguo del log ya la
    * cumplió, la sesión no arranca (`retention_expired`); si no, para como con `stop` cuando la
-   * cumple, contada desde el primer evento durable de la sesión si el log estaba vacío. Sin ella, la
-   * sesión no mira la antigüedad del log.
+   * cumple. Con un log vacío al arrancar, empieza a contar con el primer evento que la sesión hace
+   * durable, desde el evento durable más antiguo del log, que puede ser uno que el log adoptó al
+   * reabrirse. Sin ella, la sesión no mira la antigüedad del log.
    */
   readonly retentionMs?: number;
 }
@@ -281,10 +283,6 @@ function integrityEnd(error: unknown): SessionEnd {
 
 const isNotDerivable = (end: SessionEnd): boolean =>
   end.status === 'failed' && end.reason === 'log_not_derivable';
-
-/** El ID de un source event en el índice: el `observation_id` de un frame y el `event_id` de los demás. */
-const sourceEventId = (event: SourceEvent): string =>
-  event.kind === 'raw_source_frame' ? event.observation_id : event.event_id;
 
 /** Lo que el arranque lee del almacén del cursor (ADR-0015 §5). */
 interface StoredCursors {
@@ -455,6 +453,11 @@ class SessionRun {
   readonly #runId: string | null;
   /** El estado de la conexión que va en el latido. */
   #connectionState: IngestionHeartbeat['connection_state'] = 'connecting';
+  /**
+   * La conexión del intento en curso cuyo `ConnectionOpened` durable puso el latido en `connected`:
+   * su `ConnectionClosed` durable lo pone en `disconnected`. `null` sin ella y al terminar el intento.
+   */
+  #connectedId: string | null = null;
   #heartbeatsStarted = false;
   #cancelHeartbeat: (() => void) | null = null;
   /** Las escrituras del cursor y del latido, en orden. Nunca se rechaza: un fallo solo avisa. */
@@ -512,8 +515,9 @@ class SessionRun {
         } catch (error) {
           end = integrityEnd(error);
         }
-        // El cursor al parar, después de cerrar el segmento (ADR-0015 §6), mientras el bloqueo
-        // sigue tomado: otro proceso todavía no puede haber escrito el log.
+        // El cursor al parar, después de cerrar el segmento (ADR-0015 §6). Como todo cursor, solo
+        // si al escribirlo el bloqueo sigue tomado: si se perdió durante el cierre, otro proceso
+        // pudo tomarlo y escribir los suyos.
         if (!isNotDerivable(end)) {
           this.#persistCursor();
         }
@@ -664,8 +668,9 @@ class SessionRun {
         try {
           cursors = await readCursors(status, preparation);
         } catch (error) {
-          // Cualquier rechazo cuenta como un almacén que no responde: el almacén no distingue otro.
-          // El motivo sale saneado: el mensaje de PostgreSQL puede llevar el host o el rol.
+          // Cualquier rechazo cuenta como un almacén que no responde: la interfaz del almacén no
+          // separa ese caso del de una fila que no pasa sus comprobaciones. El motivo sale saneado:
+          // el mensaje de PostgreSQL puede llevar el host o el rol.
           this.#alert({ event: 'ingestion_status_unavailable', reason: failureReason(error) });
           if (!(await this.#backoff())) {
             return { end: COMPLETED };
@@ -742,10 +747,11 @@ class SessionRun {
   }
 
   /**
-   * Un intento y su conexión, entre el latido `connecting`, al empezarlo, y el `disconnected`, al
-   * terminar, de cualquier forma (ADR-0015 §6). Devuelve el fin de la sesión según cómo terminó la
-   * conexión (ADR-0015 §3), o `null` para esperar y reconectar: no conectó, o la conexión terminó
-   * `disconnected` o `paused`.
+   * Un intento y su conexión, entre el latido `connecting`, al empezarlo, y el `disconnected`
+   * (ADR-0015 §6): lo escribe el `ConnectionClosed` durable de la conexión (`#onDurable`) o, si su
+   * cierre nunca quedó durable o no llegó a abrirse, el final del intento, de cualquier forma.
+   * Devuelve el fin de la sesión según cómo terminó la conexión (ADR-0015 §3), o `null` para esperar
+   * y reconectar: no conectó, o la conexión terminó `disconnected` o `paused`.
    */
   async #connect(
     ingestor: RawFirstIngestor,
@@ -755,7 +761,10 @@ class SessionRun {
     try {
       return await this.#runAttempt(ingestor, preparation);
     } finally {
-      this.#setConnectionState('disconnected');
+      this.#connectedId = null;
+      if (this.#connectionState !== 'disconnected') {
+        this.#setConnectionState('disconnected');
+      }
     }
   }
 
@@ -985,16 +994,27 @@ class SessionRun {
 
   /**
    * Un source event que el ingestor de la sesión acaba de hacer durable. Su conexión es la del
-   * cursor; con un log vacío al arrancar, el primero pone en marcha la retención; un
-   * `ConnectionOpened` cambia el latido a `connected`, y un `ConnectionClosed`, también uno
-   * reparado, escribe el cursor (ADR-0015 §6 y §7).
+   * cursor. Con un log vacío al arrancar, el primero pone en marcha la retención, desde el evento
+   * durable más antiguo del log: puede ser uno que el log adoptó al reabrirse, que no pasó por aquí.
+   * Un `ConnectionOpened` cambia el latido a `connected`; el `ConnectionClosed` de esa conexión, a
+   * `disconnected`, aunque el socket todavía no termine de cerrarse; y cualquier `ConnectionClosed`,
+   * también uno reparado, escribe el cursor (ADR-0015 §6 y §7).
    */
   #onDurable(event: SourceEvent): void {
     this.#lastConnectionId = event.connection_id;
-    this.#armRetention(sourceEventTime(event));
+    if (this.#input.retentionMs !== undefined && !this.#retentionArmed) {
+      const eventTime = sourceEventTime(event);
+      const first = this.#ingestor?.log.firstEventTimeUtc ?? eventTime;
+      this.#armRetention(first < eventTime ? first : eventTime);
+    }
     if (event.kind === 'connection_opened') {
+      this.#connectedId = event.connection_id;
       this.#setConnectionState('connected');
     } else if (event.kind === 'connection_closed') {
+      if (event.connection_id === this.#connectedId) {
+        this.#connectedId = null;
+        this.#setConnectionState('disconnected');
+      }
       this.#persistCursor();
     }
   }
@@ -1042,12 +1062,22 @@ class SessionRun {
     };
   }
 
-  /** Escribe el cursor, si hay almacén y el log ya tiene un evento. */
+  /**
+   * Escribe el cursor, si hay almacén y el log ya tiene un evento. Nunca sin el bloqueo vigente
+   * tomado: como el latido, lo mira justo antes de escribir, detrás de las escrituras anteriores.
+   * Después de perderlo, otro proceso puede tomarlo y escribir sus cursores, y uno de esta sesión que
+   * llegara después volvería atrás el último. Un cursor que no se escribe no hace falta: el arranque
+   * siguiente deriva el estado del log, y un cursor que va por detrás del log es válido.
+   */
   #persistCursor(): void {
     const { status } = this.#input;
+    const lock = this.#lock;
+    if (status === undefined || lock === null) {
+      return;
+    }
     const cursor = this.#cursor();
-    if (status !== undefined && cursor !== null) {
-      this.#writeStatus(() => status.appendCursor(cursor));
+    if (cursor !== null) {
+      this.#writeStatus(() => (lock.held ? status.appendCursor(cursor) : Promise.resolve()));
     }
   }
 

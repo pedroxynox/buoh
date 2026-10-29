@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
 import { type SourceEvent } from '@buoh/contracts';
+import { sourceEventTime } from '@buoh/domain';
 import { type Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -193,6 +194,10 @@ describe('integración del log raw-first y el registro operativo', () => {
     expect(log.openSegmentIndex).toBe(3);
     expect(log.openSegmentStats.event_count).toBe(0);
     expect(log.totalEventCount).toBe(12);
+    // La hora del evento más antiguo sale del índice, aunque su segmento ya esté cerrado.
+    const [first] = (await log.readDurableSegments()).flat();
+    expect(first).toBeDefined();
+    expect(log.firstEventTimeUtc).toBe(first === undefined ? null : sourceEventTime(first));
   });
 
   it('un fallo de escritura raw queda en el registro operativo y un ConnectionOpened lo resuelve', async () => {

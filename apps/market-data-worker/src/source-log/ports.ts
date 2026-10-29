@@ -35,6 +35,11 @@ export interface ClosedSourceSegment {
 
 /** Estado durable del log de una fuente, para continuar tras un reinicio. */
 export interface SourceLogState {
+  /**
+   * Hora (`event_time_utc`) del primer source event durable de la fuente, el más antiguo (segmento
+   * 0, posición 0), o `null` si no tiene ninguno.
+   */
+  readonly firstEventTimeUtc: string | null;
   /** Último segmento cerrado, o `null` si ninguno. */
   readonly lastClosed: ClosedSourceSegment | null;
   /** Último source event durable de la fuente (cualquier segmento). */

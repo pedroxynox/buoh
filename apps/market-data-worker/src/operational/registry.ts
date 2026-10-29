@@ -18,7 +18,7 @@ import {
 } from '@buoh/domain';
 import { type z } from 'zod';
 
-import { failureReason } from '../source-log/source-event-log.js';
+import { failureReason, sourceEventId } from '../source-log/source-event-log.js';
 
 export type PersistenceStage = z.infer<typeof persistenceStageSchema>;
 
@@ -59,10 +59,6 @@ export const OPERATIONAL_RESOLUTION_REASONS = {
 
 function sortedUnique(values: readonly string[]): string[] {
   return [...new Set(values)].sort();
-}
-
-function sourceEventId(event: SourceEvent): string {
-  return event.kind === 'raw_source_frame' ? event.observation_id : event.event_id;
 }
 
 interface RecordInput {

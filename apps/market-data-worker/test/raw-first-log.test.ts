@@ -32,6 +32,7 @@ import {
   failureReason,
   loadSyntheticFixture,
   LogIntegrityError,
+  LogPersistenceError,
   LogReadError,
   OperationalRegistry,
   previousConnection,
@@ -715,6 +716,30 @@ describe('log de source events: rotación 1.0.0 y reinicio', () => {
       Buffer.from(ndjsonBytes(segment ?? [])).equals(Buffer.from(ndjsonBytes([...events, fourth]))),
     ).toBe(true);
     expect(store.rows.map((row) => row.position)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('firstEventTimeUtc es la hora del evento durable más antiguo, el primero del log: null sin eventos, la del primero al escribirlo y la misma al reabrirlo, también con su segmento ya cerrado', async () => {
+    const { log, open } = await freshLog();
+    expect(log.firstEventTimeUtc).toBeNull();
+    expect((await open()).firstEventTimeUtc).toBeNull();
+    await log.append(raw(1, '2026-01-01T00:00:01.000Z'));
+    await log.append(raw(2, '2026-01-01T00:00:02.000Z'));
+    expect(log.firstEventTimeUtc).toBe('2026-01-01T00:00:01.000Z');
+    expect((await open()).firstEventTimeUtc).toBe('2026-01-01T00:00:01.000Z');
+    await log.close('requested');
+    await log.append(raw(3, '2026-01-01T00:00:03.000Z'));
+    expect((await open()).firstEventTimeUtc).toBe('2026-01-01T00:00:01.000Z');
+  });
+
+  it('firstEventTimeUtc incluye un evento que el índice confirmó aunque informó error: el log reabierto lo adopta', async () => {
+    const { log, open, store } = await freshLog();
+    store.failIndexAfterInsert = () => true;
+    await expect(log.append(raw(1, '2026-01-01T00:00:01.000Z'))).rejects.toThrow(
+      LogPersistenceError,
+    );
+    expect(log.firstEventTimeUtc).toBeNull();
+    store.failIndexAfterInsert = () => false;
+    expect((await open()).firstEventTimeUtc).toBe('2026-01-01T00:00:01.000Z');
   });
 
   type Stores = Pick<Awaited<ReturnType<typeof freshLog>>, 'objects' | 'store'>;

@@ -52,6 +52,10 @@ const RETENTION_MS = 23 * 3_600_000;
 const forgetAll = (socket: FakeDerivSocket) =>
   socket.requests().filter((request) => 'forget_all' in request);
 
+/** El `req_id` del primer `forget_all` que envió el socket. */
+const forgetAllReqId = (socket: FakeDerivSocket): number =>
+  Number(forgetAll(socket)[0]?.['req_id']);
+
 /**
  * El log de una ejecución anterior cuyo primer evento es de `firstAt`: una conexión que se abrió
  * entonces y se cerró a las 09:59:30 con un cierre pedido, sin suscribirse.
@@ -144,6 +148,38 @@ describe('startDerivSession: la parada por retención (ADR-0015 §7)', () => {
     expect(result.end).toEqual({ status: 'completed' });
     expect(result.stopped_for_retention).toBe(true);
     expect(run.sourceLog.closed.map((segment) => segment.close_reason)).toEqual(['requested']);
+  });
+
+  it('con un log vacío, si el primer evento durable no pasó por la sesión porque el log lo adoptó al reabrirse, cuenta desde ese evento adoptado, el más antiguo del log', async () => {
+    const run = await sessionHarness({ answerPings: true, retentionMs: 120_000 });
+    // El ConnectionOpened de las 10:00:01: el índice lo confirma, pero informa error.
+    await run.clock.advance(1000);
+    run.sourceLog.failIndexAfterInsert = (row) => row.kind === 'connection_opened';
+    run.socket(1).open();
+    await settle();
+    run.sourceLog.failIndexAfterInsert = () => false;
+    // A las 10:00:01.500 la reparación reabre el log, que adopta esa apertura, y escribe el cierre
+    // reparado, el primer evento durable que pasa por la sesión. La retención se cumple a las
+    // 10:02:01.000, no a las 10:02:01.500.
+    await run.clock.advance(500);
+    await run.clock.advance(1);
+    await run.subscribe(run.socket(2), START_EPOCH + 2);
+    expect((await run.events()).map((event) => event.kind)).toEqual([
+      'connection_opened',
+      'connection_closed',
+      'connection_opened',
+      'raw_source_frame',
+      'raw_source_frame',
+    ]);
+    await run.clock.advance(119_498);
+    expect(forgetAll(run.socket(2))).toEqual([]);
+    await run.clock.advance(1);
+    expect(forgetAll(run.socket(2))).toHaveLength(1);
+    run.socket(2).text(derivMessages.forgetAll(forgetAllReqId(run.socket(2))));
+
+    const result = await run.done;
+    expect(result.end).toEqual({ status: 'completed' });
+    expect(result.stopped_for_retention).toBe(true);
   });
 
   it('si retentionMs se cumple mientras espera para reconectar, corta la espera y termina completed sin otro socket', async () => {
@@ -337,6 +373,30 @@ describe('startDerivSession: el cursor (ADR-0015 §6)', () => {
     expect(run.sourceLog.closed).toEqual([
       expect.objectContaining({ event_count: 5, segment_index: 0 }),
     ]);
+  });
+
+  it('el cursor del final no se escribe si el bloqueo se pierde mientras se cierra el segmento', async () => {
+    const run = await sessionHarness({ pidlessLocks: true, status: true });
+    await run.subscribe(run.socket(1), START_EPOCH);
+    // El objeto gzip del segmento espera: su cierre empieza con el bloqueo tomado.
+    const gate = Promise.withResolvers<undefined>();
+    const put = run.objects.putIfAbsent.bind(run.objects);
+    vi.spyOn(run.objects, 'putIfAbsent').mockImplementation(async (key, bytes) => {
+      if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+        await gate.promise;
+      }
+      return put(key, bytes);
+    });
+    await stopSessionWithoutWaiting(run, run.socket(1), 3);
+    // El del cierre pedido.
+    expect(cursors(run)).toHaveLength(1);
+    run.provider.lock(1).lose();
+    gate.resolve(undefined);
+
+    expect((await run.done).end).toEqual({ status: 'completed' });
+    // Sin el bloqueo, ni el segmento se cerró ni se escribió el cursor del final.
+    expect(run.sourceLog.closed).toEqual([]);
+    expect(cursors(run)).toHaveLength(1);
   });
 
   it('con el log de una ejecución anterior, el cursor parte de lo que el arranque derivó: su último evento, su conexión y el high-watermark del símbolo', async () => {
@@ -593,13 +653,13 @@ describe('startDerivSession: el latido (ADR-0015 §6)', () => {
     await run.done;
   });
 
-  it('uno que espera detrás de otra escritura no se escribe si el bloqueo se pierde mientras tanto', async () => {
+  it('ni un latido ni un cursor que esperan detrás de otra escritura se escriben si el bloqueo se pierde mientras tanto', async () => {
     const run = await sessionHarness({ status: true });
     await run.subscribe(run.socket(1), START_EPOCH);
     const writes = run.status?.holdWrites();
     // El periódico de las 10:00:15 empieza a escribirse con el bloqueo tomado y espera.
     await run.clock.advance(15_000);
-    // El cierre del servidor encola detrás el cursor y el latido disconnected.
+    // El cierre del servidor encola detrás el latido disconnected y el cursor.
     run.socket(1).emit({ code: 1001, kind: 'closed' });
     await settle();
     run.provider.lock(1).lose();
@@ -612,9 +672,31 @@ describe('startDerivSession: el latido (ADR-0015 §6)', () => {
       beat('connected', '2026-03-02T10:00:00.000Z'),
       beat('connected', '2026-03-02T10:00:15.000Z'),
     ]);
-    expect(cursors(run)).toHaveLength(1);
+    // Otro proceso puede tomar el bloqueo y escribir sus cursores: uno viejo nunca llega después.
+    expect(cursors(run)).toEqual([]);
     run.session.stop();
     await run.done;
+  });
+
+  it('después de un ConnectionClosed durable, aunque el socket todavía no termine de cerrarse, el latido ya dice disconnected: el del cierre y el periódico', async () => {
+    const run = await sessionHarness({ deferClose: true, status: true });
+    await run.subscribe(run.socket(1), START_EPOCH);
+    await run.clock.advance(1000);
+    // El cierre pedido queda durable al responder `forget_all`; el socket espera a `finishClose`.
+    await stopSessionWithoutWaiting(run, run.socket(1), 3);
+    await run.clock.advance(15_000);
+
+    expect(heartbeats(run)).toEqual([
+      beat('connecting', '2026-03-02T10:00:00.000Z'),
+      beat('connecting', '2026-03-02T10:00:00.000Z'),
+      beat('connected', '2026-03-02T10:00:00.000Z'),
+      beat('disconnected', '2026-03-02T10:00:01.000Z'),
+      beat('disconnected', '2026-03-02T10:00:15.000Z'),
+    ]);
+    // Al terminar el intento no escribe otro: ya lo dijo el cierre durable.
+    run.socket(1).finishClose();
+    await run.done;
+    expect(heartbeats(run)).toHaveLength(5);
   });
 
   it('ninguno después de done: el temporizador se cancela', async () => {

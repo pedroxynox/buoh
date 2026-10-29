@@ -46,7 +46,7 @@ export class PostgresSourceLogStore implements SourceLogStore {
   async readLogState(source: string): Promise<SourceLogState> {
     const client = await this.#pool.connect();
     try {
-      // Una instantánea coherente de las cuatro lecturas.
+      // Una instantánea coherente de todas las lecturas.
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const closed = await client.query<ClosedRecord>(
         `SELECT ${CLOSED_COLUMNS} FROM closed_source_segments
@@ -62,6 +62,11 @@ export class PostgresSourceLogStore implements SourceLogStore {
           WHERE source = $1 AND segment_index = $2
           ORDER BY position`,
         [source, openIndex],
+      );
+      const first = await client.query<{ event_time_utc: string }>(
+        `SELECT event_time_utc FROM source_event_index
+          WHERE source = $1 ORDER BY segment_index, position LIMIT 1`,
+        [source],
       );
       const last = await client.query<{ event_id: string }>(
         `SELECT event_id::text AS event_id FROM source_event_index
@@ -80,6 +85,7 @@ export class PostgresSourceLogStore implements SourceLogStore {
       );
       await client.query('COMMIT');
       return {
+        firstEventTimeUtc: first.rows[0]?.event_time_utc ?? null,
         lastClosed,
         lastEventId: last.rows[0]?.event_id ?? null,
         lastRawObservationId: lastRaw.rows[0]?.event_id ?? null,

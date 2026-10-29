@@ -78,6 +78,8 @@ export class InMemorySourceLogStore implements SourceLogStore {
     const openIndex = lastClosed === null ? 0 : lastClosed.segment_index + 1;
     const rows = this.rows.filter((row) => row.source === source);
     return Promise.resolve({
+      // Las filas entran en orden de segmento y posición: la primera es la del segmento 0.
+      firstEventTimeUtc: rows[0]?.event_time_utc ?? null,
       lastClosed,
       lastEventId: rows.at(-1)?.event_id ?? null,
       lastRawObservationId:
