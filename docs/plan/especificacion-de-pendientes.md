@@ -47,7 +47,7 @@ Tipos de pendiente:
   - el adaptador del worker pide `active_symbols`, crea el snapshot desde el frame durable y lo guarda con la regla de versiones. Un catálogo inválido deja su incidencia y no reemplaza la última versión válida;
   - `PostgresCatalogStore` guarda las versiones en `source_catalog_versions` y el JCS de cada snapshot en el almacenamiento de objetos (migración `0003`). Las pruebas de integración cubren las dos condiciones de aceptación;
   - `pnpm run data:smoke` lo consulta en vivo (`PROJECT_STATUS.md`, «Evidencia de F1.4b»).
-- **Límite:** el smoke guarda el catálogo en memoria (ADR-0012 §10), así que ningún comando guarda todavía el catálogo vivo en PostgreSQL; llegará con el primer proceso que ingiera de forma continua (P-F1-04 y P-F1-06). El catálogo tampoco decide el universo comercial, que sigue pendiente en `PROJECT_STATUS.md`.
+- **Límite:** el smoke guarda el catálogo en memoria (ADR-0012 §10). Desde el PR 5 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, `ingest`, el primer proceso que ingiere de forma continua (P-F1-04), guarda el catálogo vivo en PostgreSQL con `PostgresCatalogStore`, en el esquema y el bucket de su captura, que se borran antes de 24 horas (ADR-0015 §7). Todavía no hay evidencia de una captura viva: llega con la puerta de salida (P-F1-06). El catálogo tampoco decide el universo comercial, que sigue pendiente en `PROJECT_STATUS.md`.
 
 ### P-F1-02. Adaptador público de Deriv (`F1-SOURCE-001`) — resuelto
 
@@ -60,7 +60,7 @@ Tipos de pendiente:
   - el adaptador (`apps/market-data-worker/src/deriv/`) usa `ws` con el tamaño declarado de un frame cortado, una cola en memoria con sus límites, correlación por `req_id` y `msg_type` después de que el frame sea durable, keepalive, tiempos de espera y pausa del ingestor desde el transporte. Las respuestas pedidas inválidas van a `requested_response_incidents`;
   - quien escribe el log de una fuente en PostgreSQL toma antes su bloqueo (`SourceLock`);
   - la aceptación del plan se cumple con las pruebas del adaptador, con socket, reloj y temporizador falsos, y con `pnpm run data:smoke` (`PROJECT_STATUS.md`, «Evidencia de F1.4b»).
-- **Límite:** el adaptador no reconecta (P-F1-04), y el primer escritor continuo debe cerrar el pendiente 6 de F1.3 (`PROJECT_STATUS.md`).
+- **Límite:** el adaptador no reconecta (P-F1-04). El pendiente 6 de F1.3 lo cerró el primer escritor continuo, `ingest`, en el PR 5 de ADR-0015 §13 (`PROJECT_STATUS.md`).
 
 ### P-F1-03. `pnpm run data:smoke` — resuelto
 
@@ -77,8 +77,9 @@ Tipos de pendiente:
 - **Fuente:** plan de Fase 1 §6, runbook («Inicio», «Desconexión de WebSocket», «Almacenamiento no disponible») y ADR-0005.
 - **Estado (verificado):**
   - los contratos (`HistoryRecoveryResult`, `IngestionCursor`) y la derivación de continuidad en `packages/domain/src/quality.ts` existen;
-  - desde el PR 4 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, la sesión de ingesta del worker (`startDerivSession`) reconecta tras cada pérdida de conexión con espera exponencial y jitter inyectable, repara los cierres no registrados y pide por la conexión nueva la historia del hueco con `ticks_history`. Hoy solo la ejecuta `data:smoke`, en memoria: el comando continuo `ingest` llega con el PR 5. La tabla de cierres del runbook dice qué cierres pierden datos. El esquema de `forget` se carga con la release fijada, pero no se usa (ADR-0015 §1);
-  - `IngestionCursor` tiene esquema, pero no tabla ni almacén.
+  - desde el PR 4 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, la sesión de ingesta del worker (`startDerivSession`) reconecta tras cada pérdida de conexión con espera exponencial y jitter inyectable, repara los cierres no registrados y pide por la conexión nueva la historia del hueco con `ticks_history`. La ejecutan `data:smoke`, en memoria, y desde el PR 5 el comando continuo `ingest`, sobre PostgreSQL y el almacenamiento de objetos, con un esquema y un bucket propios y la retención de 23 horas (ADR-0015 §7). La tabla de cierres del runbook dice qué cierres pierden datos. El esquema de `forget` se carga con la release fijada, pero no se usa (ADR-0015 §1);
+  - desde el PR 5, la sesión persiste en PostgreSQL el `IngestionCursor`, después de cada `ConnectionClosed` durable y al parar, y el latido (`ingestion_cursors` e `ingestion_heartbeats`, migración `0004`); al arrancar comprueba el log contra el último cursor del símbolo (ADR-0015 §5 y §6);
+  - faltan `data:health`, que mostrará la salud viva, con `recovering` hasta que la historia cubra el hueco (P-F1-05), y la evidencia de la puerta de salida, con el smoke de reconexión contra Deriv y los ensayos de reinicio (P-F1-06).
 - **Esperado:** ante un `ConnectionClosed` no pedido, el worker:
   - pasa a `recovering`;
   - espera con retroceso exponencial y jitter inyectable;

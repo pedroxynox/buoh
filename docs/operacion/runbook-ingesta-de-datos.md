@@ -340,14 +340,16 @@ PGPASSWORD="$BUOH_POSTGRES_PASSWORD" psql -h "$BUOH_POSTGRES_HOST" -p "$BUOH_POS
   -c "SELECT event_time_utc FROM $BUOH_POSTGRES_SCHEMA.source_event_index ORDER BY segment_index, position LIMIT 1"
 ```
 
-Para borrar la captura, el esquema con todas sus tablas y el bucket con todos sus objetos (`--force` los borra antes de borrar el bucket), hacen falta las variables del paso 1 y los dos nombres del paso 2. En otra terminal, o en un shell nuevo, hay que exportar otra vez los dos nombres anotados, porque el paso 1, por sí solo, deja `BUOH_POSTGRES_SCHEMA` sin definir y `BUOH_S3_BUCKET` en `buoh-local`, el bucket de los datos sintéticos. Antes de borrar, comprobar que son los de la captura: `echo "$BUOH_POSTGRES_SCHEMA $BUOH_S3_BUCKET"`. El bloque es una sola cadena con `&&`. No borra nada si el esquema falta o es `public`, o si el bucket falta o es `buoh-local`, los mismos que `ingest` rechaza: termina con 1 sin escribir nada. Y para en el primer fallo: si el esquema no se borra, el bucket tampoco.
+Para borrar la captura, el esquema con todas sus tablas y el bucket con todos sus objetos (`--force` los borra antes de borrar el bucket), hacen falta las variables del paso 1 y los dos nombres del paso 2. En otra terminal, o en un shell nuevo, hay que exportar otra vez los dos nombres anotados, porque el paso 1, por sí solo, deja `BUOH_POSTGRES_SCHEMA` sin definir y `BUOH_S3_BUCKET` en `buoh-local`, el bucket de los datos sintéticos. Antes de borrar, comprobar que son los de la captura: `echo "$BUOH_POSTGRES_SCHEMA $BUOH_S3_BUCKET"`. El bloque es una sola cadena con `&&`, que empieza por comprobar los dos nombres con las reglas de `ingest`: las expresiones de `apps/market-data-worker/src/config.ts`, evaluadas con Node como allí, y los dos valores que rechaza. El esquema tiene de 1 a 63 caracteres entre minúsculas, cifras y `_`, no empieza con una cifra y no es `public`; el bucket tiene de 3 a 63 caracteres entre minúsculas, cifras, `.` y `-`, empieza y termina con una minúscula o una cifra y no es `buoh-local`. Si un nombre falta o no cumple su regla, el bloque no borra nada: termina con 1 sin escribir nada. Así no llega a `psql` ni a `aws` un nombre que PostgreSQL o S3 toman por otro, como `PUBLIC`, que PostgreSQL pasa a `public` si va sin comillas, o `buoh-local/`, que `aws` lee como el bucket `buoh-local`. Además, el esquema va entre comillas en el SQL, así que PostgreSQL borra exactamente ese nombre. Y el bloque para en el primer fallo: si el esquema no se borra, el bucket tampoco.
 
 ```sh
-test -n "$BUOH_POSTGRES_SCHEMA" && test "$BUOH_POSTGRES_SCHEMA" != public &&
-  test -n "$BUOH_S3_BUCKET" && test "$BUOH_S3_BUCKET" != buoh-local &&
+node -e 'process.exit(/^[a-z_][a-z0-9_]{0,62}$/u.test(process.argv[1]) ? 0 : 1)' -- "$BUOH_POSTGRES_SCHEMA" &&
+  test "$BUOH_POSTGRES_SCHEMA" != public &&
+  node -e 'process.exit(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(process.argv[1]) ? 0 : 1)' -- "$BUOH_S3_BUCKET" &&
+  test "$BUOH_S3_BUCKET" != buoh-local &&
   PGPASSWORD="$BUOH_POSTGRES_PASSWORD" psql -h "$BUOH_POSTGRES_HOST" -p "$BUOH_POSTGRES_PORT" \
     -U "$BUOH_POSTGRES_USER" -d "$BUOH_POSTGRES_DB" -v ON_ERROR_STOP=1 \
-    -c "DROP SCHEMA $BUOH_POSTGRES_SCHEMA CASCADE" &&
+    -c "DROP SCHEMA \"$BUOH_POSTGRES_SCHEMA\" CASCADE" &&
   AWS_ACCESS_KEY_ID="$BUOH_S3_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$BUOH_S3_SECRET_ACCESS_KEY" \
     AWS_DEFAULT_REGION="$BUOH_S3_REGION" aws --endpoint-url "$BUOH_S3_ENDPOINT" \
     s3 rb "s3://$BUOH_S3_BUCKET" --force
