@@ -47,7 +47,7 @@ Tipos de pendiente:
   - el adaptador del worker pide `active_symbols`, crea el snapshot desde el frame durable y lo guarda con la regla de versiones. Un catálogo inválido deja su incidencia y no reemplaza la última versión válida;
   - `PostgresCatalogStore` guarda las versiones en `source_catalog_versions` y el JCS de cada snapshot en el almacenamiento de objetos (migración `0003`). Las pruebas de integración cubren las dos condiciones de aceptación;
   - `pnpm run data:smoke` lo consulta en vivo (`PROJECT_STATUS.md`, «Evidencia de F1.4b»).
-- **Límite:** el smoke guarda el catálogo en memoria (ADR-0012 §10). Desde el PR 5 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, `ingest`, el primer proceso que ingiere de forma continua (P-F1-04), guarda el catálogo vivo en PostgreSQL con `PostgresCatalogStore`, en el esquema y el bucket de su captura, que se borran antes de 24 horas (ADR-0015 §7). Todavía no hay evidencia de una captura viva: llega con la puerta de salida (P-F1-06). El catálogo tampoco decide el universo comercial, que sigue pendiente en `PROJECT_STATUS.md`.
+- **Límite:** el smoke guarda el catálogo en memoria (ADR-0012 §10). Desde el PR 5 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, `ingest`, el primer proceso que ingiere de forma continua (P-F1-04), guarda el catálogo vivo en PostgreSQL con `PostgresCatalogStore`, en el esquema y el bucket de su captura, que se borran antes de 24 horas (ADR-0015 §7). El 2026-10-29 lo hizo en los ensayos de la puerta de salida (P-F1-06), en esquemas y buckets desechables. El catálogo tampoco decide el universo comercial, que sigue pendiente en `PROJECT_STATUS.md`.
 
 ### P-F1-02. Adaptador público de Deriv (`F1-SOURCE-001`) — resuelto
 
@@ -71,32 +71,26 @@ Tipos de pendiente:
 - **Resolución (F1.4b):** `pnpm run data:smoke -- --live` corre `scripts/data-smoke.mjs`, que deja en stdout una sola línea JSON saneada. Sin `--live` responde con un error de uso y no abre conexiones. Guarda todo en memoria y lo borra al terminar, así que el borrado en 24 horas se cumple sin tablas ni objetos que limpiar. Su uso y su resultado están en el runbook («Smoke público de Deriv»), y el primer smoke vivo, en `PROJECT_STATUS.md` («Evidencia de F1.4b»).
 - **Límite:** nunca es el único criterio de fusión, y los umbrales live siguen sin fijar (`PROJECT_STATUS.md`).
 
-### P-F1-04. Reconexión y recuperación de historia (`F1-RECONNECT-001`) — parcial
+### P-F1-04. Reconexión y recuperación de historia (`F1-RECONNECT-001`) — resuelto
 
 - **Objetivo:** que una desconexión no oculte pérdida de datos.
 - **Fuente:** plan de Fase 1 §6, runbook («Inicio», «Desconexión de WebSocket», «Almacenamiento no disponible») y ADR-0005.
-- **Estado (verificado):**
-  - los contratos (`HistoryRecoveryResult`, `IngestionCursor`) y la derivación de continuidad en `packages/domain/src/quality.ts` existen;
-  - desde el PR 4 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, la sesión de ingesta del worker (`startDerivSession`) reconecta tras cada pérdida de conexión con espera exponencial y jitter inyectable, repara los cierres no registrados y pide por la conexión nueva la historia del hueco con `ticks_history`. La ejecutan `data:smoke`, en memoria, y desde el PR 5 el comando continuo `ingest`, sobre PostgreSQL y el almacenamiento de objetos, con un esquema y un bucket propios y la retención de 23 horas (ADR-0015 §7). La tabla de cierres del runbook dice qué cierres pierden datos. El esquema de `forget` se carga con la release fijada, pero no se usa (ADR-0015 §1);
-  - desde el PR 5, la sesión persiste en PostgreSQL el `IngestionCursor`, después de cada `ConnectionClosed` durable y al parar, y el latido (`ingestion_cursors` e `ingestion_heartbeats`, migración `0004`); al arrancar comprueba el log contra el último cursor del símbolo (ADR-0015 §5 y §6);
-  - desde el PR 6, `data:health` muestra la salud viva, con `recovering` hasta que la historia cubra el hueco (P-F1-05);
-  - falta la evidencia de la puerta de salida, con el smoke de reconexión contra Deriv y los ensayos de reinicio (P-F1-06).
-- **Esperado:** ante un `ConnectionClosed` no pedido, el worker:
-  - pasa a `recovering`;
-  - espera con retroceso exponencial y jitter inyectable;
-  - consulta la historia por símbolo;
-  - solo vuelve a `healthy` cuando continuidad y persistencia están verificadas; si no, registra `event_gap_unresolved`.
+- **Antes:** existían los contratos (`HistoryRecoveryResult`, `IngestionCursor`) y la derivación de continuidad de `packages/domain/src/quality.ts`, pero el adaptador terminaba en cada pérdida de conexión, sin reconectar ni pedir la historia, nada persistía el cursor y un cierre perdido por un fallo de persistencia no quedaba en el log.
+- **Resolución (F1.5, [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §2 a §7):**
+  - la derivación del estado vivo con el perfil de medición, sin umbrales: tras un cierre no pedido, solo la historia demuestra la continuidad (PR #35);
+  - la recuperación con `ticks_history`, paginada y con reintentos, y la reparación de los cierres no registrados (`close_not_recorded`), con `supersedes_connection_id` (PR #36);
+  - la sesión de ingesta, que reconecta con espera exponencial y jitter inyectable, lee la conexión anterior del log, se para con `SIGINT` o `SIGTERM` y vuelve a tomar el bloqueo, y el smoke de reconexión (PR #37);
+  - el cursor y el latido en PostgreSQL (migración `0004`) y la captura continua `ingest`, con la retención de 23 horas (PR #38);
+  - `data:health` muestra `recovering` hasta que la historia cubre el hueco (P-F1-05, PR #39);
+  - la aceptación del plan §6 se cumple con las pruebas de reloj y transporte falsos y con el smoke vivo aparte. Los ensayos de la puerta de salida lo demostraron en vivo el 2026-10-29 (P-F1-06, [evidencia de la puerta de salida](../operacion/evidencia-puerta-fase-1.md)), y encontraron el fallo del `pip_size` de la historia, que corrigió el PR #40;
+  - cierra los pendientes 6 de F1.2 y 7 de F1.3 (`PROJECT_STATUS.md`).
+- **Límite:** con la continuidad pendiente, la salud `recovering` no muestra la causa en `open_condition_types` (pendiente 2 de F1.2, que sigue abierto). Los ticks recuperados solo existen como raw hasta que se publiquen datasets vivos (ADR-0015 §4).
 
-  El cursor se actualiza en una transacción, después de confirmar durabilidad.
-- **Componentes:** `apps/market-data-worker`, una migración nueva y `packages/domain`.
-- **Aceptación (plan §6):** prueba con reloj y transporte falsos, y smoke vivo aparte.
-- **Abierto:** pendientes registrados 6 de F1.2 y 7 de F1.3, en `PROJECT_STATUS.md`. El diseño está en [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §2 a §6, que también cierra esos dos pendientes.
-
-### P-F1-05. Reporte de salud y `pnpm run data:health -- --json` (`F1-HEALTH-001`) — parcial: falta la evidencia de P-F1-06
+### P-F1-05. Reporte de salud y `pnpm run data:health -- --json` (`F1-HEALTH-001`) — resuelto
 
 - **Objetivo:** emitir el `HealthReport` en formato máquina.
 - **Fuente:** plan de Fase 1 §5 y §6, y runbook («Reporte y evidencia»).
-- **Estado (verificado):** existen el contrato (`packages/contracts/src/health.ts`) y la derivación pura (`deriveHealthReport` en `packages/domain/src/health.ts`). Desde el PR 6 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, `pnpm run data:health -- --json` emite el informe desde fuera del proceso que ingiere, sin tomar el bloqueo ni escribir: deriva el log durable y le suma el registro operativo, el último latido (conexión y backlog), el escritor vivo según `pg_locks` y el último dataset activo, con las siete reglas de ADR-0015 §8 (runbook, «Salud de datos»). Falta ejecutarlo en los ensayos de la puerta de salida (P-F1-06).
+- **Estado (verificado):** existen el contrato (`packages/contracts/src/health.ts`) y la derivación pura (`deriveHealthReport` en `packages/domain/src/health.ts`). Desde el PR 6 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, `pnpm run data:health -- --json` emite el informe desde fuera del proceso que ingiere, sin tomar el bloqueo ni escribir: deriva el log durable y le suma el registro operativo, el último latido (conexión y backlog), el escritor vivo según `pg_locks` y el último dataset activo, con las siete reglas de ADR-0015 §8 (runbook, «Salud de datos»). Se ejecutó en cada paso de los ensayos de la puerta de salida (P-F1-06): `healthy` con la captura sana, `paused` sin escritor o con el almacenamiento caído y `recovering` al reconectar.
 - **Esperado:** valida y emite `HealthReport` con:
   - salud y estado de conexión;
   - backlog por conteo y bytes;
@@ -111,11 +105,11 @@ Tipos de pendiente:
   - en `recovering` por continuidad pendiente, `open_condition_types` queda vacío (pendiente 2 de F1.2);
   - **decidido en [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §8:** un envoltorio en `scripts/` deja stdout limpio, como `data-replay.mjs`, porque el emulador de shell de pnpm no respeta `1>&2` (ADR-0003). El backlog sale del latido que persiste la ingesta, y la conexión también si el latido es posterior al último evento de conexión del log; sin escritor vivo, la conexión es `disconnected` y el backlog, 0.
 
-### P-F1-06. Puerta de salida de Fase 1 (`F1.5`) — sin empezar
+### P-F1-06. Puerta de salida de Fase 1 (`F1.5`) — evidencia reunida; falta la decisión del propietario
 
 - **Objetivo:** reunir la evidencia que permite marcar la Fase 1 como `done`.
 - **Fuente:** plan de Fase 1 §9, runbook («Verificación periódica» y «Puerta de salida de Fase 1») y `PROJECT_STATUS.md` («Evidencia requerida para cambiar de fase»).
-- **Estado (verificado):** desde F1.4b, `pnpm run data:smoke` recibe el flujo público sin credenciales, en memoria (evidencia en `PROJECT_STATUS.md`). No hay todavía captura persistida de datos vivos ni ensayos de reinicio y de fallo de almacenamiento.
+- **Estado (verificado):** el 2026-10-29 pasaron los nueve ensayos de ADR-0015 §12: captura viva persistida con `ingest`, smoke de reconexión, reinicio sin aviso y programado, almacenamiento de objetos y PostgreSQL parados, ningún dato no durable emitido, incidencias visibles tras reiniciar y replay con el mismo `dataset_id`. Cada punto de la Definition of Done del plan §9 tiene su evidencia ([evidencia de la puerta de salida](../operacion/evidencia-puerta-fase-1.md)).
 - **Esperado:**
   - capturar el flujo público sin credenciales;
   - que reinicio, desconexión y fallo de persistencia no oculten pérdida;
@@ -123,7 +117,7 @@ Tipos de pendiente:
   - que los documentos reflejen el sistema real.
 - **Componentes:** todos los de P-F1-01 a P-F1-05, más `PROJECT_STATUS.md`, que cambia de fase en el PR de cierre.
 - **Aceptación (`PROJECT_STATUS.md`):** todos los requisitos de la fase tienen pruebas y evidencia, un dataset se reproduce con el mismo identificador y las incidencias de calidad siguen visibles tras reinicios.
-- **Abierto:** decisión humana al cerrar la fase sobre el orden entre la Fase 1B (datos MT5) y la Fase 2 (bot shadow). La evidencia se reúne como dice [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §12.
+- **Abierto:** la decisión del propietario sobre el orden entre la Fase 1B (datos MT5) y la Fase 2 (bot shadow). Con ella, `PROJECT_STATUS.md` marca la Fase 1 como `done` ([ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §12).
 
 ### P-F1-07. Pendientes menores ya registrados — menor registrado
 
