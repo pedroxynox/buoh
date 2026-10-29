@@ -47,7 +47,7 @@ export interface S3Timeouts {
   readonly requestTimeout: number;
 }
 
-/** Adaptador S3-compatible (SeaweedFS en local; proveedor productivo pendiente de decisión). */
+/** Adaptador S3-compatible (SeaweedFS en local; Cloudflare R2 en producción, ADR-0016). */
 export class S3ObjectStore implements ObjectStore {
   readonly bucket: string;
   readonly #client: S3Client;
