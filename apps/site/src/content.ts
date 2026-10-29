@@ -25,7 +25,7 @@ export const TAGLINE = 'Observa con calma. Decide con evidencia.';
  * Entrega siguiente de PROJECT_STATUS.md para la que se escribió el texto sobre lo que existe hoy.
  * Una prueba falla cuando cambia, para obligar a revisar el sitio.
  */
-export const WRITTEN_FOR_NEXT_DELIVERY = 'F2.0';
+export const WRITTEN_FOR_NEXT_DELIVERY = 'F2.1';
 
 /** Aviso corto que va en el pie de todas las páginas. */
 export const RISK_SHORT =
@@ -262,7 +262,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
     id: '2',
     title: 'Laboratorio y bot shadow para uso propio',
     state: 'en curso',
-    text: 'Empieza por su plan. Traerá estrategias versionadas, backtests honestos y un bot que emite señales hipotéticas, sin operar.',
+    text: 'Su plan ya está aprobado. Primero lleva la captura de datos a un servidor que funciona todo el día; después traerá estrategias versionadas, backtests honestos y un bot que emite señales hipotéticas, sin operar.',
   },
   {
     id: '3',

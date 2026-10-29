@@ -7,7 +7,7 @@ No es un plan de fase: no tiene requisitos propios ni `status`, y `PROJECT_STATU
 **Este documento no autoriza trabajo ni añade requisitos.** Cada comportamiento esperado cita la fuente que ya lo pide. Lo que autoriza trabajo sigue siendo:
 
 - [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md): siguiente tarea autorizada;
-- el plan activo de la fase, cuando lo hay. Hoy no hay ninguno: la [Fase 1](fase-1-fundacion-de-datos.md) terminó el 2026-10-29 (P-F1-06), y escribir el plan de la Fase 2 es la siguiente tarea. La [línea visual V1](linea-visual-v1.md) terminó el 2026-10-25 (P-V1-01).
+- el plan activo de la fase, cuando lo hay. Hoy es el [plan de Fase 2](fase-2-laboratorio-y-bot-shadow.md). La [Fase 1](fase-1-fundacion-de-datos.md) terminó el 2026-10-29 (P-F1-06), y la [línea visual V1](linea-visual-v1.md), el 2026-10-25 (P-V1-01).
 
 Si este documento y una de esas fuentes difieren, manda la fuente; hay que corregir este documento.
 
@@ -111,18 +111,18 @@ Tipos de pendiente:
 - **Fuente:** plan de Fase 1 §9, runbook («Verificación periódica» y «Puerta de salida de Fase 1») y `PROJECT_STATUS.md` («Evidencia requerida para cambiar de fase»).
 - **Antes:** el 2026-10-29 pasaron los nueve ensayos de ADR-0015 §12: captura viva persistida con `ingest`, smoke de reconexión, reinicio sin aviso y programado, almacenamiento de objetos y PostgreSQL parados, ningún dato no durable emitido, incidencias visibles tras reiniciar y replay con el mismo `dataset_id`. Cada punto de la Definition of Done del plan §9 tiene su evidencia ([evidencia de la puerta de salida](../operacion/evidencia-puerta-fase-1.md)). Para marcar la fase `done`, [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §12 pedía además la decisión del propietario sobre el orden entre la Fase 1B (datos MT5) y la Fase 2 (bot shadow).
 - **Decisión del propietario (2026-10-29):** primero la Fase 2 («Ok vamos con la fase 2»). La Fase 1B queda para después, sin fecha.
-- **Resolución:** la Fase 1 queda `done` en `PROJECT_STATUS.md`, en el plan de Fase 1 (§2 y §9), en el roadmap y en el sitio oficial (`apps/site/src/content.ts`, comprobado por `apps/site/test/content.test.ts`). La Fase 2 es la fase actual, y su plan, la siguiente tarea (`F2.0`).
+- **Resolución:** la Fase 1 queda `done` en `PROJECT_STATUS.md`, en el plan de Fase 1 (§2 y §9), en el roadmap y en el sitio oficial (`apps/site/src/content.ts`, comprobado por `apps/site/test/content.test.ts`). La Fase 2 es la fase actual, con su [plan](fase-2-laboratorio-y-bot-shadow.md).
 
 ### P-F1-07. Pendientes menores ya registrados — menor registrado
 
 `PROJECT_STATUS.md` los mantiene en «Pendientes registrados de F1.2», «de F1.3» y «de F1.4a», y este documento no los repite. Entre ellos, dos tienen fecha límite explícita:
 
-- antes de publicar datasets vivos largos: límites de lectura y artefactos que crecen sin segmentar (F1.3, pendiente 2);
-- antes de desplegar: un rol de PostgreSQL de solo inserción y lectura (F1.3, pendiente 4; ADR-0006).
+- antes de publicar datasets vivos largos: límites de lectura y artefactos que crecen sin segmentar (F1.3, pendiente 2). El [plan de Fase 2](fase-2-laboratorio-y-bot-shadow.md) lo resuelve en F2.5 (`F2-DATASET-001`);
+- antes de desplegar: un rol de PostgreSQL de solo inserción y lectura (F1.3, pendiente 4; ADR-0006). El plan de Fase 2 lo resuelve en F2.2 (`F2-ROLE-001`).
 
 Comprobado en el repositorio:
 
-- la guardia documental no tiene regla para `packages/domain/**` (F1.2, pendiente 3);
+- la guardia documental no tiene regla para `packages/domain/**` (F1.2, pendiente 3). El plan de Fase 2 la añade en F2.1 (`F2-GOV-001`);
 - `qualityProfileSchema` está repetido (F1.2, pendiente 4; aquí D-14).
 
 ## 2. Línea visual V1
@@ -159,7 +159,7 @@ La línea terminó el 2026-10-25 (P-V1-01). Los demás pendientes de esta secci�
 - **Decisión del propietario (2026-10-25):** el contexto se queda fuera del gráfico, en la tarjeta de al lado.
 - **Resolución:** la guía §8 acepta el contexto en la tarjeta de al lado, y el [flujo de gráficos](../diseno/flujo-de-graficas.md) §9 da la regla por cumplida. El código no cambia.
 
-### P-V1-04. Gráficos: accesibilidad, pruebas y unidades — sin documentar hasta ahora
+### P-V1-04. Gráficos: accesibilidad, pruebas y unidades — sin empezar
 
 - **Objetivo:** que los gráficos cumplan la guía §10 y tengan pruebas propias antes de mostrar datos reales.
 - **Fuente:**
@@ -177,7 +177,7 @@ La línea terminó el 2026-10-25 (P-V1-01). Los demás pendientes de esta secci�
   - la alternativa textual o tabular;
   - la unidad de la peor caída;
   - una prueba de contraste de los tokens `chart`.
-- **Abierto:** ninguna fuente dice si esto se hace antes de la Fase 2 o dentro de ella.
+- **Abierto:** resuelto por el [plan de Fase 2](fase-2-laboratorio-y-bot-shadow.md): se hace dentro de la fase, en F2.4, antes de que un gráfico muestre datos reales, con la aceptación de `F2-CHART-001`.
 
 ### P-V1-05. Móvil: teléfono real y reautenticación — menor registrado y decisiones humanas
 
@@ -243,10 +243,10 @@ Solo se listan; sus planes no existen todavía y el roadmap describe el destino.
   - la revisión de términos de Deriv MT5, Vantage y MetaQuotes.
 
   No existe código MT5, como manda el plan. La Fase 2 va antes, y la Fase 1B no tiene fecha (P-F1-06).
-- **Fase 2.** Es la fase actual desde el 2026-10-29 (P-F1-06). Su plan es la siguiente tarea de `PROJECT_STATUS.md`, y hasta que se fusione no autoriza código.
+- **Fase 2.** Es la fase actual desde el 2026-10-29 (P-F1-06). Su [plan](fase-2-laboratorio-y-bot-shadow.md) autoriza los incrementos F2.1 a F2.11, cada uno después de su ADR.
 - **Fases 3 a 7.** Roadmap. No están autorizadas.
 - **Despliegue.** ADR-0006, ADR-0013, ADR-0016 y arquitectura objetivo. Solo el sitio oficial tiene `render.yaml` (ADR-0013). El 2026-10-29 el propietario decidió el alojamiento del sistema de datos: el worker en un background worker de Render, PostgreSQL en Render Postgres y los objetos en Cloudflare R2, por unos 15 USD al mes, y nada se compra hasta el PR de despliegue ([ADR-0016](../arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)). Siguen pendientes:
-  - las regiones de Render y de R2, y las condiciones de ADR-0016 §4 antes de desplegar: el punto de control de la memoria, el rol de PostgreSQL de solo inserción y lectura, la retención de producción y las comprobaciones contra R2;
+  - las regiones de Render y de R2, y las condiciones de ADR-0016 §4 antes de desplegar: el punto de control de la memoria, el rol de PostgreSQL de solo inserción y lectura, la retención de producción y las comprobaciones contra R2. El [plan de Fase 2](fase-2-laboratorio-y-bot-shadow.md) las pone en F2.1 y F2.2;
   - la distribución de la app móvil.
 
 ## 5. Documentos desactualizados

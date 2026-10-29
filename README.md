@@ -12,12 +12,12 @@ Cualquier persona o motor de IA debe leer, en orden:
 
 1. [`AGENTS.md`](AGENTS.md): reglas de trabajo y jerarquía de autoridad.
 2. [`PROJECT_STATUS.md`](PROJECT_STATUS.md): estado vigente y siguiente tarea.
-3. [Plan ejecutable de Fase 1](docs/plan/fase-1-fundacion-de-datos.md).
+3. [Plan ejecutable de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md), el de la fase actual.
 4. Contratos, ADR y runbooks afectados por la tarea.
 
 ## Desarrollo actual
 
-Fase 1 tiene contratos runtime (F1.1), normalización y calidad puras (F1.2), log raw-first, publicación y replay sobre PostgreSQL y almacenamiento S3-compatible locales (F1.3), las reglas de calidad 2.0.0 para fuentes como Deriv (F1.4a), y el catálogo y el adaptador público de Deriv, solo para escuchar, con su prueba en vivo (F1.4b). La sesión de ingesta reconecta con espera exponencial tras una desconexión, repara los cierres no registrados y recupera la historia del hueco con `ticks_history`, y `pnpm run data:smoke` la corre en memoria ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md)). El comando `ingest` la corre de forma continua sobre PostgreSQL y el almacenamiento de objetos, con el cursor y el latido, y `pnpm run data:health -- --json` emite el `HealthReport` de esa captura desde fuera del proceso que ingiere, sin tomar el bloqueo ni escribir nada. La Fase 1 terminó el 2026-10-29 con la evidencia de su puerta de salida ([evidencia](docs/operacion/evidencia-puerta-fase-1.md)). La fase actual es la 2, el laboratorio y el bot *shadow*, y empieza por su plan. El bot aún no emite señales ni ejecuta operaciones. En paralelo, la línea visual V1 dejó la marca, el sistema de diseño, prototipos web, móvil y de escritorio con datos ficticios, y el sitio oficial, que `render.yaml` publica en Render desde el 2026-10-27, sin indexar. El [estado del código](docs/arquitectura/estado-del-codigo.md) resume cómo se conectan las piezas, y la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md), lo que falta.
+Fase 1 tiene contratos runtime (F1.1), normalización y calidad puras (F1.2), log raw-first, publicación y replay sobre PostgreSQL y almacenamiento S3-compatible locales (F1.3), las reglas de calidad 2.0.0 para fuentes como Deriv (F1.4a), y el catálogo y el adaptador público de Deriv, solo para escuchar, con su prueba en vivo (F1.4b). La sesión de ingesta reconecta con espera exponencial tras una desconexión, repara los cierres no registrados y recupera la historia del hueco con `ticks_history`, y `pnpm run data:smoke` la corre en memoria ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md)). El comando `ingest` la corre de forma continua sobre PostgreSQL y el almacenamiento de objetos, con el cursor y el latido, y `pnpm run data:health -- --json` emite el `HealthReport` de esa captura desde fuera del proceso que ingiere, sin tomar el bloqueo ni escribir nada. La Fase 1 terminó el 2026-10-29 con la evidencia de su puerta de salida ([evidencia](docs/operacion/evidencia-puerta-fase-1.md)). La fase actual es la 2, el laboratorio y el bot *shadow*, y su [plan](docs/plan/fase-2-laboratorio-y-bot-shadow.md) empieza por llevar el sistema de datos a un servidor. El bot aún no emite señales ni ejecuta operaciones. En paralelo, la línea visual V1 dejó la marca, el sistema de diseño, prototipos web, móvil y de escritorio con datos ficticios, y el sitio oficial, que `render.yaml` publica en Render desde el 2026-10-27, sin indexar. El [estado del código](docs/arquitectura/estado-del-codigo.md) resume cómo se conectan las piezas, y la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md), lo que falta.
 
 ```text
 pnpm install
@@ -79,6 +79,7 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 
 - [Estado actual](PROJECT_STATUS.md)
 - [Plan ejecutable de Fase 1](docs/plan/fase-1-fundacion-de-datos.md)
+- [Plan ejecutable de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md)
 - [Visión y alcance](docs/producto/vision-y-alcance.md)
 - [Roadmap por puertas de calidad](docs/producto/roadmap.md)
 - [Modelo de lanzamiento y comercialización](docs/producto/modelo-de-lanzamiento.md)
