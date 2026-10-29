@@ -3,6 +3,7 @@ import {
   connectionOpenedSchema,
   rawSourceFrameSchema,
   sha256Hex,
+  type IngestionCursor,
   type SourceEvent,
 } from '@buoh/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -54,6 +55,56 @@ const isEvent = (event: SourceEvent | undefined): event is SourceEvent => event 
 /** Un almacén que no responde. */
 const unavailable = () => Object.assign(new Error('sintético'), { code: 'ECONNREFUSED' });
 
+/**
+ * El cursor que dejó la conexión anterior del log (`previousConnectionEvents`) al cerrarse: apunta a
+ * su cierre (`uuid(9004)`), con su tick (`uuid(9003)`, a las 09:59:00) como último raw.
+ */
+const previousCursor = (overrides: Partial<IngestionCursor> = {}): IngestionCursor => ({
+  active_segment_index: 0,
+  connection_id: PREVIOUS,
+  high_watermark_event_time_utc: '2026-03-02T09:59:00.000Z',
+  last_durable_observation_id: uuid(9003),
+  last_durable_source_event_id: uuid(9004),
+  schema_version: '1.0.0',
+  source: 'deriv_options',
+  source_event_count: 3,
+  symbol: 'SYNTH_100',
+  updated_at_utc: '2026-03-02T09:59:30.000Z',
+  ...overrides,
+});
+
+/** 23 horas, la retención que pasa `ingest` (ADR-0015 §7). */
+const RETENTION_MS = 23 * 3_600_000;
+
+/**
+ * El log de una ejecución anterior cuyo primer evento es de `firstAt`: una conexión que se abrió
+ * entonces y se cerró a las 09:59:30 con un cierre pedido, sin suscribirse.
+ */
+function logSince(firstAt: string): SourceEvent[] {
+  return [
+    connectionOpenedSchema.parse({
+      connection_id: PREVIOUS,
+      event_id: uuid(9002),
+      kind: 'connection_opened',
+      occurred_at_utc: firstAt,
+      schema_version: '1.0.0',
+      source: 'deriv_options',
+      supersedes_connection_id: null,
+    }),
+    connectionClosedSchema.parse({
+      affected_symbols: [],
+      closure_type: 'requested',
+      connection_id: PREVIOUS,
+      event_id: uuid(9004),
+      kind: 'connection_closed',
+      occurred_at_utc: '2026-03-02T09:59:30.000Z',
+      reason: 'requested',
+      schema_version: '1.0.0',
+      source: 'deriv_options',
+    }),
+  ];
+}
+
 describe('startDerivSession: arranque', () => {
   it('si la preparación falla, termina failed con su motivo, sin tomar el bloqueo ni conectar', async () => {
     const run = await sessionHarness({ expectedSha256: 'f'.repeat(64) });
@@ -69,6 +120,7 @@ describe('startDerivSession: arranque', () => {
       recoveries: [],
       schemas: null,
       server_time_offset_ms: null,
+      stopped_for_retention: false,
       subscription_id: null,
       waits_ms: [],
     });
@@ -243,6 +295,166 @@ describe('startDerivSession: el estado al arrancar (ADR-0015 §5)', () => {
     expect((await run.done).end).toEqual({ status: 'completed' });
   });
 
+  it('si el último cursor del símbolo apunta a un evento que no está en el log, termina failed con cursor_ahead_of_log sin conectar ni escribir otro cursor', async () => {
+    const ahead = previousCursor({
+      last_durable_source_event_id: uuid(9999),
+      source_event_count: 4,
+      updated_at_utc: '2026-03-02T09:59:40.000Z',
+    });
+    const run = await sessionHarness({
+      cursors: [previousCursor(), ahead],
+      events: previousConnectionEvents(),
+    });
+    expect(run.sockets).toEqual([]);
+
+    expect((await run.done).end).toEqual({
+      detail: null,
+      reason: 'cursor_ahead_of_log',
+      status: 'failed',
+    });
+    expectRefusedLog(run, 3);
+    expect(run.status?.cursors.map((item) => item.cursor)).toEqual([previousCursor(), ahead]);
+  });
+
+  it('solo cuenta el último cursor del símbolo, y puede ir por detrás del log: si apunta a un evento del log, conecta', async () => {
+    // Uno anterior apunta a un evento que no está; el último, al tick, anterior al cierre del log.
+    const run = await sessionHarness({
+      cursors: [
+        previousCursor({ last_durable_source_event_id: uuid(9999) }),
+        previousCursor({ last_durable_source_event_id: uuid(9003), source_event_count: 2 }),
+      ],
+      events: previousConnectionEvents(),
+    });
+
+    expect(run.sockets).toHaveLength(1);
+    run.session.stop();
+    expect((await run.done).end).toEqual({ status: 'completed' });
+  });
+
+  it('si la fuente tiene un cursor de otro símbolo, termina failed con symbol_mismatch sin conectar, aunque el log no tenga ticks: el cursor da el símbolo del log', async () => {
+    // Una sesión de SYNTH_50 que no llegó a suscribirse: su log no tiene ticks, pero sí su cursor.
+    const [opened] = previousConnectionEvents();
+    const closed = connectionClosedSchema.parse({
+      affected_symbols: [],
+      closure_type: 'requested',
+      connection_id: PREVIOUS,
+      event_id: uuid(9004),
+      kind: 'connection_closed',
+      occurred_at_utc: '2026-03-02T09:59:30.000Z',
+      reason: 'catalog_invalid',
+      schema_version: '1.0.0',
+      source: 'deriv_options',
+    });
+    const other = previousCursor({
+      high_watermark_event_time_utc: null,
+      last_durable_observation_id: null,
+      source_event_count: 2,
+      symbol: 'SYNTH_50',
+    });
+    const run = await sessionHarness({
+      cursors: [other],
+      events: [opened, closed].filter(isEvent),
+    });
+    expect(run.sockets).toEqual([]);
+
+    expect((await run.done).end).toEqual({
+      detail: null,
+      reason: 'symbol_mismatch',
+      status: 'failed',
+    });
+    expectRefusedLog(run, 2);
+  });
+
+  it('con cursores del símbolo pedido, unos ticks de otro símbolo siguen dando symbol_mismatch', async () => {
+    const [opened, tick, closed] = previousConnectionEvents();
+    const payload = derivMessages.tick(2, START_EPOCH - 60, '100.25', 'SYNTH_50');
+    const other = rawSourceFrameSchema.parse({
+      ...tick,
+      payload_utf8: payload,
+      raw_payload_sha256: sha256Hex(payload),
+    });
+    const run = await sessionHarness({
+      cursors: [previousCursor()],
+      events: [opened, other, closed].filter(isEvent),
+    });
+
+    expect((await run.done).end).toEqual({
+      detail: null,
+      reason: 'symbol_mismatch',
+      status: 'failed',
+    });
+    expectRefusedLog(run, 3);
+  });
+
+  it('con retentionMs, si el evento durable más antiguo del log tiene retentionMs o más, termina failed con retention_expired sin conectar', async () => {
+    // A las 10:00:00 tiene exactamente 23 horas.
+    const run = await sessionHarness({
+      events: logSince('2026-03-01T11:00:00.000Z'),
+      retentionMs: RETENTION_MS,
+    });
+    expect(run.sockets).toEqual([]);
+
+    const result = await run.done;
+    expect(result.end).toEqual({ detail: null, reason: 'retention_expired', status: 'failed' });
+    expect(result.stopped_for_retention).toBe(false);
+    // El cierre, 23 horas después de la apertura, rotó el segmento por ventana.
+    expectRefusedLog(run, 2, 1);
+  });
+
+  it('con retentionMs, si al evento durable más antiguo del log le falta 1 ms para cumplirlo, conecta', async () => {
+    const run = await sessionHarness({
+      events: logSince('2026-03-01T11:00:00.001Z'),
+      retentionMs: RETENTION_MS,
+    });
+
+    expect(run.sockets).toHaveLength(1);
+    run.session.stop();
+    expect((await run.done).end).toEqual({ status: 'completed' });
+  });
+
+  it('sin retentionMs, un log de 23 horas o más conecta', async () => {
+    const run = await sessionHarness({ events: logSince('2026-02-01T10:00:00.000Z') });
+
+    expect(run.sockets).toHaveLength(1);
+    run.session.stop();
+    expect((await run.done).end).toEqual({ status: 'completed' });
+  });
+
+  it('si el almacén del cursor no responde al arrancar, avisa con ingestion_status_unavailable y el motivo saneado, nunca el texto de PostgreSQL, espera y lo intenta otra vez', async () => {
+    const run = await sessionHarness({
+      beforeStart: ({ status }) => {
+        if (status !== null) {
+          status.failReads = 1;
+          status.failure = () =>
+            Object.assign(
+              new Error('connection to server at "db.internal" (10.0.0.5), port 5432 failed'),
+              { code: 'ECONNREFUSED' },
+            );
+        }
+      },
+      events: previousConnectionEvents(),
+      // Sin latido, para que la única espera sea la del reintento.
+      pidlessLocks: true,
+      status: true,
+    });
+    expect(run.sockets).toEqual([]);
+    expect(run.alerts).toEqual([{ event: 'ingestion_status_unavailable', reason: 'ECONNREFUSED' }]);
+    expect(run.clock.pendingDelays()).toEqual([500]);
+
+    await run.clock.advance(500);
+    expect(run.timeline).toEqual(['acquire:1', 'connect:1']);
+    expect(run.openedWith).toEqual([run.provider.lock(1), run.provider.lock(1)]);
+    run.session.stop();
+    expect((await run.done).waits_ms).toEqual([500]);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, 2 ** 53])(
+    'un retentionMs de %s, que no es un entero positivo de milisegundos, es un error de programación: lanza TypeError',
+    async (retentionMs) => {
+      await expect(sessionHarness({ retentionMs })).rejects.toThrow(TypeError);
+    },
+  );
+
   it.each<[string, (sourceLog: MemorySourceLogStore) => void]>([
     [
       'al abrir el log',
@@ -319,6 +531,7 @@ describe('startDerivSession: cómo terminó cada conexión (ADR-0015 §3)', () =
         release: 'synthetic-deriv-1',
       },
       server_time_offset_ms: null,
+      stopped_for_retention: false,
       subscription_id: 'sub-1',
       waits_ms: [],
     });

@@ -53,6 +53,12 @@ export interface IngestionStatusStore {
   /** La última versión del cursor de esa fuente y ese símbolo, o `null` si no hay ninguna. */
   latestCursor(source: string, symbol: string): Promise<IngestionCursorVersion | null>;
   /**
+   * Los símbolos que tienen algún cursor de esa fuente, ordenados y sin repetir. El log es de la
+   * fuente y lo escribe una sesión de un solo símbolo, así que todos sus cursores son de ese
+   * símbolo: uno de otro dice que otra sesión escribió el log (ADR-0015 §5, `symbol_mismatch`).
+   */
+  cursorSymbols(source: string): Promise<string[]>;
+  /**
    * Guarda el latido. Solo admite uno válido (`ingestionHeartbeatSchema`), y un `heartbeat_id` ya
    * guardado falla con el código `23505`, como la clave primaria.
    */

@@ -117,6 +117,15 @@ export class PostgresIngestionStatusStore implements IngestionStatusStore {
     return { cursor, version };
   }
 
+  /** Ordenados en JavaScript, como en memoria: así el orden no depende de la collation. */
+  async cursorSymbols(source: string): Promise<string[]> {
+    const { rows } = await this.#pool.query<{ symbol: string }>(
+      'SELECT DISTINCT symbol FROM ingestion_cursors WHERE source = $1',
+      [source],
+    );
+    return rows.map((row) => row.symbol).sort();
+  }
+
   async appendHeartbeat(input: IngestionHeartbeat): Promise<void> {
     const heartbeat = ingestionHeartbeatSchema.parse(input);
     await this.#pool.query(

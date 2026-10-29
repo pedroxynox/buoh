@@ -9,7 +9,12 @@ import {
 import { type CatalogVersion } from '../../src/deriv/ports.js';
 import { PublicationConflictError, PublicationError } from '../../src/errors.js';
 import {
+  type IngestionCursorVersion,
+  type IngestionHeartbeat,
+} from '../../src/ingestion/status.js';
+import {
   InMemoryCatalogStore,
+  InMemoryIngestionStatusStore,
   InMemoryObjectStore,
   InMemoryOperationalStore,
   InMemoryRequestedResponseIncidentStore,
@@ -195,5 +200,51 @@ export class MemoryRequestedResponseIncidentStore extends InMemoryRequestedRespo
       return Promise.reject(Object.assign(new Error('Fallo inyectado'), { code: 'ECONNREFUSED' }));
     }
     return super.append(incident);
+  }
+}
+
+/**
+ * Cursor y latido en memoria (`InMemoryIngestionStatusStore`), con fallos inyectables: cada uno
+ * simula que PostgreSQL no responde, con el error de `failure`.
+ */
+export class MemoryIngestionStatusStore extends InMemoryIngestionStatusStore {
+  /** El error de cada fallo inyectado; por defecto, uno con el código `ECONNREFUSED`. */
+  failure: () => Error = () =>
+    Object.assign(new Error('Fallo inyectado'), { code: 'ECONNREFUSED' });
+  /** Cada `appendCursor` falla mientras sea `true`. */
+  failCursorWrites = false;
+  /** Cada `appendHeartbeat` falla mientras sea `true`. */
+  failHeartbeatWrites = false;
+  /** Las próximas `n` lecturas (`latestCursor` o `cursorSymbols`) fallan. */
+  failReads = 0;
+
+  #read(): Promise<void> {
+    if (this.failReads === 0) {
+      return Promise.resolve();
+    }
+    this.failReads -= 1;
+    return Promise.reject(this.failure());
+  }
+
+  override appendCursor(...args: Parameters<InMemoryIngestionStatusStore['appendCursor']>) {
+    return this.failCursorWrites
+      ? Promise.reject<IngestionCursorVersion>(this.failure())
+      : super.appendCursor(...args);
+  }
+
+  override appendHeartbeat(heartbeat: IngestionHeartbeat): Promise<void> {
+    return this.failHeartbeatWrites
+      ? Promise.reject(this.failure())
+      : super.appendHeartbeat(heartbeat);
+  }
+
+  override async latestCursor(source: string, symbol: string) {
+    await this.#read();
+    return super.latestCursor(source, symbol);
+  }
+
+  override async cursorSymbols(source: string) {
+    await this.#read();
+    return super.cursorSymbols(source);
   }
 }

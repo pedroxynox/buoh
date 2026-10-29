@@ -96,6 +96,20 @@ export function statusStoreRules(open: () => IngestionStatusStore): void {
     expect(await store.latestCursor('rules_versions', 'SYNTH_10')).toBeNull();
   });
 
+  it('cursorSymbols da los símbolos que tienen algún cursor de la fuente, ordenados y sin repetir', async () => {
+    const store = open();
+    expect(await store.cursorSymbols('rules_symbols')).toEqual([]);
+    await store.appendCursor(cursorOf('rules_symbols', { symbol: 'SYNTH_50' }));
+    await store.appendCursor(cursorOf('rules_symbols'));
+    await store.appendCursor(
+      cursorOf('rules_symbols', { source_event_count: 9, symbol: 'SYNTH_50' }),
+    );
+    await store.appendCursor(cursorOf('rules_symbols_other', { symbol: 'SYNTH_10' }));
+
+    expect(await store.cursorSymbols('rules_symbols')).toEqual(['SYNTH_100', 'SYNTH_50']);
+    expect(await store.cursorSymbols('rules_symbols_other')).toEqual(['SYNTH_10']);
+  });
+
   it('guarda los campos nulos del cursor', async () => {
     const store = open();
     const empty = cursorOf('rules_nulls', {

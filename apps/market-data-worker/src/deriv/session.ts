@@ -1,7 +1,8 @@
-import { type SourceEvent } from '@buoh/contracts';
-import { deriveMarketData, type DerivedMarketData } from '@buoh/domain';
+import { type IngestionCursor, type SourceEvent } from '@buoh/contracts';
+import { deriveMarketData, sourceEventTime, type DerivedMarketData } from '@buoh/domain';
 
 import { RawFirstIngestor } from '../ingestion/raw-first-ingestor.js';
+import { type IngestionStatusStore } from '../ingestion/status.js';
 import { stderrAlert, type OperationalAlert } from '../operational/registry.js';
 import {
   failureReason,
@@ -126,6 +127,22 @@ export interface DerivSessionInput extends Pick<
    * conexión.
    */
   readonly interruptAfterMs?: number;
+  /**
+   * El cursor y el latido de la ingesta (ADR-0015 §6): `PostgresIngestionStatusStore` en
+   * PostgreSQL. Al arrancar, después de leer el log, la sesión lee de él el último cursor del símbolo
+   * y los símbolos con algún cursor de la fuente, y comprueba el log con ellos (ADR-0015 §5). Si no
+   * responde, avisa con `ingestion_status_unavailable` y el motivo saneado, espera y lo intenta otra
+   * vez, como con el log. Sin él, como en el smoke, la sesión no lee ni escribe cursor ni latido.
+   */
+  readonly status?: IngestionStatusStore;
+  /**
+   * La retención del log, en milisegundos (ADR-0015 §7): un entero positivo, o `startDerivSession`
+   * lanza `TypeError`; `ingest` pasa 23 horas. Si el evento durable más antiguo del log ya la
+   * cumplió, la sesión no arranca (`retention_expired`); si no, para como con `stop` cuando la
+   * cumple, contada desde el primer evento durable de la sesión si el log estaba vacío. Sin ella, la
+   * sesión no mira la antigüedad del log.
+   */
+  readonly retentionMs?: number;
 }
 
 /** Motivo del corte del smoke de reconexión (ADR-0015 §9). */
@@ -166,6 +183,11 @@ export interface DerivSessionResult {
    */
   readonly server_time_offset_ms: number | null;
   /**
+   * La sesión paró porque el evento durable más antiguo del log cumplió `retentionMs` (ADR-0015 §7):
+   * como con `stop`, su fin es `completed`, salvo que antes falle algo que no se puede reintentar.
+   */
+  readonly stopped_for_retention: boolean;
+  /**
    * `subscription.id` del último intento, o `null` si ese intento no llegó a abrirse o no recibió
    * el primer tick de su suscripción.
    */
@@ -203,6 +225,13 @@ const STEADY_CONNECTION_MS = 60_000;
  * pasado, la sesión para y la abandona.
  */
 const PLANNED_CLOSE_BOUND_MS = 300_000;
+/**
+ * Lo más que la parada por retención espera de una vez antes de volver a mirar el reloj, como la
+ * espera para pasar el cierre anterior: un ajuste del reloj, o un temporizador que se retrasa con el
+ * equipo suspendido, se nota en un minuto como mucho, y una retención enorme nunca llega entera al
+ * temporizador.
+ */
+const RETENTION_STEP_MS = 60_000;
 
 /**
  * La espera del intento n, desde 1 (ADR-0015 §3, «Espera»): con d = mín(60 000, 1000 · 2^(n−1)) ms,
@@ -241,16 +270,62 @@ function integrityEnd(error: unknown): SessionEnd {
 const isNotDerivable = (end: SessionEnd): boolean =>
   end.status === 'failed' && end.reason === 'log_not_derivable';
 
+/** El ID de un source event en el índice: el `observation_id` de un frame y el `event_id` de los demás. */
+const sourceEventId = (event: SourceEvent): string =>
+  event.kind === 'raw_source_frame' ? event.observation_id : event.event_id;
+
+/** Lo que el arranque lee del almacén del cursor (ADR-0015 §5). */
+interface StoredCursors {
+  /** El último cursor del símbolo pedido, o `null` si no tiene ninguno. */
+  readonly latest: IngestionCursor | null;
+  /** Los símbolos que tienen algún cursor de la fuente. */
+  readonly symbols: readonly string[];
+}
+
+/** El último cursor del símbolo y los símbolos con algún cursor de la fuente. */
+async function readCursors(
+  status: IngestionStatusStore,
+  preparation: DerivPreparation,
+): Promise<StoredCursors> {
+  const { source } = preparation.profile;
+  const symbols = await status.cursorSymbols(source);
+  const latest = await status.latestCursor(source, preparation.symbol);
+  return { latest: latest?.cursor ?? null, symbols };
+}
+
+/** Lo que la sesión toma del log al arrancar, cuando pasa sus comprobaciones. */
+interface StartupLog {
+  /** La hora del evento durable más antiguo, el primero del log, o `null` si está vacío. */
+  readonly oldest_utc: string | null;
+}
+
 /**
- * Las comprobaciones del log antes de conectar que no necesitan el cursor (ADR-0015 §5): todos sus
- * frames son de este conector, se deriva con el perfil de medición y sus ticks son del símbolo
- * pedido. Devuelve el fin `failed`, o `null` si las pasa.
+ * Las comprobaciones del log antes de conectar (ADR-0015 §5), en este orden:
+ *
+ * 1. todos sus frames son de este conector (`connector_version_mismatch`);
+ * 2. se deriva con el perfil de medición (`log_not_derivable`);
+ * 3. es del símbolo pedido (`symbol_mismatch`): ningún cursor de la fuente es de otro símbolo y
+ *    ningún tick tampoco. Un log lo escribe una sesión de un solo símbolo, así que sus cursores dan
+ *    su símbolo, también si no tiene ticks;
+ * 4. el último cursor del símbolo apunta a un evento del log (`cursor_ahead_of_log`): si no, el log
+ *    perdió datos confirmados;
+ * 5. con `retentionMs`, el evento durable más antiguo, el primero del log, no la cumplió todavía
+ *    (`retention_expired`, ADR-0015 §7). Su hora es la de `sourceEventTime`: la recepción de un
+ *    frame y `occurred_at_utc` de los demás.
+ *
+ * Sin `cursors`, no hay comprobación con el cursor. Devuelve el fin `failed` o, si las pasa, lo que
+ * la sesión toma del log.
  */
 function checkLog(
   segments: readonly (readonly SourceEvent[])[],
   preparation: DerivPreparation,
-): SessionEnd | null {
-  const { profile } = preparation;
+  startup: {
+    readonly cursors: StoredCursors | null;
+    readonly now: string;
+    readonly retentionMs: number | undefined;
+  },
+): { readonly end: SessionEnd } | { readonly log: StartupLog } {
+  const { profile, symbol } = preparation;
   const foreign = segments.some((segment) =>
     segment.some(
       (event) =>
@@ -258,22 +333,44 @@ function checkLog(
     ),
   );
   if (foreign) {
-    return failed('connector_version_mismatch');
+    return { end: failed('connector_version_mismatch') };
   }
   let derived: DerivedMarketData;
   try {
     derived = deriveMarketData(segments, profile);
   } catch (error) {
-    return notDerivable(error);
+    return { end: notDerivable(error) };
   }
   // El perfil admite solo el símbolo pedido, así que todo tick derivado es de ese símbolo: un tick de
   // otro símbolo queda como frame inválido con `symbol_not_allowed`.
-  const otherSymbol = derived.incidents.some(
+  const otherTicks = derived.incidents.some(
     (incident) =>
       incident.incident_type === 'invalid_source_frame' &&
       incident.evidence.reason === 'symbol_not_allowed',
   );
-  return otherSymbol ? failed('symbol_mismatch') : null;
+  const { cursors } = startup;
+  const otherCursor = cursors?.symbols.some((item) => item !== symbol) === true;
+  if (otherCursor || otherTicks) {
+    return { end: failed('symbol_mismatch') };
+  }
+  const events = segments.flat();
+  const latest = cursors?.latest ?? null;
+  if (
+    latest !== null &&
+    !events.some((event) => sourceEventId(event) === latest.last_durable_source_event_id)
+  ) {
+    return { end: failed('cursor_ahead_of_log') };
+  }
+  const oldest = events[0];
+  const oldestUtc = oldest === undefined ? null : sourceEventTime(oldest);
+  if (
+    startup.retentionMs !== undefined &&
+    oldestUtc !== null &&
+    Date.parse(startup.now) >= Date.parse(oldestUtc) + startup.retentionMs
+  ) {
+    return { end: failed('retention_expired') };
+  }
+  return { log: { oldest_utc: oldestUtc } };
 }
 
 /** Una sesión en curso: su estado vive aquí, y `startDerivSession` expone `done` y `stop`. */
@@ -317,6 +414,11 @@ class SessionRun {
   /** Ya empezó a contar el corte del smoke, con el primer tick durable de la sesión. */
   #interruptArmed = false;
   #cancelInterrupt: (() => void) | null = null;
+  /** Ya empezó a contar la retención, desde el evento durable más antiguo del log. */
+  #retentionArmed = false;
+  #cancelRetention: (() => void) | null = null;
+  /** La retención paró la sesión. */
+  #stoppedForRetention = false;
 
   constructor(input: DerivSessionInput) {
     this.#input = input;
@@ -377,6 +479,7 @@ class SessionRun {
       recoveries,
       schemas: this.#summary,
       server_time_offset_ms: last?.server_time_offset_ms ?? null,
+      stopped_for_retention: this.#stoppedForRetention,
       subscription_id: last?.subscription_id ?? null,
       waits_ms: [...this.#waits],
     };
@@ -393,11 +496,14 @@ class SessionRun {
     if ('end' in opened) {
       return opened.end;
     }
-    const { log } = opened;
+    const { log, startup } = opened;
     const ingestor = new RawFirstIngestor({
       log,
       nextId: input.nextId,
       now: input.now,
+      onDurable: (event) => {
+        this.#onDurable(event);
+      },
       profile: preparation.profile,
       registry: input.registry,
       // Siempre con el bloqueo vigente: después de perderlo, la sesión toma otro antes de escribir.
@@ -420,6 +526,9 @@ class SessionRun {
       },
     });
     this.#ingestor = ingestor;
+    if (startup.oldest_utc !== null) {
+      this.#armRetention(startup.oldest_utc);
+    }
     for (;;) {
       if (this.#stopped) {
         return COMPLETED;
@@ -446,13 +555,16 @@ class SessionRun {
   }
 
   /**
-   * Toma el bloqueo, abre el log con él, lo lee entero y lo comprueba antes de conectar (ADR-0015
-   * §5). Si un almacén no responde, espera y lo intenta otra vez, con un bloqueo nuevo si mientras
-   * tanto se perdió. Si el contenido no pasa sus comprobaciones, el fin es `log_not_derivable`.
+   * Toma el bloqueo, abre el log con él, lo lee entero, lee el cursor si tiene `status` y comprueba
+   * el log antes de conectar (`checkLog`, ADR-0015 §5). Si un almacén del log o el del cursor no
+   * responde, espera y lo intenta otra vez, con un bloqueo nuevo si mientras tanto se perdió. Si el
+   * contenido del log no pasa sus comprobaciones, el fin es `log_not_derivable`.
    */
   async #openLog(
     preparation: DerivPreparation,
-  ): Promise<{ readonly end: SessionEnd } | { readonly log: SourceEventLog }> {
+  ): Promise<
+    { readonly end: SessionEnd } | { readonly log: SourceEventLog; readonly startup: StartupLog }
+  > {
     for (;;) {
       // También una parada durante la carga de los esquemas, que no se corta: termina al acabar.
       if (this.#stopped) {
@@ -483,8 +595,27 @@ class SessionRun {
         }
         continue;
       }
-      const end = checkLog(segments, preparation);
-      return end === null ? { log } : { end };
+      const { status } = this.#input;
+      let cursors: StoredCursors | null = null;
+      if (status !== undefined) {
+        try {
+          cursors = await readCursors(status, preparation);
+        } catch (error) {
+          // Cualquier rechazo cuenta como un almacén que no responde: el almacén no distingue otro.
+          // El motivo sale saneado: el mensaje de PostgreSQL puede llevar el host o el rol.
+          this.#alert({ event: 'ingestion_status_unavailable', reason: failureReason(error) });
+          if (!(await this.#backoff())) {
+            return { end: COMPLETED };
+          }
+          continue;
+        }
+      }
+      const checked = checkLog(segments, preparation, {
+        cursors,
+        now: this.#input.now(),
+        retentionMs: this.#input.retentionMs,
+      });
+      return 'end' in checked ? checked : { log, startup: checked.log };
     }
   }
 
@@ -768,7 +899,45 @@ class SessionRun {
     });
   }
 
-  /** Cancela los temporizadores de la sesión: el plazo, su tope y el corte del smoke. */
+  /**
+   * Un source event que el ingestor de la sesión acaba de hacer durable: con un log vacío al
+   * arrancar, el primero pone en marcha la retención.
+   */
+  #onDurable(event: SourceEvent): void {
+    this.#armRetention(sourceEventTime(event));
+  }
+
+  /**
+   * Pone en marcha la parada por retención, una sola vez (ADR-0015 §7): cuando el reloj llega a la
+   * hora del evento durable más antiguo del log (`oldestUtc`) más `retentionMs`, la sesión para como
+   * con `stop` y su resultado lo dice (`stopped_for_retention`). Espera en tramos de 60 000 ms como
+   * mucho y vuelve a mirar el reloj después de cada uno. Sin `retentionMs` o tras la parada, no hace
+   * nada.
+   */
+  #armRetention(oldestUtc: string): void {
+    const { retentionMs } = this.#input;
+    if (retentionMs === undefined || this.#retentionArmed || this.#stopped) {
+      return;
+    }
+    this.#retentionArmed = true;
+    const due = Date.parse(oldestUtc) + retentionMs;
+    const step = (): void => {
+      this.#cancelRetention = null;
+      const wait = due - Date.parse(this.#input.now());
+      if (wait <= 0) {
+        this.#stoppedForRetention = true;
+        this.stop();
+        return;
+      }
+      this.#cancelRetention = this.#input.scheduler.schedule(
+        Math.min(wait, RETENTION_STEP_MS),
+        step,
+      );
+    };
+    step();
+  }
+
+  /** Cancela los temporizadores de la sesión: el plazo, su tope, el corte del smoke y la retención. */
   #cancelTimers(): void {
     this.#cancelDeadline?.();
     this.#cancelDeadline = null;
@@ -776,6 +945,8 @@ class SessionRun {
     this.#cancelBound = null;
     this.#cancelInterrupt?.();
     this.#cancelInterrupt = null;
+    this.#cancelRetention?.();
+    this.#cancelRetention = null;
   }
 
   /**
@@ -822,22 +993,26 @@ class SessionRun {
  * solo `RawFirstIngestor`: tras una conexión que se pierde o se pausa, o un intento que no conecta,
  * espera y lo intenta otra vez, con un bloqueo nuevo si perdió el suyo. En cada conexión pide la
  * historia del hueco pendiente, 2000 ms después del primer tick durable posterior al cierre. Termina
- * con la parada o el cierre previsto por `durationMs` (`completed`), o cuando no puede seguir sin
- * intervención (`failed`). Con `interruptAfterMs`, corta una vez su conexión, como el smoke de
- * reconexión (ADR-0015 §9). Al terminar cierra el segmento abierto, si el log está sano y el
- * bloqueo sigue tomado, y suelta el bloqueo. Un `durationMs` o un `interruptAfterMs` que no es un
- * entero positivo de milisegundos es un error de programación: lanza `TypeError` sin empezar nada.
+ * con la parada, la retención (`retentionMs`, ADR-0015 §7) o el cierre previsto por `durationMs`
+ * (`completed`), o cuando no puede seguir sin intervención (`failed`). Con `interruptAfterMs`, corta
+ * una vez su conexión, como el smoke de reconexión (ADR-0015 §9). Al terminar cierra el segmento
+ * abierto, si el log está sano y el bloqueo sigue tomado, y suelta el bloqueo. Un `durationMs`, un
+ * `interruptAfterMs` o un `retentionMs` que no es un entero positivo de milisegundos es un error de
+ * programación: lanza `TypeError` sin empezar nada.
  */
 export function startDerivSession(input: DerivSessionInput): DerivSession {
   if (input.durationMs !== undefined) {
     assertDuration(input.durationMs);
   }
-  const { interruptAfterMs } = input;
+  const { interruptAfterMs, retentionMs } = input;
   if (
     interruptAfterMs !== undefined &&
     !(Number.isSafeInteger(interruptAfterMs) && interruptAfterMs > 0)
   ) {
     throw new TypeError('interruptAfterMs debe ser un entero positivo de milisegundos.');
+  }
+  if (retentionMs !== undefined && !(Number.isSafeInteger(retentionMs) && retentionMs > 0)) {
+    throw new TypeError('retentionMs debe ser un entero positivo de milisegundos.');
   }
   const run = new SessionRun(input);
   return {

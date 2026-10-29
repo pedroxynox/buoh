@@ -117,6 +117,13 @@ export interface RawFirstIngestorInput {
   /** Reabre el log desde los almacenes tras un fallo de persistencia. */
   readonly reopenLog: () => Promise<SourceEventLog>;
   readonly sink: TickSink;
+  /**
+   * Recibe cada source event que este ingestor acaba de hacer durable, en el orden del log, también
+   * el cierre reparado. Un evento que el índice confirmó aunque informó error no pasa por aquí: el
+   * log lo adopta al reabrirse. La sesión lleva con él su cursor, su latido y la retención (ADR-0015
+   * §6 y §7). Si lanza, la escritura se rechaza con ese error, como un error de programación.
+   */
+  readonly onDurable?: (event: SourceEvent) => void;
 }
 
 /**
@@ -183,15 +190,17 @@ export class RawFirstIngestor {
     event: SourceEvent,
     observedRef: string,
   ): Promise<Extract<ReceiveOutcome, { readonly status: 'durable' }> | NotDurable> {
+    let result: Awaited<ReturnType<SourceEventLog['append']>>;
     try {
-      const result = await this.#log.append(event);
-      return { position: result.position, segment_index: result.segment_index, status: 'durable' };
+      result = await this.#log.append(event);
     } catch (error) {
       if (error instanceof LogPersistenceError) {
         return this.#onPersistenceFailure(error, observedRef);
       }
       throw error;
     }
+    this.#input.onDurable?.(event);
+    return { position: result.position, segment_index: result.segment_index, status: 'durable' };
   }
 
   /**

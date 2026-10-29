@@ -251,6 +251,13 @@ export class InMemoryIngestionStatusStore implements IngestionStatusStore {
     return Promise.resolve(this.#latestCursor(source, symbol));
   }
 
+  cursorSymbols(source: string): Promise<string[]> {
+    const symbols = this.cursors
+      .filter((item) => item.cursor.source === source)
+      .map((item) => item.cursor.symbol);
+    return Promise.resolve([...new Set(symbols)].sort());
+  }
+
   appendHeartbeat(input: IngestionHeartbeat): Promise<void> {
     return Promise.resolve().then(() => {
       const heartbeat = ingestionHeartbeatSchema.parse(input);
