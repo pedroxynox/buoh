@@ -67,4 +67,4 @@ Gratis en el plan Hobby. Cuenta contra lo incluido: 5 GB de tráfico de salida y
 ## Pendiente
 
 - Dominio propio y revisión legal antes de quitar el `noindex` o anunciar el sitio (ADR-0013 §4). El PR que lo quite borra el `noindex` de la página y la regla `X-Robots-Tag` de `render.yaml`. Después, alguien con acceso a Render borra esa regla en el panel, que conserva las reglas de cabecera que ya no están en el Blueprint, y comprueba con `curl -sI` que ya no sale.
-- El resto del sistema, cuando el propietario decida su costo.
+- El resto del sistema llega con un incremento del plan de la Fase 2, con los proveedores y el presupuesto de [ADR-0016](../arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md).
