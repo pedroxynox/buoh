@@ -142,5 +142,5 @@ export {
   type IngestReport,
   type IngestStores,
 } from './ingest.js';
-export { openStores } from './runtime.js';
+export { openStores, type OpenStoresOptions } from './runtime.js';
 export { S3ObjectStore } from './s3/object-store.js';

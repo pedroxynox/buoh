@@ -298,7 +298,7 @@ Antes de abrir ningún almacén o conexión, comprueba los argumentos y la confi
 **Preparar la captura.** Desde la raíz del repositorio, con los servicios de «Entorno local y replay» levantados:
 
 1. Exportar las variables `BUOH_*` (`set -a; . infra/.env; set +a`) y compilar: `pnpm run build`.
-2. Elegir un esquema y un bucket nuevos para esta captura, por ejemplo con la fecha, y exportarlos. El esquema admite minúsculas, cifras y `_`, y el bucket, minúsculas, cifras, `.` y `-`:
+2. Elegir un esquema y un bucket nuevos para esta captura, por ejemplo con la fecha, y exportarlos. El esquema admite minúsculas, cifras y `_`, y el bucket, minúsculas, cifras, `.` y `-`. Anotar los dos nombres: el borrado los necesita (ver «Retención y borrado», abajo), y una terminal nueva no los tiene:
 
    ```sh
    export BUOH_POSTGRES_SCHEMA=buoh_captura_20261029
@@ -325,6 +325,8 @@ Antes de abrir ningún almacén o conexión, comprueba los argumentos y la confi
 
 **Ejecutar.** Con las mismas variables, `pnpm --filter @buoh/market-data-worker run ingest -- --live --symbol R_100`. Solo puede correr una captura de `deriv_options` por base de datos, aunque cada una tenga su esquema, porque la clave del bloqueo vale para toda la base (ver «Una sola instancia por fuente»): si otra la tiene, termina `failed` con `source_lock_taken`. Al arrancar abre los almacenes de su esquema y su bucket, lee las migraciones y corre la sesión con el bloqueo de PostgreSQL (`PostgresSessionLockProvider`), el log protegido por él (`openLockedSourceLog`), el cursor y el latido (`PostgresIngestionStatusStore`), la retención de 23 horas, `ws`, el temporizador real, el azar de `node:crypto` e IDs UUIDv7. Antes de conectar comprueba el log con el cursor y la retención (ver «Inicio») y guarda el esquema de fuente (abajo). Los ticks durables no van a ningún consumidor: quedan en el log. Las alertas van a stderr.
 
+**Conexión de PostgreSQL perdida.** Si PostgreSQL cierra una conexión libre del pool, por ejemplo al reiniciarse, con `pg_terminate_backend` o por un corte de red, queda en stderr la alerta JSON `postgres_connection_lost` con el motivo saneado (`reason`: el código o el nombre del error, como `57P01`), nunca el mensaje del servidor ni los campos de la conexión, y la captura sigue. El pool ya descartó esa conexión, y la consulta siguiente abre otra. Si PostgreSQL todavía no responde, esa consulta falla como cualquier otra, con las alertas y las esperas que describen «Inicio», «Adaptador público de Deriv» («Sesión de ingesta») y «Almacenamiento no disponible o backlog lleno por conteo/bytes».
+
 **Esquema de fuente guardado.** Antes de la primera conexión, la sesión guarda en el bucket los bytes de `ticks_response.schema.json` de la release, con la clave de su SHA-256 fijado y la escritura verificada del log (ADR-0015 §7): `sha256/e45cb48b2d3bdcc02f89456b2a3d7e9745c0c6ca1588233b15b7c6732b41ea5b` con la release `production_v20260901_0`. Con él, `data:health` (PR 6) podrá derivar el log sin descargar nada. Si el almacenamiento de objetos no responde, o esa clave ya tiene otros bytes, queda en stderr la alerta JSON `source_schema_unavailable` con el motivo saneado (`reason`), y la sesión espera, como entre intentos, y lo vuelve a intentar, sin conectar hasta guardarlo. El smoke no lo guarda.
 
 **Parar.** Con Ctrl+C en su terminal, una vez, o desde otra terminal con `pkill -TERM -f '^node dist/cli/ingest.js'`, que envía `SIGTERM` al proceso de Node de `ingest`, no a pnpm. La primera señal pide la parada de la sesión (ver «Sesión de ingesta», «Parada»): `forget_all`, cierre `requested`, segmento cerrado con `requested`, el último cursor, las escrituras pendientes del cursor y del latido y el bloqueo suelto; después escribe la línea JSON y sale. Las señales siguientes no hacen nada, y no cortan la parada. Si en un minuto no termina, por ejemplo porque PostgreSQL no responde y una escritura del cursor espera, `pkill -KILL -f '^node dist/cli/ingest.js'` lo corta: el arranque siguiente repara el cierre que faltó (`close_not_recorded`), así que la pérdida queda visible en el log.
@@ -337,20 +339,22 @@ PGPASSWORD="$BUOH_POSTGRES_PASSWORD" psql -h "$BUOH_POSTGRES_HOST" -p "$BUOH_POS
   -c "SELECT event_time_utc FROM $BUOH_POSTGRES_SCHEMA.source_event_index ORDER BY segment_index, position LIMIT 1"
 ```
 
-Para borrar la captura, el esquema con todas sus tablas y el bucket con todos sus objetos (`--force` los borra antes de borrar el bucket):
+Para borrar la captura, el esquema con todas sus tablas y el bucket con todos sus objetos (`--force` los borra antes de borrar el bucket), hacen falta las variables del paso 1 y los dos nombres del paso 2. En otra terminal, o en un shell nuevo, hay que exportar otra vez los dos nombres anotados, porque el paso 1, por sí solo, deja `BUOH_POSTGRES_SCHEMA` sin definir y `BUOH_S3_BUCKET` en `buoh-local`, el bucket de los datos sintéticos. Antes de borrar, comprobar que son los de la captura: `echo "$BUOH_POSTGRES_SCHEMA $BUOH_S3_BUCKET"`. El bloque es una sola cadena con `&&`. No borra nada si el esquema falta o es `public`, o si el bucket falta o es `buoh-local`, los mismos que `ingest` rechaza: termina con 1 sin escribir nada. Y para en el primer fallo: si el esquema no se borra, el bucket tampoco.
 
 ```sh
-PGPASSWORD="$BUOH_POSTGRES_PASSWORD" psql -h "$BUOH_POSTGRES_HOST" -p "$BUOH_POSTGRES_PORT" \
-  -U "$BUOH_POSTGRES_USER" -d "$BUOH_POSTGRES_DB" -v ON_ERROR_STOP=1 \
-  -c "DROP SCHEMA $BUOH_POSTGRES_SCHEMA CASCADE"
-AWS_ACCESS_KEY_ID="$BUOH_S3_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$BUOH_S3_SECRET_ACCESS_KEY" \
-  AWS_DEFAULT_REGION="$BUOH_S3_REGION" aws --endpoint-url "$BUOH_S3_ENDPOINT" \
-  s3 rb "s3://$BUOH_S3_BUCKET" --force
+test -n "$BUOH_POSTGRES_SCHEMA" && test "$BUOH_POSTGRES_SCHEMA" != public &&
+  test -n "$BUOH_S3_BUCKET" && test "$BUOH_S3_BUCKET" != buoh-local &&
+  PGPASSWORD="$BUOH_POSTGRES_PASSWORD" psql -h "$BUOH_POSTGRES_HOST" -p "$BUOH_POSTGRES_PORT" \
+    -U "$BUOH_POSTGRES_USER" -d "$BUOH_POSTGRES_DB" -v ON_ERROR_STOP=1 \
+    -c "DROP SCHEMA $BUOH_POSTGRES_SCHEMA CASCADE" &&
+  AWS_ACCESS_KEY_ID="$BUOH_S3_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$BUOH_S3_SECRET_ACCESS_KEY" \
+    AWS_DEFAULT_REGION="$BUOH_S3_REGION" aws --endpoint-url "$BUOH_S3_ENDPOINT" \
+    s3 rb "s3://$BUOH_S3_BUCKET" --force
 ```
 
 Después, `aws … s3 ls` ya no muestra el bucket, y `SELECT nspname FROM pg_namespace WHERE nspname = '<esquema>'` no devuelve filas. Una captura nueva usa otro esquema y otro bucket, o los mismos nombres después de borrarlos. La retención en producción llegará con el plan de alojamiento.
 
-**Salida.** stdout lleva una sola línea JSON saneada, sin payloads ni precios; las alertas van a stderr, y pnpm escribe allí también su propia salida:
+**Salida.** stdout lleva una sola línea JSON saneada, sin payloads ni precios, y pnpm no añade nada. Las alertas van a stderr, y pnpm escribe allí la orden que ejecuta (por ejemplo, `$ node dist/cli/ingest.js -- --live`) y, si la salida no es 0, sus líneas de error:
 
 | Campo | Contenido |
 |---|---|
@@ -369,7 +373,7 @@ Después, `aws … s3 ls` ya no muestra el bucket, y `SELECT nspname FROM pg_nam
 | 1 | `failed` (ver `end.reason`), `code: STORAGE_UNAVAILABLE` si PostgreSQL no respondió al leer las migraciones, con el motivo saneado, o `code: UNEXPECTED` |
 | 2 | error de uso (`code: UsageError`, o un símbolo que el esquema de la petición `ticks` no admite: `end.reason` `request_invalid`), de configuración (`code: ConfigError` o `IngestConfigError`) o migraciones pendientes (`code: MIGRATIONS_PENDING`, con las que faltan en `pending`) |
 
-Con `pnpm --filter`, el shell recibe 1 para cualquier salida distinta de 0, y pnpm escribe en stderr la del proceso («Command failed with exit code 2»); desde `apps/market-data-worker`, `pnpm run ingest -- --live` devuelve la del proceso. Una salida sin línea JSON significa que el proceso se cortó (por ejemplo, con `SIGKILL`); el detalle está en stderr.
+Con `pnpm --filter`, el shell recibe 1 para cualquier salida distinta de 0, y pnpm escribe en stderr la del proceso («Command failed with exit code 2») y `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`; desde `apps/market-data-worker`, `pnpm run ingest -- --live` devuelve la del proceso, y en stderr solo deja la orden y «Command failed with exit code 2». En los dos casos stdout lleva solo la línea JSON. Una salida sin línea JSON significa que el proceso se cortó (por ejemplo, con `SIGKILL`); el detalle está en stderr.
 
 ### Almacenamiento no disponible o backlog lleno por conteo/bytes
 
@@ -387,6 +391,8 @@ Desde F1.3b, si la escritura del objeto (`raw_object_write`) o la fila del índi
 - si PostgreSQL tampoco responde, solo queda una alerta JSON en stderr (`operational_registry_unavailable`);
 - para recuperar, el siguiente `ConnectionOpened` reabre el log desde el estado durable y, si queda durable, resuelve la condición (`persistence_restored`). Desde el PR 3 de ADR-0015 §13, el adaptador de Deriv repara antes el cierre que falte (ver «Adaptador público de Deriv», paso 2): la reparación reabre el log si había fallado y, si hace falta un cierre, lo escribe. Ese cierre reparado es el primer evento durable y resuelve la condición, sin reabrir la entrada. Si no hace falta un cierre, la resuelve el `ConnectionOpened`, como hasta ahora. La entrada siempre la reabre el `ConnectionOpened` durable. En F1.3b no se publican ni se reconcilian antes los segmentos pendientes (paso 6). La continuidad tampoco se verifica antes (ADR-0015 §10): la entrada se reabre con el `ConnectionOpened`, porque la historia se pide por esa misma conexión, y la continuidad se verifica después, con esa historia (ver «Desconexión de WebSocket», pasos 5 y 6). Nunca hay `healthy` antes.
 - desde el PR 4 de ADR-0015 §13, reabrir el log separa un almacén que no responde de un contenido que no pasa sus comprobaciones. Si el almacenamiento de objetos o el índice no responden, se registra `persistence_unavailable` (etapa `source_event_index`, con el motivo saneado) y se puede reintentar, como hasta ahora. Si el contenido del segmento abierto no pasa sus comprobaciones (una fila fuera de su posición, un objeto alterado, que falta o mayor que su fila, o una línea que no es el source event JCS de su fila), no se reintenta (ADR-0004 §12): la reapertura lanza `LogIntegrityError` sin registrar nada, y se rechaza lo que la pedía, la reparación del cierre o el `ConnectionOpened`; una conexión en curso falla entonces como un error inesperado. Un objeto que falta no es un almacén caído: el índice lo confirmó y ya no está, como al leer un segmento cerrado. Cualquier otro error al reabrir, que no sea un almacén que no responde (por ejemplo, uno de programación), tampoco se reintenta como una pausa: se rechaza igual, sin registrar nada.
+
+Desde el PR 5 de ADR-0015 §13, si PostgreSQL cierra una conexión libre del pool (un reinicio, `pg_terminate_backend` o un corte de red), los comandos que abren los almacenes con `openStores` (`ingest`, `data:replay` y `fixture:publish`) dejan en stderr la alerta JSON `postgres_connection_lost` con el motivo saneado (`reason`, por ejemplo `57P01`) y siguen. Antes, el proceso se cerraba y escribía en stderr el error entero, con el mensaje del servidor y los campos de la conexión (host, rol y base). El pool ya descartó esa conexión, y la consulta siguiente abre otra; si falla, falla como cualquier consulta, con lo que describe esta sección.
 
 ### Publicación interrumpida
 
