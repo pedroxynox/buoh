@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DERIV_SOURCE } from '../src/deriv/profile.js';
 import {
   contentKey,
+  HEALTH_CLOSE_DEADLINE_MS,
+  HEALTH_DEADLINE_MS,
   HEALTH_USAGE,
   healthCommand,
   OperationalRegistry,
@@ -13,7 +15,7 @@ import {
   type WorkerConfig,
 } from '../src/index.js';
 import { uuid } from './support/connection-harness.js';
-import { syntheticSchemaArchive } from './support/deriv-fixtures.js';
+import { ManualClock, syntheticSchemaArchive } from './support/deriv-fixtures.js';
 import {
   MemoryIngestionStatusStore,
   MemoryObjectStore,
@@ -133,6 +135,8 @@ async function commandHarness(options: CommandOptions = {}) {
   await OperationalRegistry.open({ source: DERIV_SOURCE, store: operational });
   const opened: WorkerConfig[] = [];
   let closed = 0;
+  /** El temporizador del plazo total y del cierre: el tiempo solo avanza con `advance`. */
+  const clock = new ManualClock(NOW);
   const stores: HealthCommandStores = {
     close: () => {
       closed += 1;
@@ -156,6 +160,7 @@ async function commandHarness(options: CommandOptions = {}) {
       opened.push(config);
       return { ...stores, ...overrides };
     },
+    scheduler: clock.scheduler,
   });
   /** Lo que guardan los almacenes, para comprobar que el comando no escribe nada. */
   const contents = () =>
@@ -168,8 +173,11 @@ async function commandHarness(options: CommandOptions = {}) {
       objects: [...objects.objects.entries()],
       rows: sourceLog.rows,
     });
-  return { closed: () => closed, contents, deps, opened };
+  return { clock, closed: () => closed, contents, deps, opened };
 }
+
+/** Una lectura que nunca termina: un almacén que acepta la conexión y no contesta. */
+const silent = <T>(): Promise<T> => new Promise<T>(() => undefined);
 
 /** La línea de stdout como `HealthReport`: una sola línea JSON que cumple su contrato. */
 function reportOf(stdout: string | null) {
@@ -268,6 +276,109 @@ describe('healthCommand: el informe (ADR-0015 §8, «Salida»)', () => {
         ['buoh_captura', 'buoh-captura'],
       ]);
     }
+  });
+});
+
+describe('healthCommand: un almacén que no contesta (ADR-0015 §8, regla 3)', () => {
+  it(`si la observación y la evaluación no terminan en HEALTH_DEADLINE_MS (${String(HEALTH_DEADLINE_MS)} ms), escribe el informe paused con la alerta deadline_exceeded, sale con 1 y cierra los almacenes`, async () => {
+    const run = await commandHarness();
+    let settled = false;
+    const pending = healthCommand(
+      ARGS,
+      ENV,
+      run.deps({ pendingMigrations: () => silent<readonly string[]>() }),
+    ).finally(() => {
+      settled = true;
+    });
+
+    expect(HEALTH_DEADLINE_MS).toBe(30_000);
+    await run.clock.advance(HEALTH_DEADLINE_MS - 1);
+    expect(settled).toBe(false);
+    expect(run.closed()).toBe(0);
+    await run.clock.advance(1);
+    const result = await pending;
+
+    expect(result.exitCode).toBe(1);
+    expect(reportOf(result.stdout)).toEqual(unobserved('paused'));
+    expect(result.stderr).toBe(
+      '{"event":"data_health_storage_unavailable","reason":"deadline_exceeded"}',
+    );
+    expect(run.closed()).toBe(1);
+    expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
+  it('el plazo es total: una lectura que no contesta después de otras que sí también lo agota', async () => {
+    const run = await commandHarness();
+    const pending = healthCommand(
+      ARGS,
+      ENV,
+      run.deps({ datasets: { lastActiveDatasetId: () => silent<string | null>() } }),
+    );
+    await run.clock.advance(HEALTH_DEADLINE_MS);
+    const result = await pending;
+
+    expect(result.exitCode).toBe(1);
+    expect(reportOf(result.stdout)).toEqual(unobserved('paused'));
+    expect(result.stderr).toBe(
+      '{"event":"data_health_storage_unavailable","reason":"deadline_exceeded"}',
+    );
+    expect(run.closed()).toBe(1);
+  });
+
+  it(`si cerrar los almacenes tampoco termina, no espera más de HEALTH_CLOSE_DEADLINE_MS (${String(HEALTH_CLOSE_DEADLINE_MS)} ms)`, async () => {
+    const run = await commandHarness();
+    let settled = false;
+    const pending = healthCommand(
+      ARGS,
+      ENV,
+      run.deps({
+        close: () => silent<undefined>(),
+        pendingMigrations: () => silent<readonly string[]>(),
+      }),
+    ).finally(() => {
+      settled = true;
+    });
+
+    expect(HEALTH_CLOSE_DEADLINE_MS).toBe(5_000);
+    await run.clock.advance(HEALTH_DEADLINE_MS + HEALTH_CLOSE_DEADLINE_MS - 1);
+    expect(settled).toBe(false);
+    await run.clock.advance(1);
+    const result = await pending;
+
+    expect(result.exitCode).toBe(1);
+    expect(reportOf(result.stdout)).toEqual(unobserved('paused'));
+    expect(result.stderr).toBe(
+      '{"event":"data_health_storage_unavailable","reason":"deadline_exceeded"}',
+    );
+    expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
+  it('con una lectura que termina a tiempo, no deja ningún temporizador pendiente', async () => {
+    const run = await commandHarness();
+    const result = await healthCommand(ARGS, ENV, run.deps());
+
+    expect(result.exitCode).toBe(0);
+    expect(run.clock.pendingDelays()).toEqual([]);
+    expect(run.closed()).toBe(1);
+  });
+
+  it('el plazo vencido de una petición (TimeoutError con ETIMEDOUT) es la regla 3 con su código, nunca su mensaje', async () => {
+    const run = await commandHarness();
+    const timedOut = Object.assign(
+      new Error('a request has exceeded the configured 10000 ms requestTimeout s3.interno.invalid'),
+      { code: 'ETIMEDOUT', name: 'TimeoutError' },
+    );
+    const result = await healthCommand(
+      ARGS,
+      ENV,
+      run.deps({ datasets: { lastActiveDatasetId: () => Promise.reject(timedOut) } }),
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(reportOf(result.stdout)).toEqual(unobserved('paused'));
+    expect(result.stderr).toBe('{"event":"data_health_storage_unavailable","reason":"ETIMEDOUT"}');
+    expect(result.stderr).not.toContain('s3.interno');
+    expect(run.clock.pendingDelays()).toEqual([]);
   });
 });
 

@@ -1,4 +1,5 @@
 import { ConfigError, loadConfig, type WorkerConfig } from '../config.js';
+import { type Scheduler } from '../deriv/ports.js';
 import { DERIV_SOURCE } from '../deriv/profile.js';
 import { type ExpectedSchemaArchive } from '../deriv/schema-archive.js';
 import { parseHealthArgs } from '../health-args.js';
@@ -24,7 +25,18 @@ export interface HealthDependencies {
    * sobre `openStores` y su pool.
    */
   readonly openStores: (config: WorkerConfig) => HealthCommandStores;
+  /** El temporizador del plazo total y del cierre; en `data:health`, el real. */
+  readonly scheduler: Scheduler;
 }
+
+/**
+ * El plazo total de la observación y la evaluación, en milisegundos. Si no terminan antes, el
+ * informe es el de la regla 3 con el motivo `deadline_exceeded` (ADR-0015 §8): un almacén no
+ * contestó a tiempo.
+ */
+export const HEALTH_DEADLINE_MS = 30_000;
+/** Lo que espera, como mucho, al cierre de los almacenes, después del plazo total o no. */
+export const HEALTH_CLOSE_DEADLINE_MS = 5_000;
 
 /** Las líneas que escribe `data:health`, sin el salto final, y su código de salida. */
 export interface HealthCommandResult {
@@ -42,17 +54,68 @@ export interface HealthCommandResult {
  */
 const UNEXPECTED_ERROR = 'unexpected_error';
 
+/** El motivo de la regla 3 cuando la observación y la evaluación no terminan en el plazo total. */
+const DEADLINE_EXCEEDED = 'deadline_exceeded';
+
+/**
+ * Lo que da `work`, o lo que da `onDeadline` si `work` no termina en `ms` milisegundos del
+ * temporizador. Si termina antes, cancela el temporizador; si no, `work` sigue sin que nadie lo
+ * espere.
+ */
+function withinDeadline<T>(
+  scheduler: Scheduler,
+  ms: number,
+  work: Promise<T>,
+  onDeadline: () => T,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const cancel = scheduler.schedule(ms, () => {
+      resolve(onDeadline());
+    });
+    work.then(
+      (value) => {
+        cancel();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cancel();
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
+
+/** Observa la fuente con los almacenes ya abiertos y evalúa lo observado. */
+async function observeAndEvaluate(
+  dependencies: HealthDependencies,
+  stores: HealthCommandStores,
+  input: { readonly environment: WorkerConfig['environment']; readonly symbol: string },
+): Promise<HealthEvaluation> {
+  const observation = await observeDataHealth({
+    environment: input.environment,
+    ...(dependencies.expected === undefined ? {} : { expected: dependencies.expected }),
+    nextId: dependencies.nextId,
+    now: dependencies.now,
+    stores,
+    symbol: input.symbol,
+  });
+  return evaluateDataHealth(observation);
+}
+
 /**
  * `pnpm run data:health -- --json [--symbol R_100]` completo, sin efectos propios (ADR-0015 §8):
  * interpreta los argumentos, carga la configuración, abre las lecturas, observa la fuente sin tomar
  * el bloqueo ni escribir nada, la evalúa y devuelve las líneas de stdout y stderr y el código de
- * salida. Cierra los almacenes al terminar, de cualquier forma.
+ * salida. Cierra los almacenes al terminar, de cualquier forma, y no espera ese cierre más de
+ * `HEALTH_CLOSE_DEADLINE_MS`.
  *
  * - Argumentos o variables de entorno inválidos (`UsageError`, `ConfigError`, regla 1): salida 2,
  *   nada en stdout y en stderr una línea con `code` y el mensaje, que solo nombra variables, sin
  *   abrir nada.
  * - Si no, stdout lleva el `HealthReport` y stderr la alerta saneada de las reglas 2 y 3, si la hay.
  *   Un error de programación da el informe `failed` con la alerta `unexpected_error`.
+ * - Si la observación y la evaluación no terminan en `HEALTH_DEADLINE_MS`, el informe es el de la
+ *   regla 3 (`paused`) con la alerta `deadline_exceeded`, sin esperarlas más.
  */
 export async function healthCommand(
   argv: readonly string[],
@@ -74,19 +137,22 @@ export async function healthCommand(
     }
     throw error;
   }
+  const { scheduler } = dependencies;
   let stores: HealthCommandStores | null = null;
   let evaluation: HealthEvaluation;
   try {
     stores = dependencies.openStores(config);
-    const observation = await observeDataHealth({
-      environment: config.environment,
-      ...(dependencies.expected === undefined ? {} : { expected: dependencies.expected }),
-      nextId: dependencies.nextId,
-      now: dependencies.now,
-      stores,
-      symbol,
-    });
-    evaluation = evaluateDataHealth(observation);
+    evaluation = await withinDeadline(
+      scheduler,
+      HEALTH_DEADLINE_MS,
+      observeAndEvaluate(dependencies, stores, { environment: config.environment, symbol }),
+      () =>
+        evaluateDataHealth({
+          reason: DEADLINE_EXCEEDED,
+          source: DERIV_SOURCE,
+          status: 'storage_unavailable',
+        }),
+    );
   } catch {
     evaluation = evaluateDataHealth({
       reason: UNEXPECTED_ERROR,
@@ -94,7 +160,9 @@ export async function healthCommand(
       status: 'incompatible',
     });
   } finally {
-    await stores?.close();
+    if (stores !== null) {
+      await withinDeadline(scheduler, HEALTH_CLOSE_DEADLINE_MS, stores.close(), () => undefined);
+    }
   }
   return {
     exitCode: evaluation.exitCode,

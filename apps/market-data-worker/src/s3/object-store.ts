@@ -37,6 +37,16 @@ async function readCapped(
   return bytes;
 }
 
+/**
+ * Los plazos de cada petición del cliente S3, en milisegundos, con los nombres del SDK: el de la
+ * conexión y el de la petición entera. Sin ellos ninguna tiene plazo; `data:health` los pide
+ * (`openHealthStores`).
+ */
+export interface S3Timeouts {
+  readonly connectionTimeout: number;
+  readonly requestTimeout: number;
+}
+
 /** Adaptador S3-compatible (SeaweedFS en local; proveedor productivo pendiente de decisión). */
 export class S3ObjectStore implements ObjectStore {
   readonly bucket: string;
@@ -47,7 +57,13 @@ export class S3ObjectStore implements ObjectStore {
     this.bucket = bucket;
   }
 
-  static fromConfig(config: WorkerConfig['s3']): S3ObjectStore {
+  /**
+   * El cliente de la configuración. Con `timeouts`, cada petición tiene plazo: el SDK pasa esas
+   * opciones a su manejador HTTP por defecto (`NodeHttpHandler`, de `@smithy/node-http-handler`, que
+   * ya trae `@aws-sdk/client-s3`), y `throwOnRequestTimeout` hace que una petición vencida falle con
+   * `TimeoutError` (`ETIMEDOUT`) en lugar de seguir esperando con un aviso en la consola.
+   */
+  static fromConfig(config: WorkerConfig['s3'], timeouts?: S3Timeouts): S3ObjectStore {
     return new S3ObjectStore(
       new S3Client({
         credentials: {
@@ -59,6 +75,9 @@ export class S3ObjectStore implements ObjectStore {
         maxAttempts: 1,
         region: config.region,
         requestChecksumCalculation: 'WHEN_REQUIRED',
+        ...(timeouts === undefined
+          ? {}
+          : { requestHandler: { ...timeouts, throwOnRequestTimeout: true } }),
         responseChecksumValidation: 'WHEN_REQUIRED',
       }),
       config.bucket,

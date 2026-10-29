@@ -25,8 +25,19 @@ interface RecordRow {
   state: string;
 }
 
-export function createPool(config: WorkerConfig['postgres']): pg.Pool {
+/**
+ * Los plazos de un pool, en milisegundos, con los nombres de `pg`: el de cada conexión y el de cada
+ * consulta. Sin ellos ninguna tiene plazo, como en los pools de `ingest`, `data:replay` y
+ * `fixture:publish`; `data:health` los pide (`openHealthStores`).
+ */
+export interface PoolTimeouts {
+  readonly connectionTimeoutMillis: number;
+  readonly query_timeout: number;
+}
+
+export function createPool(config: WorkerConfig['postgres'], timeouts?: PoolTimeouts): pg.Pool {
   return new pg.Pool({
+    ...timeouts,
     database: config.database,
     host: config.host,
     max: 4,

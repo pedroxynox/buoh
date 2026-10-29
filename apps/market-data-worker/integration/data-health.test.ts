@@ -180,6 +180,7 @@ async function health(
       nextId: () => uuid((sequence += 1)),
       now: clock.now,
       openStores: (opened) => openHealthStores(opened),
+      scheduler: clock.scheduler,
     },
   );
   expect(await footprint(schema)).toEqual(before);
