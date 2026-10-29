@@ -430,7 +430,7 @@ Servicios de [`infra/compose.yaml`](../../infra/compose.yaml): PostgreSQL 18 y S
 
 Límites de lectura del replay: documento de manifiesto 16 MiB, objeto 256 MiB y descompresión gzip hasta el tamaño máximo de segmento raw (64 MiB, ADR-0004 §7). Un objeto por encima del límite se rechaza sin cargarlo.
 
-`pnpm run test:integration` ejecuta las pruebas de integración contra estos servicios con las mismas variables. Usa sus propios esquemas PostgreSQL (`buoh_integration`, `buoh_integration_log`, `buoh_integration_catalog` y `buoh_integration_status`) y los recrea en cada ejecución.
+`pnpm run test:integration` ejecuta las pruebas de integración contra estos servicios con las mismas variables. Usa sus propios esquemas PostgreSQL (`buoh_integration`, `buoh_integration_log`, `buoh_integration_catalog`, `buoh_integration_status` y `buoh_integration_ingest`) y los recrea en cada ejecución. Desde el PR 5 de ADR-0015 §13, la de la captura viva (`apps/market-data-worker/integration/ingest-session.test.ts`) corre la captura de `ingest` (`runIngest`) con los almacenes reales, el bloqueo de PostgreSQL, el log protegido por él, el cursor y el latido: dos ejecuciones seguidas, la segunda sobre el cursor que dejó la primera. Su fábrica de sockets es falsa y sus esquemas son sintéticos, así que nunca sale a la red ni a Deriv (ADR-0015 §11); como no pasa por la comprobación de configuración del comando, guarda los objetos en el bucket de las demás pruebas.
 
 Tablas append-only del log y del registro (migración `0002_log_raw_first`):
 
