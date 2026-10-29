@@ -29,9 +29,9 @@ Este roadmap ordena el trabajo por evidencia y reducción de riesgo, no por fech
 
 **Criterio de salida:** el propietario revisó capturas de los prototipos y del sitio, y las pruebas de contraste y de estados pasan. Se cumplió el 2026-10-25: el propietario decidió que sus aprobaciones ya registradas cuentan como esa revisión ([plan V1](../plan/linea-visual-v1.md) §7). La app real de Windows sigue en la Fase 7.
 
-## Fase 1 — Fundación de datos
+## Fase 1 — Fundación de datos (completada)
 
-El estado vigente se consulta únicamente en [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md). El alcance y aceptación autoritativos están en el [plan ejecutable de Fase 1](../plan/fase-1-fundacion-de-datos.md).
+**Estado:** `done` desde el 2026-10-29. El alcance y la aceptación están en el [plan ejecutable de Fase 1](../plan/fase-1-fundacion-de-datos.md).
 
 **Objetivo:** demostrar que un flujo de datos de Deriv puede capturarse, validarse, almacenarse y reproducirse.
 
@@ -43,11 +43,11 @@ El estado vigente se consulta únicamente en [`PROJECT_STATUS.md`](../../PROJECT
 4. catálogo y conector público de Deriv;
 5. reconexión, recuperación y reporte de salud estructurado.
 
-**Criterio de salida:** un lote se reconstruye desde `dataset_id`, y el sistema expone continuidad, retraso, duplicados y datos fuera de orden sin ocultarlos.
+**Criterio de salida:** un lote se reconstruye desde `dataset_id`, y el sistema expone continuidad, retraso, duplicados y datos fuera de orden sin ocultarlos. Se cumplió el 2026-10-29 ([evidencia de la puerta de salida](../operacion/evidencia-puerta-fase-1.md)).
 
 ## Fase 1B — Datos de MetaTrader 5
 
-**Objetivo:** capturar precios de Deriv MT5 y Vantage con las mismas garantías que Deriv, sin operar ([ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)). Empieza cuando Fase 1 cumpla su criterio de salida.
+**Objetivo:** capturar precios de Deriv MT5 y Vantage con las mismas garantías que Deriv, sin operar ([ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)). El propietario decidió el 2026-10-29 hacer antes la Fase 2, y la Fase 1B no tiene fecha.
 
 **Incrementos:**
 
@@ -56,11 +56,11 @@ El estado vigente se consulta únicamente en [`PROJECT_STATUS.md`](../../PROJECT
 3. puente MQL5 de solo datos con contraseña de inversor;
 4. adaptador y normalizador MT5, con conversión a UTC comprobada, recuperación de historia de ticks, pruebas offline con fixtures y smoke opt-in.
 
-El orden entre Fase 1B y Fase 2 se decide al cerrar Fase 1.
-
 **Criterio de salida:** un dataset de cada servidor MT5 se reproduce desde su `dataset_id`, sus incidencias siguen visibles tras reiniciar y ninguna contraseña MT5 sale de la terminal.
 
 ## Fase 2 — Laboratorio y bot shadow para uso propio
+
+Es la fase actual desde el 2026-10-29. El estado vigente se consulta únicamente en [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md). Su plan ejecutable, que fijará el alcance y la aceptación, es la siguiente tarea.
 
 **Objetivo:** transformar una hipótesis en una estrategia viva, explicable y no ejecutora.
 
