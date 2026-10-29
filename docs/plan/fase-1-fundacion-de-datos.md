@@ -1,10 +1,10 @@
 ---
 plan_id: "F1-DATA"
 schema_version: "1.0.0"
-status: "ready"
+status: "done"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-10-25T22:00:00.000Z"
+last_reviewed_utc: "2026-10-29T15:30:00.000Z"
 ---
 
 # Plan ejecutable: Fase 1 — Fundación de datos
@@ -17,7 +17,9 @@ Fase 1 no intenta demostrar una estrategia rentable. Su producto es **evidencia 
 
 ## 2. Estado y aprobación
 
-`ready`: este plan autoriza comenzar código cuando el PR que lo contiene sea fusionado. Cambiar alcance, almacenamiento, semántica de contratos o criterios de salida requiere actualizar este plan y, si la decisión es duradera, una ADR.
+`done` desde el 2026-10-29 (§9). El plan autorizó los incrementos F1.1 a F1.5 de §8, y todos se entregaron.
+
+Al cerrarse, el plan sale de los planes activos de [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md), así que ya no autoriza directorios ni dependencias nuevos (AGENTS.md, «Desarrollo por fases»). Las piezas de §4 siguen en el repositorio, y sus contratos, ADR y runbooks siguen vigentes.
 
 ## 3. Definition of Ready
 
@@ -174,6 +176,8 @@ Fase 1 está `done` únicamente cuando:
 - un dataset publicado conserva el mismo ID en replay;
 - reinicio, desconexión y fallo de persistencia no ocultan pérdida ni emiten datos no durables;
 - `PROJECT_STATUS.md`, contratos, ADR y runbook reflejan el sistema real.
+
+**Cumplida el 2026-10-29.** Cada punto tiene su evidencia en la [evidencia de la puerta de salida de Fase 1](../operacion/evidencia-puerta-fase-1.md), con los nueve ensayos de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §12. Ese día el propietario decidió hacer antes la Fase 2 que la Fase 1B, la decisión que ADR-0015 §12 pedía para cerrar la fase.
 
 ## 10. Restricciones y preguntas no bloqueantes
 

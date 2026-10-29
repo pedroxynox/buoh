@@ -1,15 +1,13 @@
 ---
 schema_version: "1.0.0"
-status_version: 30
-updated_at_utc: "2026-10-29T13:56:21.000Z"
-current_phase: "Fase 1 — Fundación de datos"
+status_version: 31
+updated_at_utc: "2026-10-29T15:30:00.000Z"
+current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
-next_delivery: "F1.5"
-next_requirements:
-  - "F1-RECONNECT-001"
-  - "F1-HEALTH-001"
-plan: "docs/plan/fase-1-fundacion-de-datos.md"
+next_delivery: "F2.0"
+next_requirements: []
+plan: null
 parallel_plans: []
 ---
 
@@ -19,10 +17,11 @@ Este archivo describe únicamente el estado vigente. No es un diario: Git y los 
 
 ## Objetivo actual
 
-Construir una base de datos de mercado reproducible: recibir datos públicos de Deriv, preservar cada frame crudo, normalizar ticks con contratos ejecutables, registrar incidencias de calidad y publicar datasets inmutables que puedan reproducirse de forma idéntica.
+Transformar una hipótesis en una estrategia viva, explicable y no ejecutora, para uso propio ([roadmap](docs/producto/roadmap.md), Fase 2). La fase termina cuando una estrategia *shadow* puede reproducir cada decisión desde datos y versiones fijados y detenerse sola ante una degradación de los datos. El primer paso es su plan ejecutable («Siguiente tarea autorizada»).
 
 ## Situación
 
+- La Fase 1 terminó el 2026-10-29. Su puerta de salida tiene la evidencia de la [evidencia de la puerta de salida de Fase 1](docs/operacion/evidencia-puerta-fase-1.md) («Evidencia de F1.5»), y ese día el propietario decidió hacer antes la Fase 2 que la Fase 1B («Decisiones vigentes relevantes»).
 - La fundación de producto, arquitectura, seguridad y operación está aprobada.
 - F1.1 proporciona monorepo reproducible, contratos runtime, JSON Schema generado, vectores verificables y guardia documental.
 - F1.2 proporciona `packages/domain`: adaptador sintético, normalización, reglas de calidad 1.0.0, construcción de publicación y salud, todo puro y determinista.
@@ -31,8 +30,8 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
   - F1.3b: log raw-first durable con rotación `segment_policy_version = 1.0.0`, registro operativo de `persistence_unavailable`/`source_limit_exceeded` y publicación desde segmentos cerrados del log (`F1-STREAM-001`).
 - F1.4 se entrega en dos partes. F1.4a añade las reglas de calidad 2.0.0 para fuentes que mezclan varios tipos de mensaje, como Deriv: mensajes que no son ticks, errores de la fuente, atribución por `echo_req` e incidencia sin símbolo con el esquema de incidencias 2.0.0 ([contratos de dominio](docs/arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-200)).
 - F1.4b entregó el catálogo versionado de Deriv (`F1-CATALOG-001`) y el adaptador público, solo para escuchar (`F1-SOURCE-001`), con el smoke opt-in `pnpm run data:smoke` ([ADR-0012](docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md)): esquemas fijados, transporte `ws` con sus límites, cola en memoria, correlación, keepalive, versiones del catálogo e incidencias de respuestas pedidas en PostgreSQL, y bloqueo por fuente. La sesión de ingesta reconecta con espera, repara los cierres no registrados y recupera la historia del hueco ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md)).
-- La sesión de ingesta persiste el `IngestionCursor` y el latido en PostgreSQL (migración `0004`), y `pnpm --filter @buoh/market-data-worker run ingest -- --live` la ejecuta de forma continua sobre PostgreSQL y el almacenamiento de objetos, con un esquema y un bucket propios, y para sola a las 23 horas para borrar la captura antes de las 24 ([runbook](docs/operacion/runbook-ingesta-de-datos.md), «Captura viva continua»). `pnpm run data:health -- --json` emite el `HealthReport` de esa captura desde fuera del proceso que ingiere, sin tomar el bloqueo ni escribir nada ([runbook](docs/operacion/runbook-ingesta-de-datos.md), «Salud de datos»). La evidencia de la puerta de salida de Fase 1 está reunida («Evidencia de F1.5»), y no hay despliegue del sistema de datos.
-- MetaTrader 5 (Deriv MT5 y Vantage) queda decidido como segunda integración ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)): sus datos llegan en una Fase 1B posterior a Fase 1, y operar en MT5 empieza en Fase 4 (demo). No existe código de MT5.
+- La sesión de ingesta persiste el `IngestionCursor` y el latido en PostgreSQL (migración `0004`), y `pnpm --filter @buoh/market-data-worker run ingest -- --live` la ejecuta de forma continua sobre PostgreSQL y el almacenamiento de objetos, con un esquema y un bucket propios, y para sola a las 23 horas para borrar la captura antes de las 24 ([runbook](docs/operacion/runbook-ingesta-de-datos.md), «Captura viva continua»). `pnpm run data:health -- --json` emite el `HealthReport` de esa captura desde fuera del proceso que ingiere, sin tomar el bloqueo ni escribir nada ([runbook](docs/operacion/runbook-ingesta-de-datos.md), «Salud de datos»). No hay despliegue del sistema de datos.
+- MetaTrader 5 (Deriv MT5 y Vantage) queda decidido como segunda integración ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)): sus datos llegan en la Fase 1B, que va después de la Fase 2, y operar en MT5 empieza en Fase 4 (demo). No existe código de MT5.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
 - El sitio oficial está en internet desde el 2026-10-27, como sitio estático gratuito de Render, en `https://buoh-sitio.onrender.com` y sin indexar ni anunciar ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). Es lo único desplegado. El propietario conectó el repositorio, y la comprobación de [despliegue en Render](docs/operacion/despliegue-en-render.md) («Comprobar un despliegue») pasó ese día: cabeceras de seguridad y `noindex` en todas las respuestas, ninguna cookie, `404` propio y las seis páginas abren con el texto de `main` (detalle en P-V1-07 de la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md)).
 - La [línea visual V1](docs/plan/linea-visual-v1.md) ([ADR-0008](docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md)) corrió en paralelo a Fase 1 y terminó el 2026-10-25. V1.1 entregó la [guía de marca](docs/diseno/marca-buoh.md), el [catálogo de funciones](docs/producto/funciones-y-disponibilidad.md), el [concepto de interfaz](docs/diseno/concepto-de-interfaz.md) y `packages/design-system`. V1.2 entregó el prototipo navegable en `apps/web`, con datos ficticios (`V1-UI-001`). V1.3 entregó el [sitio oficial](docs/diseno/sitio-oficial.md) en `apps/site`, sin publicar (`V1-SITE-001`). V1.4 entregó el prototipo móvil en `apps/mobile` y compartió los datos ficticios en `packages/prototype-data` (`V1-MOBILE-001`, [ADR-0009](docs/arquitectura/adr/0009-prototipo-movil.md)). V1.5 entregó el prototipo de escritorio en `apps/desktop`, con Tauri 2 y un instalador de Windows compilado en CI (`V1-DESKTOP-001`, [ADR-0010](docs/arquitectura/adr/0010-prototipo-de-escritorio.md)). V1.6 cambió la identidad al logo del propietario, vectorizado, con su paleta, la tipografía Sen y un estilo más técnico (`V1-BRAND-002`, [ADR-0011](docs/arquitectura/adr/0011-identidad-desde-el-logo-del-propietario.md)). No cambió el alcance ni la puerta de salida de Fase 1.
@@ -45,29 +44,18 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 
 ## Siguiente tarea autorizada
 
-**`F1.5` — Reconexión, recuperación, salud y puerta de salida de Fase 1.**
+**`F2.0` — Plan de Fase 2.**
 
-Entregada: el código en los PR #35 a #40 y la evidencia de la puerta de salida en la [evidencia de la puerta de salida de Fase 1](docs/operacion/evidencia-puerta-fase-1.md) («Evidencia de F1.5»). Para marcar la Fase 1 como `done` solo falta la decisión del propietario sobre el orden entre la Fase 1B y la Fase 2 («Bloqueos»). El resto de esta sección describe la tarea tal como se autorizó.
+Escribir el plan ejecutable de la Fase 2 en `docs/plan/`: sus requisitos `F2-*` con su aceptación, la Definition of Ready y la de Done, el corte de implementación y la secuencia de entrega, y las ADR que haya que decidir antes del código. El [roadmap](docs/producto/roadmap.md) da sus siete incrementos y su criterio de salida («Objetivo actual»). Hasta que ese plan se fusione, la Fase 2 no autoriza código, directorios ni dependencias nuevos (AGENTS.md, «Desarrollo por fases»).
 
-Implementar la reconexión sin ocultar huecos (`F1-RECONNECT-001`) y la salud machine-readable con `pnpm run data:health -- --json` (`F1-HEALTH-001`), y reunir la evidencia de la puerta de salida de Fase 1 ([plan](docs/plan/fase-1-fundacion-de-datos.md) §8 y §9). Lo esperado y lo que falta de cada parte está en la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md), P-F1-04 a P-F1-06.
+Puntos de partida comprobados al cerrar la Fase 1:
 
-Las decisiones técnicas están en [ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md):
+- Una estrategia `shadow` necesita datos vivos todo el día. Hoy `ingest` no corre en ningún servidor, y para sola a las 23 horas para borrar la captura antes de las 24 ([runbook](docs/operacion/runbook-ingesta-de-datos.md), «Captura viva continua»). El alojamiento del sistema de datos y su costo siguen pendientes («Decisiones pendientes»).
+- Antes de desplegar hacen falta el rol de PostgreSQL de solo inserción y lectura (pendiente 4 de F1.3) y una retención de producción. El arranque, la recuperación de un hueco y `data:health` derivan el log entero, así que una captura de semanas necesita antes un punto de control.
+- Los datos live no se publican como dataset mientras no haya umbrales live de retraso y de hueco («Decisiones vigentes relevantes»), y un backtest reproducible necesita datos fijados por su `dataset_id`.
+- P-V1-04 de la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md) propone resolver la accesibilidad, las pruebas y las unidades de los gráficos antes de mostrar datos reales.
 
-- la derivación del estado vivo con el perfil de medición, sin umbrales: tras un cierre no pedido, solo la historia demuestra la continuidad;
-- la sesión de ingesta: reconexión con espera exponencial y jitter, la conexión anterior leída del log, `supersedes_connection_id`, reparación de cierres no registrados, parada y bloqueo;
-- la recuperación con `ticks_history`, paginada, y sus resultados;
-- el cursor y el latido en PostgreSQL (migración `0004`), y la captura viva continua, que para sola a las 23 horas para borrarla antes de las 24;
-- `data:health`, el smoke de reconexión, los cambios del runbook que llegan con cada PR y la evidencia de la puerta de salida.
-
-La ADR fija también una secuencia de siete PR. Los puntos de partida de abajo se comprobaron antes de la ADR; donde difieran, manda la ADR.
-
-Puntos de partida comprobados al cerrar F1.4b:
-
-- El adaptador de Deriv termina en cada pérdida de conexión con su `ConnectionClosed`. La tabla de cierres del [runbook](docs/operacion/runbook-ingesta-de-datos.md) («Adaptador público de Deriv») dice qué cierres pierden datos. Los esquemas de `ticks_history` y `forget` ya se cargan con la release fijada, pero el adaptador no los pide (ADR-0012 §1).
-- El primer proceso que ingiera de forma continua en PostgreSQL tiene que cerrar el pendiente 6 de F1.3: escribir con el log protegido por el bloqueo, volver a tomarlo tras perderlo y terminar si ya lo tiene otro proceso.
-- Los umbrales live de retraso y hueco siguen sin fijar. El smoke de F1.4b dio una primera medición («Evidencia de F1.4b»), y hasta fijarlos los datos live no se publican como dataset («Decisiones vigentes relevantes»).
-
-No crea todavía web, móvil, señales ni ejecución.
+No crea todavía señales comerciales, conexión de cuentas ni ejecución `demo` o `real`.
 
 ## Evidencia de F1.1
 
@@ -159,7 +147,7 @@ Reconexión sin ocultar huecos (`F1-RECONNECT-001`) y salud machine-readable (`F
 
 ## Pendientes registrados de F1.4a
 
-Detectados en la revisión semántica del PR #8; ninguno bloquea F1.5:
+Detectados en la revisión semántica del PR #8; ninguno bloqueó F1.5:
 
 1. El JSON Schema generado `data-quality-incident.schema.json` todavía acepta `symbol = null` en `invalid_source_frame` con el esquema de incidencias 1.0.0. El runtime sí lo rechaza. Falta la condición `if`/`then` en esa rama, añadida desde `packages/contracts/scripts/generate-json-schemas.ts` o la fuente Zod, nunca a mano en el archivo generado.
 2. Las pruebas que ligan versiones al manifiesto no fijan qué campo del manifiesto lee cada comprobación, porque en el vector v1 todas las versiones son 1.0.0. Falta un caso que mueva un campo y sus registros juntos a una versión sin usar.
@@ -168,7 +156,7 @@ El antiguo pendiente 3 (el sink `nonTickFrame` no deja ver un `error`) quedó re
 
 ## Pendientes registrados de F1.3
 
-Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la lista completa está en cada PR. Los más relevantes para F1.5 y el despliegue:
+Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la lista completa está en cada PR. Los más relevantes para el despliegue:
 
 1. Si la conexión cae durante el `COMMIT` de una publicación, se informa "no se confirmó" aunque pudo confirmarse.
 2. Publicar no aplica los límites de lectura del replay. `normalized_ticks` y `quality_incidents` son un único artefacto que crece con el dataset. Resolver antes de publicar datasets live largos.
@@ -206,18 +194,19 @@ El antiguo pendiente 6 quedó resuelto en F1.5 ([ADR-0015](docs/arquitectura/adr
 - Hasta incorporar un writer Parquet, ticks e incidencias se publican como NDJSON sin compresión; `dataset_id` no depende del formato físico.
 - Alojamiento productivo en Render para PostgreSQL, API y web; el despliegue sigue diferido ([ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)), salvo el sitio oficial, que se publica como sitio estático gratuito ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)).
 - MetaTrader 5 entra por un puente MQL5 dentro de la terminal; cada servidor MT5 es una fuente propia; las contraseñas MT5, solo de cuentas propias, las guarda la terminal y los servicios de buoh nunca las reciben ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
-- Prioridad del propietario (2026-10-26): el sitio oficial y la app de escritorio, que debe mostrar datos reales de Deriv. Consecuencia técnica: esos datos llegan por la API de buoh ([arquitectura objetivo](docs/arquitectura/arquitectura-objetivo.md), «Windows (futuro)»), y para eso el sistema de datos tiene que funcionar todo el día en un servidor. Por eso van antes la reconexión y la salud de F1.5 y la decisión del costo del alojamiento; el plan de esa línea (alojamiento, API y pantallas con datos reales) se escribe después.
+- Prioridad del propietario (2026-10-26): el sitio oficial y la app de escritorio, que debe mostrar datos reales de Deriv. Consecuencia técnica: esos datos llegan por la API de buoh ([arquitectura objetivo](docs/arquitectura/arquitectura-objetivo.md), «Windows (futuro)»), y para eso el sistema de datos tiene que funcionar todo el día en un servidor. Por eso fueron antes la reconexión y la salud de F1.5, y va antes la decisión del costo del alojamiento; el plan de esa línea (alojamiento, API y pantallas con datos reales) se escribe después.
+- Orden de fases (decisión del propietario del 2026-10-29, «Ok vamos con la fase 2»): la Fase 2 va antes que la Fase 1B (datos MT5), que queda para después, sin fecha.
 - Desde el móvil se pueden encender y apagar estrategias del bot, también con dinero real, como con un control remoto. Ningún cliente abre operaciones a mano ni se comunica con el bróker para ejecutar: todo pasa por el servidor, `execution-gateway` y su política de riesgo ([catálogo de funciones](docs/producto/funciones-y-disponibilidad.md) §1; decisión del propietario del 2026-10-25).
 
 ## Bloqueos
 
-Marcar la Fase 1 como `done` espera la decisión del propietario sobre el orden entre la Fase 1B (datos MT5) y la Fase 2 (bot shadow) (ADR-0015 §12). La evidencia ya está reunida («Evidencia de F1.5»).
+Ninguno.
 
-## Decisiones pendientes que no bloquean Fase 1
+## Decisiones pendientes
 
 - Jurisdicción inicial del producto comercial.
 - Universo definitivo de índices y tipos de contrato.
-- Costo del alojamiento del sistema de datos (PostgreSQL y API en Render, [ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)), dónde se aloja el worker y el proveedor de almacenamiento de objetos, que Render no ofrece. Hace falta para que la app de escritorio muestre datos reales.
+- Costo del alojamiento del sistema de datos (PostgreSQL y API en Render, [ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)), dónde se aloja el worker y el proveedor de almacenamiento de objetos, que Render no ofrece. Hace falta para que el bot *shadow* de la Fase 2 funcione todo el día y para que la app de escritorio muestre datos reales.
 - Equipo de la terminal MT5 (PC dedicado del propietario o servidor Windows o Linux con Wine) y su protección. Se decide en el primer incremento de Fase 1B (ADR-0007).
 - Revisión de términos de Deriv MT5, Vantage y MetaQuotes, y entidad de Vantage aplicable. Se completa en el primer incremento de Fase 1B.
 - Dominio propio del sitio oficial y revisión legal de su texto, antes de comprar el dominio, quitar el `noindex` o anunciarlo (ADR-0013).
@@ -229,7 +218,7 @@ Marcar la Fase 1 como `done` espera la decisión del propietario sobre el orden 
 
 ## Evidencia requerida para cambiar de fase
 
-La Fase 1 solo puede marcarse `done` cuando todos sus requisitos tienen pruebas y evidencia, un dataset se reproduce con el mismo identificador y las incidencias de calidad permanecen visibles tras reinicios.
+La Fase 2 solo puede marcarse `done` cuando cumple el criterio de salida del roadmap («Objetivo actual») con la evidencia que fije su plan. La Fase 1 cumplió el suyo el 2026-10-29 («Evidencia de F1.5»).
 
 ## Mantenimiento obligatorio
 

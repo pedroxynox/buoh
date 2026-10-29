@@ -7,7 +7,7 @@ No es un plan de fase: no tiene requisitos propios ni `status`, y `PROJECT_STATU
 **Este documento no autoriza trabajo ni añade requisitos.** Cada comportamiento esperado cita la fuente que ya lo pide. Lo que autoriza trabajo sigue siendo:
 
 - [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md): siguiente tarea autorizada;
-- el plan activo de la fase, [Fase 1](fase-1-fundacion-de-datos.md). La [línea visual V1](linea-visual-v1.md) terminó el 2026-10-25 (P-V1-01).
+- el plan activo de la fase, cuando lo hay. Hoy no hay ninguno: la [Fase 1](fase-1-fundacion-de-datos.md) terminó el 2026-10-29 (P-F1-06), y escribir el plan de la Fase 2 es la siguiente tarea. La [línea visual V1](linea-visual-v1.md) terminó el 2026-10-25 (P-V1-01).
 
 Si este documento y una de esas fuentes difieren, manda la fuente; hay que corregir este documento.
 
@@ -105,19 +105,13 @@ Tipos de pendiente:
   - en `recovering` por continuidad pendiente, `open_condition_types` queda vacío (pendiente 2 de F1.2);
   - **decidido en [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §8:** un envoltorio en `scripts/` deja stdout limpio, como `data-replay.mjs`, porque el emulador de shell de pnpm no respeta `1>&2` (ADR-0003). El backlog sale del latido que persiste la ingesta, y la conexión también si el latido es posterior al último evento de conexión del log; sin escritor vivo, la conexión es `disconnected` y el backlog, 0.
 
-### P-F1-06. Puerta de salida de Fase 1 (`F1.5`) — evidencia reunida; falta la decisión del propietario
+### P-F1-06. Puerta de salida de Fase 1 (`F1.5`) — resuelto
 
 - **Objetivo:** reunir la evidencia que permite marcar la Fase 1 como `done`.
 - **Fuente:** plan de Fase 1 §9, runbook («Verificación periódica» y «Puerta de salida de Fase 1») y `PROJECT_STATUS.md` («Evidencia requerida para cambiar de fase»).
-- **Estado (verificado):** el 2026-10-29 pasaron los nueve ensayos de ADR-0015 §12: captura viva persistida con `ingest`, smoke de reconexión, reinicio sin aviso y programado, almacenamiento de objetos y PostgreSQL parados, ningún dato no durable emitido, incidencias visibles tras reiniciar y replay con el mismo `dataset_id`. Cada punto de la Definition of Done del plan §9 tiene su evidencia ([evidencia de la puerta de salida](../operacion/evidencia-puerta-fase-1.md)).
-- **Esperado:**
-  - capturar el flujo público sin credenciales;
-  - que reinicio, desconexión y fallo de persistencia no oculten pérdida;
-  - reproducir un dataset con el mismo identificador;
-  - que los documentos reflejen el sistema real.
-- **Componentes:** todos los de P-F1-01 a P-F1-05, más `PROJECT_STATUS.md`, que cambia de fase en el PR de cierre.
-- **Aceptación (`PROJECT_STATUS.md`):** todos los requisitos de la fase tienen pruebas y evidencia, un dataset se reproduce con el mismo identificador y las incidencias de calidad siguen visibles tras reinicios.
-- **Abierto:** la decisión del propietario sobre el orden entre la Fase 1B (datos MT5) y la Fase 2 (bot shadow). Con ella, `PROJECT_STATUS.md` marca la Fase 1 como `done` ([ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §12).
+- **Antes:** el 2026-10-29 pasaron los nueve ensayos de ADR-0015 §12: captura viva persistida con `ingest`, smoke de reconexión, reinicio sin aviso y programado, almacenamiento de objetos y PostgreSQL parados, ningún dato no durable emitido, incidencias visibles tras reiniciar y replay con el mismo `dataset_id`. Cada punto de la Definition of Done del plan §9 tiene su evidencia ([evidencia de la puerta de salida](../operacion/evidencia-puerta-fase-1.md)). Para marcar la fase `done`, [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §12 pedía además la decisión del propietario sobre el orden entre la Fase 1B (datos MT5) y la Fase 2 (bot shadow).
+- **Decisión del propietario (2026-10-29):** primero la Fase 2 («Ok vamos con la fase 2»). La Fase 1B queda para después, sin fecha.
+- **Resolución:** la Fase 1 queda `done` en `PROJECT_STATUS.md`, en el plan de Fase 1 (§2 y §9), en el roadmap y en el sitio oficial (`apps/site/src/content.ts`, comprobado por `apps/site/test/content.test.ts`). La Fase 2 es la fase actual, y su plan, la siguiente tarea (`F2.0`).
 
 ### P-F1-07. Pendientes menores ya registrados — menor registrado
 
@@ -248,8 +242,9 @@ Solo se listan; sus planes no existen todavía y el roadmap describe el destino.
   - el equipo de la terminal y su protección;
   - la revisión de términos de Deriv MT5, Vantage y MetaQuotes.
 
-  No existe código MT5, como manda el plan.
-- **Fases 2 a 7.** Roadmap. No están autorizadas.
+  No existe código MT5, como manda el plan. La Fase 1B va después de la Fase 2 (P-F1-06).
+- **Fase 2.** Es la fase actual desde el 2026-10-29 (P-F1-06). Su plan es la siguiente tarea de `PROJECT_STATUS.md`, y hasta que se fusione no autoriza código.
+- **Fases 3 a 7.** Roadmap. No están autorizadas.
 - **Despliegue.** ADR-0006, ADR-0013 y arquitectura objetivo. Solo el sitio oficial tiene `render.yaml` (ADR-0013). Siguen pendientes:
   - el costo del alojamiento del sistema de datos (PostgreSQL y API en Render, ADR-0006), dónde se aloja el worker y el proveedor S3 productivo, que Render no ofrece; el único marcador en código es un comentario en `apps/market-data-worker/src/s3/object-store.ts`;
   - la distribución de la app móvil.
@@ -277,7 +272,7 @@ Solo se listan; sus planes no existen todavía y el roadmap describe el destino.
 
 ## 6. Decisiones humanas abiertas
 
-P-V1-01, P-V1-03 y P-GOV-01 ya no figuran aquí, ni lo que el propietario llama «operar desde el celular» (P-V1-05): las resolvió el 2026-10-25, y cada entrada registra su decisión.
+P-V1-01, P-V1-03 y P-GOV-01 ya no figuran aquí, ni lo que el propietario llama «operar desde el celular» (P-V1-05): las resolvió el 2026-10-25, y cada entrada registra su decisión. Tampoco el orden entre la Fase 1B y la Fase 2 (P-F1-06), que decidió el 2026-10-29.
 
 | Decisión | Pendiente | Dónde se registra hoy |
 |---|---|---|
@@ -286,6 +281,5 @@ P-V1-01, P-V1-03 y P-GOV-01 ya no figuran aquí, ni lo que el propietario llama 
 | Firmar el instalador de escritorio | P-V1-06 | `PROJECT_STATUS.md` |
 | Dominio propio y revisión legal del sitio | P-V1-07 | `PROJECT_STATUS.md` |
 | Universo de índices y tipos de contrato | P-F1-01 | `PROJECT_STATUS.md` |
-| Orden entre la Fase 1B y la Fase 2 | P-F1-06 | `PROJECT_STATUS.md` |
 | Equipo de la terminal MT5 y revisión de términos | §4 | `PROJECT_STATUS.md` |
 | Costo del alojamiento del sistema de datos, alojamiento del worker y proveedor S3 productivo | §4 | `PROJECT_STATUS.md` |

@@ -25,7 +25,7 @@ export const TAGLINE = 'Observa con calma. Decide con evidencia.';
  * Entrega siguiente de PROJECT_STATUS.md para la que se escribió el texto sobre lo que existe hoy.
  * Una prueba falla cuando cambia, para obligar a revisar el sitio.
  */
-export const WRITTEN_FOR_NEXT_DELIVERY = 'F1.5';
+export const WRITTEN_FOR_NEXT_DELIVERY = 'F2.0';
 
 /** Aviso corto que va en el pie de todas las páginas. */
 export const RISK_SHORT =
@@ -249,20 +249,20 @@ export const ROADMAP: readonly RoadmapPhase[] = [
   {
     id: '1',
     title: 'Fundación de datos',
-    state: 'en curso',
-    text: 'Ya existen los contratos de datos, la normalización, las reglas de calidad, la publicación de datasets reproducibles y una primera lectura de prueba del canal público de Deriv, la integración prevista para esta fase. Faltan la recuperación de datos tras una desconexión y un reporte de salud estructurado.',
+    state: 'hecha',
+    text: 'Datos públicos de Deriv recibidos sin credenciales y guardados tal como llegan, con su calidad a la vista, datasets que se reproducen con el mismo identificador, reconexión que no oculta huecos y un reporte de salud estructurado.',
   },
   {
     id: '1B',
     title: 'Datos de MetaTrader 5',
     state: 'prevista',
-    text: 'Precios de Deriv MT5 y Vantage con las mismas garantías, sin operar.',
+    text: 'Precios de Deriv MT5 y Vantage con las mismas garantías, sin operar. Llegará después de la Fase 2.',
   },
   {
     id: '2',
     title: 'Laboratorio y bot shadow para uso propio',
-    state: 'prevista',
-    text: 'Estrategias versionadas, backtests honestos y un bot que emite señales hipotéticas.',
+    state: 'en curso',
+    text: 'Empieza por su plan. Traerá estrategias versionadas, backtests honestos y un bot que emite señales hipotéticas, sin operar.',
   },
   {
     id: '3',
