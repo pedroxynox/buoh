@@ -286,6 +286,13 @@ Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de
 
 Una salida distinta de 0 sin línea JSON significa que falló la compilación o que se interrumpió el proceso; el detalle está en stderr. Sus números sirven para fijar después los umbrales live de retraso y de hueco, que el perfil de medición no lleva (ADR-0012 §8).
 
+### Captura viva continua (`ingest`)
+
+Desde el PR 5 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13 (§7), `apps/market-data-worker/src/ingest-args.ts` comprueba los argumentos y la configuración de la captura viva continua, antes de abrir ningún almacén o conexión:
+
+- **Argumentos:** `--live [--symbol R_100]`. Sin `--live` es un error de uso y no se abre nada: la captura es opt-in, como el smoke, para que ningún `verify` ni CI guarde datos reales. Ingiere un solo símbolo, con la regla del smoke: `R_100` por defecto, y un código de letras, cifras y `_`, de 1 a 64 caracteres; el esquema de la petición `ticks` decide el resto. Las opciones del smoke (`--duration-seconds` y `--interrupt-after-seconds`), cualquier otra y los argumentos sueltos también son errores de uso.
+- **Configuración:** las variables `BUOH_*` de «Entorno local y replay», con tres reglas más. `BUOH_DEPLOYMENT_ENVIRONMENT` no puede ser `staging` ni `production`, porque desplegar no está autorizado en Fase 1 ([ADR-0006](../arquitectura/adr/0006-alojamiento-en-render.md)). `BUOH_POSTGRES_SCHEMA` no puede ser `public` ni `BUOH_S3_BUCKET` `buoh-local`, que son también sus valores sin la variable: la captura guarda datos reales y se borra entera antes de 24 horas, así que necesita un esquema y un bucket propios, que no comparte con los datos sintéticos (ADR-0004 §13). El error (`IngestConfigError`) nombra todas las variables rechazadas y nunca sus valores.
+
 ### Almacenamiento no disponible o backlog lleno por conteo/bytes
 
 1. Cambiar inmediatamente a `paused`.

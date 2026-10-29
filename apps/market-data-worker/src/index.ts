@@ -1,4 +1,10 @@
-export { ConfigError, loadConfig, type WorkerConfig } from './config.js';
+export {
+  ConfigError,
+  DEFAULT_POSTGRES_SCHEMA,
+  DEFAULT_S3_BUCKET,
+  loadConfig,
+  type WorkerConfig,
+} from './config.js';
 export {
   createStorageEncoder,
   decodeObject,
@@ -115,7 +121,15 @@ export {
   SMOKE_DEFAULT_SYMBOL,
   SMOKE_MAX_DURATION_SECONDS,
   SMOKE_USAGE,
+  symbolOption,
   type SmokeOptions,
 } from './smoke-args.js';
+export {
+  checkIngestConfig,
+  IngestConfigError,
+  INGEST_USAGE,
+  parseIngestArgs,
+  type IngestOptions,
+} from './ingest-args.js';
 export { openStores } from './runtime.js';
 export { S3ObjectStore } from './s3/object-store.js';

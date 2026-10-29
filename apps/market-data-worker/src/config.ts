@@ -8,6 +8,11 @@ import { z } from 'zod';
 const nonEmpty = z.string().min(1);
 const port = z.coerce.number().int().min(1).max(65_535);
 
+/** Esquema PostgreSQL sin `BUOH_POSTGRES_SCHEMA`. `ingest` no lo admite (ADR-0015 §7). */
+export const DEFAULT_POSTGRES_SCHEMA = 'public';
+/** Bucket sin `BUOH_S3_BUCKET`, el de los datos sintéticos. `ingest` no lo admite (ADR-0015 §7). */
+export const DEFAULT_S3_BUCKET = 'buoh-local';
+
 const environmentSchema = z.object({
   BUOH_DEPLOYMENT_ENVIRONMENT: deploymentEnvironmentSchema,
   BUOH_POSTGRES_DB: nonEmpty.default('buoh'),
@@ -18,13 +23,13 @@ const environmentSchema = z.object({
   BUOH_POSTGRES_SCHEMA: z
     .string()
     .regex(/^[a-z_][a-z0-9_]{0,62}$/u)
-    .default('public'),
+    .default(DEFAULT_POSTGRES_SCHEMA),
   BUOH_POSTGRES_USER: nonEmpty.default('buoh'),
   BUOH_S3_ACCESS_KEY_ID: nonEmpty,
   BUOH_S3_BUCKET: z
     .string()
     .regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u)
-    .default('buoh-local'),
+    .default(DEFAULT_S3_BUCKET),
   BUOH_S3_ENDPOINT: z.url().default('http://127.0.0.1:8333'),
   BUOH_S3_REGION: nonEmpty.default('us-east-1'),
   BUOH_S3_SECRET_ACCESS_KEY: nonEmpty,
