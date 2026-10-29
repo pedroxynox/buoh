@@ -190,6 +190,7 @@ El antiguo pendiente 1 (atribución de símbolo y mensajes que no son ticks) que
 3. `docs/impact-map.json` no tiene regla para `packages/domain/**`.
 4. `qualityProfileSchema` está duplicado entre `packages/domain` y `packages/contracts/src/vector-integrity.ts`.
 5. `typecheck` y `lint` resuelven `@buoh/contracts` con `paths` al código fuente; vitest usa `dist`. Ejecutar `pnpm run test`, no vitest directo. `apps/market-data-worker` sigue el mismo patrón.
+
 El antiguo pendiente 6 quedó resuelto en F1.5 ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §4, «Orden»): el `HistoryRecoveryResult` pasa por la misma cola que los frames, y la sesión lo pide 2000 ms después del primer tick durable posterior al cierre, así que siempre queda después de él. Los puntos 3, 5 y 6 de la puerta de salida volvieron así a `healthy`.
 
 ## Decisiones vigentes relevantes
