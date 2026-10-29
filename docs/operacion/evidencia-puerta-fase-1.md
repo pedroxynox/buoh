@@ -1,6 +1,6 @@
 # Evidencia de la puerta de salida de Fase 1
 
-Evidencia de los nueve ensayos de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §12 y de cada punto de la Definition of Done del [plan de Fase 1](../plan/fase-1-fundacion-de-datos.md) §9, reunida el 2026-10-29. Con ella, para marcar la Fase 1 como `done` solo falta la decisión del propietario sobre el orden entre la Fase 1B (datos MT5) y la Fase 2 (bot shadow) (ADR-0015 §12; `PROJECT_STATUS.md`, «Bloqueos»).
+Evidencia de los nueve ensayos de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §12 y de cada punto de la Definition of Done del [plan de Fase 1](../plan/fase-1-fundacion-de-datos.md) §9, reunida el 2026-10-29. Con ella y con la decisión del propietario del mismo día sobre el orden de las fases (primero la Fase 2; la Fase 1B, sin fecha; `PROJECT_STATUS.md`, «Decisiones vigentes relevantes»), la Fase 1 quedó `done` (ADR-0015 §12).
 
 Los ensayos capturaron datos reales de Deriv en un PostgreSQL y un almacenamiento de objetos desechables, que se borraron al terminar cada secuencia (ADR-0015 §7, ADR-0004 §13). Este documento solo trae lo que no es dato de mercado: horas UTC, estados, motivos, conteos, esperas e identificadores. Ningún precio, payload, credencial, host ni puerto. Las salidas crudas de cada orden quedaron fuera de Git.
 

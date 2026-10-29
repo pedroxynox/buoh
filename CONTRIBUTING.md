@@ -28,6 +28,8 @@ Ante un conflicto, no elijas una interpretación silenciosa: aplica el protocolo
 
 ## Organización autorizada para Fase 1
 
+La Fase 1 terminó el 2026-10-29. Su [plan](docs/plan/fase-1-fundacion-de-datos.md) autorizó estas piezas, que siguen en el repositorio; los directorios y dependencias nuevos necesitan un plan activo, y el de la Fase 2 es la siguiente tarea de `PROJECT_STATUS.md`:
+
 - `apps/market-data-worker/`: adaptación de fuente y orquestación de ingesta.
 - `packages/contracts/`: esquemas runtime y JSON Schema generado.
 - `packages/domain/`: normalización y reglas puras de datos de mercado.
