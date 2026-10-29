@@ -2,7 +2,7 @@
 
 ## Alcance
 
-`render.yaml` solo define el sitio oficial (`apps/site`), como sitio estático gratuito ([ADR-0013](../arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). La API, el worker, PostgreSQL y el almacenamiento de objetos todavía no están en `render.yaml`: llegarán con su plan y con la decisión del propietario sobre el costo ([ADR-0006](../arquitectura/adr/0006-alojamiento-en-render.md)).
+`render.yaml` solo define el sitio oficial (`apps/site`), como sitio estático gratuito ([ADR-0013](../arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). La API, el worker y PostgreSQL todavía no están en `render.yaml`: llegarán con un incremento del plan de la Fase 2. El propietario ya decidió los proveedores y el presupuesto ([ADR-0016](../arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)), y el almacenamiento de objetos irá en Cloudflare R2, fuera de Render y de `render.yaml`.
 
 ## Qué define `render.yaml`
 

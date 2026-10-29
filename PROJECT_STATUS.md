@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 31
-updated_at_utc: "2026-10-29T15:45:40.000Z"
+status_version: 32
+updated_at_utc: "2026-10-29T19:00:50.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -40,7 +40,7 @@ Transformar una hipótesis en una estrategia viva, explicable y no ejecutora, pa
 
 Ninguno. La línea visual V1 terminó el 2026-10-25 (plan V1, §7): sus requisitos tienen evidencia fusionada, y el propietario decidió que sus aprobaciones ya registradas (ADR-0010 §4 y ADR-0011, «Contexto») cuentan como la revisión de capturas de los prototipos y del sitio. Sus piezas siguen en el repositorio; los directorios y dependencias nuevos necesitan un plan activo (AGENTS.md, «Desarrollo por fases»).
 
-Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja para cuando esté validado el núcleo web y móvil, y el roadmap la sitúa en la Fase 7. El prototipo de escritorio no la adelanta. La prioridad del propietario del 2026-10-26 por una app de escritorio con datos reales («Decisiones vigentes relevantes») tampoco lo autoriza todavía: antes hacen falta su plan y la decisión del costo del alojamiento, y entonces se revisará esa decisión de ADR-0001.
+Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja para cuando esté validado el núcleo web y móvil, y el roadmap la sitúa en la Fase 7. El prototipo de escritorio no la adelanta. La prioridad del propietario del 2026-10-26 por una app de escritorio con datos reales («Decisiones vigentes relevantes») tampoco lo autoriza todavía: antes hace falta su plan, y entonces se revisará esa decisión de ADR-0001. El costo del alojamiento ya está decidido ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)).
 
 ## Siguiente tarea autorizada
 
@@ -50,8 +50,10 @@ Escribir el plan ejecutable de la Fase 2 en `docs/plan/`: sus requisitos `F2-*` 
 
 Puntos de partida comprobados al cerrar la Fase 1:
 
-- Una estrategia `shadow` necesita datos vivos todo el día. Hoy `ingest` no corre en ningún servidor, y para sola a las 23 horas para borrar la captura antes de las 24 ([runbook](docs/operacion/runbook-ingesta-de-datos.md), «Captura viva continua»). El alojamiento del sistema de datos y su costo siguen pendientes («Decisiones pendientes»).
-- Antes de desplegar hacen falta el rol de PostgreSQL de solo inserción y lectura (pendiente 4 de F1.3) y una retención de producción. El arranque, la recuperación de un hueco y `data:health` derivan el log entero, así que una captura de semanas necesita antes un punto de control.
+- Una estrategia `shadow` necesita datos vivos todo el día. Hoy `ingest` no corre en ningún servidor, rechaza los entornos `staging` y `production` y para sola a las 23 horas para borrar la captura antes de las 24 ([runbook](docs/operacion/runbook-ingesta-de-datos.md), «Captura viva continua»). El alojamiento ya está decidido: Render y Cloudflare R2, unos 15 USD al mes, y nada se compra hasta el PR de despliegue ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)). Sus condiciones antes de desplegar están en ADR-0016 §4.
+- Antes de desplegar hacen falta el rol de PostgreSQL de solo inserción y lectura (pendiente 4 de F1.3) y una retención de producción. El arranque, la recuperación de un hueco y `data:health` derivan el log entero, y su memoria crece con él: con 17,8 horas de log, `ingest` llegó a 358 MB y `data:health` a 318 MB, y el worker Starter tiene 512 MB (ADR-0016, «Medición»). El punto de control va antes del despliegue, también para una captura de un solo día.
+- Con la derivación de hoy, todo en memoria, un mes de datos ocuparía unos 10 GB, así que el backtest tiene que leer los datos por partes (ADR-0016, «Consecuencias»).
+- La Fase 2 empieza solo con R_100 («Decisiones vigentes relevantes»).
 - Los datos live no se publican como dataset mientras no haya umbrales live de retraso y de hueco («Decisiones vigentes relevantes»), y un backtest reproducible necesita datos fijados por su `dataset_id`.
 - P-V1-04 de la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md) propone resolver la accesibilidad, las pruebas y las unidades de los gráficos antes de mostrar datos reales.
 
@@ -193,8 +195,10 @@ El antiguo pendiente 6 quedó resuelto en F1.5 ([ADR-0015](docs/arquitectura/adr
 - Sin umbrales live, el estado vivo se derivará con el perfil de medición: tras un cierre no pedido, solo la historia demostrará la continuidad, y el estado vivo no mostrará retrasos ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §2, decisión de la dirección técnica).
 - Hasta incorporar un writer Parquet, ticks e incidencias se publican como NDJSON sin compresión; `dataset_id` no depende del formato físico.
 - Alojamiento productivo en Render para PostgreSQL, API y web; el despliegue sigue diferido ([ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)), salvo el sitio oficial, que se publica como sitio estático gratuito ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)).
+- Alojamiento del sistema de datos (decisión del propietario del 2026-10-29, «Ok me parece perfecto todo»): `market-data-worker` en un background worker Starter de Render, PostgreSQL en Render Postgres Basic-256mb y los objetos en Cloudflare R2, por unos 15 USD al mes, unos 22 cuando exista la API. No se crea ni se paga nada hasta que esté listo el PR de despliegue ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)).
+- Símbolo de la Fase 2 (la misma respuesta del propietario, que el agente toma como un sí a su propuesta de empezar solo con R_100): el bot *shadow* empieza solo con R_100 (Volatility 100 Index), el índice que ya se captura. El universo definitivo sigue pendiente.
 - MetaTrader 5 entra por un puente MQL5 dentro de la terminal; cada servidor MT5 es una fuente propia; las contraseñas MT5, solo de cuentas propias, las guarda la terminal y los servicios de buoh nunca las reciben ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
-- Prioridad del propietario (2026-10-26): el sitio oficial y la app de escritorio, que debe mostrar datos reales de Deriv. Consecuencia técnica: esos datos llegan por la API de buoh ([arquitectura objetivo](docs/arquitectura/arquitectura-objetivo.md), «Windows (futuro)»), y para eso el sistema de datos tiene que funcionar todo el día en un servidor. Por eso fueron antes la reconexión y la salud de F1.5, y va antes la decisión del costo del alojamiento; el plan de esa línea (alojamiento, API y pantallas con datos reales) se escribe después.
+- Prioridad del propietario (2026-10-26): el sitio oficial y la app de escritorio, que debe mostrar datos reales de Deriv. Consecuencia técnica: esos datos llegan por la API de buoh ([arquitectura objetivo](docs/arquitectura/arquitectura-objetivo.md), «Windows (futuro)»), y para eso el sistema de datos tiene que funcionar todo el día en un servidor. Por eso fueron antes la reconexión y la salud de F1.5 y la decisión del costo del alojamiento ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)); el plan de esa línea (alojamiento, API y pantallas con datos reales) se escribe después.
 - Orden de fases (decisión del propietario del 2026-10-29, «Ok vamos con la fase 2»): la Fase 2 va antes que la Fase 1B (datos MT5), que queda para después, sin fecha.
 - Desde el móvil se pueden encender y apagar estrategias del bot, también con dinero real, como con un control remoto. Ningún cliente abre operaciones a mano ni se comunica con el bróker para ejecutar: todo pasa por el servidor, `execution-gateway` y su política de riesgo ([catálogo de funciones](docs/producto/funciones-y-disponibilidad.md) §1; decisión del propietario del 2026-10-25).
 
@@ -205,8 +209,8 @@ Ninguno.
 ## Decisiones pendientes
 
 - Jurisdicción inicial del producto comercial.
-- Universo definitivo de índices y tipos de contrato.
-- Costo del alojamiento del sistema de datos (PostgreSQL y API en Render, [ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)), dónde se aloja el worker y el proveedor de almacenamiento de objetos, que Render no ofrece. Hace falta para que el bot *shadow* de la Fase 2 funcione todo el día y para que la app de escritorio muestre datos reales.
+- Universo definitivo de índices y tipos de contrato. La Fase 2 empieza solo con R_100 («Decisiones vigentes relevantes»).
+- Región de Render y de Cloudflare R2 para el sistema de datos. Se elige en el PR de despliegue, porque Render no deja cambiarla después ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md) §4).
 - Equipo de la terminal MT5 (PC dedicado del propietario o servidor Windows o Linux con Wine) y su protección. Se decide en el primer incremento de Fase 1B (ADR-0007).
 - Revisión de términos de Deriv MT5, Vantage y MetaQuotes, y entidad de Vantage aplicable. Se completa en el primer incremento de Fase 1B.
 - Dominio propio del sitio oficial y revisión legal de su texto, antes de comprar el dominio, quitar el `noindex` o anunciarlo (ADR-0013).

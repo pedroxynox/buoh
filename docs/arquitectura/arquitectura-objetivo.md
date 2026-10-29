@@ -154,7 +154,7 @@ La terminal MT5 con el puente corre en un PC dedicado del propietario o en un se
 ## Despliegue y fiabilidad
 
 - **Desarrollo de Fase 1:** Docker Compose para PostgreSQL estándar y almacenamiento S3-compatible local; datos sintéticos y públicos.
-- **Alojamiento productivo:** Render para PostgreSQL, API y web ([ADR-0006](adr/0006-alojamiento-en-render.md)). Siguen pendientes el alojamiento de `market-data-worker`, el proveedor S3-compatible productivo y la distribución de la app móvil. El despliegue sigue diferido hasta que lo autorice un plan (el de la Fase 2 es la siguiente tarea de `PROJECT_STATUS.md`), salvo el sitio oficial, que se publica como sitio estático gratuito ([ADR-0013](adr/0013-publicacion-del-sitio-en-render.md)).
+- **Alojamiento productivo:** Render para PostgreSQL, API, web y `market-data-worker` (un background worker), y Cloudflare R2 como almacenamiento S3-compatible ([ADR-0006](adr/0006-alojamiento-en-render.md) y [ADR-0016](adr/0016-alojamiento-del-sistema-de-datos.md)). Siguen pendientes las regiones y la distribución de la app móvil. El despliegue sigue diferido hasta que lo autorice un plan (el de la Fase 2 es la siguiente tarea de `PROJECT_STATUS.md`), salvo el sitio oficial, que se publica como sitio estático gratuito ([ADR-0013](adr/0013-publicacion-del-sitio-en-render.md)).
 - **Fases posteriores:** TimescaleDB o Redis se incorporan solo si una ADR documenta la necesidad medida.
 - **Preproducción:** estrategia *shadow*, pruebas de resiliencia, telemetría, migraciones y prueba demo sin secretos productivos.
 - **Producción de señales:** observabilidad de datos, eventos y latencia; interrupción automática si la calidad se degrada.
