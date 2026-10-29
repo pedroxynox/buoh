@@ -4,7 +4,7 @@ schema_version: "1.0.0"
 status: "active"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-10-29T22:55:02.000Z"
+last_reviewed_utc: "2026-10-29T23:34:34.000Z"
 ---
 
 # Plan ejecutable: Fase 2 — Laboratorio y bot shadow para uso propio
@@ -386,7 +386,7 @@ Un ensayo en vivo o en producción nunca sustituye una prueba sin red, porque la
 | Servicio web Starter para la API y la web | F2.3 | 7 USD |
 | Background worker Starter para el motor `shadow` | F2.9 | 7 USD |
 
-En total, unos 29 USD al mes. Las cuatro primeras filas son los unos 22 USD que aprobó el propietario (ADR-0016 §2). El servidor del motor está pendiente de su visto bueno (§12). Los backtests corren dentro del servicio de la API, sin costo aparte. Los precios son los que comprobó ADR-0016 y se confirman al comprar.
+En total, unos 29 USD al mes. Las cuatro primeras filas son los unos 22 USD que aprobó el propietario (ADR-0016 §2). El servidor del motor lo aprobó el 2026-10-29 («1. Si, un servidor pequeño para el bot»), y se compra con F2.9. Los backtests corren dentro del servicio de la API, sin costo aparte. Los precios son los que comprobó ADR-0016 y se confirman al comprar.
 
 Pueden sumarse, si sus ADR los eligen y el propietario los aprueba:
 
@@ -398,7 +398,7 @@ Pueden sumarse, si sus ADR los eligen y el propietario los aprueba:
 
 | Decisión | Materia | Se pide en |
 |---|---|---|
-| Servidor propio para el motor `shadow`, unos 7 USD más al mes | dinero | antes de abrir el PR de este plan |
+| Servidor propio para el motor `shadow`, unos 7 USD más al mes | dinero | decidida el 2026-10-29: sí (§11) |
 | Región de Render y de R2, que luego no se puede cambiar | producto y dinero | F2.2 |
 | Retención y tamaño del disco, si suben el presupuesto | dinero | F2.2 |
 | Cómo inicia sesión el propietario | seguridad | F2.3 |

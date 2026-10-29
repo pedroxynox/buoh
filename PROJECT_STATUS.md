@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
 status_version: 33
-updated_at_utc: "2026-10-29T22:55:02.000Z"
+updated_at_utc: "2026-10-29T23:34:34.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -190,6 +190,7 @@ El antiguo pendiente 6 quedó resuelto en F1.5 ([ADR-0015](docs/arquitectura/adr
 - Hasta incorporar un writer Parquet, ticks e incidencias se publican como NDJSON sin compresión; `dataset_id` no depende del formato físico.
 - Alojamiento productivo en Render para PostgreSQL, API y web; el despliegue sigue diferido ([ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)), salvo el sitio oficial, que se publica como sitio estático gratuito ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)).
 - Alojamiento del sistema de datos (decisión del propietario del 2026-10-29, «Ok me parece perfecto todo»): `market-data-worker` en un background worker Starter de Render, PostgreSQL en Render Postgres Basic-256mb y los objetos en Cloudflare R2, por unos 15 USD al mes, unos 22 cuando exista la API. No se crea ni se paga nada hasta que esté listo el PR de despliegue ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)).
+- Servidor del motor de señales *shadow* (decisión del propietario del 2026-10-29, «1. Si, un servidor pequeño para el bot»): `apps/signal-engine` corre en su propio background worker Starter de Render, unos 7 USD más al mes, para que un fallo o una actualización del bot no corte la captura ni la web. El total de la Fase 2 queda en unos 29 USD al mes, y ese servidor se compra con F2.9 ([plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md) §11).
 - Símbolo de la Fase 2 (la misma respuesta del propietario, que el agente toma como un sí a su propuesta de empezar solo con R_100): el bot *shadow* empieza solo con R_100 (Volatility 100 Index), el índice que ya se captura. El universo definitivo sigue pendiente.
 - MetaTrader 5 entra por un puente MQL5 dentro de la terminal; cada servidor MT5 es una fuente propia; las contraseñas MT5, solo de cuentas propias, las guarda la terminal y los servicios de buoh nunca las reciben ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
 - Prioridad del propietario (2026-10-26): el sitio oficial y la app de escritorio, que debe mostrar datos reales de Deriv. Consecuencia técnica: esos datos llegan por la API de buoh ([arquitectura objetivo](docs/arquitectura/arquitectura-objetivo.md), «Windows (futuro)»), y para eso el sistema de datos tiene que funcionar todo el día en un servidor. Por eso fueron antes la reconexión y la salud de F1.5 y la decisión del costo del alojamiento ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)); el plan de esa línea (alojamiento, API y pantallas con datos reales) se escribe después.
