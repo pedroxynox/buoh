@@ -461,7 +461,7 @@ La misma migración amplía el `CHECK` del motivo de `requested_response_inciden
 
 ## Reporte y evidencia
 
-`pnpm run data:health -- --json` emitirá el `HealthReport` canónico (F1.5). Todo incidente conserva:
+`pnpm run data:health -- --json` emitirá el `HealthReport` canónico (F1.5). Desde el PR 6 de ADR-0015 §13, `evaluateDataHealth` (`apps/market-data-worker/src/health/evaluate.ts`) deriva ese informe con las reglas 2 a 7 de ADR-0015 §8 a partir de lo observado: el log durable con el perfil de medición, el registro operativo, el último latido, el escritor vivo y el último dataset activo de la fuente. Todo incidente conserva:
 
 - IDs y rango UTC;
 - fuente, símbolos y conexión;

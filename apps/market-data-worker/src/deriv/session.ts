@@ -35,6 +35,7 @@ import {
 } from './connection.js';
 import { GapWatch, type GapWatchFailure } from './gap-watch.js';
 import { type HistoryRecoveryOutcome } from './history-recovery.js';
+import { checkLogContent } from './log-check.js';
 import { DERIV_SCHEMA_RELEASE, schemaEntryName } from './schema-archive.js';
 
 /** El bloqueo de la fuente que tiene la sesión (ADR-0012 §9): `SourceLock` en PostgreSQL. */
@@ -365,11 +366,10 @@ function latestTickTime(ticks: DerivedMarketData['ticks'], symbol: string): stri
 /**
  * Las comprobaciones del log antes de conectar (ADR-0015 §5), en este orden:
  *
- * 1. todos sus frames son de este conector (`connector_version_mismatch`);
- * 2. se deriva con el perfil de medición (`log_not_derivable`);
- * 3. es del símbolo pedido (`symbol_mismatch`): ningún cursor de la fuente es de otro símbolo y
- *    ningún tick tampoco. Un log lo escribe una sesión de un solo símbolo, así que sus cursores dan
- *    su símbolo, también si no tiene ticks;
+ * 1. a 3. las del contenido del log, que comparte con `data:health` (`checkLogContent`): todos sus
+ *    frames son de este conector (`connector_version_mismatch`), se deriva con el perfil de
+ *    medición (`log_not_derivable`) y es del símbolo pedido (`symbol_mismatch`), con los símbolos
+ *    de los cursores de la fuente;
  * 4. el último cursor del símbolo apunta a un evento del log (`cursor_ahead_of_log`): si no, el log
  *    perdió datos confirmados;
  * 5. con `retentionMs`, el evento durable más antiguo, el primero del log, no la cumplió todavía
@@ -389,33 +389,17 @@ function checkLog(
   },
 ): { readonly end: SessionEnd } | { readonly log: StartupLog } {
   const { profile, symbol } = preparation;
-  const foreign = segments.some((segment) =>
-    segment.some(
-      (event) =>
-        event.kind === 'raw_source_frame' && event.connector_version !== profile.connector_version,
-    ),
-  );
-  if (foreign) {
-    return { end: failed('connector_version_mismatch') };
-  }
-  let derived: DerivedMarketData;
-  try {
-    derived = deriveMarketData(segments, profile);
-  } catch (error) {
-    return { end: notDerivable(error) };
-  }
-  // El perfil admite solo el símbolo pedido, así que todo tick derivado es de ese símbolo: un tick de
-  // otro símbolo queda como frame inválido con `symbol_not_allowed`.
-  const otherTicks = derived.incidents.some(
-    (incident) =>
-      incident.incident_type === 'invalid_source_frame' &&
-      incident.evidence.reason === 'symbol_not_allowed',
-  );
   const { cursors } = startup;
-  const otherCursor = cursors?.symbols.some((item) => item !== symbol) === true;
-  if (otherCursor || otherTicks) {
-    return { end: failed('symbol_mismatch') };
+  const checked = checkLogContent({
+    cursorSymbols: cursors?.symbols ?? [],
+    profile,
+    segments,
+    symbol,
+  });
+  if (checked.status === 'failed') {
+    return { end: failed(checked.reason, checked.detail) };
   }
+  const { derived } = checked;
   const events = segments.flat();
   const latest = cursors?.latest ?? null;
   if (
