@@ -13,7 +13,7 @@ Kiro Web abre el espacio de trabajo en `/projects/sandbox`, con el repositorio e
 1. Instalar las skills: `node /projects/sandbox/buoh/.kiro/instalar-skills.mjs`. Si termina con 1, decir al propietario en una línea qué origen faltó y seguir con las demás. Si el instalador de la rama de la sesión no es el de `main` (`git -C /projects/sandbox/buoh diff --quiet origin/main -- .kiro/instalar-skills.mjs` falla), no ejecutarlo sin preguntar antes al propietario: puede traer skills que nadie ha revisado (ADR-0014, «Consecuencias»).
 2. Activar la skill `caveman` («Comunicación con el propietario»).
 3. Leer, en orden: `AGENTS.md`, `PROJECT_STATUS.md`, `.kiro/steering/fundamentos-buoh.md`, este archivo, [`skills-de-kiro.md`](skills-de-kiro.md), el plan activo y lo que toque la tarea.
-4. Comprobar el estado real: `git fetch`, la rama actual y `gh api "repos/pedroxynox/buoh/pulls?state=all&per_page=5"`. Cada incremento empieza en una rama nueva desde `main` actualizado; una rama ya fusionada no se reutiliza.
+4. Comprobar el estado real: `git fetch`, la rama actual y `gh api "repos/pedroxynox/buoh/pulls?state=all&per_page=5"`. Cada incremento empieza en una rama nueva desde `main` actualizado; una rama ya fusionada no se reutiliza. Si un PR listo sigue abierto, recordarle al propietario en una línea que espera su fusión.
 5. Poner título y descripción a la sesión de Kiro.
 
 El contexto que dura vive en `AGENTS.md`, `PROJECT_STATUS.md` y `.kiro/steering/`. No crear otros archivos de contexto o memoria en el repositorio, como `.claude/napkin.md`.
@@ -40,7 +40,7 @@ Si una sesión empieza sin seguir estos pasos, el propietario puede pedirlo en s
 - Ante conflicto o decisión ausente, seguir el protocolo de `AGENTS.md`. Los detalles técnicos que ese protocolo deja al agente se resuelven investigando, sin trasladarlos al propietario.
 - Cuando el protocolo pida una decisión humana (producto, dinero, riesgo o seguridad), explicar al propietario las opciones y la recomendación en palabras simples. Las preguntas y los avisos de seguridad van en frases completas.
 - Actualizar el estado de la sesión de Kiro cada vez que cambie la tarea: el propietario lo mira para saber qué pasa.
-- Al terminar, fusionar el PR con las condiciones de `AGENTS.md` («Fusión») y dar al propietario el enlace del PR y un resumen corto. Si el PR espera su visto bueno, explicarle el cambio en palabras simples y preguntar.
+- Al terminar, dejar el PR listo con las condiciones de `AGENTS.md` («Fusión») y dar al propietario el enlace y un resumen corto de lo que cambia y de si necesita algo más que su fusión. El agente no fusiona: fusiona el propietario.
 
 ## Comandos y GitHub
 
@@ -48,7 +48,7 @@ Si una sesión empieza sin seguir estos pasos, el propietario puede pedirlo en s
 - Si una herramienta larga se corta, por ejemplo la revisión semántica, volver a lanzarla y avisar al propietario en una línea. Relanzar una revisión que se cortó no cuenta como una segunda revisión semántica.
 - Antes de cada commit, ejecutar `DOCS_BASE_REF=origin/main pnpm run verify:pr` y confirmar que el código de salida es 0. El final del log no basta: un fallo de tipos puede quedar más arriba.
 - Los subcomandos `gh pr` y `gh issue` no funcionan aquí, y `gh run list` tampoco. Crear el PR con `gh api repos/pedroxynox/buoh/pulls -f title=… -F body=@<archivo> -f head=<rama> -f base=main` y revisar CI con `gh api repos/pedroxynox/buoh/commits/<sha>/check-runs`.
-- Para fusionar: primero el comentario con `gh api repos/pedroxynox/buoh/issues/<n>/comments -f body=…`, y después `gh api -X PUT repos/pedroxynox/buoh/pulls/<n>/merge -f merge_method=merge -f sha=<commit con CI en verde>`. Con `sha`, GitHub rechaza la fusión (409) si el PR cambió entretanto.
+- El comentario de PR listo se deja con `gh api repos/pedroxynox/buoh/issues/<n>/comments -F body=@<archivo>`. El agente no llama a la API de fusión (`PUT …/pulls/<n>/merge`). Para saber si el propietario ya fusionó: `gh api repos/pedroxynox/buoh/pulls/<n> --jq .merged_at`.
 - Guardar cuerpos de PR, logs y binarios auxiliares fuera del repo, por ejemplo en `/projects/sandbox/.buoh-local/`.
 
 ## PostgreSQL y SeaweedFS sin Docker
