@@ -79,7 +79,8 @@ Tipos de pendiente:
   - los contratos (`HistoryRecoveryResult`, `IngestionCursor`) y la derivación de continuidad en `packages/domain/src/quality.ts` existen;
   - desde el PR 4 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, la sesión de ingesta del worker (`startDerivSession`) reconecta tras cada pérdida de conexión con espera exponencial y jitter inyectable, repara los cierres no registrados y pide por la conexión nueva la historia del hueco con `ticks_history`. La ejecutan `data:smoke`, en memoria, y desde el PR 5 el comando continuo `ingest`, sobre PostgreSQL y el almacenamiento de objetos, con un esquema y un bucket propios y la retención de 23 horas (ADR-0015 §7). La tabla de cierres del runbook dice qué cierres pierden datos. El esquema de `forget` se carga con la release fijada, pero no se usa (ADR-0015 §1);
   - desde el PR 5, la sesión persiste en PostgreSQL el `IngestionCursor`, después de cada `ConnectionClosed` durable y al parar, y el latido (`ingestion_cursors` e `ingestion_heartbeats`, migración `0004`); al arrancar comprueba el log contra el último cursor del símbolo (ADR-0015 §5 y §6);
-  - faltan `data:health`, que mostrará la salud viva, con `recovering` hasta que la historia cubra el hueco (P-F1-05), y la evidencia de la puerta de salida, con el smoke de reconexión contra Deriv y los ensayos de reinicio (P-F1-06).
+  - desde el PR 6, `data:health` muestra la salud viva, con `recovering` hasta que la historia cubra el hueco (P-F1-05);
+  - falta la evidencia de la puerta de salida, con el smoke de reconexión contra Deriv y los ensayos de reinicio (P-F1-06).
 - **Esperado:** ante un `ConnectionClosed` no pedido, el worker:
   - pasa a `recovering`;
   - espera con retroceso exponencial y jitter inyectable;
@@ -91,11 +92,11 @@ Tipos de pendiente:
 - **Aceptación (plan §6):** prueba con reloj y transporte falsos, y smoke vivo aparte.
 - **Abierto:** pendientes registrados 6 de F1.2 y 7 de F1.3, en `PROJECT_STATUS.md`. El diseño está en [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §2 a §6, que también cierra esos dos pendientes.
 
-### P-F1-05. Reporte de salud y `pnpm run data:health -- --json` (`F1-HEALTH-001`) — parcial
+### P-F1-05. Reporte de salud y `pnpm run data:health -- --json` (`F1-HEALTH-001`) — parcial: falta la evidencia de P-F1-06
 
 - **Objetivo:** emitir el `HealthReport` en formato máquina.
 - **Fuente:** plan de Fase 1 §5 y §6, y runbook («Reporte y evidencia»).
-- **Estado (verificado):** existen el contrato (`packages/contracts/src/health.ts`) y la derivación pura (`deriveHealthReport` en `packages/domain/src/health.ts`). No hay comando ni conexión con el estado real de conexión y backlog.
+- **Estado (verificado):** existen el contrato (`packages/contracts/src/health.ts`) y la derivación pura (`deriveHealthReport` en `packages/domain/src/health.ts`). Desde el PR 6 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, `pnpm run data:health -- --json` emite el informe desde fuera del proceso que ingiere, sin tomar el bloqueo ni escribir: deriva el log durable y le suma el registro operativo, el último latido (conexión y backlog), el escritor vivo según `pg_locks` y el último dataset activo, con las siete reglas de ADR-0015 §8 (runbook, «Salud de datos»). Falta ejecutarlo en los ensayos de la puerta de salida (P-F1-06).
 - **Esperado:** valida y emite `HealthReport` con:
   - salud y estado de conexión;
   - backlog por conteo y bytes;
