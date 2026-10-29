@@ -359,7 +359,7 @@ Después, `aws … s3 ls` ya no muestra el bucket, y `SELECT nspname FROM pg_nam
 | `stopped_for_retention` | si paró porque el evento durable más antiguo cumplió 23 horas |
 | `connections` | por cada intento, en orden: `connection_id` (`null` si no llegó a abrirse), su cierre (`closure_type`, `reason` y `persisted`, o `null`) y su fin (`end`) |
 | `waits_ms` | las esperas antes de cada reintento, en milisegundos y en orden, también las de volver a leer el log, tomar el bloqueo o guardar el esquema |
-| `recoveries` | cada recuperación de historia pedida, en orden: `status` (`complete`, `partial`, `unavailable` o `abandoned`), `reason`, `attempts`, `pages`, `recovered_event_count` y si su resultado quedó en el log (`durable`), sin horas ni precios. Una abandonada lleva `null` en los cuatro primeros |
+| `recoveries` | cada recuperación de historia pedida, en orden: `status` (`complete`, `partial`, `unavailable` o `abandoned`), `reason`, `attempts`, `pages`, `recovered_event_count` y si su resultado quedó en el log (`durable`), sin horas ni precios. Una abandonada lleva `null` en `reason`, `attempts`, `pages` y `recovered_event_count`, y `durable` en `false` |
 | `schemas` | release y SHA-256 de `schemas.zip`, o `null` si no cargaron |
 | `source`, `connector_version`, `symbol`, `started_at_utc` y `finished_at_utc` | la fuente, el conector, el símbolo y las horas del proceso |
 
