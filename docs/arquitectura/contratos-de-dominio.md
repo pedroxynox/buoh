@@ -135,7 +135,7 @@ Desde el PR 3 de [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §
 - `partial` y `unavailable` llevan uno de estos motivos: `history_page_limit`, `history_error_response`, `history_invalid`, `history_timeout`, `history_boundary_missing` o `history_boundary_mismatch`. `unavailable` significa que falló la primera página. Si se cumple más de uno, va el primero en este orden: una página que falla (`history_error_response`, `history_invalid` o `history_timeout`), un extremo con otra cotización (`history_boundary_mismatch`), el tope de páginas sin llegar al inicio del rango (`history_page_limit`) y un extremo que falta (`history_boundary_missing`);
 - un intento que termina con `history_error_response`, `history_timeout` o `history_boundary_missing` se repite, con 30 000 ms entre intentos y hasta tres en total. Solo se persiste el resultado del último intento.
 
-La sesión que lo pide llega con el PR 4.
+Desde el PR 4, lo pide la sesión de ingesta (`startDerivSession`) por la conexión nueva, 2000 ms después del primer tick durable posterior al cierre (ADR-0015 §4, «Cuándo»).
 
 ## `IngestionCursor`
 
@@ -567,7 +567,7 @@ Implementado en F1.3b ([ADR-0005](adr/0005-persistencia-local-y-formato-fisico-f
 |---|---|---|
 | `severity` | `critical` | `error` si impone `paused` (`websocket_frame`, `in_memory_queue_*`); `critical` si impone `failed` (`schema_*`) |
 | `observed_ref` | `observation_id` del frame afectado si ya se asignó; si no, un UUIDv7 nuevo del generador inyectado que identifica el intento | igual |
-| `related_refs` | último source event durable, o `[]` si no existe | igual |
+| `related_refs` | último source event durable, o `[]` si no existe | igual, salvo un límite de esquema (`schema_*`) de la sesión de ingesta del worker, que prepara los esquemas antes de tomar el bloqueo y abrir el log: esa incidencia lleva `[]` |
 | `symbol` | `null` salvo atribución cierta | `null` salvo atribución cierta sin parsear contenido fuera del límite |
 | `observed_at_utc` | reloj UTC inyectado al detectar | igual |
 

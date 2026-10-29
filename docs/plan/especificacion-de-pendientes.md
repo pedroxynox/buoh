@@ -77,7 +77,7 @@ Tipos de pendiente:
 - **Fuente:** plan de Fase 1 §6, runbook («Inicio», «Desconexión de WebSocket», «Almacenamiento no disponible») y ADR-0005.
 - **Estado (verificado):**
   - los contratos (`HistoryRecoveryResult`, `IngestionCursor`) y la derivación de continuidad en `packages/domain/src/quality.ts` existen;
-  - en el worker no hay reconexión, espera exponencial ni consulta de historia. Desde F1.4b, el adaptador de Deriv termina en cada pérdida de conexión con su `ConnectionClosed`, y la tabla de cierres del runbook dice cuáles pierden datos. Los esquemas de `ticks_history` y `forget` ya se cargan con la release fijada, pero el adaptador no los pide;
+  - desde el PR 4 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, la sesión de ingesta del worker (`startDerivSession`) reconecta tras cada pérdida de conexión con espera exponencial y jitter inyectable, repara los cierres no registrados y pide por la conexión nueva la historia del hueco con `ticks_history`. Hoy solo la ejecuta `data:smoke`, en memoria: el comando continuo `ingest` llega con el PR 5. La tabla de cierres del runbook dice qué cierres pierden datos. El esquema de `forget` se carga con la release fijada, pero no se usa (ADR-0015 §1);
   - `IngestionCursor` tiene esquema, pero no tabla ni almacén.
 - **Esperado:** ante un `ConnectionClosed` no pedido, el worker:
   - pasa a `recovering`;

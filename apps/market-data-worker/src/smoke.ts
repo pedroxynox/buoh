@@ -1,11 +1,17 @@
-import { type ConnectionClosed } from '@buoh/contracts';
+import { type ConnectionClosed, type HistoryRecoveryResult } from '@buoh/contracts';
 import { type InvalidFrameReason } from '@buoh/domain';
 
-import { runDerivAdapter } from './deriv/adapter.js';
-import { type DerivSessionEnd } from './deriv/connection.js';
+import { type HistoryRecoveryOutcome } from './deriv/history-recovery.js';
 import { type Scheduler } from './deriv/ports.js';
 import { DERIV_CONNECTOR_VERSION, DERIV_SOURCE } from './deriv/profile.js';
 import { type ExpectedSchemaArchive } from './deriv/schema-archive.js';
+import {
+  SMOKE_INTERRUPT_REASON,
+  startDerivSession,
+  type DerivSessionConnection,
+  type DerivSessionResult,
+  type SessionLockProvider,
+} from './deriv/session.js';
 import { type SocketFactory } from './deriv/socket.js';
 import {
   InMemoryCatalogStore,
@@ -35,26 +41,55 @@ export interface Distribution {
   readonly p99: number;
 }
 
+/** Una recuperación de historia en el resultado del smoke: sin horas ni precios. */
+export interface SmokeRecovery {
+  /** Intentos hechos, de 1 a 3. */
+  readonly attempts: number;
+  /** Páginas pedidas en el último intento. */
+  readonly pages: number;
+  /** Motivo de `partial` o `unavailable`; `null` con `complete`. */
+  readonly reason: string | null;
+  /** Ticks recuperados entre los dos extremos; `null` con `unavailable`. */
+  readonly recovered_event_count: number | null;
+  readonly status: HistoryRecoveryResult['status'];
+}
+
 /**
- * Resultado saneado del smoke (ADR-0012 §10): solo tiempos, conteos, códigos y hashes. Nunca lleva
- * payloads ni precios.
+ * Resultado saneado del smoke (ADR-0012 §10 y ADR-0015 §9): solo tiempos, conteos, códigos y
+ * hashes. Nunca lleva payloads ni precios.
  */
 export interface SmokeReport {
+  /**
+   * Catálogo vigente del último intento, o `null` si ese intento no llegó a abrirse o no lo
+   * obtuvo.
+   */
   readonly catalog: { readonly content_sha256: string; readonly entry_count: number } | null;
+  /** Cierre del último intento de conexión, o `null` si ese intento no llegó a abrirse. */
   readonly closure: {
     readonly closure_type: ConnectionClosed['closure_type'];
     readonly persisted: boolean;
     readonly reason: string;
   } | null;
+  /**
+   * Las conexiones que llegaron a abrirse (con `connection_id`). Un intento que no abrió no cuenta;
+   * se ve en `reconnect_waits_ms` y, si fue el último, en `closure` `null`.
+   */
+  readonly connections: number;
   readonly connector_version: string;
-  /** Recepción menos la hora del tick, sin el primer tick de la suscripción. */
+  /** Recepción menos la hora del tick, sin el primer tick de cada suscripción. */
   readonly delivery_delay_ms: Distribution | null;
   readonly duration_seconds: number;
-  readonly end: DerivSessionEnd;
+  /**
+   * Cómo terminó la sesión (`DerivSessionResult.end`). Si el smoke la paró porque a la duración
+   * pedida no había llegado ningún tick durable y la sesión terminó `completed`, es `failed` con
+   * `no_ticks`, y `detail` es el motivo del último intento que terminó por su cuenta (por ejemplo
+   * `connect_failed`, `connect_timeout` o `remote_closed`) o `null`.
+   */
+  readonly end: DerivSessionResult['end'];
   readonly finished_at_utc: string;
   /**
-   * Retraso del primer tick de la suscripción. Va aparte porque puede ser un tick que Deriv ya
-   * tenía al suscribirse, así que su retraso puede incluir su antigüedad.
+   * Retraso del primer tick de la primera suscripción. Va aparte porque puede ser un tick que Deriv
+   * ya tenía al suscribirse, así que su retraso puede incluir su antigüedad.
    */
   readonly first_tick_delay_ms: number | null;
   readonly frames: {
@@ -74,18 +109,36 @@ export interface SmokeReport {
     /** Respuestas pedidas inválidas (ADR-0012 §6), por motivo. */
     readonly requested_responses: Readonly<Record<string, number>>;
   };
+  /** El corte pedido con `--interrupt-after-seconds`, en segundos, o `null`. */
+  readonly interrupt_after_seconds: number | null;
   readonly note: string;
+  /** Las esperas antes de cada reintento, en milisegundos y en orden. */
+  readonly reconnect_waits_ms: readonly number[];
+  /**
+   * Las conexiones abiertas después de la primera. La sesión solo vuelve a conectar después de una
+   * conexión que terminó sin el cierre previsto (`disconnected` o `paused`), también la del corte.
+   * Un intento que no llegó a abrirse no cuenta.
+   */
+  readonly reconnections: number;
+  /** La última recuperación de historia cuyo resultado quedó en el log, o `null`. */
+  readonly recovery: SmokeRecovery | null;
   readonly schemas: { readonly archive_sha256: string; readonly release: string } | null;
-  /** Recepción local menos la hora del servidor (`time`), o `null` si no se obtuvo. */
+  /**
+   * Recepción local menos la hora del servidor (`time`) en el último intento, o `null` si ese
+   * intento no llegó a abrirse o no la obtuvo.
+   */
   readonly server_time_offset_ms: number | null;
   readonly source: string;
   readonly source_time_resolution_ms: number;
   readonly started_at_utc: string;
   readonly status: 'failed' | 'passed';
   readonly symbol: string;
-  /** Nombre oficial del símbolo en el catálogo recibido, sin traducir. */
+  /**
+   * Nombre oficial del símbolo en el catálogo del último intento, sin traducir; `null` si ese
+   * intento no llegó a abrirse o el símbolo no está en su catálogo.
+   */
   readonly symbol_name: string | null;
-  /** Intervalo entre las horas de ticks consecutivos. */
+  /** Intervalo entre las horas de ticks consecutivos de una misma suscripción. */
   readonly tick_interval_ms: Distribution | null;
 }
 
@@ -115,15 +168,75 @@ function tally(keys: readonly string[]): Record<string, number> {
   return counts;
 }
 
+/**
+ * La última recuperación de historia cuyo resultado quedó en el log (`finished` y `durable`), o
+ * `null`. Una `abandoned` no cuenta, porque puede no haber pedido ninguna página, ni una cuyo
+ * resultado no quedó durable.
+ */
+export function lastDurableRecovery(
+  outcomes: readonly HistoryRecoveryOutcome[],
+): SmokeRecovery | null {
+  const outcome = outcomes.findLast((item) => item.status === 'finished' && item.durable);
+  if (outcome?.status !== 'finished') {
+    return null;
+  }
+  const { result } = outcome;
+  return {
+    attempts: outcome.attempts,
+    pages: outcome.pages,
+    reason: result.status === 'complete' ? null : result.reason,
+    recovered_event_count: result.status === 'unavailable' ? null : result.recovered_event_count,
+    status: result.status,
+  };
+}
+
+/**
+ * El bloqueo de la fuente del smoke: siempre tomado. El smoke guarda todo en la memoria de su
+ * proceso, así que ningún otro proceso escribe su log (ADR-0012 §10).
+ */
+const SMOKE_LOCK: SessionLockProvider = {
+  acquire: () => Promise.resolve({ held: true, release: () => Promise.resolve() }),
+};
+
+/** Motivo del fin cuando el smoke para una sesión que no tuvo ningún tick durable a tiempo. */
+const NO_TICKS = 'no_ticks';
+
+/**
+ * El motivo del fin del último intento que terminó por su cuenta, o `null`. Un intento en curso que
+ * corta la parada del smoke termina `completed`, sin motivo, y no cuenta.
+ */
+function lastAttemptReason(connections: readonly DerivSessionConnection[]): string | null {
+  const end = connections.findLast((connection) => connection.end.status !== 'completed')?.end;
+  return end === undefined || end.status === 'completed' ? null : end.reason;
+}
+
+/** Las horas de un tick, en ms desde la época: el precio nunca sale del log en memoria. */
+interface TickTimes {
+  readonly event: number;
+  readonly received: number;
+}
+
 export interface SmokeInput {
   readonly alert?: OperationalAlert;
   readonly connect: SocketFactory;
+  /**
+   * Duración de la sesión, desde su primer tick durable. También es el límite para ese tick: si a
+   * esa duración desde el inicio del smoke no llegó ningún tick durable, el smoke para la sesión y
+   * falla con `no_ticks`.
+   */
   readonly durationSeconds: number;
   /** Archivo de esquemas esperado; por defecto, la release fijada. */
   readonly expected?: ExpectedSchemaArchive;
   readonly fetch: typeof fetch;
+  /**
+   * El corte del smoke de reconexión (ADR-0015 §9), en segundos desde el primer tick durable: un
+   * entero desde 1 y menor que la duración. Sin él (o con `null`), no corta.
+   */
+  readonly interruptAfterSeconds?: number | null;
   readonly nextId: () => string;
   readonly now: () => string;
+  /** Azar de la espera entre intentos, en [0, 1). */
+  readonly random: () => number;
   readonly scheduler: Scheduler;
   readonly schemaUrl?: string;
   readonly symbol: string;
@@ -132,10 +245,17 @@ export interface SmokeInput {
 }
 
 /**
- * `pnpm run data:smoke` (ADR-0012 §10): una conexión al canal público de Deriv con el perfil de
- * medición y almacenamiento en memoria de este proceso. Nada se escribe en disco, PostgreSQL ni
- * almacenamiento de objetos, y todo se borra al terminar (ADR-0004 §13). Pasa si la conexión termina
- * con el cierre previsto y llegó al menos un tick.
+ * `pnpm run data:smoke` (ADR-0012 §10 y ADR-0015 §9): la sesión de ingesta contra el canal público
+ * de Deriv, con el perfil de medición, almacenamiento en memoria de este proceso, un bloqueo en
+ * memoria siempre tomado y el cierre previsto a la duración pedida. Nada se escribe en disco,
+ * PostgreSQL ni almacenamiento de objetos, y todo se borra al terminar (ADR-0004 §13). Una
+ * desconexión no prevista se reconecta y se recupera; con `interruptAfterSeconds`, la sesión
+ * corta su propio socket una vez. Si a la duración pedida desde su inicio todavía no llegó ningún
+ * tick durable, el smoke para la sesión y falla con `no_ticks`. Pasa si la sesión terminó
+ * `completed`, llegó al menos un tick y el último intento cerró con el cierre previsto, que quedó
+ * en el log. Además, sin corte, no hubo ninguna reconexión; con él, hubo exactamente una, la que
+ * siguió al corte de la primera conexión abierta, y la última recuperación que quedó en el log es
+ * `complete`. Un intento que no llegó a abrirse no cuenta como conexión ni como reconexión.
  */
 export async function runSmoke(input: SmokeInput): Promise<SmokeReport> {
   const startedAt = input.now();
@@ -143,72 +263,123 @@ export async function runSmoke(input: SmokeInput): Promise<SmokeReport> {
   const sourceLog = new InMemorySourceLogStore();
   const operational = new InMemoryOperationalStore();
   const requested = new InMemoryRequestedResponseIncidentStore();
-  const openLog = () =>
-    SourceEventLog.open({
-      objects,
-      source: DERIV_SOURCE,
-      store: sourceLog,
-      zlibVersion: input.zlibVersion,
-    });
   const registry = await OperationalRegistry.open({
     ...(input.alert === undefined ? {} : { alert: input.alert }),
     source: DERIV_SOURCE,
     store: operational,
   });
 
-  // Solo los tiempos de cada tick: el precio nunca sale del log en memoria.
-  const tickTimes: { readonly event: number; readonly received: number }[] = [];
+  // Los ticks, por suscripción. Cada conexión pide el catálogo una vez, antes de suscribirse, así
+  // que el primer tick después de cada catálogo es el primero de una suscripción.
+  const subscriptions: TickTimes[][] = [];
+  let subscribing = true;
   const invalid: InvalidFrameReason[] = [];
   const nonTick: string[] = [];
-  const result = await runDerivAdapter({
+  const interruptAfterSeconds = input.interruptAfterSeconds ?? null;
+  const session = startDerivSession({
     ...(input.alert === undefined ? {} : { alert: input.alert }),
     catalog: new InMemoryCatalogStore(),
     connect: input.connect,
     durationMs: input.durationSeconds * 1000,
     ...(input.expected === undefined ? {} : { expected: input.expected }),
     fetch: input.fetch,
-    log: await openLog(),
+    ...(interruptAfterSeconds === null ? {} : { interruptAfterMs: interruptAfterSeconds * 1000 }),
+    lock: SMOKE_LOCK,
     nextId: input.nextId,
     now: input.now,
+    openLog: () =>
+      SourceEventLog.open({
+        objects,
+        source: DERIV_SOURCE,
+        store: sourceLog,
+        zlibVersion: input.zlibVersion,
+      }),
+    random: input.random,
     registry,
-    reopenLog: openLog,
     requestedResponses: requested,
     scheduler: input.scheduler,
     ...(input.schemaUrl === undefined ? {} : { schemaUrl: input.schemaUrl }),
     serverTime: true,
     sink: {
       invalidFrame: ({ reason }) => invalid.push(reason),
-      nonTickFrame: ({ msg_type }) => nonTick.push(msg_type),
-      tick: (tick) =>
-        tickTimes.push({
+      nonTickFrame: ({ msg_type }) => {
+        nonTick.push(msg_type);
+        if (msg_type === 'active_symbols') {
+          subscribing = true;
+        }
+      },
+      tick: (tick) => {
+        if (subscribing) {
+          subscriptions.push([]);
+          subscribing = false;
+        }
+        subscriptions.at(-1)?.push({
           event: Date.parse(tick.event_time_utc),
           received: Date.parse(tick.received_at_utc),
-        }),
+        });
+      },
     },
     symbol: input.symbol,
   });
+  // El plazo del cierre previsto solo empieza con el primer tick durable de la sesión: sin él, la
+  // sesión seguiría sin fin. Si a la duración pedida desde el inicio del smoke todavía no llegó
+  // ningún tick durable (cada uno entra en una suscripción), el smoke para la sesión.
+  const tickBound = { fired: false };
+  const cancelTickBound = input.scheduler.schedule(input.durationSeconds * 1000, () => {
+    if (subscriptions.length === 0) {
+      tickBound.fired = true;
+      session.stop();
+    }
+  });
+  const result = await session.done.finally(cancelTickBound);
   const finishedAt = input.now();
+  // La parada del límite deja la sesión `completed`; un fin `failed` conserva su motivo.
+  const end: SmokeReport['end'] =
+    tickBound.fired && result.end.status === 'completed'
+      ? {
+          detail: lastAttemptReason(result.connections),
+          reason: NO_TICKS,
+          status: 'failed',
+        }
+      : result.end;
 
+  // Un intento que no llegó a abrirse no es una conexión: no tuvo cierre, así que tampoco deja una
+  // reconexión. El cierre del resultado es el del último intento.
+  const closure = result.connections.at(-1)?.closure ?? null;
+  const opened = result.connections.filter((connection) => connection.connection_id !== null);
+  const reconnections = Math.max(0, opened.length - 1);
+  const recovery = lastDurableRecovery(result.recoveries);
+  const ticks = subscriptions.reduce((count, times) => count + times.length, 0);
+  const plannedClose =
+    closure?.closure_type === 'requested' && closure.reason === 'requested' && closure.persisted;
+  const reconnectedAsAsked =
+    interruptAfterSeconds === null
+      ? reconnections === 0
+      : reconnections === 1 &&
+        opened[0]?.closure?.reason === SMOKE_INTERRUPT_REASON &&
+        recovery?.status === 'complete';
+  const passed = end.status === 'completed' && ticks > 0 && plannedClose && reconnectedAsAsked;
+  const delay = (tick: TickTimes) => tick.received - tick.event;
+  const firstTick = subscriptions[0]?.[0];
   const snapshot = result.catalog?.snapshot ?? null;
-  const passed = result.end.status === 'completed' && tickTimes.length > 0;
-  const delays = tickTimes.map((tick) => tick.received - tick.event);
   return {
     catalog:
       snapshot === null
         ? null
         : { content_sha256: snapshot.content_sha256, entry_count: snapshot.entry_count },
-    closure: result.closure,
+    closure,
+    connections: opened.length,
     connector_version: DERIV_CONNECTOR_VERSION,
-    delivery_delay_ms: distribution(delays.slice(1)),
+    delivery_delay_ms: distribution(subscriptions.flatMap((times) => times.slice(1).map(delay))),
     duration_seconds: input.durationSeconds,
-    end: result.end,
+    end,
     finished_at_utc: finishedAt,
-    first_tick_delay_ms: delays[0] ?? null,
+    first_tick_delay_ms: firstTick === undefined ? null : delay(firstTick),
     frames: {
       invalid: invalid.length,
       non_tick: tally(nonTick),
       raw: sourceLog.rows.filter((row) => row.kind === 'raw_source_frame').length,
-      ticks: tickTimes.length,
+      ticks,
     },
     incidents: {
       invalid_frames: tally(invalid),
@@ -219,7 +390,11 @@ export async function runSmoke(input: SmokeInput): Promise<SmokeReport> {
         ),
       ),
     },
+    interrupt_after_seconds: interruptAfterSeconds,
     note: SMOKE_NOTE,
+    reconnect_waits_ms: result.waits_ms,
+    reconnections,
+    recovery,
     schemas: result.schemas,
     server_time_offset_ms: result.server_time_offset_ms,
     source: DERIV_SOURCE,
@@ -231,7 +406,9 @@ export async function runSmoke(input: SmokeInput): Promise<SmokeReport> {
       snapshot?.entries.find((entry) => entry.underlying_symbol === input.symbol)
         ?.underlying_symbol_name ?? null,
     tick_interval_ms: distribution(
-      tickTimes.slice(1).map((tick, index) => tick.event - (tickTimes[index]?.event ?? tick.event)),
+      subscriptions.flatMap((times) =>
+        times.slice(1).map((tick, index) => tick.event - (times[index]?.event ?? tick.event)),
+      ),
     ),
   };
 }
@@ -254,7 +431,7 @@ export function smokeExitCode(report: SmokeReport): 0 | 1 | 2 {
  */
 export async function smokeCommand(
   argv: readonly string[],
-  dependencies: Omit<SmokeInput, 'durationSeconds' | 'symbol'>,
+  dependencies: Omit<SmokeInput, 'durationSeconds' | 'interruptAfterSeconds' | 'symbol'>,
 ): Promise<{ readonly exitCode: 0 | 1 | 2; readonly line: string }> {
   let options;
   try {
@@ -272,6 +449,7 @@ export async function smokeCommand(
     const report = await runSmoke({
       ...dependencies,
       durationSeconds: options.durationSeconds,
+      interruptAfterSeconds: options.interruptAfterSeconds,
       symbol: options.symbol,
     });
     return { exitCode: smokeExitCode(report), line: JSON.stringify(report) };

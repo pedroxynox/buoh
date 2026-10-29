@@ -73,7 +73,7 @@ export function syntheticSchemas(): DerivSchemaSet {
 }
 
 /** Socket falso cuyo servidor responde enseguida cada `ping` del keepalive. */
-class PongingSocket extends FakeDerivSocket {
+export class PongingSocket extends FakeDerivSocket {
   override send(text: string): void {
     super.send(text);
     const body = JSON.parse(text) as { readonly ping?: unknown; readonly req_id?: unknown };
@@ -91,8 +91,11 @@ export interface ConnectionHarnessOptions {
   readonly answerPings?: boolean;
   /** El socket falso avisa del cierre solo con `finishClose`, como `ws`. */
   readonly deferClose?: boolean;
-  /** Tiempo de escucha hasta `forget_all`; por defecto, 600 000 ms, fuera de las pruebas. */
-  readonly durationMs?: number;
+  /**
+   * Tiempo de escucha hasta `forget_all`; por defecto, 600 000 ms, fuera de las pruebas. Con `null`,
+   * la conexión no lo tiene, como en la sesión: nunca pide el cierre previsto por su cuenta.
+   */
+  readonly durationMs?: number | null;
   /** Source events que el log ya tiene, de ejecuciones anteriores; por defecto, ninguno. */
   readonly events?: readonly SourceEvent[];
   /** Esquemas que cambian en el archivo sintético (`syntheticSchemaArchive`); por defecto, ninguno. */
@@ -162,7 +165,7 @@ export async function connectionHarness(options: ConnectionHarnessOptions = {}) 
       sockets.push(socket);
       return socket;
     },
-    durationMs: options.durationMs ?? 600_000,
+    ...(options.durationMs === null ? {} : { durationMs: options.durationMs ?? 600_000 }),
     endpoint: DERIV_PUBLIC_ENDPOINT,
     ingestor,
     nextId,
