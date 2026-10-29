@@ -1,10 +1,13 @@
 import { type WorkerConfig } from './config.js';
+import { type HealthCommandStores } from './health/command.js';
 import { stderrAlert, type OperationalAlert } from './operational/registry.js';
 import { PostgresCatalogStore } from './postgres/catalog-store.js';
 import { PostgresIngestionStatusStore } from './postgres/ingestion-status-store.js';
 import { PostgresMetadataStore, createPool } from './postgres/metadata-store.js';
+import { pendingMigrations } from './postgres/migrate.js';
 import { PostgresOperationalStore } from './postgres/operational-store.js';
 import { PostgresRequestedResponseIncidentStore } from './postgres/requested-response-store.js';
+import { sourceLockHolder } from './postgres/source-lock.js';
 import { PostgresSourceLogStore } from './postgres/source-log-store.js';
 import { S3ObjectStore } from './s3/object-store.js';
 import { failureReason } from './source-log/source-event-log.js';
@@ -44,5 +47,28 @@ export function openStores(config: WorkerConfig, options: OpenStoresOptions = {}
     pool,
     requestedResponses: new PostgresRequestedResponseIncidentStore(pool),
     sourceLog: new PostgresSourceLogStore(pool),
+  };
+}
+
+/**
+ * Las lecturas de `data:health` (ADR-0015 §8) sobre `openStores`, con su pool y su alerta: el log,
+ * el esquema de fuente guardado, el registro operativo, el cursor y el latido, el último dataset,
+ * el escritor vivo según `pg_locks` (`sourceLockHolder`) y las migraciones pendientes. Ninguna
+ * escribe ni toma el bloqueo. `close` libera las conexiones.
+ */
+export function openHealthStores(
+  config: WorkerConfig,
+  options: OpenStoresOptions = {},
+): HealthCommandStores {
+  const stores = openStores(config, options);
+  return {
+    close: stores.close,
+    datasets: stores.metadata,
+    ingestionStatus: stores.ingestionStatus,
+    lockHolder: (source) => sourceLockHolder(stores.pool, source),
+    objects: stores.objects,
+    operational: stores.operational,
+    pendingMigrations: () => pendingMigrations(stores.pool),
+    sourceLog: stores.sourceLog,
   };
 }
