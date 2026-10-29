@@ -13,6 +13,7 @@ import {
   syntheticSchemaArchive,
   type FakeDerivSocket,
 } from './support/deriv-fixtures.js';
+import { type MemoryObjectStore } from './support/memory-stores.js';
 import {
   holdObjectWrites,
   PREVIOUS,
@@ -755,6 +756,21 @@ describe('startDerivSession: el esquema de fuente guardado (ADR-0015 §7)', () =
   const schemaKey = (run: SessionRun) =>
     contentKey(run.fixture.expected.entries_sha256['ticks_response.schema.json']);
 
+  /**
+   * Deja bajo la clave del esquema de fuente otros bytes, que `bytes` hace con los del esquema, como
+   * un bucket que ya tenía esa clave con otro contenido.
+   */
+  const storeAtSchemaKey = (
+    objects: MemoryObjectStore,
+    bytes: (entry: Uint8Array) => Uint8Array,
+  ): void => {
+    const { entries, expected } = syntheticSchemaArchive();
+    objects.objects.set(
+      contentKey(expected.entries_sha256['ticks_response.schema.json']),
+      bytes(entries['ticks_response.schema.json']),
+    );
+  };
+
   it('con schemaObjects, guarda los bytes de ticks_response.schema.json de la release con la clave de su SHA-256 fijado antes de la primera conexión', async () => {
     const run = await sessionHarness({ schemaObjects: true });
 
@@ -788,25 +804,64 @@ describe('startDerivSession: el esquema de fuente guardado (ADR-0015 §7)', () =
     expect((await run.done).waits_ms).toEqual([500]);
   });
 
-  it('usa la escritura verificada: si la clave ya tiene otros bytes, no los da por buenos y no conecta', async () => {
+  it('usa la escritura verificada: si la clave ya tiene otros bytes, que ninguna espera cambia, termina failed con source_schema_mismatch sin conectar, sin otra espera y con el bloqueo suelto', async () => {
     const run = await sessionHarness({
       beforeStart: ({ objects }) => {
-        const entry =
-          syntheticSchemaArchive().expected.entries_sha256['ticks_response.schema.json'];
-        const bytes = Uint8Array.from(
-          syntheticSchemaArchive().entries['ticks_response.schema.json'],
-        ).reverse();
-        objects.objects.set(contentKey(entry), bytes);
+        storeAtSchemaKey(objects, (entry) => Uint8Array.from(entry).reverse());
       },
       schemaObjects: true,
     });
+
+    const result = await run.done;
+    expect(result.end).toEqual({
+      detail: null,
+      reason: 'source_schema_mismatch',
+      status: 'failed',
+    });
+    expect(result.waits_ms).toEqual([]);
     expect(run.sockets).toEqual([]);
-    expect(run.alerts).toEqual([
-      { event: 'source_schema_unavailable', reason: 'object_verification_failed' },
-    ]);
-    run.session.stop();
-    expect((await run.done).end).toEqual({ status: 'completed' });
+    expect(run.alerts).toEqual([]);
+    expect(run.timeline).toEqual(['acquire:1', 'release:1']);
+    expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
+  it('también si la clave tiene un objeto mayor que el esquema, que la lectura verificada, limitada a su tamaño, rechaza: termina failed con source_schema_mismatch sin conectar', async () => {
+    const run = await sessionHarness({
+      beforeStart: ({ objects }) => {
+        storeAtSchemaKey(objects, (entry) => Uint8Array.from([...entry, 0x0a]));
+      },
+      schemaObjects: true,
+    });
+
+    const result = await run.done;
+    expect(result.end).toEqual({
+      detail: null,
+      reason: 'source_schema_mismatch',
+      status: 'failed',
+    });
+    expect(result.waits_ms).toEqual([]);
     expect(run.sockets).toEqual([]);
+    expect(run.timeline).toEqual(['acquire:1', 'release:1']);
+  });
+
+  it('con source_schema_mismatch, como con las demás comprobaciones del arranque, no escribe nada al terminar: con el log de una ejecución anterior, ni cierra su segmento ni escribe un cursor', async () => {
+    const run = await sessionHarness({
+      beforeStart: ({ objects }) => {
+        storeAtSchemaKey(objects, (entry) => Uint8Array.from(entry).reverse());
+      },
+      events: previousConnectionEvents(),
+      schemaObjects: true,
+      status: true,
+    });
+
+    expect((await run.done).end).toEqual({
+      detail: null,
+      reason: 'source_schema_mismatch',
+      status: 'failed',
+    });
+    expect(run.sourceLog.rows).toHaveLength(3);
+    expect(run.sourceLog.closed).toEqual([]);
+    expect(run.status?.cursors).toEqual([]);
     expect(run.timeline).toEqual(['acquire:1', 'release:1']);
   });
 

@@ -1,6 +1,7 @@
 import { type IngestionCursor, type SourceEvent } from '@buoh/contracts';
 import { deriveMarketData, sourceEventTime, type DerivedMarketData } from '@buoh/domain';
 
+import { ObjectReadError } from '../errors.js';
 import { RawFirstIngestor } from '../ingestion/raw-first-ingestor.js';
 import {
   INGESTION_CURSOR_SCHEMA_VERSION,
@@ -162,10 +163,11 @@ export interface DerivSessionInput extends Pick<
    * El almacenamiento de objetos donde la sesión guarda, antes de su primera conexión, el esquema de
    * fuente del perfil: los bytes de `ticks_response.schema.json` de la release, con la clave de su
    * SHA-256 fijado (`contentKey`) y la escritura verificada del log (ADR-0015 §7), para que
-   * `data:health` (ADR-0015 §8, PR 6) derive el log sin descargar nada. Si no responde, o la clave ya
-   * tiene otros bytes, avisa con `source_schema_unavailable` y el motivo saneado, espera como entre
-   * intentos y lo vuelve a intentar. `ingest` pasa el de su log; sin él, como en el smoke, la sesión
-   * no lo guarda.
+   * `data:health` (ADR-0015 §8, PR 6) derive el log sin descargar nada. Si no responde, avisa con
+   * `source_schema_unavailable` y el motivo saneado, espera como entre intentos y lo vuelve a
+   * intentar. Si la clave ya tiene otros bytes, que la escritura no reemplaza, no conecta y termina
+   * `failed` con `source_schema_mismatch` (ADR-0015 §5). `ingest` pasa el de su log; sin él, como en
+   * el smoke, la sesión no lo guarda.
    */
   readonly schemaObjects?: ObjectStore;
 }
@@ -300,6 +302,28 @@ function integrityEnd(error: unknown): SessionEnd {
 
 const isNotDerivable = (end: SessionEnd): boolean =>
   end.status === 'failed' && end.reason === 'log_not_derivable';
+
+/**
+ * El esquema de fuente guardado no coincide con su SHA-256 fijado (ADR-0015 §5): su clave ya tiene
+ * otros bytes. Como con las demás comprobaciones del arranque, hace falta un log nuevo.
+ */
+const SOURCE_SCHEMA_MISMATCH = 'source_schema_mismatch';
+
+const isSchemaMismatch = (end: SessionEnd): boolean =>
+  end.status === 'failed' && end.reason === SOURCE_SCHEMA_MISMATCH;
+
+/**
+ * La escritura verificada del esquema de fuente falló porque su clave ya tiene otros bytes, que
+ * `putIfAbsent` nunca reemplaza, así que esperar no lo arregla. Con el mismo tamaño o menos, la
+ * relectura no coincide (`object_verification_failed`); con más, la lectura, limitada al tamaño
+ * del esquema, lo rechaza (`ObjectReadError` con `too_large`).
+ */
+function holdsOtherBytes(error: unknown): boolean {
+  return (
+    failureReason(error) === 'object_verification_failed' ||
+    (error instanceof ObjectReadError && error.reason === 'too_large')
+  );
+}
 
 /** Lo que el arranque lee del almacén del cursor (ADR-0015 §5). */
 interface StoredCursors {
@@ -525,8 +549,14 @@ class SessionRun {
       // Un log que no pasa sus comprobaciones no se toca, uno fallido no lo cierra `rotate`, y uno
       // desactualizado tras volver a tomar el bloqueo lo reabre antes con el bloqueo nuevo: si
       // entonces su contenido no pasa las comprobaciones, el fin es `log_not_derivable` y el
-      // segmento queda abierto.
-      if (this.#ingestor !== null && this.#lock?.held === true && !isNotDerivable(end)) {
+      // segmento queda abierto. Con un esquema de fuente guardado que no coincide, tampoco se toca,
+      // como tras las demás comprobaciones del arranque (ADR-0015 §5).
+      if (
+        this.#ingestor !== null &&
+        this.#lock?.held === true &&
+        !isNotDerivable(end) &&
+        !isSchemaMismatch(end)
+      ) {
         try {
           await this.#ingestor.rotate('requested');
         } catch (error) {
@@ -757,9 +787,11 @@ class SessionRun {
   /**
    * Guarda el esquema de fuente en `schemaObjects` antes de la primera conexión (ADR-0015 §7): los
    * bytes de la entrada que la carga ya comprobó contra su SHA-256 fijado, con la clave de ese
-   * SHA-256. Si la escritura verificada falla, avisa con `source_schema_unavailable` y el motivo
-   * saneado, espera como entre intentos y lo vuelve a intentar. Devuelve `null` cuando queda
-   * guardado, o sin `schemaObjects`, y el fin `completed` si llega la parada.
+   * SHA-256. Si la escritura verificada falla porque la clave ya tiene otros bytes, devuelve el fin
+   * `failed` con `source_schema_mismatch` (ADR-0015 §5); si falla de otra forma, porque el almacén no
+   * responde, avisa con `source_schema_unavailable` y el motivo saneado, espera como entre intentos
+   * y lo vuelve a intentar. Devuelve `null` cuando queda guardado, o sin `schemaObjects`, y el fin
+   * `completed` si llega la parada.
    */
   async #storeSourceSchema(preparation: DerivPreparation): Promise<SessionEnd | null> {
     const objects = this.#input.schemaObjects;
@@ -778,6 +810,9 @@ class SessionRun {
         await writeVerified(objects, contentKey(pinned), bytes, 'application/json');
         return null;
       } catch (error) {
+        if (holdsOtherBytes(error)) {
+          return failed(SOURCE_SCHEMA_MISMATCH);
+        }
         this.#alert({ event: 'source_schema_unavailable', reason: failureReason(error) });
         if (!(await this.#backoff())) {
           return COMPLETED;

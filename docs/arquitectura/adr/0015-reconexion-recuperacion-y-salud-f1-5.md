@@ -114,7 +114,8 @@ La sesión no arranca, con `failed`, si:
 - el log se escribió con otro `connector_version` (`connector_version_mismatch`) o no se puede derivar (`log_not_derivable`);
 - el símbolo del log, el del último cursor o, si no hay cursor, el de sus ticks, no es el pedido (`symbol_mismatch`);
 - el último cursor apunta a un evento que no está en el índice (`cursor_ahead_of_log`): el log perdió datos confirmados;
-- el evento durable más antiguo del log tiene 23 horas o más (`retention_expired`, §7).
+- el evento durable más antiguo del log tiene 23 horas o más (`retention_expired`, §7);
+- el esquema de fuente guardado no coincide con su SHA-256 fijado (`source_schema_mismatch`, §7): su clave ya tiene otros bytes, que la escritura no reemplaza.
 
 En todos los casos hace falta un log nuevo.
 
@@ -154,7 +155,7 @@ En todos los casos hace falta un log nuevo.
 - **Escritor vivo:** una sesión de PostgreSQL tiene el bloqueo de la fuente según `pg_locks`. Es el de este esquema si su PID es el del último latido.
 - **Reglas**, en orden. Las tres primeras deciden solas; de la 4 a la 6 se aplica una, que da la conexión, el backlog y un mínimo de salud, y la 7 completa el informe:
   1. argumentos o variables de entorno inválidos del propio comando: código 2 y un error saneado en stderr, sin informe, como `data:replay` y `data:smoke`;
-  2. lo incompatible que se observa: otro conector en el log, un esquema guardado que falta o no coincide con su SHA-256 fijado con el log no vacío, otro símbolo o un log que no se puede derivar → `failed`, con el motivo saneado en stderr;
+  2. lo incompatible que se observa: otro conector en el log, un esquema guardado que falta o no coincide con su SHA-256 fijado con el log no vacío, otro símbolo o un log que no se puede derivar → `failed`, con el motivo saneado en stderr; con un esquema guardado que no coincide, el mismo motivo que da la ingesta al arrancar, `source_schema_mismatch` (§5);
   3. PostgreSQL o el almacenamiento de objetos no responden → `paused`, con `connection_state` `disconnected`, backlog 0 y los demás campos `null`, porque no se pudo observar nada; stderr lo dice;
   4. sin escritor vivo: `connection_state` `disconnected`, backlog 0, porque no existe ninguna cola, y salud como mínimo `paused`, porque nada procesa la entrada. Si la última conexión no tiene cierre durable, se deriva como si ya tuviera el cierre `close_not_recorded` que registrará el próximo arranque (§3), así que muestra `connection_lost`;
   5. con escritor vivo de este esquema y un latido de hace 45 000 ms o menos: el backlog sale del latido, y la conexión también si el latido es posterior al último evento de conexión del log; si no, sale del log. Con una conexión que no es `connected`, la salud nunca es `healthy`: pasa a `recovering`. El latido de arranque dice `connecting`, así que un log vacío sigue en `starting`;
@@ -184,7 +185,7 @@ El runbook es la fuente canónica de la operación. Cada PR de §13 lo actualiza
 
 ### 11. Pruebas
 
-- Offline, sin red, reloj real ni azar: socket, reloj, temporizador, IDs y `random` falsos, y almacenes en memoria. Cubren la tabla de §3, la espera y su reinicio, la conexión anterior tras un `ConnectionOpened` no durable, la reparación con el log fallido y con el cierre adoptado, el bloqueo perdido, cada estado y motivo de §4 las comprobaciones al arrancar de §5 (`connector_version_mismatch`, `log_not_derivable`, `symbol_mismatch`, `cursor_ahead_of_log` y `retention_expired`), las de retención de §7 (valores por defecto rechazados y parada a las 23 horas), el smoke con corte de §9 y las reglas de §8, incluida la ventana entre una reconexión y su latido.
+- Offline, sin red, reloj real ni azar: socket, reloj, temporizador, IDs y `random` falsos, y almacenes en memoria. Cubren la tabla de §3, la espera y su reinicio, la conexión anterior tras un `ConnectionOpened` no durable, la reparación con el log fallido y con el cierre adoptado, el bloqueo perdido, cada estado y motivo de §4 las comprobaciones al arrancar de §5 (`connector_version_mismatch`, `log_not_derivable`, `symbol_mismatch`, `cursor_ahead_of_log`, `retention_expired` y `source_schema_mismatch`), las de retención de §7 (valores por defecto rechazados y parada a las 23 horas), el smoke con corte de §9 y las reglas de §8, incluida la ventana entre una reconexión y su latido.
 - `pnpm run test:integration`: las tablas de la migración `0004`, el cursor contra el índice y `data:health` contra PostgreSQL y el almacenamiento S3-compatible locales. El endpoint de Deriv está fijado, así que la sesión se prueba con su fábrica de sockets inyectada.
 - Los vectores v1 no cambian.
 
