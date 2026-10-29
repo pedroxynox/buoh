@@ -97,6 +97,8 @@ El agente deja cada PR listo para fusionar:
 - deja en el PR un comentario que dice que está listo, qué commit revisó la revisión semántica y en qué commit está CI en verde;
 - da al propietario el enlace y le explica en palabras simples qué cambia el PR.
 
+Si después de ese comentario entra otro commit, por ejemplo para actualizar la rama con `main`, el PR deja de estar listo hasta un comentario nuevo con CI en verde sobre ese commit. Actualizar con `main` sin otros cambios no reabre la revisión semántica; si hubo que resolver un conflicto, el comentario nuevo dice cómo.
+
 La fusión del propietario es su visto bueno. Por eso, al darle el enlace, el agente le dice también:
 
 - si el PR marca en la plantilla «Seguridad, secretos o permisos» o «Riesgo, señales o ejecución», qué cambia en la seguridad o el riesgo, que conservan revisión humana (`CONTRIBUTING.md`);

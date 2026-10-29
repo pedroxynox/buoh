@@ -13,7 +13,7 @@ Kiro Web abre el espacio de trabajo en `/projects/sandbox`, con el repositorio e
 1. Instalar las skills: `node /projects/sandbox/buoh/.kiro/instalar-skills.mjs`. Si termina con 1, decir al propietario en una línea qué origen faltó y seguir con las demás. Si el instalador de la rama de la sesión no es el de `main` (`git -C /projects/sandbox/buoh diff --quiet origin/main -- .kiro/instalar-skills.mjs` falla), no ejecutarlo sin preguntar antes al propietario: puede traer skills que nadie ha revisado (ADR-0014, «Consecuencias»).
 2. Activar la skill `caveman` («Comunicación con el propietario»).
 3. Leer, en orden: `AGENTS.md`, `PROJECT_STATUS.md`, `.kiro/steering/fundamentos-buoh.md`, este archivo, [`skills-de-kiro.md`](skills-de-kiro.md), el plan activo y lo que toque la tarea.
-4. Comprobar el estado real: `git fetch`, la rama actual y `gh api "repos/pedroxynox/buoh/pulls?state=all&per_page=5"`. Cada incremento empieza en una rama nueva desde `main` actualizado; una rama ya fusionada no se reutiliza. Si un PR listo sigue abierto, recordarle al propietario en una línea que espera su fusión.
+4. Comprobar el estado real: `git fetch`, la rama actual y `gh api "repos/pedroxynox/buoh/pulls?state=all&per_page=5"`. Cada incremento empieza en una rama nueva desde `main` actualizado; una rama ya fusionada no se reutiliza. Si un PR listo sigue abierto (`gh api "repos/pedroxynox/buoh/pulls?state=open"`), recordarle al propietario en una línea que espera su fusión.
 5. Poner título y descripción a la sesión de Kiro.
 
 El contexto que dura vive en `AGENTS.md`, `PROJECT_STATUS.md` y `.kiro/steering/`. No crear otros archivos de contexto o memoria en el repositorio, como `.claude/napkin.md`.
