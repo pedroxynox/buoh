@@ -103,17 +103,31 @@ export function canonicalQuoteDecimal(lexeme: string, pipSize: number): QuoteDec
 
 /**
  * `pip_size` válido (ADR-0004 §4): el lexema de un entero de 0 a 18, sin signo, fracción, exponente
- * ni ceros a la izquierda. Es la regla del normalizador para un tick, y la usa también quien lee
- * otra respuesta con cotizaciones, como la recuperación de historia del worker (ADR-0015 §4).
+ * ni ceros a la izquierda. Es la regla del normalizador para un tick; la respuesta de historia usa
+ * `pipSizeFromNumberLexeme`.
  */
 export function isPipSizeLexeme(lexeme: string): boolean {
   return /^(?:0|[1-9]\d*)$/u.test(lexeme) && Number(lexeme) <= 18;
 }
 
 /**
+ * `pip_size` de una respuesta de historia (ADR-0015 §4), que solo tiene que dar los decimales de sus
+ * cotizaciones: el lexema de un valor entero de 0 a 18, como el de `isPipSizeLexeme` o seguido de
+ * una fracción de ceros (`2.0`, como lo manda el canal real en la historia). Devuelve ese entero, o
+ * `null` con signo, otra fracción, exponente o ceros a la izquierda. La regla de un tick no cambia.
+ */
+export function pipSizeFromNumberLexeme(lexeme: string): number | null {
+  if (!/^(?:0|[1-9]\d*)(?:\.0+)?$/u.test(lexeme)) {
+    return null;
+  }
+  const value = Number(lexeme);
+  return value <= 18 ? value : null;
+}
+
+/**
  * Epoch en segundos enteros (ADR-0004 §4): el lexema de un entero, sin fracción, exponente ni ceros
- * a la izquierda, para no inventar fracciones. No comprueba el rango de la hora. Como
- * `isPipSizeLexeme`, es una regla del normalizador que comparte la recuperación de historia.
+ * a la izquierda, para no inventar fracciones. No comprueba el rango de la hora. Es una regla del
+ * normalizador que comparte la recuperación de historia.
  */
 export function isEpochSecondsLexeme(lexeme: string): boolean {
   return /^-?(?:0|[1-9]\d*)$/u.test(lexeme);

@@ -26,6 +26,7 @@ export {
   isEpochSecondsLexeme,
   isPipSizeLexeme,
   normalizeRawFrame,
+  pipSizeFromNumberLexeme,
   SymbolAttributionError,
   type InvalidFrameReason,
   type NormalizationResult,

@@ -15,6 +15,7 @@ import {
   isPipSizeLexeme,
   normalizeRawFrame,
   parseJsonPreservingNumbers,
+  pipSizeFromNumberLexeme,
   type PipelineProfile,
 } from '../src/index.js';
 
@@ -171,6 +172,22 @@ describe('isPipSizeLexeme e isEpochSecondsLexeme (reglas de lexema de ADR-0004 �
       reason: 'event_time_out_of_range',
       symbol: 'SYNTH_100',
     });
+  });
+});
+
+describe('pipSizeFromNumberLexeme (el pip_size de una respuesta de historia, ADR-0015 §4)', () => {
+  it.each([
+    ['2', 2],
+    ['2.0', 2],
+    ['18.00', 18],
+    ['0', 0],
+    ['0.0', 0],
+  ])('acepta %s y da %d: valor entero de 0 a 18, con o sin fracción de ceros', (lexeme, value) => {
+    expect(pipSizeFromNumberLexeme(lexeme)).toBe(value);
+  });
+
+  it.each(['2.5', '19', '19.0', '-2', '2e0', '02', '2.'])('rechaza %s', (lexeme) => {
+    expect(pipSizeFromNumberLexeme(lexeme)).toBeNull();
   });
 });
 

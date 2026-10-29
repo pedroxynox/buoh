@@ -418,6 +418,22 @@ describe('DerivConnection.recoverHistory: páginas y resultado (ADR-0015 §4)', 
     });
     expect(run.requested.incidents).toEqual([]);
   });
+
+  it('con pip_size 2.0, como lo manda el canal real en la historia, y los dos extremos con su cotización da complete', async () => {
+    const run = await recovering();
+    const outcome = run.connection.recoverHistory(REQUEST);
+    await settle();
+    const prices = ['100.25', '100.5', '100.75'];
+    run.socket().text(derivMessages.history(3, [S, S + 30, E], prices, '2.0'));
+
+    expect(await outcome).toMatchObject({
+      attempts: 1,
+      durable: true,
+      pages: 1,
+      result: { recovered_event_count: 1, status: 'complete' },
+    });
+    expect(run.requested.incidents).toEqual([]);
+  });
 });
 
 describe('DerivConnection.recoverHistory: precedencia del resultado', () => {
@@ -496,6 +512,11 @@ describe('DerivConnection.recoverHistory: páginas inválidas (ADR-0015 §4, «R
       'pip_size 2.5',
       'history_inconsistent',
       historyPage(`"history":{"prices":[100.25],"times":[${s}]},"pip_size":2.5`),
+    ],
+    [
+      'pip_size 19.0, entero pero mayor que 18',
+      'history_inconsistent',
+      derivMessages.history(3, [S], ['100.25'], '19.0'),
     ],
     [
       'times y prices de distinta longitud',
