@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 29
-updated_at_utc: "2026-10-29T06:00:00.000Z"
+status_version: 30
+updated_at_utc: "2026-10-29T12:55:15.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -31,7 +31,7 @@ Construir una base de datos de mercado reproducible: recibir datos públicos de 
   - F1.3b: log raw-first durable con rotación `segment_policy_version = 1.0.0`, registro operativo de `persistence_unavailable`/`source_limit_exceeded` y publicación desde segmentos cerrados del log (`F1-STREAM-001`).
 - F1.4 se entrega en dos partes. F1.4a añade las reglas de calidad 2.0.0 para fuentes que mezclan varios tipos de mensaje, como Deriv: mensajes que no son ticks, errores de la fuente, atribución por `echo_req` e incidencia sin símbolo con el esquema de incidencias 2.0.0 ([contratos de dominio](docs/arquitectura/contratos-de-dominio.md#semántica-ejecutable-de-reglas-200)).
 - F1.4b entregó el catálogo versionado de Deriv (`F1-CATALOG-001`) y el adaptador público, solo para escuchar (`F1-SOURCE-001`), con el smoke opt-in `pnpm run data:smoke` ([ADR-0012](docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md)): esquemas fijados, transporte `ws` con sus límites, cola en memoria, correlación, keepalive, versiones del catálogo e incidencias de respuestas pedidas en PostgreSQL, y bloqueo por fuente. La sesión de ingesta reconecta con espera, repara los cierres no registrados y recupera la historia del hueco ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md)).
-- La sesión de ingesta persiste el `IngestionCursor` y el latido en PostgreSQL (migración `0004`), y `pnpm --filter @buoh/market-data-worker run ingest -- --live` la ejecuta de forma continua sobre PostgreSQL y el almacenamiento de objetos, con un esquema y un bucket propios, y para sola a las 23 horas para borrar la captura antes de las 24 ([runbook](docs/operacion/runbook-ingesta-de-datos.md), «Captura viva continua»). `pnpm run data:health -- --json` emite el `HealthReport` de esa captura desde fuera del proceso que ingiere, sin tomar el bloqueo ni escribir nada ([runbook](docs/operacion/runbook-ingesta-de-datos.md), «Salud de datos»). Todavía falta la evidencia de la puerta de salida de Fase 1, y no hay despliegue del sistema de datos.
+- La sesión de ingesta persiste el `IngestionCursor` y el latido en PostgreSQL (migración `0004`), y `pnpm --filter @buoh/market-data-worker run ingest -- --live` la ejecuta de forma continua sobre PostgreSQL y el almacenamiento de objetos, con un esquema y un bucket propios, y para sola a las 23 horas para borrar la captura antes de las 24 ([runbook](docs/operacion/runbook-ingesta-de-datos.md), «Captura viva continua»). `pnpm run data:health -- --json` emite el `HealthReport` de esa captura desde fuera del proceso que ingiere, sin tomar el bloqueo ni escribir nada ([runbook](docs/operacion/runbook-ingesta-de-datos.md), «Salud de datos»). La evidencia de la puerta de salida de Fase 1 está reunida («Evidencia de F1.5»), y no hay despliegue del sistema de datos.
 - MetaTrader 5 (Deriv MT5 y Vantage) queda decidido como segunda integración ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)): sus datos llegan en una Fase 1B posterior a Fase 1, y operar en MT5 empieza en Fase 4 (demo). No existe código de MT5.
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`.
 - El sitio oficial está en internet desde el 2026-10-27, como sitio estático gratuito de Render, en `https://buoh-sitio.onrender.com` y sin indexar ni anunciar ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). Es lo único desplegado. El propietario conectó el repositorio, y la comprobación de [despliegue en Render](docs/operacion/despliegue-en-render.md) («Comprobar un despliegue») pasó ese día: cabeceras de seguridad y `noindex` en todas las respuestas, ninguna cookie, `404` propio y las seis páginas abren con el texto de `main` (detalle en P-V1-07 de la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md)).
@@ -46,6 +46,8 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 ## Siguiente tarea autorizada
 
 **`F1.5` — Reconexión, recuperación, salud y puerta de salida de Fase 1.**
+
+Entregada: el código en los PR #35 a #40 y la evidencia de la puerta de salida en la [evidencia de la puerta de salida de Fase 1](docs/operacion/evidencia-puerta-fase-1.md) («Evidencia de F1.5»). Para marcar la Fase 1 como `done` solo falta la decisión del propietario sobre el orden entre la Fase 1B y la Fase 2 («Bloqueos»). El resto de esta sección describe la tarea tal como se autorizó.
 
 Implementar la reconexión sin ocultar huecos (`F1-RECONNECT-001`) y la salud machine-readable con `pnpm run data:health -- --json` (`F1-HEALTH-001`), y reunir la evidencia de la puerta de salida de Fase 1 ([plan](docs/plan/fase-1-fundacion-de-datos.md) §8 y §9). Lo esperado y lo que falta de cada parte está en la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md), P-F1-04 a P-F1-06.
 
@@ -147,6 +149,14 @@ Catálogo versionado (`F1-CATALOG-001`) y adaptador público de Deriv (`F1-SOURC
   - Deriv da sus horas en segundos enteros, así que el retraso y el desfase medidos pueden superar a los reales hasta en 999 ms;
   - nada se escribió fuera del proceso (ADR-0004 §13).
 
+## Evidencia de F1.5
+
+Reconexión sin ocultar huecos (`F1-RECONNECT-001`) y salud machine-readable (`F1-HEALTH-001`), en la secuencia de siete PR de ADR-0015 §13 (#33, #35 a #39) más la corrección #40, que encontraron los ensayos.
+
+- Pruebas offline, sin red, reloj real ni aleatoriedad: dominio 137 y worker 574 en total, con la sesión, la espera, la reparación de cierres, la recuperación con `ticks_history`, el cursor, el latido, la retención, `ingest` y las siete reglas de `data:health`, con socket, reloj, temporizador y azar falsos.
+- `pnpm run test:integration` (77 en total): la migración `0004`, el cursor y el latido, el bloqueo de PostgreSQL, `ingest` y `data:health` contra PostgreSQL 18 y almacenamiento S3-compatible.
+- Los nueve ensayos de ADR-0015 §12, el 2026-10-29, contra el canal público de Deriv y un PostgreSQL y un almacenamiento desechables: todos pasan, y cada punto de la Definition of Done del plan §9 tiene su evidencia ([evidencia de la puerta de salida de Fase 1](docs/operacion/evidencia-puerta-fase-1.md)). La primera pasada encontró que la historia real trae `"pip_size":2.0`, que la recuperación rechazaba; #40 lo corrigió y los ensayos se repitieron.
+
 ## Pendientes registrados de F1.4a
 
 Detectados en la revisión semántica del PR #8; ninguno bloquea F1.5:
@@ -200,7 +210,7 @@ El antiguo pendiente 1 (atribución de símbolo y mensajes que no son ticks) que
 
 ## Bloqueos
 
-Ninguno para iniciar `F1.5`.
+Marcar la Fase 1 como `done` espera la decisión del propietario sobre el orden entre la Fase 1B (datos MT5) y la Fase 2 (bot shadow) (ADR-0015 §12). La evidencia ya está reunida («Evidencia de F1.5»).
 
 ## Decisiones pendientes que no bloquean Fase 1
 
@@ -209,7 +219,6 @@ Ninguno para iniciar `F1.5`.
 - Costo del alojamiento del sistema de datos (PostgreSQL y API en Render, [ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)), dónde se aloja el worker y el proveedor de almacenamiento de objetos, que Render no ofrece. Hace falta para que la app de escritorio muestre datos reales.
 - Equipo de la terminal MT5 (PC dedicado del propietario o servidor Windows o Linux con Wine) y su protección. Se decide en el primer incremento de Fase 1B (ADR-0007).
 - Revisión de términos de Deriv MT5, Vantage y MetaQuotes, y entidad de Vantage aplicable. Se completa en el primer incremento de Fase 1B.
-- Orden entre Fase 1B (datos MT5) y Fase 2 (bot shadow). Se decide al cerrar Fase 1.
 - Dominio propio del sitio oficial y revisión legal de su texto, antes de comprar el dominio, quitar el `noindex` o anunciarlo (ADR-0013).
 - Firmar el instalador de escritorio antes de distribuirlo (ADR-0010). El propietario ya lo instaló y probó en su PC el 2026-10-25.
 - Probar la app móvil en un teléfono real (Expo Go para el SDK 58 aún no está en las tiendas, o una compilación nativa), y cómo compilarla y distribuirla (ADR-0009).
