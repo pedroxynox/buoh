@@ -6,26 +6,28 @@ Los ensayos capturaron datos reales de Deriv en un PostgreSQL y un almacenamient
 
 ## Entorno
 
-- Sandbox de Kiro, sin Docker. PostgreSQL 18.4 y SeaweedFS 4.48 portátiles, como dice `.kiro/steering/entorno-sandbox-kiro.md` («PostgreSQL y SeaweedFS sin Docker»), solo en `127.0.0.1` y con credenciales generadas para la sesión, fuera del repositorio. CI usa PostgreSQL 18.6 (`infra/compose.yaml`).
-- Node.js 24.22.0 y pnpm 12.14.0 (`devEngines`). `BUOH_DEPLOYMENT_ENVIRONMENT=test`. Cada secuencia, con un esquema y un bucket propios, creados y borrados con los pasos de «Captura viva continua (`ingest`)» del [runbook](runbook-ingesta-de-datos.md).
+- Sandbox de Kiro, sin Docker. PostgreSQL 18.4 y SeaweedFS 4.48 portátiles, como dice `.kiro/steering/entorno-sandbox-kiro.md` («PostgreSQL y SeaweedFS sin Docker»), solo en la interfaz local y con credenciales generadas para la sesión, fuera del repositorio. CI usa PostgreSQL 18.6 (`infra/compose.yaml`).
+- Node.js 24.22.0 (`devEngines`) y pnpm 12.14.0 (`packageManager`). `BUOH_DEPLOYMENT_ENVIRONMENT=test`. Cada secuencia, con un esquema y un bucket propios, creados y borrados con los pasos de «Captura viva continua (`ingest`)» del [runbook](runbook-ingesta-de-datos.md).
 - Deriv: el canal público fijado (`DERIV_PUBLIC_ENDPOINT`), la release de esquemas `production_v20260901_0` (SHA-256 `adaab0acaf33bd159e45912995af2b78101049f43683d223f0ac11be0a39e7c3`), el conector `deriv-options-ws-1.1.0` y el símbolo `R_100`, sin credenciales.
-- Código: `main` en `2dffd23` (PR #35 a #40) más las herramientas de `scripts/evidencia-f1-5/`, que no son comandos del producto («Puerta de salida de Fase 1» en el runbook dice cómo repetir cada secuencia). `psql` no estaba instalado, así que los bloques SQL del runbook corrieron tal cual con un sustituto mínimo sobre `pg` de Node.
+- Código: `main` en `2dffd23` (PR #35 a #40) más las herramientas de `scripts/evidencia-f1-5/`, salvo el punto 9, que corrió antes, sobre `7e460fc` con las herramientas que luego fueron `9ff4f85`. Las herramientas no son comandos del producto («Puerta de salida de Fase 1» en el runbook dice cómo repetir cada secuencia). `psql` no estaba instalado, así que los bloques SQL del runbook corrieron tal cual con un sustituto mínimo sobre `pg` de Node.
 
 ## Un fallo que encontraron los ensayos
 
-La primera pasada (08:49–09:11 UTC) falló en los puntos 2 y 3. La respuesta real de `ticks_history` trae `"pip_size":2.0`, y la recuperación de historia solo admitía un lexema entero, así que toda recuperación viva terminaba `unavailable` con `history_invalid` y la captura quedaba en `degraded` con `event_gap_unresolved`. Las pruebas no lo vieron porque sus fixtures mandaban `"pip_size":2`. El PR #40 lo corrigió (`pipSizeFromNumberLexeme`, solo para la historia) y los puntos 1 a 8 se repitieron después con el arreglo. Los resultados de abajo son los de esa segunda pasada; el punto 9 no depende del arreglo y viene de la primera.
+La primera pasada (08:49–09:11 UTC) falló en los puntos 2 y 3. La respuesta real de `ticks_history` trae `"pip_size":2.0`, y la recuperación de historia solo admitía un lexema entero, así que toda recuperación viva terminaba `unavailable` con `history_invalid` y la captura quedaba en `degraded` con `event_gap_unresolved`. Las pruebas no lo vieron porque sus fixtures mandaban `"pip_size":2`. El PR #40 lo corrigió (`pipSizeFromNumberLexeme`, solo para la historia). Los puntos 1 a 4, 7 y 8 se repitieron con el arreglo, y el 5 y el 6 corrieron una sola vez, ya con él. Los resultados de abajo son los de esas ejecuciones; el punto 9 no depende del arreglo y viene de antes.
+
+La corrida del propio comando `ingest` (punto 1) encontró además que la orden del runbook para pararlo desde otra terminal, `pkill -TERM -f '^node dist/cli/ingest.js'`, no llegaba al proceso: pnpm lo arranca con la ruta completa de Node. Los PR #42 y #43 corrigieron el patrón (`'node dist/cli/ingest\.js'`).
 
 ## Los nueve ensayos (ADR-0015 §12)
 
 | Punto | Resultado | Clave |
 |---|---|---|
-| 1. Captura viva continua con `ingest` | pasa | 181,4 s de captura; `healthy` a los 10,9 s y en las tres instantáneas siguientes |
+| 1. Captura viva continua con `ingest` | pasa | 181,4 s con el cableado de `ingest` (`capture.mjs`), `healthy` a los 10,9 s y en las tres instantáneas siguientes; y el propio comando `ingest`, `healthy` a los 5,6 s y parado con `SIGTERM` (salida 0) |
 | 2. Desconexión: smoke con corte | pasa | `passed`; 1 reconexión; recuperación `complete`; cierre previsto durable |
 | 3. Reinicio sin aviso (`SIGKILL`) | pasa | `close_not_recorded`, apertura que lo supera, recuperación `complete`; `healthy` 8,0 s después de matar el proceso |
 | 4. Reinicio programado (`SIGTERM`) | pasa | cierre `requested` durable, apertura que lo supera, ningún hueco; `healthy` 6,0 s tras arrancar |
-| 5. Almacenamiento de objetos parado | pasa | `persistence_unavailable` abierta y resuelta; `paused` mientras duró; reparación, recuperación `complete` y `healthy` |
-| 6. PostgreSQL parado | pasa | `paused` por la regla 3; bloqueo nuevo con otro PID; reparación, recuperación `complete` y `healthy` |
-| 7. Ningún dato no durable emitido | pasa | 129, 23 y 24 ticks entregados en las tres capturas, todos frames durables del log |
+| 5. Almacenamiento de objetos parado | pasa | `persistence_unavailable` abierta y resuelta; `paused` mientras duró; reparación, recuperación `complete` y `healthy` 6,9 s después de volver |
+| 6. PostgreSQL parado | pasa | `paused` por la regla 3; bloqueo nuevo con otro PID; reparación, recuperación `complete` y `healthy` 12,3 s después de volver |
+| 7. Ningún dato no durable emitido | pasa | 129, 23 y 24 ticks entregados en las tres secuencias con captura (cinco capturas), todos frames durables del log |
 | 8. Incidencias visibles tras reiniciar | pasa | conteos por tipo antes y después de cada reinicio, y `data:health` en cada paso |
 | 9. Replay | pasa | los dos datasets sintéticos se reproducen y verifican con su `dataset_id` |
 
@@ -33,9 +35,11 @@ La primera pasada (08:49–09:11 UTC) falló en los puntos 2 y 3. La respuesta r
 
 `capture.mjs` corrió la sesión de ingesta con el cableado de `ingest` (almacenes de PostgreSQL y S3, bloqueo de PostgreSQL, log protegido, cursor, latido y retención de 23 horas), y su sink anotó cada tick entregado. Arrancó a las 09:35:06.402Z y llegó a `healthy` a las 09:35:17.332Z. Siguió `healthy` en `data:health` a +1, +2 y +3 minutos y se mató a las 09:38:07.801Z, tras 181,4 s y 91 ticks. Antes de matarla, el log tenía 1 segmento, 1 `connection_opened` sin cierre, 96 frames raw, 91 ticks derivados, ninguna incidencia, ninguna condición y ningún hueco pendiente; el latido decía `connected` y había escritor vivo.
 
+El sink de `ingest` no anota los ticks que entrega, así que esta captura larga usó `capture.mjs`, que compone `runIngest` con las mismas opciones de la sesión y otro sink, para poder comprobar el punto 7. Para probar también el propio comando en vivo, `pnpm --filter @buoh/market-data-worker run ingest -- --live --symbol R_100` corrió de 13:35:58Z a 13:36:36Z, en un esquema y un bucket desechables. `data:health` dio `healthy` a los 5,6 s y otra vez 30 s después. `pkill -TERM -f 'node dist/cli/ingest\.js'` lo paró, e `ingest` salió con 0 un segundo después: fin `completed`, cierre `requested` durable, el cursor escrito, el último latido `disconnected` y ningún aviso en stderr. El esquema y el bucket se borraron después.
+
 ### 2. Desconexión
 
-`pnpm run data:smoke -- --live --duration-seconds 120 --interrupt-after-seconds 30`, en memoria, de 09:40:25Z a 09:42:25Z: salida 0 y `passed`. Hubo 2 conexiones y 1 reconexión tras el corte `smoke_interrupt`, con una espera de 776 ms. La recuperación fue `complete` en 1 intento y 1 página, con `recovered_event_count` 0, porque en el corte no se perdió ningún tick. El cierre final fue el previsto (`requested`, durable). Llegaron 68 frames y 61 ticks, sin frames inválidos ni incidencias. La primera pasada ya había dado los mismos frames, pero con la recuperación `unavailable`; la segunda solo cambia por el arreglo.
+`pnpm run data:smoke -- --live --duration-seconds 120 --interrupt-after-seconds 30`, en memoria, de 09:40:25Z a 09:42:25Z: salida 0 y `passed`. Hubo 2 conexiones y 1 reconexión tras el corte del propio smoke (`--interrupt-after-seconds 30`, ADR-0015 §9), con una espera de 776 ms. La recuperación fue `complete` en 1 intento y 1 página, con `recovered_event_count` 0, porque en el corte no se perdió ningún tick. El cierre final fue el previsto (`requested`, durable). Llegaron 68 frames y 61 ticks, sin frames inválidos ni incidencias. La primera pasada había dado 69 frames y 62 ticks, con la recuperación `unavailable` y una incidencia `history_inconsistent`.
 
 ### 3. Reinicio sin aviso
 
@@ -47,13 +51,15 @@ La captura del punto 1 terminó por `SIGKILL` a las 09:38:07.805Z, sin línea JS
 
 ### 5. Almacenamiento de objetos parado
 
-En una captura `healthy`, SeaweedFS se paró a las 09:55:51.002Z y volvió a las 09:56:13.280Z (22,3 s). Mientras estuvo parado, la captura siguió viva y `data:health` dio `paused` con `data_health_storage_unavailable` / `ECONNREFUSED` en cada sondeo. El registro operativo, en PostgreSQL, abrió `persistence_unavailable` 2 veces, con 5 incidencias: 1 en `raw_object_write` y 4 en `source_event_index`. La sesión esperó 678, 1227, 2498, 5423 y 13 119 ms entre intentos. Al volver, cerró la conexión perdida con `close_not_recorded`, abrió una nueva que la supera y recuperó el hueco con `complete` y 11 ticks. Las dos condiciones se resolvieron con `persistence_restored`, y `data:health` dio `healthy` 29,2 s después de volver el almacenamiento.
+En una captura `healthy`, la orden de parada de SeaweedFS empezó a las 09:55:51.002Z y la de arranque terminó a las 09:56:13.280Z (22,3 s; el punto 6 se mide igual). Mientras estuvo parado, la captura siguió viva y `data:health` dio `paused` con `data_health_storage_unavailable` / `ECONNREFUSED` en cada sondeo. El registro operativo, en PostgreSQL, abrió `persistence_unavailable` 2 veces, con 5 incidencias: 1 en `raw_object_write` y 4 en `source_event_index`. La sesión esperó 678, 1227, 2498, 5423 y 13 119 ms entre intentos. Al volver, cerró la conexión perdida con `close_not_recorded`, abrió una nueva que la supera y recuperó el hueco con `complete` y 11 ticks. Las dos condiciones se resolvieron con `persistence_restored`, y `data:health` dio `healthy` a las 09:56:20.214Z, 6,9 s después de volver el almacenamiento y 29,2 s después de la orden de parada. Ningún sondeo vio `recovering`: la recuperación terminó entre dos sondeos.
 
 ### 6. PostgreSQL parado
 
-En una captura `healthy`, PostgreSQL se paró a las 09:57:59.050Z y volvió a las 09:58:15.219Z (16,2 s). Mientras estuvo parado, `data:health` dio `paused` por la regla 3 (`data_health_storage_unavailable` / `ECONNREFUSED`) en los cuatro sondeos. En el stderr de la captura quedaron solo avisos saneados: `source_lock_unavailable` / `ECONNREFUSED` ×4, `operational_registry_unavailable` / `ECONNREFUSED` ×1 y `postgres_connection_lost` / `57P01` ×2. La conexión terminó `paused` con `persistence_unavailable`, sin cierre durable, y la sesión esperó 842, 1268, 2452, 4262 y 12 092 ms.
+En una captura `healthy`, la orden de parada de PostgreSQL empezó a las 09:57:58.533Z y la de arranque terminó a las 09:58:15.219Z (16,7 s). Mientras estuvo parado, `data:health` dio `paused` por la regla 3 (`data_health_storage_unavailable` / `ECONNREFUSED`) en los cuatro sondeos. En el stderr de la captura quedaron solo avisos saneados: `source_lock_unavailable` / `ECONNREFUSED` ×4, `operational_registry_unavailable` / `ECONNREFUSED` ×1 y `postgres_connection_lost` / `57P01` ×2. La conexión terminó `paused` con `persistence_unavailable`, sin cierre durable, y la sesión esperó 842, 1268, 2452, 4262 y 12 092 ms.
 
 Al volver, la sesión tomó un bloqueo nuevo: los latidos pasan del PID 1794 al 2542, con el mismo `run_id`. Cerró la conexión anterior con `close_not_recorded` (09:58:21.297Z), abrió una que la supera (09:58:21.364Z) y recuperó el hueco con `complete` y 10 ticks. `data:health` dio `paused` sin escritor vivo, después `recovering` (09:58:22.017Z) y `healthy` a las 09:58:27.552Z, 12,3 s después de volver PostgreSQL. El registro operativo terminó sin condiciones abiertas.
+
+Este punto no lo evaluó la herramienta. La tarea que corrió la secuencia se cortó durante su último paso, la lista de buckets que quedan, antes de que `drills.mjs` escribiera sus comprobaciones. Todo lo de arriba sale de las salidas crudas de cada paso (los `data:health`, los conteos, los latidos y el stderr de la captura), y con ellas pasa cada condición que la herramienta comprueba para el punto 6. El borrado del bucket consta por la salida del bloque del runbook (`remove_bucket`, salida 0), y una lista posterior no muestra ningún esquema ni bucket desechable.
 
 ### 7. Ningún dato no durable emitido
 
@@ -72,7 +78,7 @@ Cada `observation_id` que el sink recibió se buscó en el log al final, entre l
 | tras el reinicio, 09:38:54 | 3: …, abierta | `complete` 1 | `connection_lost` 1 | — | 0 | 114 |
 | final, 09:39:26 | 3: …, `requested` | `complete` 1 | `connection_lost` 1 | — | 0 | 129 |
 
-`data:health -- --json` en los 15 pasos de los reinicios: `paused` y `disconnected` con el esquema vacío, al arrancar y con la captura parada (salida 1); `healthy` y `connected` en cada captura en marcha (salida 0); `paused` con `connection_lost` justo después del `SIGKILL`. En los puntos 5 y 6, `paused` mientras duró el fallo, `recovering` al reconectar y `healthy` después. Nunca hubo backlog, y `execution_mode` siempre fue `disabled`.
+`data:health -- --json` en los 15 pasos de los reinicios: `paused` y `disconnected` con el esquema vacío, al arrancar y con la captura parada (salida 1); `healthy` y `connected` en cada captura en marcha (salida 0); `paused` con `connection_lost` justo después del `SIGKILL`. En los puntos 5 y 6, `paused` mientras duró el fallo y `healthy` después; en el 6, además, `recovering` en el sondeo de la reconexión. Nunca hubo backlog, y `execution_mode` siempre fue `disabled`. La comprobación del punto 8 de `drills.mjs` solo registra los conteos y sus salidas: la comparación entre pasos es la de esta tabla.
 
 ### 9. Replay
 
@@ -86,14 +92,16 @@ En un esquema y un bucket desechables (08:48:26–08:48:30 UTC): `db:migrate`, `
 | Un clon limpio ejecuta las verificaciones offline con el toolchain fijado | CI ejecuta `DOCS_BASE_REF=origin/main pnpm run verify:pr` y `pnpm run test:integration` sobre un clon limpio, con el Node y el pnpm fijados, en cada PR y en cada push a `main` (`CONTRIBUTING.md`); los dos pasaron sobre `main` en `2dffd23` |
 | Los vectores se reproducen exactamente | `pnpm run test:vectors`, dentro de `verify:pr`, y el punto 9 |
 | Un flujo público de Deriv se captura sin credenciales | Punto 1 (persistido) y punto 2 (en memoria) |
-| Raw, normalizados e incidencias tienen procedencia y versiones | Contratos y log raw-first (F1.1 a F1.3b). Cada frame vivo del log lleva su `connector_version`, su conexión, la hora de recepción y el SHA-256 de su payload; la captura guarda el esquema de fuente de la release con su SHA-256 fijado, y `data:health` comprobó en cada paso el conector del log y ese esquema (regla 2, sin fallos) |
+| Raw, normalizados e incidencias tienen procedencia y versiones | Contratos y log raw-first (F1.1 a F1.3b). Cada frame vivo del log lleva su `connector_version`, su conexión, la hora de recepción y el SHA-256 de su payload; la captura guarda el esquema de fuente de la release con su SHA-256 fijado, y `data:health` comprobó el conector del log y ese esquema en cada paso con log que comprobar (regla 2, sin fallos) |
 | Un dataset publicado conserva el mismo ID en replay | Punto 9 |
 | Reinicio, desconexión y fallo de persistencia no ocultan pérdida ni emiten datos no durables | Puntos 2 a 8. Cada pérdida dejó un cierre no pedido (`close_not_recorded` o el del corte), con `connection_lost` y su recuperación en el log, y ningún tick entregado faltó entre los frames durables |
-| `PROJECT_STATUS.md`, contratos, ADR y runbook reflejan el sistema real | Cada PR de ADR-0015 §13 actualizó el runbook y los contratos en el mismo commit que el código (la guardia documental lo exige). Este PR actualiza `PROJECT_STATUS.md`, la especificación de pendientes y el runbook |
+| `PROJECT_STATUS.md`, contratos, ADR y runbook reflejan el sistema real | Cada PR de ADR-0015 §13 actualizó el runbook y los contratos en el mismo PR que el código (la guardia documental revisa el rango de cada PR). Este PR actualiza `PROJECT_STATUS.md`, la especificación de pendientes y el runbook |
 
 ## Límites y lo que no se demostró
 
 - Los servicios fueron portátiles en el sandbox, no las imágenes de `infra/compose.yaml`, y PostgreSQL fue 18.4, no la 18.6 de CI. Las pruebas de integración de CI corren con las imágenes fijadas.
+- La captura larga del punto 1 corrió con `capture.mjs`, que compone el cableado de `runIngest` con otro sink, porque el de `ingest` no deja ver los ticks entregados (punto 7). Esa copia no tiene una prueba propia que la mantenga igual a `ingest`; el comando `ingest` corrió en vivo aparte, 38 s.
+- Si `drills.mjs` muere por una señal, no borra su esquema ni su bucket: el runbook dice cómo borrarlos.
 - Las capturas duraron minutos, no las 23 horas de la retención. La parada a las 23 horas y `retention_expired` solo están probadas con reloj falso.
 - En el punto 2 la historia no trajo ningún tick que faltara (`recovered_event_count` 0). Los puntos 3, 5 y 6 sí recuperaron ticks (1, 11 y 10), así que el recuento intermedio está probado en vivo.
 - Las incidencias derivadas solo incluyen las que este tráfico produjo. Los demás tipos están cubiertos por los vectores y las pruebas offline.

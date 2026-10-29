@@ -71,26 +71,20 @@ Tipos de pendiente:
 - **Resolución (F1.4b):** `pnpm run data:smoke -- --live` corre `scripts/data-smoke.mjs`, que deja en stdout una sola línea JSON saneada. Sin `--live` responde con un error de uso y no abre conexiones. Guarda todo en memoria y lo borra al terminar, así que el borrado en 24 horas se cumple sin tablas ni objetos que limpiar. Su uso y su resultado están en el runbook («Smoke público de Deriv»), y el primer smoke vivo, en `PROJECT_STATUS.md` («Evidencia de F1.4b»).
 - **Límite:** nunca es el único criterio de fusión, y los umbrales live siguen sin fijar (`PROJECT_STATUS.md`).
 
-### P-F1-04. Reconexión y recuperación de historia (`F1-RECONNECT-001`) — parcial
+### P-F1-04. Reconexión y recuperación de historia (`F1-RECONNECT-001`) — resuelto
 
 - **Objetivo:** que una desconexión no oculte pérdida de datos.
 - **Fuente:** plan de Fase 1 §6, runbook («Inicio», «Desconexión de WebSocket», «Almacenamiento no disponible») y ADR-0005.
-- **Estado (verificado):**
-  - los contratos (`HistoryRecoveryResult`, `IngestionCursor`) y la derivación de continuidad en `packages/domain/src/quality.ts` existen;
-  - desde el PR 4 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, la sesión de ingesta del worker (`startDerivSession`) reconecta tras cada pérdida de conexión con espera exponencial y jitter inyectable, repara los cierres no registrados y pide por la conexión nueva la historia del hueco con `ticks_history`. La ejecutan `data:smoke`, en memoria, y desde el PR 5 el comando continuo `ingest`, sobre PostgreSQL y el almacenamiento de objetos, con un esquema y un bucket propios y la retención de 23 horas (ADR-0015 §7). La tabla de cierres del runbook dice qué cierres pierden datos. El esquema de `forget` se carga con la release fijada, pero no se usa (ADR-0015 §1);
-  - desde el PR 5, la sesión persiste en PostgreSQL el `IngestionCursor`, después de cada `ConnectionClosed` durable y al parar, y el latido (`ingestion_cursors` e `ingestion_heartbeats`, migración `0004`); al arrancar comprueba el log contra el último cursor del símbolo (ADR-0015 §5 y §6);
-  - desde el PR 6, `data:health` muestra la salud viva, con `recovering` hasta que la historia cubra el hueco (P-F1-05);
-  - el 2026-10-29, el smoke de reconexión contra Deriv y los ensayos de reinicio y de fallo de almacenamiento pasaron (P-F1-06, [evidencia de la puerta de salida](../operacion/evidencia-puerta-fase-1.md)). Encontraron un fallo de la recuperación con el `pip_size` real de la historia, que corrigió el PR #40.
-- **Esperado:** ante un `ConnectionClosed` no pedido, el worker:
-  - pasa a `recovering`;
-  - espera con retroceso exponencial y jitter inyectable;
-  - consulta la historia por símbolo;
-  - solo vuelve a `healthy` cuando continuidad y persistencia están verificadas; si no, registra `event_gap_unresolved`.
-
-  El cursor se actualiza en una transacción, después de confirmar durabilidad.
-- **Componentes:** `apps/market-data-worker`, una migración nueva y `packages/domain`.
-- **Aceptación (plan §6):** prueba con reloj y transporte falsos, y smoke vivo aparte.
-- **Abierto:** pendientes registrados 6 de F1.2 y 7 de F1.3, en `PROJECT_STATUS.md`. El diseño está en [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §2 a §6, que también cierra esos dos pendientes.
+- **Antes:** existían los contratos (`HistoryRecoveryResult`, `IngestionCursor`) y la derivación de continuidad de `packages/domain/src/quality.ts`, pero el adaptador terminaba en cada pérdida de conexión, sin reconectar ni pedir la historia, nada persistía el cursor y un cierre perdido por un fallo de persistencia no quedaba en el log.
+- **Resolución (F1.5, [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §2 a §7):**
+  - la derivación del estado vivo con el perfil de medición, sin umbrales: tras un cierre no pedido, solo la historia demuestra la continuidad (PR #35);
+  - la recuperación con `ticks_history`, paginada y con reintentos, y la reparación de los cierres no registrados (`close_not_recorded`), con `supersedes_connection_id` (PR #36);
+  - la sesión de ingesta, que reconecta con espera exponencial y jitter inyectable, lee la conexión anterior del log, se para con `SIGINT` o `SIGTERM` y vuelve a tomar el bloqueo, y el smoke de reconexión (PR #37);
+  - el cursor y el latido en PostgreSQL (migración `0004`) y la captura continua `ingest`, con la retención de 23 horas (PR #38);
+  - `data:health` muestra `recovering` hasta que la historia cubre el hueco (P-F1-05, PR #39);
+  - la aceptación del plan §6 se cumple con las pruebas de reloj y transporte falsos y con el smoke vivo aparte. Los ensayos de la puerta de salida lo demostraron en vivo el 2026-10-29 (P-F1-06, [evidencia de la puerta de salida](../operacion/evidencia-puerta-fase-1.md)), y encontraron el fallo del `pip_size` de la historia, que corrigió el PR #40;
+  - cierra los pendientes 6 de F1.2 y 7 de F1.3 (`PROJECT_STATUS.md`).
+- **Límite:** con la continuidad pendiente, la salud `recovering` no muestra la causa en `open_condition_types` (pendiente 2 de F1.2, que sigue abierto). Los ticks recuperados solo existen como raw hasta que se publiquen datasets vivos (ADR-0015 §4).
 
 ### P-F1-05. Reporte de salud y `pnpm run data:health -- --json` (`F1-HEALTH-001`) — resuelto
 

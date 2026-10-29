@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
 status_version: 30
-updated_at_utc: "2026-10-29T12:55:15.000Z"
+updated_at_utc: "2026-10-29T13:56:21.000Z"
 current_phase: "Fase 1 — Fundación de datos"
 phase_status: "active"
 active_work: null
@@ -151,7 +151,7 @@ Catálogo versionado (`F1-CATALOG-001`) y adaptador público de Deriv (`F1-SOURC
 
 ## Evidencia de F1.5
 
-Reconexión sin ocultar huecos (`F1-RECONNECT-001`) y salud machine-readable (`F1-HEALTH-001`), en la secuencia de siete PR de ADR-0015 §13 (#33, #35 a #39) más la corrección #40, que encontraron los ensayos.
+Reconexión sin ocultar huecos (`F1-RECONNECT-001`) y salud machine-readable (`F1-HEALTH-001`), en la secuencia de siete PR de ADR-0015 §13 (#33, #35 a #39 y #41), más las correcciones que encontraron los ensayos: #40 (el `pip_size` de la historia) y #42 y #43 (la orden del runbook para parar `ingest`).
 
 - Pruebas offline, sin red, reloj real ni aleatoriedad: dominio 137 y worker 574 en total, con la sesión, la espera, la reparación de cierres, la recuperación con `ticks_history`, el cursor, el latido, la retención, `ingest` y las siete reglas de `data:health`, con socket, reloj, temporizador y azar falsos.
 - `pnpm run test:integration` (77 en total): la migración `0004`, el cursor y el latido, el bloqueo de PostgreSQL, `ingest` y `data:health` contra PostgreSQL 18 y almacenamiento S3-compatible.
@@ -178,7 +178,7 @@ Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la li
 
 El antiguo pendiente 6 (un solo escritor por fuente) quedó resuelto en F1.5 con `ingest` (PR #38), el primer proceso que escribe el log de forma continua: escribe con el log protegido por el bloqueo (`openLockedSourceLog`), vuelve a tomar el bloqueo antes de reconectar si lo perdió y termina con `source_lock_taken` si lo tiene otro proceso ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §3, «Bloqueo»). F1.4b lo había resuelto en parte: el transporte entrega una llamada a la vez, y `fixture:publish` toma antes el bloqueo de su fuente, que nota una sesión perdida en unos 10 s (ADR-0012 §9).
 
-7. Tras un fallo de persistencia, el `ConnectionClosed` del cierre no se guarda en el log, así que un dataset que abarque la caída no lleva marca de la interrupción. Un índice que confirma pero informa error se trata como no durable y se adopta al reabrir sin reconciliar el tick.
+El antiguo pendiente 7 quedó resuelto en F1.5 ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §3). Tras un fallo de persistencia, la sesión repara antes del socket siguiente el `ConnectionClosed` que no quedó durable (`close_not_recorded`), así que la caída queda en el log con `connection_lost` y su recuperación. Un evento que el índice confirmó aunque informó error se adopta al reabrir, sin cerrar dos veces la misma conexión, y la sesión vuelve a leer del log la conexión anterior y el high-watermark; ese evento no se entrega a quien escucha, como acepta §12 (punto 7). Lo demostraron en vivo los puntos 3, 5 y 6 de la puerta de salida.
 
 ## Pendientes registrados de F1.2
 
@@ -190,7 +190,7 @@ El antiguo pendiente 1 (atribución de símbolo y mensajes que no son ticks) que
 3. `docs/impact-map.json` no tiene regla para `packages/domain/**`.
 4. `qualityProfileSchema` está duplicado entre `packages/domain` y `packages/contracts/src/vector-integrity.ts`.
 5. `typecheck` y `lint` resuelven `@buoh/contracts` con `paths` al código fuente; vitest usa `dist`. Ejecutar `pnpm run test`, no vitest directo. `apps/market-data-worker` sigue el mismo patrón.
-6. El `HistoryRecoveryResult` debe registrarse después del primer tick posterior al cierre; con otro orden la salud se queda en `recovering`.
+El antiguo pendiente 6 quedó resuelto en F1.5 ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §4, «Orden»): el `HistoryRecoveryResult` pasa por la misma cola que los frames, y la sesión lo pide 2000 ms después del primer tick durable posterior al cierre, así que siempre queda después de él. Los puntos 3, 5 y 6 de la puerta de salida volvieron así a `healthy`.
 
 ## Decisiones vigentes relevantes
 
