@@ -528,8 +528,9 @@ La misma migración amplía el `CHECK` del motivo de `requested_response_inciden
 - versiones de worker, conector, contratos y reglas;
 - último frame confirmado y objetos afectados;
 - eventos append-only de apertura/resolución de condiciones;
-- transición de salud;
 - acción, resultado y responsable operativo.
+
+La salud de un incidente no se conserva aparte: se deriva en cualquier momento de los eventos durables y del registro operativo con `data:health`, y una transición de salud se conserva guardando la salida de `data:health` en cada paso, como hace la evidencia de la puerta de salida ([ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §12, punto 8).
 
 No se registran payloads completos, secretos ni datos personales en logs operativos; el raw se consulta por referencia con acceso controlado.
 
