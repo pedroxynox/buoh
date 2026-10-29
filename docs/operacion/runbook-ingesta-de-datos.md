@@ -403,7 +403,7 @@ La hora de la observación se toma una vez, al terminar de leer: así el cierre 
 | la clave del esquema de fuente no tiene ningún objeto | el perfil falta: con el log no vacío, la evaluación da `source_schema_missing` (regla 2), y con el log vacío no hace falta | — |
 | PostgreSQL o el almacenamiento de objetos rechazan cualquier otra lectura, también una fila que no pasa sus comprobaciones, porque la interfaz de los almacenes no separa los dos casos, como en la sesión | el motivo saneado, por ejemplo `ECONNREFUSED` | 3: `paused` |
 
-**Comando.** `healthCommand` (`apps/market-data-worker/src/health/command.ts`) es el comando completo, y lo ejecuta `apps/market-data-worker/dist/cli/health.js --json [--symbol R_100]`. Antes de abrir nada comprueba los argumentos (`src/health-args.ts`) y la configuración:
+**Comando.** `pnpm run data:health -- --json [--symbol R_100]`, desde la raíz del repositorio. Lo ejecuta `scripts/data-health.mjs`: compila antes el worker, con los mensajes de la compilación en stderr, y después corre `apps/market-data-worker/dist/cli/health.js`, así que stdout lleva solo la línea JSON del informe, como en `data:replay` (ADR-0003). Reenvía `SIGINT` y `SIGTERM`, y termina con el código del proceso. El comando completo es `healthCommand` (`apps/market-data-worker/src/health/command.ts`). Antes de abrir nada comprueba los argumentos (`src/health-args.ts`) y la configuración:
 
 - **Argumentos:** `--json` es obligatorio, porque es el único formato de salida (plan de Fase 1 §5). `--symbol` sigue la regla del smoke: `R_100` por defecto, y un código de letras, cifras y `_`, de 1 a 64 caracteres. Cualquier otra opción, un valor para `--json` o un argumento suelto es un error de uso.
 - **Configuración:** las variables `BUOH_*` de «Entorno local y replay». Para mirar una captura hacen falta las mismas que usa su `ingest`, con su `BUOH_POSTGRES_SCHEMA` y su `BUOH_S3_BUCKET` (ver «Captura viva continua (`ingest`)», «Preparar la captura»). A diferencia de `ingest`, admite el esquema `public`, el bucket `buoh-local` y cualquier entorno, porque solo lee.
@@ -429,6 +429,8 @@ Un error de programación al observar o al evaluar da el informe `failed` sin ob
 | 0 | `healthy` |
 | 1 | otra salud: `starting`, `degraded`, `recovering`, `paused` (también la regla 3) o `failed` (la regla 2 o un error inesperado) |
 | 2 | error de uso o de configuración (regla 1) |
+
+Desde la raíz, `pnpm run data:health` devuelve el código del proceso. En stderr, pnpm escribe además la orden que ejecuta (por ejemplo, `$ node scripts/data-health.mjs -- --json`), turbo el resumen de la compilación y, si la salida no es 0, pnpm la línea `[ELIFECYCLE] Command failed with exit code 1.`. Una salida distinta de 0 sin línea JSON en stdout ni error de uso en stderr significa que falló la compilación o que se interrumpió el proceso; el detalle está en stderr.
 
 ### Almacenamiento no disponible o backlog lleno por conteo/bytes
 

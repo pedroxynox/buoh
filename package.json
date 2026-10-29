@@ -17,6 +17,7 @@
   },
   "scripts": {
     "build": "turbo run build",
+    "data:health": "node scripts/data-health.mjs",
     "data:replay": "node scripts/data-replay.mjs",
     "data:smoke": "node scripts/data-smoke.mjs",
     "docs:check": "node scripts/check-doc-impact.mjs",
