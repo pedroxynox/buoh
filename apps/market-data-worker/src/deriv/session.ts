@@ -28,6 +28,11 @@ import { type HistoryRecoveryOutcome } from './history-recovery.js';
 
 /** El bloqueo de la fuente que tiene la sesión (ADR-0012 §9): `SourceLock` en PostgreSQL. */
 export interface SessionLock {
+  /**
+   * El PID de PostgreSQL de la sesión que lo tiene (`pg_backend_pid()`), el que va en el latido de
+   * la ingesta (ADR-0015 §6). El bloqueo en memoria del smoke no lo tiene.
+   */
+  readonly backendPid?: number;
   /** `false` desde que se perdió: las escrituras del log protegido por él fallan. */
   readonly held: boolean;
   /** Lo suelta. Nunca falla. */

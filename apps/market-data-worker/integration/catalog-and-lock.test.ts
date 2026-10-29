@@ -119,12 +119,13 @@ afterAll(async () => {
   await admin.end();
 });
 
-describe('migración 0003', () => {
-  it('se aplica después de las dos anteriores', () => {
+describe('migraciones', () => {
+  it('aplica la 0003 después de las dos anteriores, y la 0004', () => {
     expect(applied).toEqual([
       '0001_publicaciones.sql',
       '0002_log_raw_first.sql',
       '0003_catalogo_y_respuestas_pedidas.sql',
+      '0004_cursor_y_latido.sql',
     ]);
   });
 });
@@ -361,7 +362,7 @@ describe('PostgresRequestedResponseIncidentStore (ADR-0012 §6)', () => {
     expect(rowCount).toBe(0);
   });
 
-  it('la tabla solo admite los seis motivos de una respuesta pedida', async () => {
+  it('la tabla solo admite los motivos de una respuesta pedida', async () => {
     expect(
       await errorCode(
         stores.pool.query(

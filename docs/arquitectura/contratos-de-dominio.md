@@ -606,7 +606,7 @@ El perfil de Deriv no declara `ticks` ni `error`. Una suscripción fallida (`msg
 
 Desde el PR 3 de [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13 (§4), quien pide `ticks_history` comprueba igual su respuesta `history`, con `checkRequestedResponse`; `schema_validation_failed` es solo para la que no cumple el esquema de respuesta. Además, la página tiene que ser coherente: traer el objeto `history`, sus arrays `times` y `prices`, y `pip_size`, con `pip_size` entero de 0 a 18, `times` y `prices` de la misma longitud, tiempos enteros estrictamente crecientes dentro del rango pedido y precios que acepta con ese `pip_size` la regla de `quote_decimal` (`canonicalQuoteDecimal`, en `packages/domain`); si no, el motivo es `history_inconsistent`, también cuando cumple el esquema pero le falta uno de esos miembros. Una petición de historia rechazada llega con `msg_type` `ticks_history` y un objeto `error`; el perfil v2 no lo declara, así que la registran las reglas 2.0.0 y no deja incidencia de respuesta pedida.
 
-`history_inconsistent` (una página de historia incoherente) existe en `packages/domain` desde el PR 3 y es solo para las respuestas de historia. En PostgreSQL, `requested_response_incidents` lo admitirá desde la migración `0004`, que llega con el PR 5 de ADR-0015 §13; la `0003`, la vigente, no lo admite.
+`history_inconsistent` (una página de historia incoherente) existe en `packages/domain` desde el PR 3 y es solo para las respuestas de historia. En PostgreSQL, `requested_response_incidents` lo admite desde la migración `0004`, del PR 5 de ADR-0015 §13; la `0003` no lo admitía.
 
 ## Contratos futuros
 

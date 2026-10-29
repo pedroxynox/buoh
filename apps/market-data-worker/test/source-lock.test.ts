@@ -2,14 +2,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
 import { openSchemaArchive } from '../src/deriv/schema-archive.js';
+import { SourceLockUnavailableError } from '../src/deriv/session.js';
 import {
   lockedSourceLogStore,
+  openLockedSourceLog,
   OperationalRegistry,
+  PostgresSessionLockProvider,
   RawFirstIngestor,
   SOURCE_LOCK_LOST,
+  SourceLock,
   sourceLockKey,
   SourceEventLog,
   type SourceEventIndexRow,
+  type WorkerConfig,
 } from '../src/index.js';
 import { syntheticSchemaArchive } from './support/deriv-fixtures.js';
 import {
@@ -162,5 +167,76 @@ describe('lockedSourceLogStore', () => {
     expect(reopened.status).toBe('not_durable');
     expect(ingestor.state).toBe('paused');
     expect(inner.rows).toEqual([]);
+  });
+});
+
+describe('PostgresSessionLockProvider', () => {
+  // Sin PostgreSQL: `SourceLock.acquire` sustituido. La prueba con PostgreSQL real está en
+  // integration/ingestion-status.test.ts.
+  const postgres: WorkerConfig['postgres'] = {
+    database: 'buoh',
+    host: '127.0.0.1',
+    password: 'sintético',
+    port: 5432,
+    schema: 'buoh_test',
+    user: 'buoh',
+  };
+
+  it('toma el bloqueo de su fuente con SourceLock.acquire y lo devuelve tal cual, o null', async () => {
+    const lock = { backendPid: 4242, held: true, source: DERIV_SOURCE } as unknown as SourceLock;
+    const acquire = vi
+      .spyOn(SourceLock, 'acquire')
+      .mockResolvedValueOnce(lock)
+      .mockResolvedValueOnce(null);
+    const provider = new PostgresSessionLockProvider({ postgres, source: DERIV_SOURCE });
+
+    expect(await provider.acquire()).toBe(lock);
+    expect(await provider.acquire()).toBeNull();
+    expect(acquire.mock.calls).toEqual([
+      [{ postgres, source: DERIV_SOURCE }],
+      [{ postgres, source: DERIV_SOURCE }],
+    ]);
+  });
+
+  it('si PostgreSQL no responde, lanza SourceLockUnavailableError con la causa saneada', async () => {
+    const cause = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432 rol buoh'), {
+      code: 'ECONNREFUSED',
+    });
+    vi.spyOn(SourceLock, 'acquire').mockRejectedValueOnce(cause);
+    const provider = new PostgresSessionLockProvider({ postgres, source: DERIV_SOURCE });
+
+    const error = await provider.acquire().then(
+      () => null,
+      (rejection: unknown) => rejection,
+    );
+    expect(error).toBeInstanceOf(SourceLockUnavailableError);
+    expect((error as SourceLockUnavailableError).reason).toBe('ECONNREFUSED');
+    expect((error as Error).cause).toBe(cause);
+    expect((error as Error).message).not.toContain('127.0.0.1');
+  });
+
+  it('un error sin código, como el tiempo de conexión vencido de pg, también es no disponible', async () => {
+    vi.spyOn(SourceLock, 'acquire').mockRejectedValueOnce(
+      new Error('Connection terminated due to connection timeout'),
+    );
+    const provider = new PostgresSessionLockProvider({ postgres, source: DERIV_SOURCE });
+    await expect(provider.acquire()).rejects.toMatchObject({
+      name: 'SourceLockUnavailableError',
+      reason: 'Error',
+    });
+  });
+});
+
+describe('openLockedSourceLog', () => {
+  it('solo abre el log con un SourceLock: un bloqueo en memoria se rechaza sin leer el log', async () => {
+    const store = new MemorySourceLogStore();
+    const readLogState = vi.spyOn(store, 'readLogState');
+    await expect(
+      openLockedSourceLog(
+        { held: true, release: () => Promise.resolve() },
+        { objects: new MemoryObjectStore(), source: DERIV_SOURCE, store, zlibVersion: 'test' },
+      ),
+    ).rejects.toThrow(TypeError);
+    expect(readLogState).not.toHaveBeenCalled();
   });
 });

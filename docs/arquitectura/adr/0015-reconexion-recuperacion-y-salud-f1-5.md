@@ -123,6 +123,7 @@ En todos los casos hace falta un log nuevo.
 - La migración `0004` crea dos tablas append-only:
   - `ingestion_cursors`: versiones del `IngestionCursor` 1.0.0 por fuente y símbolo, contiguas desde 1, como el catálogo;
   - `ingestion_heartbeats`: el latido de cada ejecución, con la fuente, la ejecución (UUIDv7), la hora, el PID de PostgreSQL de la sesión que tiene el bloqueo (`pg_backend_pid()`), el estado de la conexión (`connecting`, `connected` o `disconnected`) y el backlog por conteo y bytes.
+- La `0004` también admite `history_inconsistent` (§4) en el `CHECK` del motivo de `requested_response_incidents`, que el PR 3 dejó pendiente.
 - La sesión lleva el cursor de cada símbolo en memoria, y solo avanza con eventos durables. Lo persiste después de cada `ConnectionClosed` durable, incluidos los reparados (contratos de dominio, `IngestionCursor`), y al parar. Sus lectores son el arranque (§5) y `data:health` (§8): el símbolo del log y la comprobación contra el índice.
 - El latido se escribe al arrancar, en cada cambio de estado de la conexión (`connecting` al intentar, `connected` con el `ConnectionOpened` durable y `disconnected` al cerrar) y cada 15 000 ms, siempre que el bloqueo siga tomado (`held`).
 - Un fallo al escribir el cursor o el latido no detiene la ingesta, porque no es la durabilidad de los datos: deja la alerta `ingestion_status_unavailable` en stderr, y `data:health` verá el latido vencido.

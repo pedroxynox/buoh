@@ -26,6 +26,14 @@ export {
   type TickSink,
 } from './ingestion/raw-first-ingestor.js';
 export {
+  INGESTION_CURSOR_SCHEMA_VERSION,
+  ingestionHeartbeatSchema,
+  parseIngestionCursor,
+  type IngestionCursorVersion,
+  type IngestionHeartbeat,
+  type IngestionStatusStore,
+} from './ingestion/status.js';
+export {
   OPERATIONAL_RESOLUTION_REASONS,
   OperationalRegistry,
   stderrAlert,
@@ -37,6 +45,8 @@ export {
 export { PostgresCatalogStore } from './postgres/catalog-store.js';
 export { PostgresOperationalStore } from './postgres/operational-store.js';
 export { PostgresRequestedResponseIncidentStore } from './postgres/requested-response-store.js';
+export { PostgresIngestionStatusStore } from './postgres/ingestion-status-store.js';
+export { openLockedSourceLog, PostgresSessionLockProvider } from './postgres/session-lock.js';
 export {
   lockedSourceLogStore,
   SOURCE_LOCK_HEARTBEAT_MS,
@@ -80,6 +90,7 @@ export {
 export { parseReplayArgs, REPLAY_USAGE, UsageError } from './replay-args.js';
 export {
   InMemoryCatalogStore,
+  InMemoryIngestionStatusStore,
   InMemoryObjectStore,
   InMemoryOperationalStore,
   InMemoryRequestedResponseIncidentStore,

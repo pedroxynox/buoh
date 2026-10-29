@@ -124,11 +124,12 @@ afterAll(async () => {
 });
 
 describe('integración del log raw-first y el registro operativo', () => {
-  it('aplica las tres migraciones', () => {
+  it('aplica las cuatro migraciones', () => {
     expect(applied).toEqual([
       '0001_publicaciones.sql',
       '0002_log_raw_first.sql',
       '0003_catalogo_y_respuestas_pedidas.sql',
+      '0004_cursor_y_latido.sql',
     ]);
   });
 

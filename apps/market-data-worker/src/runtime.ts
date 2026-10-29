@@ -1,5 +1,6 @@
 import { type WorkerConfig } from './config.js';
 import { PostgresCatalogStore } from './postgres/catalog-store.js';
+import { PostgresIngestionStatusStore } from './postgres/ingestion-status-store.js';
 import { PostgresMetadataStore, createPool } from './postgres/metadata-store.js';
 import { PostgresOperationalStore } from './postgres/operational-store.js';
 import { PostgresRequestedResponseIncidentStore } from './postgres/requested-response-store.js';
@@ -16,6 +17,7 @@ export function openStores(config: WorkerConfig) {
       objects.destroy();
       await pool.end();
     },
+    ingestionStatus: new PostgresIngestionStatusStore(pool),
     metadata: new PostgresMetadataStore(pool),
     objects,
     operational: new PostgresOperationalStore(pool),
