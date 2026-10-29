@@ -42,6 +42,24 @@ export function createDerivMeasurementProfile(input: {
   readonly schemas: DerivSchemaSet;
   readonly symbol: string;
 }): PipelineProfile {
+  return createDerivMeasurementProfileFromSourceSchema({
+    source_schema_bytes: input.schemas.schema('ticks', 'response').bytes,
+    source_schema_release: input.schemas.release,
+    symbol: input.symbol,
+  });
+}
+
+/**
+ * El mismo perfil de medición, armado con los bytes del esquema de fuente y su release en lugar de
+ * los esquemas cargados: `data:health` lo arma con el esquema que guardó la ingesta (ADR-0015 §7 y
+ * §8), sin descargar nada. Con los bytes de `ticks_response.schema.json` y la release de unos
+ * esquemas cargados da el perfil de `createDerivMeasurementProfile`.
+ */
+export function createDerivMeasurementProfileFromSourceSchema(input: {
+  readonly source_schema_bytes: Uint8Array;
+  readonly source_schema_release: string;
+  readonly symbol: string;
+}): PipelineProfile {
   const qualityProfile = {
     allowed_symbols: [input.symbol],
     gap_detection: 'after_reconnection',
@@ -56,7 +74,7 @@ export function createDerivMeasurementProfile(input: {
   return createPipelineProfile({
     connector_version: DERIV_CONNECTOR_VERSION,
     quality_profile_bytes: utf8(canonicalJson(qualityProfile)),
-    source_schema_bytes: input.schemas.schema('ticks', 'response').bytes,
-    source_schema_release: input.schemas.release,
+    source_schema_bytes: input.source_schema_bytes,
+    source_schema_release: input.source_schema_release,
   });
 }

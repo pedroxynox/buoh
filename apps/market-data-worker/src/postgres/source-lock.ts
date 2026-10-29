@@ -29,6 +29,29 @@ export function sourceLockKey(source: string): string {
 }
 
 /**
+ * El PID de la sesión de PostgreSQL que tiene el bloqueo de la fuente según `pg_locks`, o `null` si
+ * no lo tiene ninguna: el escritor vivo de `data:health` (ADR-0015 §8). Es la consulta del runbook
+ * («Una sola instancia por fuente»): un bloqueo de 64 bits guarda los 32 bits altos de la clave en
+ * `classid`, los 32 bajos en `objid` y `objsubid = 1`. Como el bloqueo, mira solo la base de datos
+ * del pool: otra base del mismo servidor tiene sus propios bloqueos. Solo lee: nunca toma el
+ * bloqueo. `pg_locks` se lee con cualquier rol.
+ */
+export async function sourceLockHolder(
+  pool: Pick<pg.Pool, 'query'>,
+  source: string,
+): Promise<number | null> {
+  const key = BigInt.asUintN(64, BigInt(sourceLockKey(source)));
+  const { rows } = await pool.query<{ pid: number }>(
+    `SELECT pid FROM pg_locks
+      WHERE locktype = 'advisory' AND granted AND objsubid = 1
+        AND classid = $1::bigint::oid AND objid = $2::bigint::oid
+        AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`,
+    [(key >> 32n).toString(), (key & 0xffff_ffffn).toString()],
+  );
+  return rows[0]?.pid ?? null;
+}
+
+/**
  * Bloqueo de sesión de una fuente (ADR-0012 §9; pendiente 6 de F1.3). Todo proceso que escriba el
  * log de una fuente en PostgreSQL lo toma antes y lo mantiene mientras ingiere. Vive en un cliente
  * propio, fuera del pool: el pool cierra los clientes inactivos y el bloqueo se iría con ellos.

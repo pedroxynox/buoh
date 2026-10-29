@@ -20,6 +20,7 @@ import {
   type OperationalAlert,
   type WorkerConfig,
 } from '../src/index.js';
+import { sourceLockHolder } from '../src/postgres/source-lock.js';
 import { START, START_EPOCH, uuid } from '../test/support/connection-harness.js';
 import {
   derivMessages,
@@ -27,7 +28,6 @@ import {
   ManualClock,
   syntheticSchemaArchive,
 } from '../test/support/deriv-fixtures.js';
-import { sourceLockHolder } from '../test/support/pg-locks.js';
 
 /**
  * La captura viva continua (`runIngest`, ADR-0015 §7) contra PostgreSQL y S3-compatible locales: los

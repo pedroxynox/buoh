@@ -37,6 +37,7 @@ import {
   type ObjectStore,
   type WorkerConfig,
 } from '../src/index.js';
+import { sourceLockHolder } from '../src/postgres/source-lock.js';
 import {
   catalogEntry,
   derivMessages,
@@ -44,7 +45,6 @@ import {
   SYNTH_100,
   syntheticSchemaArchive,
 } from '../test/support/deriv-fixtures.js';
-import { sourceLockHolder } from '../test/support/pg-locks.js';
 
 /**
  * Catálogo, incidencias de respuestas pedidas y bloqueo por fuente (ADR-0012 §6, §7 y §9) contra

@@ -173,8 +173,11 @@ export interface DerivSessionInput extends Pick<
   readonly schemaObjects?: ObjectStore;
 }
 
-/** La entrada de la release que es el esquema de fuente del perfil de medición (`profile.ts`). */
-const SOURCE_SCHEMA_ENTRY = schemaEntryName('ticks', 'response');
+/**
+ * La entrada de la release que es el esquema de fuente del perfil de medición (`profile.ts`): la que
+ * la sesión guarda y `data:health` lee (ADR-0015 §7 y §8).
+ */
+export const SOURCE_SCHEMA_ENTRY = schemaEntryName('ticks', 'response');
 
 /** Motivo del corte del smoke de reconexión (ADR-0015 §9). */
 export const SMOKE_INTERRUPT_REASON = 'smoke_interrupt';

@@ -1,8 +1,10 @@
+import { type Pool } from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
 import { openSchemaArchive } from '../src/deriv/schema-archive.js';
 import { SourceLockUnavailableError } from '../src/deriv/session.js';
+import { sourceLockHolder } from '../src/postgres/source-lock.js';
 import {
   lockedSourceLogStore,
   openLockedSourceLog,
@@ -60,6 +62,48 @@ describe('sourceLockKey', () => {
     // Calculado con hashlib de Python, fuera del código probado.
     expect(sourceLockKey('deriv_options')).toBe('-3598305319908194316');
     expect(sourceLockKey('synthetic')).toBe('2508138588543325748');
+  });
+});
+
+describe('sourceLockHolder (ADR-0015 §8, «Escritor vivo»)', () => {
+  /** Un pool que responde cada consulta con `rows` y anota su texto y sus valores. */
+  function fakePool(rows: readonly { pid: number }[]) {
+    const queries: { text: string; values: unknown }[] = [];
+    const pool = {
+      query: (text: string, values: unknown) => {
+        queries.push({ text, values });
+        return Promise.resolve({ rows });
+      },
+    } as unknown as Pick<Pool, 'query'>;
+    return { pool, queries };
+  }
+
+  it('lee de pg_locks el bloqueo concedido de la fuente en la base actual, con los 32 bits altos y bajos de la clave, y da el PID de su sesión', async () => {
+    const { pool, queries } = fakePool([{ pid: 4242 }]);
+    expect(await sourceLockHolder(pool, 'deriv_options')).toBe(4242);
+    expect(await sourceLockHolder(pool, 'synthetic')).toBe(4242);
+    // Las dos mitades de la clave como enteros sin signo, calculadas con hashlib de Python, fuera
+    // del código probado.
+    expect(queries.map((query) => query.values)).toEqual([
+      ['3457171552', '1299793908'],
+      ['583971521', '4052948532'],
+    ]);
+    const [first] = queries;
+    expect(first?.text).toMatch(/^SELECT pid FROM pg_locks\b/u);
+    for (const condition of [
+      /locktype = 'advisory'/u,
+      /\bgranted\b/u,
+      /objsubid = 1/u,
+      /classid = \$1::bigint::oid/u,
+      /objid = \$2::bigint::oid/u,
+      /database = \(SELECT oid FROM pg_database WHERE datname = current_database\(\)\)/u,
+    ]) {
+      expect(first?.text).toMatch(condition);
+    }
+  });
+
+  it('sin una sesión que tenga el bloqueo da null', async () => {
+    expect(await sourceLockHolder(fakePool([]).pool, 'deriv_options')).toBeNull();
   });
 });
 

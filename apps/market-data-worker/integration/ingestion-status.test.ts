@@ -25,8 +25,8 @@ import {
   SourceLock,
   type WorkerConfig,
 } from '../src/index.js';
+import { sourceLockHolder } from '../src/postgres/source-lock.js';
 import { derivMessages, syntheticSchemaArchive } from '../test/support/deriv-fixtures.js';
-import { sourceLockHolder } from '../test/support/pg-locks.js';
 import {
   cursorOf,
   heartbeatOf,

@@ -378,6 +378,31 @@ Después, `aws … s3 ls` ya no muestra el bucket, y `SELECT nspname FROM pg_nam
 
 Con `pnpm --filter`, el shell recibe 1 para cualquier salida distinta de 0, y pnpm escribe en stderr la del proceso («Command failed with exit code 2») y `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`; desde `apps/market-data-worker`, `pnpm run ingest -- --live` devuelve la del proceso, y en stderr solo deja la orden y «Command failed with exit code 2». En los dos casos stdout lleva solo la línea JSON. Una salida sin línea JSON significa que el proceso se cortó (por ejemplo, con `SIGKILL`); el detalle está en stderr.
 
+### Salud de datos (`data:health`)
+
+Desde el PR 6 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13 (§8), la salud de datos de la fuente `deriv_options` se deriva desde fuera del proceso que ingiere, y nunca se guarda: `observeDataHealth` (`apps/market-data-worker/src/health/observe.ts`) lee lo observado y `evaluateDataHealth` (`src/health/evaluate.ts`) le aplica las reglas (ver «Reporte y evidencia»). La lectura nunca toma el bloqueo de la fuente ni escribe nada: el log se abre con almacenes que rechazan toda escritura, y del registro operativo solo se cargan las condiciones.
+
+**Qué lee**, en este orden (ADR-0015 §8, «Entradas»), en el esquema PostgreSQL y el bucket de la configuración:
+
+1. las migraciones del worker que le faltan al esquema, sin aplicar nada, como `ingest` (ver «Captura viva continua (`ingest`)»). Si falta alguna, no lee nada más;
+2. el escritor vivo: la sesión de PostgreSQL que tiene el bloqueo de la fuente según `pg_locks` (`sourceLockHolder`, en `apps/market-data-worker/src/postgres/source-lock.ts`), con la consulta de «Una sola instancia por fuente» limitada a la base de datos actual, porque otra base del mismo servidor tiene sus propios bloqueos. Da el PID de esa sesión, o ninguno. Cualquier rol puede leer `pg_locks`;
+3. el último latido de la fuente, el último escrito en `ingestion_heartbeats`. El escritor vivo es el de este esquema si su PID es el de ese latido. El escritor y el latido se leen antes que el log: así un evento de conexión del log posterior al latido manda (regla 5), y si no hay escritor vivo, el log que se lee después ya tiene el cierre que dejó el último al soltar el bloqueo;
+4. los símbolos de los cursores de la fuente (`ingestion_cursors`), que dan el símbolo del log, como al arrancar la sesión (ver «Inicio»);
+5. el log durable, los segmentos cerrados y el abierto, con las comprobaciones de siempre (ver «Adaptador público de Deriv», paso 2);
+6. el esquema de fuente que guardó `ingest` (ver «Captura viva continua (`ingest`)», «Esquema de fuente guardado»), con la clave de su SHA-256 fijado y leído como mucho hasta 10 485 760 bytes, el máximo de una entrada de `schemas.zip` (ADR-0004 §7), porque la release fijada da el SHA-256 de cada entrada pero no su tamaño. Con esos bytes y la release arma el perfil de medición del símbolo, el mismo que arma la sesión con los esquemas cargados (`createDerivMeasurementProfileFromSourceSchema`, en `src/deriv/profile.ts`), sin descargar nada;
+7. los tipos de las condiciones abiertas del registro operativo de la fuente;
+8. el `dataset_id` del último dataset activo de la fuente en el entorno de `BUOH_DEPLOYMENT_ENVIRONMENT` (`PostgresMetadataStore.lastActiveDatasetId`): el de su record `active` con la hora de publicación más tardía y, a la misma hora, el de `publication_id` mayor, o ninguno. Los datos vivos no se publican (ADR-0015 §7), así que hoy con `deriv_options` no hay ninguno.
+
+La hora de la observación se toma una vez, al terminar de leer: así el cierre que la regla 4 añade en memoria nunca queda antes de lo leído, y un latido leído nunca es posterior a ella. Si una lectura dice algo incompatible o falla, la observación termina ahí, con un motivo saneado: un código, o el código o el nombre del error, nunca su mensaje.
+
+| Lo que se lee | Lo observado | Regla de ADR-0015 §8 |
+|---|---|---|
+| al esquema le faltan migraciones, o una tabla no existe (`42P01`) en cualquier lectura | `migrations_pending` | 2: `failed` |
+| el contenido del log no pasa sus comprobaciones (`LogIntegrityError`): un objeto alterado, que falta o mayor que su fila, un hash o unos conteos que no cuadran, entre otras | `log_not_derivable` | 2 |
+| la clave del esquema de fuente tiene otros bytes: más de 10 485 760, o con otro SHA-256. Da igual que el log esté vacío, porque `ingest` ya no arranca con ese bucket | `source_schema_mismatch` | 2 |
+| la clave del esquema de fuente no tiene ningún objeto | el perfil falta: con el log no vacío, la evaluación da `source_schema_missing` (regla 2), y con el log vacío no hace falta | — |
+| PostgreSQL o el almacenamiento de objetos rechazan cualquier otra lectura, también una fila que no pasa sus comprobaciones, porque la interfaz de los almacenes no separa los dos casos, como en la sesión | el motivo saneado, por ejemplo `ECONNREFUSED` | 3: `paused` |
+
 ### Almacenamiento no disponible o backlog lleno por conteo/bytes
 
 1. Cambiar inmediatamente a `paused`.
@@ -439,7 +464,7 @@ Servicios de [`infra/compose.yaml`](../../infra/compose.yaml): PostgreSQL 18 y S
 
 Límites de lectura del replay: documento de manifiesto 16 MiB, objeto 256 MiB y descompresión gzip hasta el tamaño máximo de segmento raw (64 MiB, ADR-0004 §7). Un objeto por encima del límite se rechaza sin cargarlo.
 
-`pnpm run test:integration` ejecuta las pruebas de integración contra estos servicios con las mismas variables. Usa sus propios esquemas PostgreSQL (`buoh_integration`, `buoh_integration_log`, `buoh_integration_catalog`, `buoh_integration_status` y `buoh_integration_ingest`) y los recrea en cada ejecución. Desde el PR 5 de ADR-0015 §13, la de la captura viva (`apps/market-data-worker/integration/ingest-session.test.ts`) corre la captura de `ingest` (`runIngest`) con los almacenes reales, el bloqueo de PostgreSQL, el log protegido por él, el cursor y el latido: dos ejecuciones seguidas, la segunda sobre el cursor que dejó la primera. Su fábrica de sockets es falsa y sus esquemas son sintéticos, así que nunca sale a la red ni a Deriv (ADR-0015 §11); como no pasa por la comprobación de configuración del comando, guarda los objetos en el bucket de las demás pruebas.
+`pnpm run test:integration` ejecuta las pruebas de integración contra estos servicios con las mismas variables. Usa sus propios esquemas PostgreSQL (`buoh_integration`, `buoh_integration_log`, `buoh_integration_catalog`, `buoh_integration_status`, `buoh_integration_ingest` y `buoh_integration_health`) y los recrea en cada ejecución. Desde el PR 5 de ADR-0015 §13, la de la captura viva (`apps/market-data-worker/integration/ingest-session.test.ts`) corre la captura de `ingest` (`runIngest`) con los almacenes reales, el bloqueo de PostgreSQL, el log protegido por él, el cursor y el latido: dos ejecuciones seguidas, la segunda sobre el cursor que dejó la primera. Su fábrica de sockets es falsa y sus esquemas son sintéticos, así que nunca sale a la red ni a Deriv (ADR-0015 §11); como no pasa por la comprobación de configuración del comando, guarda los objetos en el bucket de las demás pruebas.
 
 Tablas append-only del log y del registro (migración `0002_log_raw_first`):
 

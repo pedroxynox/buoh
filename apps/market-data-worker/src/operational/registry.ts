@@ -5,6 +5,7 @@ import {
   deriveSourceLimitConditionKey,
   operationalConditionEventSchema,
   validateConditionCausality,
+  type ConditionType,
   type DataQualityIncident,
   type OperationalConditionEvent,
   type persistenceStageSchema,
@@ -57,7 +58,7 @@ export const OPERATIONAL_RESOLUTION_REASONS = {
   source_limit_exceeded: 'input_reopened',
 } as const;
 
-function sortedUnique(values: readonly string[]): string[] {
+function sortedUnique<T extends string>(values: readonly T[]): T[] {
   return [...new Set(values)].sort();
 }
 
@@ -124,7 +125,8 @@ export class OperationalRegistry {
       .toSorted((left, right) => (left.condition_key < right.condition_key ? -1 : 1));
   }
 
-  openConditionTypes(): string[] {
+  /** Los tipos de las condiciones abiertas, únicos y ordenados; los lee `data:health`. */
+  openConditionTypes(): ConditionType[] {
     return sortedUnique(this.openConditions().map((condition) => condition.condition_type));
   }
 

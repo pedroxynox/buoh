@@ -76,6 +76,30 @@ export class PostgresMetadataStore implements MetadataStore {
     return publishedManifestRecordSchema.parse(row);
   }
 
+  /**
+   * El `dataset_id` del último dataset activo de la fuente en el entorno, o `null` si no tiene
+   * ninguno: el de su record `active` con la hora de publicación más tardía, y a la misma hora, el de
+   * `publication_id` mayor (un UUIDv7, que crece con el tiempo). Lo lee `data:health` (ADR-0015 §8,
+   * «Entradas»). Solo lee. `published_at_utc` es el texto UTC canónico del contrato, con
+   * milisegundos, así que su orden de texto es el del tiempo.
+   */
+  async lastActiveDatasetId(
+    source: string,
+    environment: DeploymentEnvironment,
+  ): Promise<string | null> {
+    const { rows } = await this.#pool.query<{ dataset_id: string }>(
+      `SELECT records.dataset_id
+         FROM published_manifest_records AS records
+         JOIN datasets ON datasets.dataset_id = records.dataset_id
+        WHERE datasets.source = $1 AND records.deployment_environment = $2
+          AND records.state = 'active'
+        ORDER BY records.published_at_utc DESC, records.publication_id DESC
+        LIMIT 1`,
+      [source, environment],
+    );
+    return rows[0]?.dataset_id ?? null;
+  }
+
   async commitPublication(input: CommitPublicationInput): Promise<void> {
     const { core, environment, incidents, record } = input;
     const coreJcs = canonicalJson(core);
