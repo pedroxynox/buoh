@@ -5,7 +5,8 @@
 // Uso, desde la raíz del repositorio, con el worker compilado y las variables `BUOH_*` de los
 // servicios locales (runbook, «Entorno local y replay»):
 //
-//   node scripts/evidencia-f1-5/drills.mjs --sequence <reinicios|smoke|replay|servicios> --out-dir <dir>
+//   node scripts/evidencia-f1-5/drills.mjs
+//     --sequence <reinicios|smoke|objetos|postgres|replay|servicios> --out-dir <dir>
 //     [--symbol R_100] [--capture-seconds 180]
 //
 // - `reinicios` (puntos 1, 3, 4, 7 y 8): prepara una captura con un esquema y un bucket desechables
@@ -22,9 +23,20 @@
 // - `replay` (punto 9): en un esquema y un bucket desechables, `db:migrate`, `fixture:publish` y
 //   `pnpm run data:replay` de cada dataset sintético (recomputación y `--verify-only`), comparando
 //   su `dataset_id` con el de los vectores, y el mismo borrado.
-// - `servicios`: comprueba las órdenes que paran y arrancan cada servicio (`service`), que usarán
-//   los ensayos de fallo de persistencia (puntos 5 y 6): con cada servicio parado, `data:health` da
+// - `servicios`: comprueba las órdenes que paran y arrancan cada servicio (`service`), que usan los
+//   ensayos de fallo de persistencia (puntos 5 y 6): con cada servicio parado, `data:health` da
 //   `paused` con la alerta `data_health_storage_unavailable`, y al arrancarlo otra vez, ya no.
+// - `objetos` (punto 5, y 7 y 8 de su captura) y `postgres` (punto 6, y 7 y 8): con un esquema y un
+//   bucket desechables, corre `capture.mjs` hasta `healthy`, para el almacenamiento de objetos o
+//   PostgreSQL unos 15 s mientras siguen llegando ticks, con `data:health` cada 5 s y un conteo, y
+//   lo arranca otra vez. Espera `healthy` (como mucho 180 s), la deja 30 s más, la para con
+//   `SIGTERM`, comprueba los ticks entregados, lista los latidos por PID de PostgreSQL y borra el
+//   esquema y el bucket. Comprueba lo que pide ADR-0015 §12: `paused` mientras dura el fallo, el
+//   cierre reparado (`close_not_recorded`) de la conexión que se perdió, una apertura que la
+//   supera, la recuperación `complete` y `healthy`; en `objetos`, además, `persistence_unavailable`
+//   abierta en el registro operativo durante el fallo y resuelta después; en `postgres`, la alerta
+//   `operational_registry_unavailable` en el stderr de la captura, la regla 3 de `data:health`
+//   (`data_health_storage_unavailable`) y otro PID en el latido después del fallo.
 //
 // Cada paso queda en `<out-dir>/<secuencia>-<hora>/results.json`, con horas UTC, salidas, estados,
 // motivos, conteos e IDs, nunca precios, payloads, credenciales, hosts ni puertos. La salida cruda
@@ -69,6 +81,15 @@ const SCHEMA_LEFT = String.raw`PGPASSWORD="$BUOH_POSTGRES_PASSWORD" psql -h "$BU
   -c "SELECT nspname FROM pg_namespace WHERE nspname = '$BUOH_POSTGRES_SCHEMA'"`;
 const BUCKETS_LEFT = String.raw`AWS_ACCESS_KEY_ID="$BUOH_S3_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$BUOH_S3_SECRET_ACCESS_KEY" \
   AWS_DEFAULT_REGION="$BUOH_S3_REGION" aws --endpoint-url "$BUOH_S3_ENDPOINT" s3 ls`;
+// Los latidos de la ingesta (ADR-0015 §6) agrupados por PID de PostgreSQL y ejecución, para el punto
+// 6: solo PIDs, IDs, conteos y horas.
+const HEARTBEAT_PIDS = String.raw`PGPASSWORD="$BUOH_POSTGRES_PASSWORD" psql -h "$BUOH_POSTGRES_HOST" -p "$BUOH_POSTGRES_PORT" \
+  -U "$BUOH_POSTGRES_USER" -d "$BUOH_POSTGRES_DB" -v ON_ERROR_STOP=1 -At \
+  -c "SELECT pg_backend_pid, run_id, count(*), min(observed_at_utc), max(observed_at_utc)
+      FROM \"$BUOH_POSTGRES_SCHEMA\".ingestion_heartbeats
+      GROUP BY pg_backend_pid, run_id ORDER BY min(observed_at_utc)"`;
+/** Cuánto tiempo queda parado el servicio en los puntos 5 y 6 («unos segundos», ADR-0015 §12). */
+const OUTAGE_MS = 15_000;
 
 let options;
 try {
@@ -81,8 +102,12 @@ try {
       symbol: { default: 'R_100', type: 'string' },
     },
   }));
-  if (!['reinicios', 'replay', 'servicios', 'smoke'].includes(options.sequence ?? '')) {
-    throw new TypeError('--sequence es reinicios, smoke, replay o servicios.');
+  if (
+    !['objetos', 'postgres', 'reinicios', 'replay', 'servicios', 'smoke'].includes(
+      options.sequence ?? '',
+    )
+  ) {
+    throw new TypeError('--sequence es reinicios, smoke, objetos, postgres, replay o servicios.');
   }
   if (options['out-dir'] === undefined) {
     throw new TypeError('Falta --out-dir.');
@@ -787,7 +812,234 @@ async function servicios() {
   };
 }
 
-const sequences = { reinicios, replay, servicios, smoke };
+/** Cuenta cada valor de `values`, con las claves ordenadas. */
+function countBy(values) {
+  const counts = {};
+  for (const value of [...values].sort()) counts[value] = (counts[value] ?? 0) + 1;
+  return counts;
+}
+
+/**
+ * Las alertas JSON que la captura dejó hasta ahora en su stderr, contadas por `evento:motivo`: solo
+ * el nombre y el motivo saneado, nada más de cada alerta.
+ */
+const captureAlerts = (capture) =>
+  countBy(
+    jsonLines(readFileSync(`${capture.base}.err`, 'utf8'))
+      .filter((line) => typeof line.event === 'string')
+      .map((line) => `${line.event}:${line.reason ?? ''}`),
+  );
+
+/** Las filas de `HEARTBEAT_PIDS`, separadas por tabuladores. */
+const heartbeatRows = (stdout) =>
+  stdout
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => {
+      const [pid, runId, heartbeats, first, last] = line.split('\t');
+      return {
+        first_utc: first,
+        heartbeats: Number(heartbeats),
+        last_utc: last,
+        pg_backend_pid: Number(pid),
+        run_id: runId,
+      };
+    });
+
+/**
+ * Puntos 5 (`s3`) y 6 (`pg`), y 7 y 8 de su captura: para el servicio unos `OUTAGE_MS` durante la
+ * ingesta y lo arranca otra vez (ADR-0015 §12). `data:health` corre en cada paso y cada 5 s con el
+ * servicio parado, y `count-incidents.mjs` antes del fallo, al final del fallo, al arrancar el
+ * servicio, tras volver a `healthy` y al final, con los ticks entregados.
+ */
+async function storageFailure(serviceName) {
+  const env = throwawayEnv();
+  const counts = {};
+  const outage = { during: [], service: serviceName };
+  const waits = {};
+  const captures = [];
+  let serviceStopped = false;
+  let stop = null;
+  let heartbeats = null;
+  try {
+    await prepareStorage(env);
+    await health('vacio', env);
+    const c1 = startCapture('c1', env);
+    captures.push(c1);
+    waits.before = await waitHealthy('c1', env, c1, { pollMs: 5_000, timeoutMs: 180_000 });
+    if (!waits.before.reached) throw new Error('La captura no llegó a healthy antes del fallo.');
+    counts.before = await count('antes-del-fallo', env);
+    // El fallo: el servicio parado unos segundos, mientras la fuente sigue mandando ticks.
+    outage.stop = await service(serviceName, 'stop', env);
+    serviceStopped = true;
+    const until = Date.parse(outage.stop.finished_at_utc) + OUTAGE_MS;
+    for (let poll = 1; poll === 1 || Date.now() < until; poll += 1) {
+      if (poll > 1) await sleep(Math.max(0, Math.min(5_000, until - Date.now())));
+      outage.during.push(await health(`${serviceName}-parado-${poll}`, env));
+    }
+    counts.during = await count(`${serviceName}-parado`, env);
+    outage.alerts_while_stopped = captureAlerts(c1);
+    outage.start = await service(serviceName, 'start', env);
+    serviceStopped = false;
+    outage.after_start = await health(`${serviceName}-arrancado`, env);
+    counts.afterStart = await count(`${serviceName}-arrancado`, env);
+    waits.after = await waitHealthy('recuperacion', env, c1, { pollMs: 5_000, timeoutMs: 180_000 });
+    counts.recovered = await count('recuperada', env);
+    await holdUntil(
+      'sostenida',
+      env,
+      c1,
+      (Date.now() - Date.parse(c1.started_at_utc)) / 1000 + 30,
+      30_000,
+    );
+    stop = await stopCapture(c1, 'SIGTERM');
+    await health('final', env);
+    // Punto 7: cada tick entregado es un frame durable del log.
+    counts.final = await count(
+      'final-ticks-entregados',
+      env,
+      captures.map((capture) => capture.ticksFile),
+    );
+    const listed = await shellStep('latidos', HEARTBEAT_PIDS, env);
+    heartbeats = listed.code === 0 ? heartbeatRows(listed.stdout) : null;
+  } catch (error) {
+    results.error = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  } finally {
+    // El borrado necesita los dos servicios.
+    if (serviceStopped) {
+      try {
+        await service(serviceName, 'start', env);
+      } catch (error) {
+        results.restart_error = error instanceof Error ? error.message : String(error);
+      }
+    }
+    for (const capture of captures) {
+      if (capture.exit === null) await stopCapture(capture, 'SIGKILL');
+    }
+    await deleteStorage(env);
+  }
+
+  const capture = captures[0];
+  const lost = lastConnection(counts.before);
+  const after = connectionsOf(counts.recovered);
+  const repaired = after.find((connection) => connection.connection_id === lost?.connection_id);
+  const superseding = after.find(
+    (connection) => connection.supersedes_connection_id === lost?.connection_id,
+  );
+  const recovery =
+    recoveriesOf(counts.recovered).find(
+      (entry) => entry.connection_id === superseding?.connection_id,
+    ) ?? null;
+  const healthyAfter = (from) =>
+    waits.after?.reached === true && from !== undefined
+      ? (Date.parse(waits.after.reached_at_utc) - Date.parse(from)) / 1000
+      : null;
+  const healthWhileStopped = outage.during.map((step) => ({
+    alerts: step.alerts.map((alert) => `${alert.event}:${alert.reason ?? ''}`),
+    exit: step.exit,
+    finished_at_utc: step.finished_at_utc,
+    service_health: step.service_health,
+  }));
+  const common = {
+    alerts_total: capture === undefined ? null : captureAlerts(capture),
+    alerts_while_stopped: outage.alerts_while_stopped ?? null,
+    capture_kept_running: stop?.already_exited === false && stop?.exit === 0,
+    health_while_stopped: healthWhileStopped,
+    heartbeat_pids: heartbeats,
+    healthy_after_start_seconds: healthyAfter(outage.start?.finished_at_utc),
+    healthy_after_stop_seconds: healthyAfter(outage.stop?.started_at_utc),
+    healthy_reached: waits.after?.reached ?? false,
+    lost_connection_id: lost?.connection_id ?? null,
+    paused_while_stopped:
+      healthWhileStopped.length > 0 &&
+      healthWhileStopped.every((step) => step.service_health === 'paused'),
+    recovery,
+    repaired_close: repaired
+      ? { closure_reason: repaired.closure_reason, closure_type: repaired.closure_type }
+      : null,
+    service_started_at_utc: outage.start?.finished_at_utc ?? null,
+    service_stopped_at_utc: outage.stop?.started_at_utc ?? null,
+    superseding_connection_id: superseding?.connection_id ?? null,
+    waits_ms: stop?.report?.waits_ms ?? null,
+  };
+  const commonPass =
+    common.capture_kept_running &&
+    common.paused_while_stopped &&
+    repaired?.closure_type === 'transport_error' &&
+    repaired?.closure_reason === 'close_not_recorded' &&
+    superseding !== undefined &&
+    recovery?.status === 'complete' &&
+    common.healthy_reached;
+  const delivered = counts.final?.summary?.delivered_ticks ?? null;
+  const item = {};
+  if (serviceName === 's3') {
+    const whileStopped = counts.during?.summary?.operational ?? null;
+    const registry = counts.recovered?.summary?.operational ?? null;
+    const opened = registry?.conditions_by_type?.['persistence_unavailable:opened'] ?? 0;
+    item.item5_almacenamiento_de_objetos = {
+      ...common,
+      pass:
+        commonPass &&
+        (whileStopped?.open_condition_types ?? []).includes('persistence_unavailable') &&
+        (registry?.incidents_by_type?.persistence_unavailable ?? 0) > 0 &&
+        opened > 0 &&
+        registry?.conditions_by_type?.['persistence_unavailable:resolved'] === opened &&
+        registry?.open_condition_types?.length === 0,
+      registry_after_recovery: registry,
+      registry_while_stopped: whileStopped,
+    };
+  } else {
+    const pidBefore = counts.before?.summary?.heartbeat_pg_backend_pid ?? null;
+    const pidAfter = counts.recovered?.summary?.heartbeat_pg_backend_pid ?? null;
+    item.item6_postgresql = {
+      ...common,
+      heartbeat_pid_after: pidAfter,
+      heartbeat_pid_before: pidBefore,
+      pass:
+        commonPass &&
+        Object.keys(outage.alerts_while_stopped ?? {}).some((key) =>
+          key.startsWith('operational_registry_unavailable:'),
+        ) &&
+        healthWhileStopped.every((step) =>
+          step.alerts.some((alert) => alert.startsWith('data_health_storage_unavailable:')),
+        ) &&
+        pidBefore !== null &&
+        pidAfter !== null &&
+        pidBefore !== pidAfter &&
+        counts.recovered?.summary?.writer_pid === pidAfter,
+      writer_pid_after: counts.recovered?.summary?.writer_pid ?? null,
+    };
+  }
+  results.outage = {
+    service: serviceName,
+    started_at_utc: outage.start?.finished_at_utc ?? null,
+    stopped_at_utc: outage.stop?.started_at_utc ?? null,
+  };
+  results.heartbeats = heartbeats;
+  results.checks = {
+    ...item,
+    item7_ningun_dato_no_durable: {
+      delivered,
+      pass: delivered !== null && delivered.delivered > 0 && delivered.missing === 0,
+    },
+    item8_incidencias_tras_reiniciar: {
+      counts_recorded: Object.keys(counts),
+      pass: ['before', 'recovered', 'final'].every((key) => counts[key]?.exit === 0),
+    },
+    retention_deleted: {
+      pass: results.deletion?.schema_gone === true && results.deletion?.bucket_gone === true,
+    },
+  };
+}
+
+const sequences = {
+  objetos: () => storageFailure('s3'),
+  postgres: () => storageFailure('pg'),
+  reinicios,
+  replay,
+  servicios,
+  smoke,
+};
 await sequences[sequence]();
 results.finished_at_utc = now();
 save();

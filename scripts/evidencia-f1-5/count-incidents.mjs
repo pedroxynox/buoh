@@ -1,4 +1,4 @@
-// Evidencia de la puerta de salida de Fase 1 (ADR-0015 §12, puntos 7 y 8). No es un comando del
+// Evidencia de la puerta de salida de Fase 1 (ADR-0015 §12, puntos 5 a 8). No es un comando del
 // producto.
 //
 // Uso, desde la raíz del repositorio y con el worker compilado:
@@ -9,10 +9,15 @@
 // solo para leer, como `data:health`: `observeDataHealth` sobre `openHealthStores`, que nunca toman
 // el bloqueo ni escriben. Deriva del log, con el perfil de medición que arma esa lectura con el
 // esquema de fuente guardado, las incidencias y condiciones (`deriveMarketData`, de `@buoh/domain`)
-// y escribe una sola línea JSON en stdout con conteos, tipos, estados, motivos e IDs, nunca precios
-// ni payloads. Con `--delivered`, cada archivo lleva un `observation_id` por línea (los ticks que
-// entregó el sink de `capture.mjs`), y la línea dice cuántos son un `raw_source_frame` durable del
-// log (punto 7).
+// y escribe una sola línea JSON en stdout con conteos, tipos, estados, motivos, IDs y el PID de
+// PostgreSQL del escritor vivo y del último latido, nunca precios ni payloads. Con `--delivered`,
+// cada archivo lleva un `observation_id` por línea (los ticks que entregó el sink de `capture.mjs`),
+// y la línea dice cuántos son un `raw_source_frame` durable del log (punto 7).
+//
+// Aparte del log, `operational` cuenta todo lo que guarda el registro operativo de la fuente
+// (incidencias por tipo, etapa y motivo, y condiciones por tipo y acción), leído con la misma
+// lectura que usa `data:health`. Como solo necesita PostgreSQL, sale también con el almacenamiento
+// de objetos parado (punto 5); si PostgreSQL no responde, dice `unavailable` y el motivo saneado.
 //
 // Salida 0 si pudo leer el log; 1 si la lectura terminó en las reglas 2 o 3 de `data:health` (la
 // línea lleva `observation` y `reason`) o la derivación falló; 2 con argumentos inválidos.
@@ -22,10 +27,13 @@ import { parseArgs } from 'node:util';
 
 import {
   createUuidV7Generator,
+  failureReason,
   loadConfig,
   observeDataHealth,
   openHealthStores,
+  OperationalRegistry,
 } from '../../apps/market-data-worker/dist/index.js';
+import { DERIV_SOURCE } from '../../apps/market-data-worker/dist/deriv/profile.js';
 import { deriveMarketData } from '../../packages/domain/dist/index.js';
 
 /** Cuenta cada valor de `values`, con las claves ordenadas. */
@@ -88,6 +96,48 @@ function deliveredCheck(files, events) {
   };
 }
 
+/** No escribe nunca: el registro operativo se abre aquí solo para leerlo. */
+const refuseWrite = () => Promise.reject(new TypeError('count-incidents solo lee.'));
+
+/**
+ * Lo que guarda el registro operativo de la fuente, contado: incidencias por tipo y por
+ * `tipo:etapa:motivo` (la etapa, o el recurso de un límite, y el motivo saneado de su evidencia),
+ * condiciones por `tipo:acción`, motivos de resolución y los tipos que siguen abiertos, como los
+ * deja `OperationalRegistry`. Si PostgreSQL no responde, `unavailable` y el motivo saneado.
+ */
+async function operationalSummary(stores) {
+  let loaded;
+  try {
+    loaded = await stores.operational.load(DERIV_SOURCE);
+  } catch (error) {
+    return { reason: failureReason(error), status: 'unavailable' };
+  }
+  const registry = await OperationalRegistry.open({
+    source: DERIV_SOURCE,
+    store: { append: refuseWrite, load: () => Promise.resolve(loaded) },
+  });
+  const { conditions, incidents } = loaded;
+  return {
+    conditions_by_type: countBy(
+      conditions.map((condition) => `${condition.condition_type}:${condition.action}`),
+    ),
+    incidents_by_stage: countBy(
+      incidents.map(
+        (incident) =>
+          `${incident.incident_type}:${incident.evidence?.stage ?? incident.evidence?.resource ?? ''}:${incident.evidence?.reason ?? ''}`,
+      ),
+    ),
+    incidents_by_type: countBy(incidents.map((incident) => incident.incident_type)),
+    open_condition_types: registry.openConditionTypes(),
+    resolution_reasons: countBy(
+      conditions
+        .filter((condition) => condition.action === 'resolved')
+        .map((condition) => condition.resolution_reason),
+    ),
+    status: 'loaded',
+  };
+}
+
 let options;
 try {
   ({ values: options } = parseArgs({
@@ -132,6 +182,8 @@ try {
       events: events.length,
       events_by_kind: countBy(events.map((event) => event.kind)),
       heartbeat_connection_state: observation.latestHeartbeat?.connection_state ?? null,
+      heartbeat_observed_at_utc: observation.latestHeartbeat?.observed_at_utc ?? null,
+      heartbeat_pg_backend_pid: observation.latestHeartbeat?.pg_backend_pid ?? null,
       latest_cursor_present: observation.latestCursor !== null,
       observation: 'observed',
       operational_open_condition_types: [...observation.operationalConditionTypes],
@@ -144,6 +196,7 @@ try {
       })),
       recoveries_by_status: countBy(recoveries.map((event) => event.status)),
       segments: observation.segments.length,
+      writer_pid: observation.writerPid,
       writer_present: observation.writerPid !== null,
     };
     if (observation.profile !== null && events.length > 0) {
@@ -176,6 +229,7 @@ try {
       line.delivered_ticks = deliveredCheck(options.delivered, events);
     }
   }
+  line.operational = await operationalSummary(stores);
 } finally {
   await stores.close();
 }
