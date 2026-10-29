@@ -47,7 +47,7 @@ Este roadmap ordena el trabajo por evidencia y reducción de riesgo, no por fech
 
 ## Fase 1B — Datos de MetaTrader 5
 
-**Objetivo:** capturar precios de Deriv MT5 y Vantage con las mismas garantías que Deriv, sin operar ([ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)). Va después de la Fase 2: el propietario decidió el 2026-10-29 hacer antes la Fase 2, y la Fase 1B no tiene fecha.
+**Objetivo:** capturar precios de Deriv MT5 y Vantage con las mismas garantías que Deriv, sin operar ([ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)). El propietario decidió el 2026-10-29 hacer antes la Fase 2, y la Fase 1B no tiene fecha.
 
 **Incrementos:**
 

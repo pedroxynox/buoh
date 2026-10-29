@@ -242,7 +242,7 @@ Solo se listan; sus planes no existen todavía y el roadmap describe el destino.
   - el equipo de la terminal y su protección;
   - la revisión de términos de Deriv MT5, Vantage y MetaQuotes.
 
-  No existe código MT5, como manda el plan. La Fase 1B va después de la Fase 2 (P-F1-06).
+  No existe código MT5, como manda el plan. La Fase 2 va antes, y la Fase 1B no tiene fecha (P-F1-06).
 - **Fase 2.** Es la fase actual desde el 2026-10-29 (P-F1-06). Su plan es la siguiente tarea de `PROJECT_STATUS.md`, y hasta que se fusione no autoriza código.
 - **Fases 3 a 7.** Roadmap. No están autorizadas.
 - **Despliegue.** ADR-0006, ADR-0013 y arquitectura objetivo. Solo el sitio oficial tiene `render.yaml` (ADR-0013). Siguen pendientes:

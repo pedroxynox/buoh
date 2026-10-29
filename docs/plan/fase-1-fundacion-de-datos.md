@@ -4,7 +4,7 @@ schema_version: "1.0.0"
 status: "done"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-10-29T15:30:00.000Z"
+last_reviewed_utc: "2026-10-29T15:45:40.000Z"
 ---
 
 # Plan ejecutable: Fase 1 — Fundación de datos

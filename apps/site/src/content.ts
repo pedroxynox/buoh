@@ -256,7 +256,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
     id: '1B',
     title: 'Datos de MetaTrader 5',
     state: 'prevista',
-    text: 'Precios de Deriv MT5 y Vantage con las mismas garantías, sin operar. Llegará después de la Fase 2.',
+    text: 'Precios de Deriv MT5 y Vantage con las mismas garantías, sin operar. Sin fecha: primero va la Fase 2.',
   },
   {
     id: '2',
