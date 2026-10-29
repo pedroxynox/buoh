@@ -6,8 +6,13 @@ import {
 } from '@buoh/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { contentKey } from '../src/object-keys.js';
 import { settle, START_EPOCH, uuid } from './support/connection-harness.js';
-import { derivMessages, type FakeDerivSocket } from './support/deriv-fixtures.js';
+import {
+  derivMessages,
+  syntheticSchemaArchive,
+  type FakeDerivSocket,
+} from './support/deriv-fixtures.js';
 import {
   holdObjectWrites,
   PREVIOUS,
@@ -742,5 +747,89 @@ describe('startDerivSession: el latido (ADR-0015 §6)', () => {
 
     expect(run.status?.heartbeats).toEqual([]);
     expect(cursors(run)).toHaveLength(2);
+  });
+});
+
+describe('startDerivSession: el esquema de fuente guardado (ADR-0015 §7)', () => {
+  /** La clave del esquema de fuente: la de su SHA-256 fijado en el archivo esperado. */
+  const schemaKey = (run: SessionRun) =>
+    contentKey(run.fixture.expected.entries_sha256['ticks_response.schema.json']);
+
+  it('con schemaObjects, guarda los bytes de ticks_response.schema.json de la release con la clave de su SHA-256 fijado antes de la primera conexión', async () => {
+    const run = await sessionHarness({ schemaObjects: true });
+
+    expect(run.timeline).toEqual(['acquire:1', 'connect:1']);
+    expect(run.objects.objects.get(schemaKey(run))).toEqual(
+      run.fixture.entries['ticks_response.schema.json'],
+    );
+    run.session.stop();
+    expect((await run.done).end).toEqual({ status: 'completed' });
+  });
+
+  it('si el almacenamiento de objetos no responde, avisa con source_schema_unavailable y el motivo saneado, espera y lo intenta otra vez, y solo entonces conecta', async () => {
+    const run = await sessionHarness({
+      beforeStart: ({ objects }) => {
+        vi.spyOn(objects, 'putIfAbsent').mockRejectedValueOnce(
+          Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:8333'), {
+            code: 'ECONNREFUSED',
+          }),
+        );
+      },
+      schemaObjects: true,
+    });
+    expect(run.sockets).toEqual([]);
+    expect(run.alerts).toEqual([{ event: 'source_schema_unavailable', reason: 'ECONNREFUSED' }]);
+    expect(run.clock.pendingDelays()).toEqual([500]);
+
+    await run.clock.advance(500);
+    expect(run.timeline).toEqual(['acquire:1', 'connect:1']);
+    expect(run.objects.objects.has(schemaKey(run))).toBe(true);
+    run.session.stop();
+    expect((await run.done).waits_ms).toEqual([500]);
+  });
+
+  it('usa la escritura verificada: si la clave ya tiene otros bytes, no los da por buenos y no conecta', async () => {
+    const run = await sessionHarness({
+      beforeStart: ({ objects }) => {
+        const entry =
+          syntheticSchemaArchive().expected.entries_sha256['ticks_response.schema.json'];
+        const bytes = Uint8Array.from(
+          syntheticSchemaArchive().entries['ticks_response.schema.json'],
+        ).reverse();
+        objects.objects.set(contentKey(entry), bytes);
+      },
+      schemaObjects: true,
+    });
+    expect(run.sockets).toEqual([]);
+    expect(run.alerts).toEqual([
+      { event: 'source_schema_unavailable', reason: 'object_verification_failed' },
+    ]);
+    run.session.stop();
+    expect((await run.done).end).toEqual({ status: 'completed' });
+    expect(run.sockets).toEqual([]);
+    expect(run.timeline).toEqual(['acquire:1', 'release:1']);
+  });
+
+  it('una parada mientras espera para volver a intentarlo termina completed, sin conectar', async () => {
+    const run = await sessionHarness({
+      beforeStart: ({ objects }) => {
+        objects.armNextPutFailure('ECONNREFUSED');
+      },
+      schemaObjects: true,
+    });
+    expect(run.clock.pendingDelays()).toEqual([500]);
+    run.session.stop();
+
+    expect((await run.done).end).toEqual({ status: 'completed' });
+    expect(run.sockets).toEqual([]);
+    expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
+  it('sin schemaObjects, como en el smoke, no guarda el esquema', async () => {
+    const run = await sessionHarness();
+    expect(run.timeline).toEqual(['acquire:1', 'connect:1']);
+    expect(run.objects.objects.has(schemaKey(run))).toBe(false);
+    run.session.stop();
+    await run.done;
   });
 });

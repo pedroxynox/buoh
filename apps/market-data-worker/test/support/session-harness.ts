@@ -195,6 +195,11 @@ export interface SessionHarnessOptions {
   readonly cursors?: readonly IngestionCursor[];
   /** Los bloqueos no exponen `backendPid`, como el del smoke; por defecto, sí. */
   readonly pidlessLocks?: boolean;
+  /**
+   * La sesión guarda el esquema de fuente en el almacenamiento de objetos del log (`objects`), como
+   * `ingest`; por defecto, no, como el smoke.
+   */
+  readonly schemaObjects?: boolean;
   /** La retención de la sesión, en milisegundos; por defecto, ninguna. */
   readonly retentionMs?: number;
   /** Pide la parada dentro de la llamada número `n` a `connect`, mientras se crea el socket. */
@@ -343,6 +348,7 @@ export async function sessionHarness(options: SessionHarnessOptions = {}) {
     requestedResponses: new MemoryRequestedResponseIncidentStore(),
     ...(options.retentionMs === undefined ? {} : { retentionMs: options.retentionMs }),
     scheduler: clock.scheduler,
+    ...(options.schemaObjects === true ? { schemaObjects: objects } : {}),
     schemaUrl: SCHEMA_URL,
     serverTime: options.serverTime ?? false,
     ...(status === null ? {} : { status }),

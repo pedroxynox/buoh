@@ -18,6 +18,7 @@
     "build": "tsc -p tsconfig.build.json",
     "db:migrate": "node dist/cli/migrate.js",
     "fixture:publish": "node dist/cli/publish-fixture.js",
+    "ingest": "node dist/cli/ingest.js",
     "replay": "node dist/cli/replay.js",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",

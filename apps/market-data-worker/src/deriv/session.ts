@@ -7,12 +7,15 @@ import {
   type IngestionHeartbeat,
   type IngestionStatusStore,
 } from '../ingestion/status.js';
+import { contentKey } from '../object-keys.js';
 import { stderrAlert, type OperationalAlert } from '../operational/registry.js';
+import { type ObjectStore } from '../ports.js';
 import {
   failureReason,
   LogIntegrityError,
   LogReadError,
   sourceEventId,
+  writeVerified,
   type SourceEventLog,
 } from '../source-log/source-event-log.js';
 import {
@@ -31,6 +34,7 @@ import {
 } from './connection.js';
 import { GapWatch, type GapWatchFailure } from './gap-watch.js';
 import { type HistoryRecoveryOutcome } from './history-recovery.js';
+import { DERIV_SCHEMA_RELEASE, schemaEntryName } from './schema-archive.js';
 
 /** El bloqueo de la fuente que tiene la sesión (ADR-0012 §9): `SourceLock` en PostgreSQL. */
 export interface SessionLock {
@@ -154,7 +158,20 @@ export interface DerivSessionInput extends Pick<
    * reabrirse. Sin ella, la sesión no mira la antigüedad del log.
    */
   readonly retentionMs?: number;
+  /**
+   * El almacenamiento de objetos donde la sesión guarda, antes de su primera conexión, el esquema de
+   * fuente del perfil: los bytes de `ticks_response.schema.json` de la release, con la clave de su
+   * SHA-256 fijado (`contentKey`) y la escritura verificada del log (ADR-0015 §7), para que
+   * `data:health` (ADR-0015 §8, PR 6) derive el log sin descargar nada. Si no responde, o la clave ya
+   * tiene otros bytes, avisa con `source_schema_unavailable` y el motivo saneado, espera como entre
+   * intentos y lo vuelve a intentar. `ingest` pasa el de su log; sin él, como en el smoke, la sesión
+   * no lo guarda.
+   */
+  readonly schemaObjects?: ObjectStore;
 }
+
+/** La entrada de la release que es el esquema de fuente del perfil de medición (`profile.ts`). */
+const SOURCE_SCHEMA_ENTRY = schemaEntryName('ticks', 'response');
 
 /** Motivo del corte del smoke de reconexión (ADR-0015 §9). */
 export const SMOKE_INTERRUPT_REASON = 'smoke_interrupt';
@@ -594,6 +611,10 @@ class SessionRun {
     if (startup.oldest_utc !== null) {
       this.#armRetention(startup.oldest_utc);
     }
+    const stored = await this.#storeSourceSchema(preparation);
+    if (stored !== null) {
+      return stored;
+    }
     for (;;) {
       if (this.#stopped) {
         return COMPLETED;
@@ -730,6 +751,38 @@ class SessionRun {
       }
       this.#lock = lock;
       return null;
+    }
+  }
+
+  /**
+   * Guarda el esquema de fuente en `schemaObjects` antes de la primera conexión (ADR-0015 §7): los
+   * bytes de la entrada que la carga ya comprobó contra su SHA-256 fijado, con la clave de ese
+   * SHA-256. Si la escritura verificada falla, avisa con `source_schema_unavailable` y el motivo
+   * saneado, espera como entre intentos y lo vuelve a intentar. Devuelve `null` cuando queda
+   * guardado, o sin `schemaObjects`, y el fin `completed` si llega la parada.
+   */
+  async #storeSourceSchema(preparation: DerivPreparation): Promise<SessionEnd | null> {
+    const objects = this.#input.schemaObjects;
+    if (objects === undefined) {
+      return null;
+    }
+    const pinned = (this.#input.expected ?? DERIV_SCHEMA_RELEASE).entries_sha256[
+      SOURCE_SCHEMA_ENTRY
+    ];
+    const { bytes } = preparation.schemas.schema('ticks', 'response');
+    for (;;) {
+      if (this.#stopped) {
+        return COMPLETED;
+      }
+      try {
+        await writeVerified(objects, contentKey(pinned), bytes, 'application/json');
+        return null;
+      } catch (error) {
+        this.#alert({ event: 'source_schema_unavailable', reason: failureReason(error) });
+        if (!(await this.#backoff())) {
+          return COMPLETED;
+        }
+      }
     }
   }
 

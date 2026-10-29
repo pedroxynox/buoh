@@ -82,7 +82,7 @@ export {
 export { driveSyntheticStimuli, type SyntheticDriverHooks } from './synthetic-driver.js';
 export { contentKey, keyFromUri, manifestKey, objectUri } from './object-keys.js';
 export { type CommitPublicationInput, type MetadataStore, type ObjectStore } from './ports.js';
-export { migrate } from './postgres/migrate.js';
+export { migrate, pendingMigrations } from './postgres/migrate.js';
 export { createPool, PostgresMetadataStore } from './postgres/metadata-store.js';
 export { publishDataset, type PublishDatasetInput } from './publication.js';
 export {
@@ -131,5 +131,16 @@ export {
   parseIngestArgs,
   type IngestOptions,
 } from './ingest-args.js';
+export {
+  INGEST_RETENTION_MS,
+  ingestCommand,
+  ingestExitCode,
+  runIngest,
+  type IngestDependencies,
+  type IngestInput,
+  type IngestRecovery,
+  type IngestReport,
+  type IngestStores,
+} from './ingest.js';
 export { openStores } from './runtime.js';
 export { S3ObjectStore } from './s3/object-store.js';

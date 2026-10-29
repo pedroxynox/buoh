@@ -1,19 +1,9 @@
 import { randomBytes, randomInt } from 'node:crypto';
 
-import { type Scheduler } from '../deriv/ports.js';
 import { openWsSocket } from '../deriv/socket.js';
 import { createUuidV7Generator } from '../ids.js';
 import { smokeCommand } from '../smoke.js';
-
-/** Temporizador real; solo los comandos operativos lo usan (ADR-0004 §4). */
-const realScheduler: Scheduler = {
-  schedule: (ms, callback) => {
-    const timer = setTimeout(callback, ms);
-    return () => {
-      clearTimeout(timer);
-    };
-  },
-};
+import { realScheduler } from './scheduler.js';
 
 /** Valores de un entero aleatorio de 32 bits: dividido por este número, queda en [0, 1). */
 const RANDOM_RANGE = 2 ** 32;
