@@ -63,7 +63,7 @@ Los detalles completos están en [fundamentos de buoh](.kiro/steering/fundamento
 6. Ejecuta las verificaciones disponibles y conserva comandos y resultados exactos.
 7. Revisa impacto documental y actualiza la fuente canónica correspondiente.
 8. Actualiza `PROJECT_STATUS.md` solo si cambian fase, objetivo, tarea siguiente, bloqueo, decisión pendiente o evidencia de salida.
-9. Abre un PR pequeño usando la plantilla y fusiónalo con las condiciones de «Fusión».
+9. Abre un PR pequeño usando la plantilla y déjalo listo para que el propietario lo fusione («Fusión»).
 
 No se considera terminado un cambio porque compile o porque un comando termine con código cero: verifica cada criterio de aceptación aplicable.
 
@@ -88,19 +88,27 @@ El modelo revisor contrasta el diff con fuentes canónicas y vectores independie
 
 ### Fusión
 
-El propietario decidió el 2026-10-26 que el agente fusione sus propios PR («siempre haces merge tú»). El agente fusiona sin esperarlo solo si se cumplen estas condiciones:
+El propietario decidió el 2026-10-29 fusionar él mismo todos los PR («siempre yo haré merge y tu abres los pr normalmente»). Esta decisión sustituye a la del 2026-10-26, por la que el agente fusionaba sus propios PR. El agente no fusiona ningún PR.
+
+El agente deja cada PR listo para fusionar:
 
 - la revisión semántica terminó sin hallazgos bloqueantes, y los commits posteriores a ella solo corrigen sus hallazgos; cualquier otro cambio va en un PR nuevo;
-- CI está en verde sobre el último commit del PR, y la fusión se pide para ese commit;
-- antes de fusionar, deja en el PR un comentario que dice que fusiona por esta decisión, qué condiciones se cumplieron, qué commit se revisó y cuál se fusiona. Si el PR esperó al propietario, el comentario dice también cuándo y con qué palabras dio su visto bueno o su decisión.
+- CI está en verde sobre el último commit del PR;
+- deja en el PR un comentario que dice que está listo, qué commit revisó la revisión semántica y en qué commit está CI en verde;
+- da al propietario el enlace y le explica en palabras simples qué cambia el PR.
 
-Tres casos esperan al propietario:
+Si después de ese comentario entra otro commit, por ejemplo para actualizar la rama con `main`, el PR deja de estar listo hasta un comentario nuevo con CI en verde sobre ese commit. Actualizar con `main` sin otros cambios no reabre la revisión semántica; si hubo que resolver un conflicto, el comentario nuevo dice cómo.
 
-- si el PR marca en la plantilla «Seguridad, secretos o permisos» o «Riesgo, señales o ejecución», el agente le explica el cambio en palabras simples y fusiona solo con su visto bueno, porque la seguridad y el riesgo conservan revisión humana (`CONTRIBUTING.md`);
-- si el PR necesita una decisión del propietario sobre producto, dinero, riesgo o seguridad, el agente la pide primero («Protocolo ante conflictos o vacíos») y fusiona solo después;
-- si el PR crea una ADR que nombra al propietario entre sus decisores, o cambia una decisión de una ADR así, fusiona solo con su visto bueno. Las ADR cuyo único decisor es la dirección técnica siguen el flujo normal.
+La fusión del propietario es su visto bueno. Por eso, al darle el enlace, el agente le dice también:
 
-El propietario puede pedir cambios, revertir un PR fusionado o volver a fusionar él mismo cuando quiera. Nadie sube cambios directamente a `main`.
+- si el PR marca en la plantilla «Seguridad, secretos o permisos» o «Riesgo, señales o ejecución», qué cambia en la seguridad o el riesgo, que conservan revisión humana (`CONTRIBUTING.md`);
+- si el PR crea una ADR que lo nombra entre sus decisores, o cambia una decisión de una ADR así, que fusionarlo aprueba esa decisión.
+
+Si el PR necesita una decisión del propietario sobre producto, dinero, riesgo o seguridad, el agente le explica las opciones y su recomendación y le pide la decisión antes de abrir el PR («Protocolo ante conflictos o vacíos»). El PR registra cuándo y con qué palabras la dio.
+
+Cada PR sale de `main` actualizado. Si el trabajo siguiente necesita un PR que el propietario todavía no fusionó, el agente se lo dice y, mientras tanto, avanza en lo que no dependa de él.
+
+El propietario puede pedir cambios, cerrar un PR sin fusionarlo o revertir uno fusionado cuando quiera. Nadie sube cambios directamente a `main`.
 
 ## Desarrollo por fases
 
