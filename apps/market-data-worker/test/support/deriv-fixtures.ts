@@ -233,9 +233,15 @@ export const derivMessages = {
     }),
   /**
    * Página de `ticks_history` con `style: ticks`. Los precios van como lexemas, igual que `quote` en
-   * `tick`, para que conserven sus decimales.
+   * `tick`, para que conserven sus decimales, y un `pipSize` en texto también: `'2.0'`, como lo manda
+   * el canal real en la historia.
    */
-  history: (id: number, times: readonly number[], prices: readonly string[], pipSize = 2) =>
+  history: (
+    id: number,
+    times: readonly number[],
+    prices: readonly string[],
+    pipSize: number | string = 2,
+  ) =>
     `{"echo_req":${JSON.stringify(historyEcho(id))},"history":{"prices":[${prices.join(',')}],"times":[${times.map(String).join(',')}]},"msg_type":"history","pip_size":${String(pipSize)},"req_id":${String(id)}}`,
   /** Petición de historia rechazada: `msg_type` `ticks_history` con un objeto `error`. */
   historyError: (id: number, code: string) =>

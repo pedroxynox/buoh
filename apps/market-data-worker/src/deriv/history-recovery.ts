@@ -3,7 +3,7 @@ import {
   canonicalQuoteDecimal,
   checkRequestedResponse,
   isEpochSecondsLexeme,
-  isPipSizeLexeme,
+  pipSizeFromNumberLexeme,
   type JsonNode,
   type RequestedResponseInvalidReason,
 } from '@buoh/domain';
@@ -112,10 +112,12 @@ const inconsistent: HistoryPage = { incident: 'history_inconsistent', status: 'i
  * - `history`: se comprueba como una respuesta pedida (ADR-0012 §6), con `error` y el esquema de
  *   respuesta: `schema_validation_failed` es solo para la que no cumple ese esquema. Además tiene
  *   que traer el objeto `history`, sus arrays `times` y `prices` y `pip_size`, y ser coherente:
- *   `pip_size` entero de 0 a 18, `times` y `prices` de la misma longitud, tiempos enteros
- *   estrictamente crecientes dentro de `[start, end]` y precios que la regla de `quote_decimal`
- *   acepta con ese `pip_size`. Si no, `history_inconsistent`, también cuando cumple el esquema pero
- *   le falta uno de esos miembros (contratos de dominio, «Incidencias de respuestas pedidas»).
+ *   `pip_size` de valor entero de 0 a 18, también escrito con una fracción de ceros (`2.0`, como lo
+ *   manda el canal real en la historia; `pipSizeFromNumberLexeme`), `times` y `prices` de la misma
+ *   longitud, tiempos enteros estrictamente crecientes dentro de `[start, end]` y precios que la
+ *   regla de `quote_decimal` acepta con ese `pip_size`. Si no, `history_inconsistent`, también
+ *   cuando cumple el esquema pero le falta uno de esos miembros (contratos de dominio, «Incidencias
+ *   de respuestas pedidas»).
  */
 export function readHistoryPage(
   root: JsonNode,
@@ -150,14 +152,16 @@ export function readHistoryPage(
   ) {
     return inconsistent;
   }
-  // Con las reglas de lexema de un tick (ADR-0004 §4): `pip_size` y tiempos enteros.
-  if (pipSize.type !== 'number' || !isPipSizeLexeme(pipSize.lexeme)) {
+  // `pip_size` solo da los decimales de las cotizaciones: un valor entero, que la historia del canal
+  // real escribe `2.0` (ADR-0015 §4). Los tiempos siguen las reglas de lexema de un tick (ADR-0004
+  // §4): enteros.
+  const decimals = pipSize.type === 'number' ? pipSizeFromNumberLexeme(pipSize.lexeme) : null;
+  if (decimals === null) {
     return inconsistent;
   }
   if (times.items.length !== prices.items.length) {
     return inconsistent;
   }
-  const decimals = Number(pipSize.lexeme);
   const ticks: HistoryTick[] = [];
   for (const [index, timeNode] of times.items.entries()) {
     const priceNode = prices.items[index];
