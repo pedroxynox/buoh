@@ -15,7 +15,6 @@ import {
   failureReason,
   LogIntegrityError,
   LogReadError,
-  sourceEventId,
   writeVerified,
   type SourceEventLog,
 } from '../source-log/source-event-log.js';
@@ -35,7 +34,7 @@ import {
 } from './connection.js';
 import { GapWatch, type GapWatchFailure } from './gap-watch.js';
 import { type HistoryRecoveryOutcome } from './history-recovery.js';
-import { checkLogContent } from './log-check.js';
+import { checkLogContent, isCursorAheadOfLog } from './log-check.js';
 import { DERIV_SCHEMA_RELEASE, schemaEntryName } from './schema-archive.js';
 
 /** El bloqueo de la fuente que tiene la sesión (ADR-0012 §9): `SourceLock` en PostgreSQL. */
@@ -373,8 +372,9 @@ function latestTickTime(ticks: DerivedMarketData['ticks'], symbol: string): stri
  *    frames son de este conector (`connector_version_mismatch`), se deriva con el perfil de
  *    medición (`log_not_derivable`) y es del símbolo pedido (`symbol_mismatch`), con los símbolos
  *    de los cursores de la fuente;
- * 4. el último cursor del símbolo apunta a un evento del log (`cursor_ahead_of_log`): si no, el log
- *    perdió datos confirmados;
+ * 4. el último cursor del símbolo apunta a un evento del log (`cursor_ahead_of_log`,
+ *    `isCursorAheadOfLog`, que también comparte con `data:health`): si no, el log perdió datos
+ *    confirmados;
  * 5. con `retentionMs`, el evento durable más antiguo, el primero del log, no la cumplió todavía
  *    (`retention_expired`, ADR-0015 §7). Su hora es la de `sourceEventTime`: la recepción de un
  *    frame y `occurred_at_utc` de los demás.
@@ -404,11 +404,7 @@ function checkLog(
   }
   const { derived } = checked;
   const events = segments.flat();
-  const latest = cursors?.latest ?? null;
-  if (
-    latest !== null &&
-    !events.some((event) => sourceEventId(event) === latest.last_durable_source_event_id)
-  ) {
+  if (isCursorAheadOfLog({ cursor: cursors?.latest ?? null, segments })) {
     return { end: failed('cursor_ahead_of_log') };
   }
   const oldest = events[0];

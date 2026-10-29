@@ -1,7 +1,26 @@
-import { type SourceEvent } from '@buoh/contracts';
+import { type IngestionCursor, type SourceEvent } from '@buoh/contracts';
 import { deriveMarketData, type DerivedMarketData, type PipelineProfile } from '@buoh/domain';
 
-import { failureReason } from '../source-log/source-event-log.js';
+import { failureReason, sourceEventId } from '../source-log/source-event-log.js';
+
+/**
+ * ¿El último cursor del símbolo apunta a un evento que no está en el log durable? (ADR-0015 §5 y §6,
+ * `cursor_ahead_of_log`): el log perdió datos que el índice había confirmado. Lo comprueban el
+ * arranque de la sesión y `data:health` (§8, regla 2), después de `checkLogContent`. Un cursor que va
+ * por detrás del log, porque el proceso cayó después de escribirlo, no lo está; sin cursor, tampoco.
+ */
+export function isCursorAheadOfLog(input: {
+  readonly cursor: Pick<IngestionCursor, 'last_durable_source_event_id'> | null;
+  readonly segments: readonly (readonly SourceEvent[])[];
+}): boolean {
+  const { cursor } = input;
+  return (
+    cursor !== null &&
+    !input.segments.some((segment) =>
+      segment.some((event) => sourceEventId(event) === cursor.last_durable_source_event_id),
+    )
+  );
+}
 
 /** Lo que da `checkLogContent`: la derivación del log, o por qué no pasa sus comprobaciones. */
 export type LogContentCheck =

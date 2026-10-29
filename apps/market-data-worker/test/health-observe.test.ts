@@ -144,6 +144,10 @@ async function observeHarness(options: ObserveOptions = {}) {
         timeline.push(`cursorSymbols:${source}`);
         return status.cursorSymbols(source);
       },
+      latestCursor: (source, symbol) => {
+        timeline.push(`latestCursor:${source}:${symbol}`);
+        return status.latestCursor(source, symbol);
+      },
       latestHeartbeat: (source) => {
         timeline.push(`latestHeartbeat:${source}`);
         return status.latestHeartbeat(source);
@@ -233,6 +237,7 @@ describe('observeDataHealth: lo que lee (ADR-0015 §8, «Entradas»)', () => {
     expect(observation).toEqual({
       cursorSymbols: [SYMBOL],
       lastPublishedDatasetId: DATASET,
+      latestCursor: cursorOf(DERIV_SOURCE),
       latestHeartbeat: run.heartbeat,
       nextId: run.nextId,
       now: NOW,
@@ -276,12 +281,23 @@ describe('observeDataHealth: lo que lee (ADR-0015 §8, «Entradas»)', () => {
     expect(run.timeline.at(-1)).toBe('now');
   });
 
+  it('lee el último cursor del símbolo pedido antes que el log, como el arranque: un cursor escrito después apunta a un evento que el log ya tiene', async () => {
+    const run = await observeHarness();
+    await run.observe();
+    const at = (entry: string) => run.timeline.indexOf(entry);
+    expect(at('latestCursor:deriv_options:SYNTH_100')).toBeGreaterThan(-1);
+    expect(at('latestCursor:deriv_options:SYNTH_100')).toBeLessThan(
+      at('readLogState:deriv_options'),
+    );
+  });
+
   it('sin escritor vivo, sin latido ni cursores y con el log vacío, lo observado lo dice: null, null y listas vacías', async () => {
     const run = await observeHarness({ events: [] });
     const observation = await run.observe({
       datasets: { lastActiveDatasetId: () => Promise.resolve(null) },
       ingestionStatus: {
         cursorSymbols: () => Promise.resolve([]),
+        latestCursor: () => Promise.resolve(null),
         latestHeartbeat: () => Promise.resolve(null),
       },
       lockHolder: () => Promise.resolve(null),
@@ -290,6 +306,7 @@ describe('observeDataHealth: lo que lee (ADR-0015 §8, «Entradas»)', () => {
     expect(observation).toMatchObject({
       cursorSymbols: [],
       lastPublishedDatasetId: null,
+      latestCursor: null,
       latestHeartbeat: null,
       operationalConditionTypes: [],
       segments: [],
@@ -341,7 +358,11 @@ describe('observeDataHealth: lo incompatible (ADR-0015 §8, regla 2)', () => {
     const run = await observeHarness();
     expect(
       await run.observe({
-        ingestionStatus: { cursorSymbols: missing, latestHeartbeat: missing },
+        ingestionStatus: {
+          cursorSymbols: missing,
+          latestCursor: missing,
+          latestHeartbeat: missing,
+        },
       }),
     ).toEqual(incompatible('migrations_pending'));
     expect(
@@ -411,6 +432,15 @@ describe('observeDataHealth: almacenamiento que no responde (ADR-0015 §8, regla
         ingestionStatus: {
           ...stores.ingestionStatus,
           cursorSymbols: () => Promise.reject(unavailable()),
+        },
+      }),
+    ],
+    [
+      'el último cursor del símbolo',
+      (stores) => ({
+        ingestionStatus: {
+          ...stores.ingestionStatus,
+          latestCursor: () => Promise.reject(unavailable()),
         },
       }),
     ],

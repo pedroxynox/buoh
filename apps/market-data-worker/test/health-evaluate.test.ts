@@ -22,7 +22,7 @@ import {
   S,
   stoppedBeforeRecoveryEvents,
 } from './support/recovery-harness.js';
-import { heartbeatOf } from './support/status-store-rules.js';
+import { cursorOf, heartbeatOf } from './support/status-store-rules.js';
 
 // La evaluación de `data:health` (ADR-0015 §8): una función pura que recibe lo observado (el log
 // durable, el registro operativo, el último latido, el escritor vivo y el último dataset) y devuelve
@@ -89,6 +89,7 @@ function observed(overrides: Partial<ObservedSource> = {}): ObservedSource {
   return {
     cursorSymbols: [SYMBOL],
     lastPublishedDatasetId: null,
+    latestCursor: null,
     latestHeartbeat: heartbeat(),
     nextId: () => uuid(7000 + (sequence += 1)),
     now: '2026-03-02T09:59:10.000Z',
@@ -281,6 +282,49 @@ describe('evaluateDataHealth: lo observado incompatible (ADR-0015 §8, regla 2)'
   it('sin esquema de fuente guardado y con el log vacío, un cursor de otro símbolo da failed con symbol_mismatch', () => {
     expect(
       evaluateDataHealth(observed({ cursorSymbols: ['SYNTH_50'], profile: null, segments: [] })),
+    ).toEqual(failedWith('symbol_mismatch'));
+  });
+});
+
+describe('evaluateDataHealth: el último cursor contra el log (ADR-0015 §6 y §8, regla 2)', () => {
+  /** El último cursor del símbolo pedido, con su último evento durable. */
+  const cursorAt = (eventId: string) =>
+    cursorOf(DERIV_SOURCE, { last_durable_source_event_id: eventId, symbol: SYMBOL });
+
+  it('si el último cursor del símbolo apunta a un evento que no está en el log, da failed con cursor_ahead_of_log, aunque el escritor vivo de este esquema informe', () => {
+    expect(evaluateDataHealth(observed({ latestCursor: cursorAt(uuid(9999)) }))).toEqual(
+      failedWith('cursor_ahead_of_log'),
+    );
+  });
+
+  it('un cursor que va por detrás del log, porque el proceso cayó después de escribirlo, no es un fallo', () => {
+    // La apertura de la conexión (`uuid(9002)`), anterior a su tick.
+    const behind = evaluateDataHealth(observed({ latestCursor: cursorAt(uuid(9002)) }));
+    expect(behind.exitCode).toBe(0);
+    expect(behind.report.service_health).toBe('healthy');
+    expect(evaluateDataHealth(observed({ latestCursor: cursorAt(uuid(9003)) }))).toEqual(behind);
+  });
+
+  it('con el log vacío y un cursor del símbolo, da failed con cursor_ahead_of_log, también sin esquema de fuente guardado', () => {
+    for (const profile of [PROFILE, null]) {
+      expect(
+        evaluateDataHealth(observed({ latestCursor: cursorAt(uuid(9003)), profile, segments: [] })),
+      ).toEqual(failedWith('cursor_ahead_of_log'));
+    }
+  });
+
+  it('compara con el log durable: el cierre que la regla 4 añade en memoria no cuenta', () => {
+    // Sin escritor vivo, el cierre en memoria toma el primer ID, uuid(7001).
+    expect(
+      evaluateDataHealth(observed({ latestCursor: cursorAt(uuid(7001)), writerPid: null })),
+    ).toEqual(failedWith('cursor_ahead_of_log'));
+  });
+
+  it('las comprobaciones del contenido del log van antes, como en el arranque: otro símbolo con el cursor por delante es symbol_mismatch', () => {
+    expect(
+      evaluateDataHealth(
+        observed({ cursorSymbols: [SYMBOL, 'R_50'], latestCursor: cursorAt(uuid(9999)) }),
+      ),
     ).toEqual(failedWith('symbol_mismatch'));
   });
 });

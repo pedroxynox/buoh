@@ -554,4 +554,34 @@ describe('data:health sobre PostgreSQL y S3-compatible (ADR-0015 §8)', () => {
     expect(alert['event']).toBe('data_health_storage_unavailable');
     expect(alert['reason']).toMatch(/^[A-Za-z0-9_.-]{1,64}$/u);
   });
+
+  // La última: el cursor añadido queda en la tabla append-only y lo verían las siguientes.
+  it('con el último cursor del símbolo por delante del log, da failed con cursor_ahead_of_log, como el arranque de la sesión', async () => {
+    const latest = await stores.ingestionStatus.latestCursor(DERIV_SOURCE, SYMBOL);
+    if (latest === null) {
+      throw new TypeError('La captura no dejó ningún cursor.');
+    }
+    // Antes, el último cursor apunta a un evento del log: la captura lo escribió al parar.
+    const events = await durableEvents();
+    expect(
+      events.some((event) =>
+        [event.kind === 'raw_source_frame' ? event.observation_id : event.event_id].includes(
+          latest.cursor.last_durable_source_event_id,
+        ),
+      ),
+    ).toBe(true);
+    await stores.ingestionStatus.appendCursor({
+      ...latest.cursor,
+      last_durable_source_event_id: uuid(9601),
+      source_event_count: latest.cursor.source_event_count + 1,
+    });
+
+    const result = await health();
+    expect(result.exitCode).toBe(1);
+    expect(result.report).toMatchObject({
+      connection_state: 'disconnected',
+      service_health: 'failed',
+    });
+    expect(result.stderr).toBe('{"event":"data_health_failed","reason":"cursor_ahead_of_log"}');
+  });
 });

@@ -1,6 +1,7 @@
 import {
   type ConditionType,
   type HealthReport,
+  type IngestionCursor,
   type ServiceHealth,
   type SourceEvent,
 } from '@buoh/contracts';
@@ -11,7 +12,7 @@ import {
   type PipelineProfile,
 } from '@buoh/domain';
 
-import { checkLogContent, isOtherSymbol } from '../deriv/log-check.js';
+import { checkLogContent, isCursorAheadOfLog, isOtherSymbol } from '../deriv/log-check.js';
 import { type IngestionHeartbeat } from '../ingestion/status.js';
 import { previousConnection, unrecordedClose } from '../source-log/previous-connection.js';
 
@@ -21,6 +22,11 @@ export interface ObservedSource {
   readonly cursorSymbols: readonly string[];
   /** El `dataset_id` del último dataset activo de la fuente en el entorno, o `null`. */
   readonly lastPublishedDatasetId: string | null;
+  /**
+   * El último cursor del símbolo pedido (`IngestionStatusStore.latestCursor`), o `null` si no tiene
+   * ninguno.
+   */
+  readonly latestCursor: IngestionCursor | null;
   /** El último latido escrito de la fuente (`IngestionStatusStore.latestHeartbeat`), o `null`. */
   readonly latestHeartbeat: IngestionHeartbeat | null;
   /** UUIDv7 para el cierre que la regla 4 añade en memoria. */
@@ -97,11 +103,11 @@ function emptyDerivation(): DerivedMarketData {
 }
 
 /**
- * Las comprobaciones de la regla 2 sobre el log que se deriva. Con el esquema de fuente guardado, son
- * las del arranque de la sesión (`checkLogContent`). Sin él, un log no vacío no se puede derivar
+ * Las comprobaciones del contenido del log que se deriva. Con el esquema de fuente guardado, son las
+ * del arranque de la sesión (`checkLogContent`). Sin él, un log no vacío no se puede derivar
  * (`source_schema_missing`), y uno vacío solo se comprueba con los cursores de la fuente.
  */
-function checkObservedLog(
+function checkObservedContent(
   observation: ObservedSource,
   segments: readonly (readonly SourceEvent[])[],
 ): ObservedLogCheck {
@@ -116,6 +122,26 @@ function checkObservedLog(
   return isOtherSymbol({ cursorSymbols, derived, symbol })
     ? { reason: 'symbol_mismatch', status: 'failed' }
     : { derived, status: 'passed' };
+}
+
+/**
+ * Las comprobaciones de la regla 2 sobre el log que se deriva, en el orden del arranque de la sesión
+ * (ADR-0015 §5): las del contenido (`checkObservedContent`) y después el último cursor del símbolo
+ * contra el log durable observado, sin el cierre que la regla 4 añade en memoria
+ * (`isCursorAheadOfLog`, `cursor_ahead_of_log`), como pide §6.
+ */
+function checkObservedLog(
+  observation: ObservedSource,
+  segments: readonly (readonly SourceEvent[])[],
+): ObservedLogCheck {
+  const checked = checkObservedContent(observation, segments);
+  if (
+    checked.status === 'passed' &&
+    isCursorAheadOfLog({ cursor: observation.latestCursor, segments: observation.segments })
+  ) {
+    return { reason: 'cursor_ahead_of_log', status: 'failed' };
+  }
+  return checked;
 }
 
 /**

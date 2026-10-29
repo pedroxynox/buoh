@@ -124,7 +124,8 @@ async function commandHarness(options: CommandOptions = {}) {
     SCHEMA_KEY,
     options.schema ?? FIXTURE.entries['ticks_response.schema.json'],
   );
-  await status.appendCursor(cursorOf(DERIV_SOURCE));
+  // El último cursor del símbolo apunta al tick durable del log (`uuid(9003)`).
+  await status.appendCursor(cursorOf(DERIV_SOURCE, { last_durable_source_event_id: uuid(9003) }));
   await status.appendHeartbeat(
     heartbeatOf(DERIV_SOURCE, 1, {
       connection_state: 'connected',

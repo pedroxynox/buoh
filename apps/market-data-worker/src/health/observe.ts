@@ -29,7 +29,10 @@ export interface HealthStores {
     lastActiveDatasetId(source: string, environment: DeploymentEnvironment): Promise<string | null>;
   };
   /** Los cursores y el último latido de la ingesta (`PostgresIngestionStatusStore`). */
-  readonly ingestionStatus: Pick<IngestionStatusStore, 'cursorSymbols' | 'latestHeartbeat'>;
+  readonly ingestionStatus: Pick<
+    IngestionStatusStore,
+    'cursorSymbols' | 'latestCursor' | 'latestHeartbeat'
+  >;
   /** El almacenamiento de objetos: los objetos del log y el esquema de fuente guardado. */
   readonly objects: Pick<ObjectStore, 'bucket' | 'get'>;
   /** El registro operativo (`PostgresOperationalStore`). */
@@ -191,8 +194,10 @@ async function readSourceSchema(
  * 2. el escritor vivo (`pg_locks`) y el último latido, antes que el log: así un evento de conexión
  *    del log posterior al latido gana (regla 5), y un escritor que suelta el bloqueo mientras se
  *    lee el log ya dejó su cierre en él;
- * 3. los cursores de la fuente, el log durable y el esquema de fuente guardado, con el que arma el
- *    perfil de medición; sin él, el perfil es `null` y la evaluación decide;
+ * 3. los símbolos de los cursores de la fuente y el último cursor del símbolo pedido, antes que el
+ *    log, como el arranque: un cursor escrito mientras se lee apunta a un evento que el índice ya
+ *    tenía; después, el log durable y el esquema de fuente guardado, con el que arma el perfil de
+ *    medición; sin él, el perfil es `null` y la evaluación decide;
  * 4. los tipos abiertos del registro operativo y el último dataset activo de la fuente en el
  *    entorno.
  *
@@ -214,6 +219,9 @@ export async function observeDataHealth(input: ObserveDataHealthInput): Promise<
       stores.ingestionStatus.latestHeartbeat(DERIV_SOURCE),
     );
     const cursorSymbols = await fromStore(() => stores.ingestionStatus.cursorSymbols(DERIV_SOURCE));
+    const latestCursor = await fromStore(() =>
+      stores.ingestionStatus.latestCursor(DERIV_SOURCE, symbol),
+    );
     const segments = await readLog(stores);
     const sourceSchema = await readSourceSchema(stores.objects, expected);
     const registry = await fromStore(() =>
@@ -228,6 +236,7 @@ export async function observeDataHealth(input: ObserveDataHealthInput): Promise<
     return {
       cursorSymbols,
       lastPublishedDatasetId,
+      latestCursor: latestCursor?.cursor ?? null,
       latestHeartbeat,
       nextId: input.nextId,
       now: input.now(),
