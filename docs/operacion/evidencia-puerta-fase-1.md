@@ -11,11 +11,11 @@ Los ensayos capturaron datos reales de Deriv en un PostgreSQL y un almacenamient
 - Deriv: el canal público fijado (`DERIV_PUBLIC_ENDPOINT`), la release de esquemas `production_v20260901_0` (SHA-256 `adaab0acaf33bd159e45912995af2b78101049f43683d223f0ac11be0a39e7c3`), el conector `deriv-options-ws-1.1.0` y el símbolo `R_100`, sin credenciales.
 - Código: `main` en `2dffd23` (PR #35 a #40) más las herramientas de `scripts/evidencia-f1-5/`, salvo el punto 9, que corrió antes, sobre `7e460fc` con las herramientas que luego fueron `9ff4f85`. Las herramientas no son comandos del producto («Puerta de salida de Fase 1» en el runbook dice cómo repetir cada secuencia). `psql` no estaba instalado, así que los bloques SQL del runbook corrieron tal cual con un sustituto mínimo sobre `pg` de Node.
 
-## Un fallo que encontraron los ensayos
+## Dos fallos que encontraron los ensayos
 
 La primera pasada (08:49–09:11 UTC) falló en los puntos 2 y 3. La respuesta real de `ticks_history` trae `"pip_size":2.0`, y la recuperación de historia solo admitía un lexema entero, así que toda recuperación viva terminaba `unavailable` con `history_invalid` y la captura quedaba en `degraded` con `event_gap_unresolved`. Las pruebas no lo vieron porque sus fixtures mandaban `"pip_size":2`. El PR #40 lo corrigió (`pipSizeFromNumberLexeme`, solo para la historia). Los puntos 1 a 4, 7 y 8 se repitieron con el arreglo, y el 5 y el 6 corrieron una sola vez, ya con él. Los resultados de abajo son los de esas ejecuciones; el punto 9 no depende del arreglo y viene de antes.
 
-La corrida del propio comando `ingest` (punto 1) encontró además que la orden del runbook para pararlo desde otra terminal, `pkill -TERM -f '^node dist/cli/ingest.js'`, no llegaba al proceso: pnpm lo arranca con la ruta completa de Node. Los PR #42 y #43 corrigieron el patrón (`'node dist/cli/ingest\.js'`).
+Una primera corrida del propio comando `ingest` (punto 1, 13:18–13:35 UTC) encontró además que la orden del runbook para pararlo desde otra terminal, `pkill -TERM -f '^node dist/cli/ingest.js'`, no llegaba al proceso: salió con 1 a las 13:19:25Z y la captura siguió, porque pnpm arranca el script con la ruta completa de Node. Su esquema y su bucket se borraron con el bloque del runbook a las 13:35:57Z. Los PR #42 y #43 corrigieron el patrón (`'node dist/cli/ingest\.js'`), y la corrida del punto 1 de abajo ya lo usó.
 
 ## Los nueve ensayos (ADR-0015 §12)
 
@@ -94,13 +94,13 @@ En un esquema y un bucket desechables (08:48:26–08:48:30 UTC): `db:migrate`, `
 | Un flujo público de Deriv se captura sin credenciales | Punto 1 (persistido) y punto 2 (en memoria) |
 | Raw, normalizados e incidencias tienen procedencia y versiones | Contratos y log raw-first (F1.1 a F1.3b). Cada frame vivo del log lleva su `connector_version`, su conexión, la hora de recepción y el SHA-256 de su payload; la captura guarda el esquema de fuente de la release con su SHA-256 fijado, y `data:health` comprobó el conector del log y ese esquema en cada paso con log que comprobar (regla 2, sin fallos) |
 | Un dataset publicado conserva el mismo ID en replay | Punto 9 |
-| Reinicio, desconexión y fallo de persistencia no ocultan pérdida ni emiten datos no durables | Puntos 2 a 8. Cada pérdida dejó un cierre no pedido (`close_not_recorded` o el del corte), con `connection_lost` y su recuperación en el log, y ningún tick entregado faltó entre los frames durables |
+| Reinicio, desconexión y fallo de persistencia no ocultan pérdida ni emiten datos no durables | Puntos 2 a 8. En los puntos 3, 5 y 6, cada pérdida dejó en el log un cierre `close_not_recorded`, con `connection_lost` y su recuperación `complete`. En el punto 2, que corre en memoria, el corte consta en la línea del smoke como una reconexión con recuperación `complete`. Ningún tick entregado faltó entre los frames durables |
 | `PROJECT_STATUS.md`, contratos, ADR y runbook reflejan el sistema real | Cada PR de ADR-0015 §13 actualizó el runbook y los contratos en el mismo PR que el código (la guardia documental revisa el rango de cada PR). Este PR actualiza `PROJECT_STATUS.md`, la especificación de pendientes y el runbook |
 
 ## Límites y lo que no se demostró
 
 - Los servicios fueron portátiles en el sandbox, no las imágenes de `infra/compose.yaml`, y PostgreSQL fue 18.4, no la 18.6 de CI. Las pruebas de integración de CI corren con las imágenes fijadas.
-- La captura larga del punto 1 corrió con `capture.mjs`, que compone el cableado de `runIngest` con otro sink, porque el de `ingest` no deja ver los ticks entregados (punto 7). Esa copia no tiene una prueba propia que la mantenga igual a `ingest`; el comando `ingest` corrió en vivo aparte, 38 s.
+- La captura larga del punto 1 corrió con `capture.mjs`, que compone el cableado de `runIngest` con otro sink, porque el de `ingest` no deja ver los ticks entregados (punto 7). Esa copia no tiene una prueba propia que la mantenga igual a `ingest`; el comando `ingest` corrió en vivo aparte, 37 s.
 - Si `drills.mjs` muere por una señal, no borra su esquema ni su bucket: el runbook dice cómo borrarlos.
 - Las capturas duraron minutos, no las 23 horas de la retención. La parada a las 23 horas y `retention_expired` solo están probadas con reloj falso.
 - En el punto 2 la historia no trajo ningún tick que faltara (`recovered_event_count` 0). Los puntos 3, 5 y 6 sí recuperaron ticks (1, 11 y 10), así que el recuento intermedio está probado en vivo.
