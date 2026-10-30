@@ -675,8 +675,8 @@ describe('log de source events: rotación 1.0.0 y reinicio', () => {
   }
 
   // Escribe 10 001 eventos en almacenes en memoria que comprueban cada fila contra todas las
-  // anteriores. Sola tarda unos 2 s, pero en el runner de CI, con las demás pruebas en paralelo, ya
-  // llegaba a 4,6 s, cerca del plazo por defecto de 5 s.
+  // anteriores. Sola tarda unos 2 s, pero en el runner de CI, con las demás suites en paralelo,
+  // llegó a 4,6 s y el 2026-10-30 pasó del plazo por defecto de 5 s.
   it('rota antes del frame 10 001', { timeout: 30_000 }, async () => {
     const { log, store } = await freshLog();
     for (let sequence = 1; sequence <= 10_001; sequence += 1) {

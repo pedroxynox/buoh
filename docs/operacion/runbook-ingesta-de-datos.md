@@ -538,7 +538,7 @@ No se registran payloads completos, secretos ni datos personales en logs operati
 
 ## Verificación periódica
 
-- Pruebas offline y vectores en cada cambio relevante. La de la rotación por raw frames (`rota antes del frame 10 001`, en `apps/market-data-worker/test/raw-first-log.test.ts`) escribe 10 001 eventos en almacenes en memoria y tiene un plazo de 30 s, en lugar de los 5 s por defecto: en el runner de CI, con las demás pruebas en paralelo, llegaba a 4,6 s.
+- Pruebas offline y vectores en cada cambio relevante. La de la rotación por raw frames (`rota antes del frame 10 001`, en `apps/market-data-worker/test/raw-first-log.test.ts`) escribe 10 001 eventos en almacenes en memoria y tiene un plazo de 30 s, en lugar de los 5 s por defecto: en el runner de CI, con las demás suites en paralelo, el 2026-10-30 pasó de 5 s.
 - Smoke público de Deriv opt-in (`pnpm run data:smoke -- --live`), con resultado saneado y fecha; nunca es el único criterio de fusión.
 - Ensayo de reinicio y fallo de almacenamiento antes de cerrar Fase 1.
 - Verificación de replay y `dataset_id` en la puerta de salida.
