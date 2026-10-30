@@ -5,7 +5,7 @@
 - **Ámbito:** Fase 1, incremento F1.3
 - **Decisores:** Propietario de buoh, a propuesta de la dirección técnica
 - **Complementa:** [ADR-0004](0004-pipeline-y-reproduccion-de-datos-fase-1.md) §6–§9; difiere temporalmente Parquet de §6
-- **Complementada por:** [ADR-0012](0012-catalogo-y-adaptador-publico-de-deriv.md), que añade el catálogo y las incidencias de respuestas pedidas al almacenamiento local, y el bloqueo por fuente; y por [ADR-0015](0015-reconexion-recuperacion-y-salud-f1-5.md), que persiste el `IngestionCursor` que §4 dejaba para F1.5, junto con el latido de la ingesta
+- **Complementada por:** [ADR-0012](0012-catalogo-y-adaptador-publico-de-deriv.md), que añade el catálogo y las incidencias de respuestas pedidas al almacenamiento local, y el bloqueo por fuente; por [ADR-0015](0015-reconexion-recuperacion-y-salud-f1-5.md), que persiste el `IngestionCursor` que §4 dejaba para F1.5, junto con el latido de la ingesta; y por [ADR-0017](0017-punto-de-control-de-la-derivacion-en-vivo.md), que deriva por partes y guarda el estado vivo que §4 dejaba sin calidad incremental, sin cambiar la calidad de los datasets
 
 ## Contexto
 
