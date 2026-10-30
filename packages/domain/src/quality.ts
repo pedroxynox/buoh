@@ -1,55 +1,38 @@
 import {
-  dataQualityIncidentSchema,
-  deriveConnectionConditionKey,
-  deriveEventId,
-  deriveGapConditionKey,
   marketTickSchema,
   sourceEventSchema,
   validateConditionCausality,
-  type ConnectionClosed,
-  type ConnectionOpened,
   type DataQualityIncident,
-  type HistoryRecoveryResult,
-  type JsonValue,
   type MarketTick,
   type OperationalConditionEvent,
   type SourceEvent,
 } from '@buoh/contracts';
 
+import {
+  applyConnectionClosed,
+  applyConnectionOpened,
+  applyHistoryRecovery,
+  applyTickContinuity,
+  applyTickWatermark,
+  assertProvenance,
+  buildIncident,
+  emptyRuleState,
+  pendingGapsOf,
+  sourceEventKey,
+  type IncidentBody,
+  type PendingGap,
+  type RuleSink,
+} from './derivation-rules.js';
 import { normalizeRawFrame, type UnflaggedTick } from './normalizer.js';
-import { CONTRACT_SCHEMA_VERSION, derivationThresholds, type PipelineProfile } from './profile.js';
+import { derivationThresholds, type PipelineProfile } from './profile.js';
+
+export {
+  DERIVABLE_INCIDENT_SEVERITY,
+  RESOLUTION_REASONS,
+  type PendingGap,
+} from './derivation-rules.js';
 
 type IncidentType = DataQualityIncident['incident_type'];
-type Severity = DataQualityIncident['severity'];
-
-/** Severidad fija por tipo en reglas de calidad 1.0.0 (incidencias derivables del dataset). */
-export const DERIVABLE_INCIDENT_SEVERITY = {
-  connection_lost: 'warning',
-  delivery_delayed: 'warning',
-  duplicate_exact: 'warning',
-  event_gap_unresolved: 'error',
-  invalid_source_frame: 'error',
-  out_of_order: 'warning',
-  source_time_conflict: 'error',
-} as const satisfies Partial<Record<IncidentType, Severity>>;
-
-export const RESOLUTION_REASONS = {
-  connection_lost: 'connection_reestablished',
-  event_gap_unresolved: 'history_recovered',
-} as const;
-
-/**
- * Hueco de un símbolo cuya continuidad está pendiente (ADR-0015 §2): el rango que tiene que cubrir
- * un `HistoryRecoveryResult` para decidirlo. `to_event_time_utc` es `null` mientras no llegue el
- * primer tick posterior al último cierre, que fija el fin del hueco.
- */
-export interface PendingGap {
-  /** High-watermark del inicio del hueco + 1 ms. */
-  readonly from_event_time_utc: string;
-  readonly symbol: string;
-  /** Primer tick posterior al último cierre − 1 ms, nunca antes de `from_event_time_utc`. */
-  readonly to_event_time_utc: string | null;
-}
 
 export interface DerivedMarketData {
   /** Condiciones en orden de reducer: `occurred_at_utc`, `condition_event_id`. */
@@ -70,14 +53,6 @@ export interface DerivedMarketData {
   /** Ticks en orden canónico: `event_time_utc`, `tick_fingerprint_sha256`, `observation_id`. */
   readonly ticks: MarketTick[];
 }
-
-type ConditionBody = {
-  cause_refs: readonly string[];
-  condition_key: string;
-  condition_type: keyof typeof RESOLUTION_REASONS;
-  occurred_at_utc: string;
-  symbol: string | null;
-} & ({ action: 'opened' } | { action: 'resolved'; resolution_reason: string });
 
 interface ObservedTick {
   readonly order: number;
@@ -121,17 +96,14 @@ function compareConditions(
   );
 }
 
-function withDerivedId<K extends string>(key: K, body: Record<string, unknown>) {
-  return { ...body, [key]: deriveEventId(body as JsonValue) } as Record<string, unknown> &
-    Record<K, `sha256:${string}`>;
-}
-
 /**
  * Motor puro de normalización y calidad (reglas 1.0.0 y 2.0.0).
  *
  * Recorre los source events en orden de observación persistido y produce ticks, incidencias
  * derivables y eventos de condición. Solo usa source events, esquema, perfil y versiones; no lee
  * reloj, red, aleatoriedad ni artefactos derivados previos, por lo que replay recompone lo mismo.
+ * Las reglas del high-watermark, la continuidad, las conexiones y los huecos son las de
+ * `derivation-rules.ts`, que comparte con la derivación en pliegue del estado vivo (ADR-0017 §3).
  *
  * Con un perfil de medición deriva el estado vivo sin umbrales (ADR-0015 §2): sin `delivery_delayed`,
  * y con la continuidad tras un cierre no pedido pendiente hasta que la decide la historia. Publicar
@@ -144,7 +116,6 @@ export function deriveMarketData(
   const { maximum_delivery_delay_ms: maximumDelay, maximum_event_gap_ms: maximumGap } =
     derivationThresholds(profile);
   const events: SourceEvent[] = segments.flat().map((event) => sourceEventSchema.parse(event));
-  const source = profile.source;
 
   const incidents: DataQualityIncident[] = [];
   const conditions: OperationalConditionEvent[] = [];
@@ -152,20 +123,11 @@ export function deriveMarketData(
   const observedTicks: ObservedTick[] = [];
   const firstByFingerprint = new Map<string, string>();
   const firstByEventTime = new Map<string, { fingerprint: string; observationId: string }>();
-  const highWatermark = new Map<string, { eventTime: string; observationId: string }>();
-  const openConnection = new Map<string, OperationalConditionEvent>();
-  const openGap = new Map<string, OperationalConditionEvent>();
-  /**
-   * Continuidad pendiente por símbolo:
-   * - `watermark`: high-watermark en el primer cierre no solicitado (inicio del hueco);
-   * - `closeWatermark`: high-watermark en el último cierre; solo decide un tick posterior a él;
-   * - `exceeded`: ya se supo que el hueco supera el umbral; solo una recuperación lo decide;
-   * - `end`: tiempo del primer tick posterior al último cierre (fin del hueco a cubrir).
-   */
-  const pendingContinuity = new Map<
-    string,
-    { closeWatermark: string; end?: string; exceeded: boolean; watermark: string }
-  >();
+  const state = emptyRuleState();
+  const sink: RuleSink = {
+    condition: (condition) => conditions.push(condition),
+    incident: (incident) => incidents.push(incident),
+  };
 
   const addFlag = (observationId: string, type: IncidentType) => {
     const set = flags.get(observationId) ?? new Set<IncidentType>();
@@ -173,56 +135,8 @@ export function deriveMarketData(
     flags.set(observationId, set);
   };
 
-  const emitIncident = (body: {
-    evidence: Record<string, unknown>;
-    incident_type: keyof typeof DERIVABLE_INCIDENT_SEVERITY;
-    observed_at_utc: string;
-    observed_ref: string;
-    related_refs: readonly string[];
-    symbol: string | null;
-  }): DataQualityIncident => {
-    const incident = dataQualityIncidentSchema.parse(
-      withDerivedId('incident_id', {
-        ...body,
-        quality_rule_version: profile.rules.quality_rule_version,
-        related_refs: sortedUnique(body.related_refs),
-        schema_version: profile.rules.incident_schema_version,
-        severity: DERIVABLE_INCIDENT_SEVERITY[body.incident_type],
-        source,
-      }),
-    );
-    incidents.push(incident);
-    return incident;
-  };
-
-  const emitCondition = (body: ConditionBody): OperationalConditionEvent => {
-    const condition = withDerivedId('condition_event_id', {
-      ...body,
-      cause_refs: sortedUnique(body.cause_refs),
-      schema_version: CONTRACT_SCHEMA_VERSION,
-      source,
-    }) as unknown as OperationalConditionEvent;
-    conditions.push(condition);
-    return condition;
-  };
-
-  const assertProvenance = (event: SourceEvent) => {
-    if (event.schema_version !== CONTRACT_SCHEMA_VERSION) {
-      throw new TypeError(
-        `schema_version ${event.schema_version} de source event no soportada; se esperaba ${CONTRACT_SCHEMA_VERSION}.`,
-      );
-    }
-    if (event.source !== source) {
-      throw new TypeError(`Source event de otra fuente: ${event.source}; se esperaba ${source}.`);
-    }
-    if (
-      event.kind === 'raw_source_frame' &&
-      event.connector_version !== profile.connector_version
-    ) {
-      throw new TypeError(
-        `connector_version ${event.connector_version} no coincide con el perfil ${profile.connector_version}.`,
-      );
-    }
+  const emitIncident = (body: IncidentBody) => {
+    incidents.push(buildIncident(profile, body));
   };
 
   const onRawFrame = (event: Extract<SourceEvent, { kind: 'raw_source_frame' }>, order: number) => {
@@ -288,8 +202,8 @@ export function deriveMarketData(
     }
 
     // out_of_order: evento estrictamente anterior al high-watermark del símbolo.
-    const watermark = highWatermark.get(tick.symbol);
-    if (watermark !== undefined && tick.event_time_utc < watermark.eventTime) {
+    const watermark = applyTickWatermark(state, tick);
+    if (watermark !== undefined) {
       emitIncident({
         ...common,
         evidence: { event_time_utc: tick.event_time_utc, high_watermark_utc: watermark.eventTime },
@@ -297,35 +211,9 @@ export function deriveMarketData(
         related_refs: [watermark.observationId],
       });
       addFlag(observationId, 'out_of_order');
-    } else if (watermark === undefined || tick.event_time_utc > watermark.eventTime) {
-      highWatermark.set(tick.symbol, { eventTime: tick.event_time_utc, observationId });
     }
 
-    // gap_detection = after_reconnection: decide solo el primer tick estrictamente posterior al
-    // high-watermark del último cierre (uno igual o anterior no informa sobre el intervalo). Si el
-    // hueco no estaba excedido y la separación desde su inicio no supera el perfil, demuestra
-    // continuidad; si no, fija el fin del hueco y solo un HistoryRecoveryResult lo decide. Sin umbral
-    // (perfil de medición), la separación nunca la demuestra.
-    const pending = pendingContinuity.get(tick.symbol);
-    if (
-      pending !== undefined &&
-      pending.end === undefined &&
-      tick.event_time_utc > pending.closeWatermark
-    ) {
-      if (
-        !pending.exceeded &&
-        maximumGap !== null &&
-        Date.parse(tick.event_time_utc) - Date.parse(pending.watermark) <= maximumGap
-      ) {
-        pendingContinuity.delete(tick.symbol);
-      } else {
-        pendingContinuity.set(tick.symbol, {
-          ...pending,
-          end: tick.event_time_utc,
-          exceeded: true,
-        });
-      }
-    }
+    applyTickContinuity(state, tick, maximumGap);
 
     // delivery_delayed: recepción menos evento supera el perfil. Sin umbral no se evalúa.
     const delay = Date.parse(tick.received_at_utc) - Date.parse(tick.event_time_utc);
@@ -340,82 +228,15 @@ export function deriveMarketData(
     }
   };
 
-  const onConnectionClosed = (event: ConnectionClosed) => {
-    if (event.closure_type === 'requested') {
-      return;
-    }
-    for (const symbol of event.affected_symbols) {
-      const watermark = highWatermark.get(symbol);
-      const pending = pendingContinuity.get(symbol);
-      if (pending !== undefined) {
-        // Ya pendiente: conserva el inicio y lo ya sabido del hueco; el siguiente tick posterior al
-        // high-watermark actual fija el nuevo fin, así una recuperación debe cubrir todos los huecos.
-        pendingContinuity.set(symbol, {
-          closeWatermark: watermark?.eventTime ?? pending.closeWatermark,
-          exceeded: pending.exceeded,
-          watermark: pending.watermark,
-        });
-      } else if (watermark !== undefined) {
-        pendingContinuity.set(symbol, {
-          closeWatermark: watermark.eventTime,
-          exceeded: false,
-          watermark: watermark.eventTime,
-        });
-      }
-    }
-    const incident = emitIncident({
-      evidence: {
-        affected_symbols: event.affected_symbols,
-        closure_type: event.closure_type,
-        reason: event.reason,
-      },
-      incident_type: 'connection_lost',
-      observed_at_utc: event.occurred_at_utc,
-      observed_ref: event.event_id,
-      related_refs: [],
-      symbol: null,
-    });
-    if (openConnection.has(event.connection_id)) {
-      throw new TypeError(`La conexión ${event.connection_id} se cerró dos veces.`);
-    }
-    openConnection.set(
-      event.connection_id,
-      emitCondition({
-        action: 'opened',
-        cause_refs: [incident.incident_id],
-        condition_key: deriveConnectionConditionKey(source, event.connection_id),
-        condition_type: 'connection_lost',
-        occurred_at_utc: event.occurred_at_utc,
-        symbol: null,
-      }),
-    );
-  };
-
-  const onConnectionOpened = (event: ConnectionOpened) => {
-    if (event.supersedes_connection_id === null) {
-      return;
-    }
-    const opening = openConnection.get(event.supersedes_connection_id);
-    if (opening === undefined) {
-      return;
-    }
-    openConnection.delete(event.supersedes_connection_id);
-    emitCondition({
-      action: 'resolved',
-      cause_refs: [event.event_id, opening.condition_event_id],
-      condition_key: opening.condition_key,
-      condition_type: 'connection_lost',
-      occurred_at_utc: event.occurred_at_utc,
-      resolution_reason: RESOLUTION_REASONS.connection_lost,
-      symbol: null,
-    });
-  };
-
   /**
    * Observaciones que delimitan el hueco entre las ya registradas: la de mayor tiempo anterior a
    * `from` y la de menor tiempo posterior a `to` (empates: la primera observada).
    */
-  const gapBoundaries = (event: HistoryRecoveryResult) => {
+  const gapBoundaries = (event: {
+    from_event_time_utc: string;
+    symbol: string;
+    to_event_time_utc: string;
+  }) => {
     let before: ObservedTick | undefined;
     let after: ObservedTick | undefined;
     for (const candidate of observedTicks) {
@@ -436,82 +257,16 @@ export function deriveMarketData(
         after = candidate;
       }
     }
-    return { after, before };
-  };
-
-  const onHistoryRecovery = (event: HistoryRecoveryResult) => {
-    // Un resultado que cubre el hueco pendiente lo decide: complete demuestra continuidad;
-    // partial/unavailable la convierten en un hueco explícito. Un rango que no lo cubre no decide.
-    const pending = pendingContinuity.get(event.symbol);
-    if (
-      pending?.end !== undefined &&
-      Date.parse(event.from_event_time_utc) <= Date.parse(pending.watermark) + 1 &&
-      Date.parse(event.to_event_time_utc) >= Date.parse(pending.end) - 1
-    ) {
-      pendingContinuity.delete(event.symbol);
-    }
-    const conditionKey = deriveGapConditionKey({
-      from_event_time_utc: event.from_event_time_utc,
-      source,
-      symbol: event.symbol,
-      to_event_time_utc: event.to_event_time_utc,
-    });
-
-    if (event.status === 'complete') {
-      const opening = openGap.get(conditionKey);
-      if (opening !== undefined) {
-        openGap.delete(conditionKey);
-        emitCondition({
-          action: 'resolved',
-          cause_refs: [event.event_id, opening.condition_event_id],
-          condition_key: conditionKey,
-          condition_type: 'event_gap_unresolved',
-          occurred_at_utc: event.occurred_at_utc,
-          resolution_reason: RESOLUTION_REASONS.event_gap_unresolved,
-          symbol: event.symbol,
-        });
-      }
-      return;
-    }
-
-    // `partial` y `unavailable` no demuestran continuidad.
-    const { after, before } = gapBoundaries(event);
-    const incident = emitIncident({
-      evidence: {
-        from_event_time_utc: event.from_event_time_utc,
-        reason: event.reason,
-        to_event_time_utc: event.to_event_time_utc,
-      },
-      incident_type: 'event_gap_unresolved',
-      observed_at_utc: event.occurred_at_utc,
-      observed_ref: event.event_id,
-      related_refs: [before, after]
-        .filter((item): item is ObservedTick => item !== undefined)
-        .map((item) => item.tick.observation_id),
-      symbol: event.symbol,
-    });
-    if (after !== undefined) {
-      addFlag(after.tick.observation_id, 'event_gap_unresolved');
-    }
-    if (!openGap.has(conditionKey)) {
-      openGap.set(
-        conditionKey,
-        emitCondition({
-          action: 'opened',
-          cause_refs: [incident.incident_id],
-          condition_key: conditionKey,
-          condition_type: 'event_gap_unresolved',
-          occurred_at_utc: event.occurred_at_utc,
-          symbol: event.symbol,
-        }),
-      );
-    }
+    return {
+      ...(after === undefined ? {} : { after: after.tick.observation_id }),
+      ...(before === undefined ? {} : { before: before.tick.observation_id }),
+    };
   };
 
   const seenIds = new Set<string>();
   events.forEach((event, order) => {
-    assertProvenance(event);
-    const id = event.kind === 'raw_source_frame' ? event.observation_id : event.event_id;
+    assertProvenance(event, profile);
+    const id = sourceEventKey(event);
     if (seenIds.has(id)) {
       throw new TypeError(`ID de source event repetido: ${id}`);
     }
@@ -521,14 +276,20 @@ export function deriveMarketData(
         onRawFrame(event, order);
         break;
       case 'connection_closed':
-        onConnectionClosed(event);
+        applyConnectionClosed(state, event, profile, sink);
         break;
       case 'connection_opened':
-        onConnectionOpened(event);
+        applyConnectionOpened(state, event, profile, sink);
         break;
-      case 'history_recovery_result':
-        onHistoryRecovery(event);
+      case 'history_recovery_result': {
+        const extremes = applyHistoryRecovery(state, event, profile, sink, () =>
+          gapBoundaries(event),
+        );
+        if (extremes?.after !== undefined) {
+          addFlag(extremes.after, 'event_gap_unresolved');
+        }
         break;
+      }
     }
   });
 
@@ -546,24 +307,7 @@ export function deriveMarketData(
     incidents: orderedIncidents,
     sourceEvents: events,
   });
-
-  const pendingSymbols = [...pendingContinuity.keys()].sort();
-  const pendingGaps = pendingSymbols.map((symbol): PendingGap => {
-    const pending = pendingContinuity.get(symbol);
-    if (pending === undefined) {
-      throw new TypeError(`Continuidad pendiente sin estado para ${symbol}.`);
-    }
-    // El rango que acepta onHistoryRecovery: desde el inicio + 1 ms hasta el fin − 1 ms.
-    const from = Date.parse(pending.watermark) + 1;
-    return {
-      from_event_time_utc: new Date(from).toISOString(),
-      symbol,
-      to_event_time_utc:
-        pending.end === undefined
-          ? null
-          : new Date(Math.max(Date.parse(pending.end) - 1, from)).toISOString(),
-    };
-  });
+  const { pendingGaps, pendingSymbols } = pendingGapsOf(state.pendingContinuity);
 
   return {
     conditions: causality.conditions,

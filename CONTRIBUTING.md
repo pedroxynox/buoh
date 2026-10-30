@@ -47,7 +47,7 @@ El [plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md) (§6) autoriza
 - `packages/strategy-sdk/` (F2.6): modelo de estrategia, indicadores y evaluador puros.
 - `apps/signal-engine/` (F2.9): motor de señales `shadow`.
 
-También amplía `apps/market-data-worker`, `packages/domain`, `packages/contracts`, `apps/web`, `render.yaml` y `test-vectors/`. Cada directorio nuevo entra en `docs/impact-map.json` en el PR que lo crea (`F2-GOV-001`).
+También amplía `apps/market-data-worker`, `packages/domain`, `packages/contracts`, `apps/web`, `render.yaml` y `test-vectors/`. Cada directorio nuevo entra en `docs/impact-map.json` en el PR que lo crea (`F2-GOV-001`). Desde F2.1, la guardia también pide revisar los [contratos de dominio](docs/arquitectura/contratos-de-dominio.md) o ADR-0004 al tocar `packages/domain/**`.
 
 ## Organización autorizada para la línea visual V1
 

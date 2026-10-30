@@ -11,6 +11,7 @@ import {
   publishedManifestRecordStructuralSchema,
 } from '../src/dataset.js';
 import { healthReportStructuralSchema } from '../src/health.js';
+import { liveDerivationCheckpointStructuralSchema } from '../src/live-checkpoint.js';
 import { marketTickStructuralSchema } from '../src/market-tick.js';
 import { sourceCatalogSnapshotStructuralSchema } from '../src/source-catalog.js';
 import { ingestionCursorSchema, sourceEventStructuralSchema } from '../src/source-events.js';
@@ -24,6 +25,7 @@ const schemas = [
   ['dataset-manifest.schema.json', datasetManifestStructuralSchema],
   ['health-report.schema.json', healthReportStructuralSchema],
   ['ingestion-cursor.schema.json', ingestionCursorSchema],
+  ['live-derivation-checkpoint.schema.json', liveDerivationCheckpointStructuralSchema],
   ['market-tick.schema.json', marketTickStructuralSchema],
   ['operational-condition-event.schema.json', operationalConditionEventStructuralSchema],
   ['published-manifest-record.schema.json', publishedManifestRecordStructuralSchema],

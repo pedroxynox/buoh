@@ -1,7 +1,8 @@
 /**
  * Punto de entrada de @buoh/domain: lógica pura de Fase 1, sin red, reloj ni almacenamiento.
  * Normaliza frames crudos, aplica las reglas de calidad, arma la publicación de un dataset y deriva
- * la salud. El worker (apps/market-data-worker) le pasa los datos y guarda lo que devuelve.
+ * la salud. Desde F2.1 también deriva en pliegue el estado vivo y su punto de control (ADR-0017).
+ * El worker (apps/market-data-worker) le pasa los datos y guarda lo que devuelve.
  */
 export {
   createCatalogResponseSchema,
@@ -66,6 +67,15 @@ export {
   type DerivedMarketData,
   type PendingGap,
 } from './quality.js';
+export {
+  buildLiveDerivationCheckpoint,
+  emptyLiveDerivationState,
+  foldLiveDerivation,
+  liveCheckpointDigests,
+  liveCheckpointVersions,
+  liveDerivationView,
+  type LiveDerivationView,
+} from './live-derivation.js';
 export {
   appendSegmentStats,
   EMPTY_SEGMENT_STATS,
