@@ -50,7 +50,7 @@ El estado vivo tiene, como mucho, una entrada por símbolo, por hueco pendiente 
 - **Condiciones abiertas** (`connection_lost` y `event_gap_unresolved`): cada evento de apertura completo, con su incidencia causal, y para `connection_lost`, la `connection_id` cerrada.
 - **Conexión anterior:** la última `connection_id` con `ConnectionOpened` y la hora de su `ConnectionClosed`, si lo tiene.
 - **Para la salud:** la hora del último `ConnectionOpened` o `ConnectionClosed`, la `observation_id` y la hora de recepción del último raw, y si el log quedó conectado (`connectedInLog` de `deriveHealthReport`).
-- **Para el arranque:** la `connection_id` del último evento y si algún frame se rechazó con `symbol_not_allowed` (`isOtherSymbol`).
+- **Para el arranque:** la `connection_id` del último evento y si algún frame se rechazó con `symbol_not_allowed` (`symbol_not_allowed_seen`, que lee `isOtherSymbolSeen`).
 
 El último tiempo de evento de todos los ticks, que `HealthReport` da como `last_event_time_utc`, es el mayor high-watermark.
 

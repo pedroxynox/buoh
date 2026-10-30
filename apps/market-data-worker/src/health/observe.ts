@@ -1,7 +1,7 @@
 import { sha256Hex, type DeploymentEnvironment, type IngestionCursor } from '@buoh/contracts';
 import { SOURCE_LIMITS, type PipelineProfile } from '@buoh/domain';
 
-import { foldSinceCheckpoint } from '../deriv/log-check.js';
+import { checkFoldedContent, foldSinceCheckpoint } from '../deriv/log-check.js';
 import { createDerivMeasurementProfileFromSourceSchema, DERIV_SOURCE } from '../deriv/profile.js';
 import { DERIV_SCHEMA_RELEASE, type ExpectedSchemaArchive } from '../deriv/schema-archive.js';
 import { SOURCE_SCHEMA_ENTRY } from '../deriv/session.js';
@@ -200,33 +200,36 @@ function openLog(
  * perfil, solo dice si tiene eventos. Con él, lo pliega desde el último punto de control válido por
  * debajo del segmento abierto que leyó `SourceEventLog.open` (`foldSinceCheckpoint`), así que un
  * segmento que se cierre mientras lee no entra dos veces, y avisa en `progress` de cada fila que
- * rechaza. Si el pliegue llega al final, busca en el índice el evento del último cursor del símbolo
- * (`SourceEventLog.hasEvent`). Lanza `ObservationEnd` con la regla 2 o la 3 si el contenido no pasa
- * sus comprobaciones o un almacén no responde.
+ * rechaza. Como el arranque, solo si el contenido pasa sus comprobaciones (`checkFoldedContent`),
+ * busca en el índice el evento del último cursor del símbolo (`SourceEventLog.hasEvent`). Lanza
+ * `ObservationEnd` con la regla 2 o la 3 si el contenido no pasa las del log o un almacén no
+ * responde.
  */
 export async function readObservedLog(
   log: SourceEventLog,
   input: {
+    readonly cursorSymbols: readonly string[];
     readonly latestCursor: IngestionCursor | null;
     readonly profile: PipelineProfile | null;
     readonly progress: HealthObservationProgress;
     readonly symbol: string;
   },
 ): Promise<ObservedLog> {
-  const { latestCursor, profile, progress } = input;
+  const { cursorSymbols, latestCursor, profile, progress, symbol } = input;
   if (profile === null) {
     return { empty: log.firstEventTimeUtc === null, status: 'unprofiled' };
   }
   const lookup = new LiveCheckpointLookup({
     alert: (payload) => progress.alerts.push(payload),
     profile,
-    symbol: input.symbol,
+    symbol,
   });
   try {
     const fold = await fromLog(() => foldSinceCheckpoint(log, lookup));
     progress.rebuilding = false;
     const cursorInLog =
-      fold.status !== 'derived' || latestCursor === null
+      latestCursor === null ||
+      checkFoldedContent(fold, { cursorSymbols, symbol }).status === 'failed'
         ? null
         : await fromLog(() => log.hasEvent(latestCursor.last_durable_source_event_id));
     return { cursor_in_log: cursorInLog, fold, status: 'folded' };
@@ -313,6 +316,7 @@ export async function observeDataHealth(input: ObserveDataHealthInput): Promise<
             symbol,
           });
     const observedLog = await readObservedLog(log, {
+      cursorSymbols,
       latestCursor: latestCursor?.cursor ?? null,
       profile,
       progress,

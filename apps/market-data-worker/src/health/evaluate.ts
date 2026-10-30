@@ -22,7 +22,8 @@ import { unrecordedClose } from '../source-log/previous-connection.js';
  * El log durable que observó `data:health`, leído desde su último punto de control válido (ADR-0017
  * §4). Sin el esquema de fuente guardado no hay perfil con el que plegarlo, y solo se sabe si tiene
  * eventos (`unprofiled`). Con él, su pliegue (`foldSinceCheckpoint`) y si el índice tiene el evento
- * del último cursor del símbolo (`cursor_in_log`: `null` sin cursor o si el log no se plegó).
+ * del último cursor del símbolo (`cursor_in_log`: `null` sin cursor o si el contenido del log no
+ * pasa sus comprobaciones, que van antes, como al arrancar).
  */
 export type ObservedLog =
   | { readonly empty: boolean; readonly status: 'unprofiled' }

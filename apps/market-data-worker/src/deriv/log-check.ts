@@ -49,16 +49,9 @@ export interface StartupLog {
   readonly oldest_utc: string | null;
 }
 
-/**
- * Lo que da `checkLogSinceCheckpoint`: lo que la sesión toma del log, con su estado vivo, o por qué
- * no lo acepta.
- */
+/** Lo que da `checkLogSinceCheckpoint`: lo que la sesión toma del log, o por qué no lo acepta. */
 export type StartupCheck =
-  | {
-      readonly startup: StartupLog;
-      readonly state: LiveDerivationState;
-      readonly status: 'passed';
-    }
+  | { readonly startup: StartupLog; readonly status: 'passed' }
   | {
       /** Con `log_not_derivable`, el error del pliegue saneado (`failureReason`); si no, `null`. */
       readonly detail: string | null;
@@ -223,7 +216,6 @@ export async function checkLogSinceCheckpoint(
       high_watermark_utc: liveWatermark(view, symbol),
       oldest_utc: oldestUtc,
     },
-    state: content.state,
     status: 'passed',
   };
 }

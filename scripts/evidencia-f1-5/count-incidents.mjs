@@ -5,12 +5,16 @@
 //
 //   node scripts/evidencia-f1-5/count-incidents.mjs [--symbol R_100] [--delivered <archivo>]...
 //
-// Con las mismas variables `BUOH_*` que la captura (`ingest`), lee el log durable de `deriv_options`
-// solo para leer, como `data:health`: `observeDataHealth` sobre `openHealthStores`, que nunca toman
-// el bloqueo ni escriben. Deriva del log, con el perfil de medición que arma esa lectura con el
-// esquema de fuente guardado, las incidencias y condiciones (`deriveMarketData`, de `@buoh/domain`)
-// y escribe una sola línea JSON en stdout con conteos, tipos, estados, motivos, IDs y el PID de
-// PostgreSQL del escritor vivo y del último latido, nunca precios ni payloads. Con `--delivered`,
+// Con las mismas variables `BUOH_*` que la captura (`ingest`), observa `deriv_options` como
+// `data:health` (`observeDataHealth` sobre `openHealthStores`, que nunca toman el bloqueo ni
+// escriben) y después lee aparte el log durable entero, también solo para leer: `SourceEventLog`
+// sobre almacenes que rechazan toda escritura, con `readDurableSegments`. Desde el PR 5 de ADR-0017
+// §11, `data:health` parte del último punto de control y ya no da los eventos del log; leerlo
+// entero vale para las capturas de minutos de los ensayos. Deriva del log, con el perfil de medición
+// que arma la observación con el esquema de fuente guardado, las incidencias y condiciones
+// (`deriveMarketData`, de `@buoh/domain`) y escribe una sola línea JSON en stdout con conteos, tipos,
+// estados, motivos, IDs y el PID de PostgreSQL del escritor vivo y del último latido, nunca precios
+// ni payloads. Con `--delivered`,
 // cada archivo lleva un `observation_id` por línea (los ticks que entregó el sink de `capture.mjs`),
 // y la línea dice cuántos son un `raw_source_frame` durable del log (punto 7).
 //
@@ -19,8 +23,9 @@
 // lectura que usa `data:health`. Como solo necesita PostgreSQL, sale también con el almacenamiento
 // de objetos parado (punto 5); si PostgreSQL no responde, dice `unavailable` y el motivo saneado.
 //
-// Salida 0 si pudo leer el log; 1 si la lectura terminó en las reglas 2 o 3 de `data:health` (la
-// línea lleva `observation` y `reason`) o la derivación falló; 2 con argumentos inválidos.
+// Salida 0 si pudo leer el log; 1 si la observación terminó en las reglas 2 o 3 de `data:health` (la
+// línea lleva `observation` y `reason`), si no pudo leer el log entero (`log_read`, con el motivo
+// saneado) o si la derivación falló; 2 con argumentos inválidos.
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { parseArgs } from 'node:util';
@@ -29,9 +34,12 @@ import {
   createUuidV7Generator,
   failureReason,
   loadConfig,
+  LogIntegrityError,
+  LogReadError,
   observeDataHealth,
   openHealthStores,
   OperationalRegistry,
+  SourceEventLog,
 } from '../../apps/market-data-worker/dist/index.js';
 import { DERIV_SOURCE } from '../../apps/market-data-worker/dist/deriv/profile.js';
 import { deriveMarketData } from '../../packages/domain/dist/index.js';
@@ -96,8 +104,37 @@ function deliveredCheck(files, events) {
   };
 }
 
-/** No escribe nunca: el registro operativo se abre aquí solo para leerlo. */
+/** No escribe nunca: el log y el registro operativo se abren aquí solo para leerlos. */
 const refuseWrite = () => Promise.reject(new TypeError('count-incidents solo lee.'));
+
+/**
+ * Los segmentos del log durable de la fuente, cerrados y abierto, leídos enteros y verificados,
+ * con el log abierto como lo abre `data:health`: sobre almacenes que rechazan toda escritura.
+ */
+async function durableSegments(stores) {
+  const { objects, sourceLog } = stores;
+  const log = await SourceEventLog.open({
+    objects: {
+      bucket: objects.bucket,
+      get: (key, maxBytes) => objects.get(key, maxBytes),
+      putIfAbsent: refuseWrite,
+    },
+    source: DERIV_SOURCE,
+    store: {
+      hasSourceEvent: (source, eventId) => sourceLog.hasSourceEvent(source, eventId),
+      insertClosedSegment: refuseWrite,
+      insertIndexRow: refuseWrite,
+      insertLiveCheckpoint: refuseWrite,
+      listClosedSegments: (source, from, to) => sourceLog.listClosedSegments(source, from, to),
+      readLiveCheckpoint: (source, versionsSha256, below) =>
+        sourceLog.readLiveCheckpoint(source, versionsSha256, below),
+      readLogState: (source) => sourceLog.readLogState(source),
+    },
+    // Solo para cerrar segmentos, que esta lectura nunca hace.
+    zlibVersion: 'count-incidents-read-only',
+  });
+  return log.readDurableSegments();
+}
 
 /**
  * Lo que guarda el registro operativo de la fuente, contado: incidencias por tipo y por
@@ -171,11 +208,31 @@ try {
     stores,
     symbol: options.symbol,
   });
+  let segments = null;
+  if (observation.status === 'observed') {
+    try {
+      segments = await durableSegments(stores);
+    } catch (error) {
+      // Un almacén que no responde o un contenido que no pasa sus comprobaciones, como en
+      // `data:health`; cualquier otro error es de programación.
+      if (error instanceof LogReadError) {
+        line = { log_read: { reason: error.reason, status: 'failed' }, observation: 'observed' };
+      } else if (error instanceof LogIntegrityError) {
+        line = {
+          log_read: { reason: 'log_not_derivable', status: 'failed' },
+          observation: 'observed',
+        };
+      } else {
+        throw error;
+      }
+      exitCode = 1;
+    }
+  }
   if (observation.status !== 'observed') {
     exitCode = 1;
     line = { observation: observation.status, reason: observation.reason };
-  } else {
-    const events = observation.segments.flat();
+  } else if (segments !== null) {
+    const events = segments.flat();
     const recoveries = events.filter((event) => event.kind === 'history_recovery_result');
     line = {
       connections: connectionsOf(events),
@@ -195,13 +252,13 @@ try {
         status: event.status,
       })),
       recoveries_by_status: countBy(recoveries.map((event) => event.status)),
-      segments: observation.segments.length,
+      segments: segments.length,
       writer_pid: observation.writerPid,
       writer_present: observation.writerPid !== null,
     };
     if (observation.profile !== null && events.length > 0) {
       try {
-        const derived = deriveMarketData(observation.segments, observation.profile);
+        const derived = deriveMarketData(segments, observation.profile);
         line.derivation = {
           conditions_by_type: countBy(
             derived.conditions.map(

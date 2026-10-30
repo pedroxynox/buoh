@@ -23,7 +23,6 @@ import {
   hasOtherConnector,
   isOtherSymbolSeen,
   type StartupCheck,
-  type StartupLog,
   type StoredCursors,
 } from '../src/deriv/log-check.js';
 import {
@@ -115,23 +114,14 @@ interface Readers {
   /** El estado del hueco del símbolo y su high-watermark, o `not_derivable` si no se deriva. */
   readonly gap: { readonly state: GapState; readonly watermark: string | null } | 'not_derivable';
   readonly previous: ReturnType<typeof previousConnection>;
-  readonly startup: ComparableStartup;
+  readonly startup: StartupCheck;
 }
 
-/** El veredicto del arranque y lo que la sesión toma del log, sin el estado vivo que lo acompaña. */
-type ComparableStartup =
-  | Extract<StartupCheck, { status: 'failed' }>
-  | { readonly startup: StartupLog; readonly status: 'passed' };
-
-/**
- * Con `log_not_derivable` se compara el motivo, no su detalle saneado (ADR-0017 §9). El estado vivo
- * lo comparan las pruebas de `readLiveState`.
- */
-function comparable(check: StartupCheck | ComparableStartup): ComparableStartup {
-  if (check.status === 'passed') {
-    return { startup: check.startup, status: 'passed' };
-  }
-  return check.reason === 'log_not_derivable' ? { ...check, detail: 'detalle saneado' } : check;
+/** Con `log_not_derivable` se compara el motivo, no su detalle saneado (ADR-0017 §9). */
+function comparable(check: StartupCheck): StartupCheck {
+  return check.status === 'failed' && check.reason === 'log_not_derivable'
+    ? { ...check, detail: 'detalle saneado' }
+    : check;
 }
 
 /** `gapState` antes de ADR-0017: los extremos, buscados en los ticks derivados del log entero. */
@@ -251,7 +241,7 @@ function wholeLogReaders(
   const events = segments.flat();
   const failed = (reason: Extract<StartupCheck, { status: 'failed' }>['reason']) =>
     ({ detail: null, reason, status: 'failed' }) as const;
-  const startup = ((): ComparableStartup => {
+  const startup = ((): StartupCheck => {
     const checked = checkLogContent({
       cursorSymbols: input.cursors?.symbols ?? [],
       profile,
@@ -1116,6 +1106,7 @@ async function expectSameHealthFromEveryCheckpoint(
           healthInputs(profile, { ...writer, cursorSymbols, latestCursor: cursor });
         return {
           cursor,
+          cursorSymbols,
           expected: wholeLogHealth(segments, inputs(), profile),
           inputs,
           label: `${label}, ${cursorLabel}, ${writerLabel}, cursores de ${cursorSymbols.join(' y ')}`,
@@ -1143,19 +1134,24 @@ async function expectSameHealthFromEveryCheckpoint(
     keepCheckpointsUpTo(run, c);
     run.reads.length = 0;
     for (const [, cursor] of cursors) {
-      const progress = { alerts: [], rebuilding: false };
-      const log = await readObservedLog(run.log, {
-        latestCursor: cursor,
-        profile,
-        progress,
-        symbol: SYMBOL,
-      });
-      expect(progress, label).toEqual({ alerts: [], rebuilding: false });
-      for (const scenario of scenarios.filter((item) => item.cursor === cursor)) {
-        expect(
-          evaluateDataHealth({ ...scenario.inputs(), log }),
-          `${scenario.label}, punto de control ${String(c)}`,
-        ).toEqual(scenario.expected);
+      for (const cursorSymbols of symbolSets) {
+        const progress = { alerts: [], rebuilding: false };
+        const log = await readObservedLog(run.log, {
+          cursorSymbols,
+          latestCursor: cursor,
+          profile,
+          progress,
+          symbol: SYMBOL,
+        });
+        expect(progress, label).toEqual({ alerts: [], rebuilding: false });
+        for (const scenario of scenarios.filter(
+          (item) => item.cursor === cursor && item.cursorSymbols === cursorSymbols,
+        )) {
+          expect(
+            evaluateDataHealth({ ...scenario.inputs(), log }),
+            `${scenario.label}, punto de control ${String(c)}`,
+          ).toEqual(scenario.expected);
+        }
       }
     }
     const after = Array.from({ length: open - c - 1 }, (_item, index) => c + 1 + index);
@@ -1270,6 +1266,7 @@ describe('data:health desde el punto de control: equivalencia en el worker (ADR-
         for (let c = -1; c < run.rows.length; c += 1) {
           keepCheckpointsUpTo(run, c);
           const log = await readObservedLog(run.log, {
+            cursorSymbols: [SYMBOL],
             latestCursor: null,
             profile: measurement,
             progress: { alerts: [], rebuilding: false },

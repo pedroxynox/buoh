@@ -393,6 +393,13 @@ describe('observeDataHealth: lo que lee (ADR-0015 §8, «Entradas»)', () => {
         ),
       ).toEqual([]);
     }
+    // Un log parado, con todos sus eventos en segmentos cerrados y el abierto vacío, tampoco está
+    // vacío: lo dice el índice (`firstEventTimeUtc`).
+    const stopped = await observeHarness({ closedEvents: [3], schema: null });
+    await stopped.seed.close('requested');
+    expect(await stopped.observe()).toMatchObject({
+      log: { empty: false, status: 'unprofiled' },
+    });
   });
 
   it('no escribe nada en ningún almacén, aunque los que recibe sepan escribir', async () => {
@@ -570,7 +577,7 @@ describe('observeDataHealth: el log desde su último punto de control válido (A
     expect(checkpointReads(run)).toEqual(['readLiveCheckpoint:deriv_options:1']);
   });
 
-  it('busca en el índice el evento del último cursor del símbolo, sin recorrer el log, solo si el pliegue llega al final', async () => {
+  it('busca en el índice el evento del último cursor del símbolo, sin recorrer el log, solo si el contenido del log pasa sus comprobaciones, como el arranque', async () => {
     const run = await observeHarness({ closedEvents: [3] });
     const cursorAt = (eventId: string) => ({
       ingestionStatus: {
@@ -623,6 +630,24 @@ describe('observeDataHealth: el log desde su último punto de control válido (A
       log: { cursor_in_log: null, fold: { status: 'not_derivable' }, status: 'folded' },
     });
     expect(broken.timeline.filter((entry) => entry.startsWith('hasSourceEvent:'))).toEqual([]);
+
+    // Con un cursor de otro símbolo, tampoco: la regla 2 da symbol_mismatch aunque el índice no
+    // responda a esa búsqueda.
+    run.timeline.length = 0;
+    expect(
+      await run.observe({
+        ...cursorAt(uuid(9999)),
+        ingestionStatus: {
+          ...cursorAt(uuid(9999)).ingestionStatus,
+          cursorSymbols: () => Promise.resolve(['R_50', SYMBOL]),
+        },
+        sourceLog: {
+          ...run.stores.sourceLog,
+          hasSourceEvent: () => Promise.reject(unavailable()),
+        },
+      }),
+    ).toMatchObject({ log: foldedLog(run.events, null), status: 'observed' });
+    expect(lookups()).toEqual([]);
   });
 });
 

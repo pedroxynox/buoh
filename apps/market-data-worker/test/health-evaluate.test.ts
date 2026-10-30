@@ -10,7 +10,11 @@ import {
 import { emptyLiveDerivationState, type PipelineProfile } from '@buoh/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { foldCheckedSegment, type CheckedFold } from '../src/deriv/log-check.js';
+import {
+  checkFoldedContent,
+  foldCheckedSegment,
+  type CheckedFold,
+} from '../src/deriv/log-check.js';
 import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
 import {
   evaluateDataHealth,
@@ -90,12 +94,14 @@ function previousParts() {
 /**
  * El log que observa `data:health` de un log durable sin puntos de control, como lo lee
  * `readObservedLog`: sin perfil, solo si tiene eventos; con él, su pliegue desde el log vacío,
- * segmento a segmento (`foldCheckedSegment`), y, si se pliega, si tiene el evento del último cursor.
+ * segmento a segmento (`foldCheckedSegment`), y, si su contenido pasa sus comprobaciones, si tiene
+ * el evento del último cursor.
  */
 function observedLog(
   segments: readonly (readonly SourceEvent[])[],
   profile: PipelineProfile | null,
   cursor: IngestionCursor | null,
+  cursorSymbols: readonly string[],
 ): ObservedLog {
   if (profile === null) {
     return { empty: segments.every((segment) => segment.length === 0), status: 'unprofiled' };
@@ -106,7 +112,8 @@ function observedLog(
   );
   return {
     cursor_in_log:
-      fold.status !== 'derived' || cursor === null
+      cursor === null ||
+      checkFoldedContent(fold, { cursorSymbols, symbol: SYMBOL }).status === 'failed'
         ? null
         : segments.some((segment) =>
             segment.some((event) => sourceEventId(event) === cursor.last_durable_source_event_id),
@@ -146,7 +153,12 @@ function observed(overrides: ObservedOverrides = {}): ObservedSource {
   };
   return {
     ...observation,
-    log: observedLog(segments, observation.profile, observation.latestCursor),
+    log: observedLog(
+      segments,
+      observation.profile,
+      observation.latestCursor,
+      observation.cursorSymbols,
+    ),
   };
 }
 
