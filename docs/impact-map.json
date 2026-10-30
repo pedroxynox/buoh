@@ -8,6 +8,15 @@
       "requires_any": ["docs/arquitectura/contratos-de-dominio.md"]
     },
     {
+      "id": "domain",
+      "description": "Las reglas puras de dominio deben mantener su semántica canónica.",
+      "includes": ["packages/domain/**"],
+      "requires_any": [
+        "docs/arquitectura/contratos-de-dominio.md",
+        "docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md"
+      ]
+    },
+    {
       "id": "toolchain",
       "description": "Cambios de toolchain deben reflejar decisión o estado vigente.",
       "includes": [

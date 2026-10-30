@@ -93,6 +93,7 @@ test('fija las reglas productivas y sus rutas críticas', () => {
     actualMap.rules.map((rule) => rule.id),
     [
       'contracts',
+      'domain',
       'toolchain',
       'market-data-worker',
       'infrastructure',
@@ -110,6 +111,11 @@ test('fija las reglas productivas y sus rutas críticas', () => {
 
   const cases = [
     ['packages/contracts/src/index.ts', 'docs/arquitectura/contratos-de-dominio.md'],
+    ['packages/domain/src/quality.ts', 'docs/arquitectura/contratos-de-dominio.md'],
+    [
+      'packages/domain/test/fixtures/live-checkpoints.ndjson',
+      'docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md',
+    ],
     ['.prettierrc.json', 'PROJECT_STATUS.md'],
     ['scripts/check-runtime.mjs', 'docs/arquitectura/adr/0003-lenguajes-y-limites.md'],
     ['apps/market-data-worker/src/index.ts', 'docs/operacion/runbook-ingesta-de-datos.md'],

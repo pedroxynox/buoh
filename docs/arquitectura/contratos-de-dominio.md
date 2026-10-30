@@ -6,13 +6,13 @@ Desde F1.1, [`packages/contracts`](../../packages/contracts/) es canónico para 
 
 Las validaciones que JSON Schema no expresa —hashes derivados, orden, cardinalidad entre artifacts y relaciones entre campos— permanecen en los esquemas runtime y sus pruebas. Un consumidor no debe sustituir la validación runtime por validar únicamente el JSON Schema. Las invariantes entre artefactos de un dataset (conteos, orden canónico, unión tick→raw, referencias de incidencias, procedencia y extremos temporales) están en `validateDatasetConsistency`, que usan el verificador de vectores y `data:replay` en ambos modos.
 
-Fase 1 implementa `SourceEvent`, `MarketTick`, `DataQualityIncident`, `OperationalConditionEvent`, `IngestionCursor`, `DatasetManifest`, `PublishedManifestRecord` y `HealthReport`. F1.4b añade `SourceCatalogSnapshot` ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md)). Estrategias, señales y ejecución permanecen conceptuales.
+Fase 1 implementa `SourceEvent`, `MarketTick`, `DataQualityIncident`, `OperationalConditionEvent`, `IngestionCursor`, `DatasetManifest`, `PublishedManifestRecord` y `HealthReport`. F1.4b añade `SourceCatalogSnapshot` ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md)), y F2.1, `LiveDerivationCheckpoint` ([ADR-0017](adr/0017-punto-de-control-de-la-derivacion-en-vivo.md)). Estrategias, señales y ejecución permanecen conceptuales.
 
 ## Evidencia de F1.1
 
 - Zod 4 mantiene contratos estrictos y uniones discriminadas.
 - `canonicalize` implementa RFC 8785 para IDs y hashes estructurados.
-- `pnpm run schemas:generate` produjo ocho JSON Schema en F1.1, y nueve desde F1.4b con `SourceCatalogSnapshot`; `schemas:check` detecta deriva.
+- `pnpm run schemas:generate` produjo ocho JSON Schema en F1.1, nueve desde F1.4b con `SourceCatalogSnapshot` y diez desde F2.1 con `LiveDerivationCheckpoint`; `schemas:check` detecta deriva.
 - `pnpm run test:vectors` verifica manifiestos, raw hashes, IDs derivados, publicaciones y escenarios principal/cero-ticks sin red.
 - Desde F1.2, `test:vectors` además regenera con `packages/domain` todos los artefactos de ambos escenarios y los compara byte a byte.
 
@@ -160,25 +160,37 @@ Decidido en [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §6 y p
 
 ## `LiveDerivationCheckpoint`
 
-Decidido en [ADR-0017](adr/0017-punto-de-control-de-la-derivacion-en-vivo.md) (F2.1). Lo implementa el PR 2 de su secuencia, con su esquema Zod y su JSON Schema; hasta entonces es conceptual.
+Decidido en [ADR-0017](adr/0017-punto-de-control-de-la-derivacion-en-vivo.md) (F2.1). Desde el PR 2 de su secuencia, `LiveDerivationCheckpoint` 1.0.0 está en `packages/contracts`, con su esquema Zod y su JSON Schema, y el pliegue que lo produce está en `packages/domain`. La tabla y los lectores que lo usan llegan con los PR 3 a 5.
 
 Es el estado vivo de un log al final de un segmento cerrado: lo que la derivación del log hasta ese segmento deja para los lectores en vivo (arranque, reparación de cierres, vigilancia de huecos y `data:health`). No es un artefacto de dataset ni participa en ningún `dataset_id`.
 
-- **Identidad del log:** `source`, `symbol` y el segmento cerrado que cubre, con su `logical_content_sha256` y los conteos acumulados de eventos y de raw frames hasta él, que se comprueban contra `closed_source_segments`.
-- **Versiones:** conector, conjunto de reglas de calidad, SHA-256 del perfil, SHA-256 del esquema de fuente guardado, política de segmentos, versión del contrato de los source events y versión del formato del estado vivo, un campo propio, distinto de `schema_version`, que sube con cualquier cambio de lo que el pliegue produce para un mismo log. Si alguna no coincide con la del lector, el punto de control no se usa ni se migra: el estado se reconstruye por partes. Uno con otro enlace o con otro SHA-256 tampoco se usa, y deja una alerta.
-- **Estado vivo:**
-  - high-watermark por símbolo, con su tick canónico;
-  - continuidad pendiente por símbolo, con los ticks de los extremos del hueco;
-  - condiciones abiertas con sus incidencias causales;
-  - conexión anterior;
-  - hora del último evento de conexión;
-  - último raw;
-  - si el log quedó conectado;
-  - `connection_id` del último evento;
-  - si algún frame se rechazó con `symbol_not_allowed`.
+```text
+schema_version: SchemaVersion
+source: string
+symbol: Symbol
+segment_index: NonNegativeInteger
+segment_logical_content_sha256: Sha256Hex
+event_count: NonNegativeInteger
+raw_frame_count: NonNegativeInteger
+versions: LiveCheckpointVersions
+state: LiveDerivationState
+```
+
+- **Identidad del log:** `source`, `symbol` y el segmento cerrado *k* que cubre (`segment_index`), con su `logical_content_sha256` y los conteos acumulados de eventos y de raw frames de los segmentos 0 a *k*, que se comprueban contra `closed_source_segments`.
+- **Versiones** (`versions`): `connector_version`, `quality_rule_version`, `quality_profile_sha256`, `source_schema_sha256` del esquema de fuente guardado, `segment_policy_version`, `source_event_schema_version` y `live_state_version`, la versión del formato del estado vivo (`LIVE_STATE_VERSION`, hoy 1.0.0). Esta última es un campo propio, distinto de `schema_version`, que sube con cualquier cambio de lo que el pliegue produce para un mismo log. Si alguna versión no coincide con la del lector, el punto de control no se usa ni se migra: el estado se reconstruye por partes. Uno con otro enlace o con otro SHA-256 tampoco se usa, y deja una alerta.
+- **Estado vivo** (`state`):
+  - `watermarks`: el high-watermark de cada símbolo, con la `observation_id` del tick que lo fijó y el tick canónico de ese instante (`observation_id`, `quote_decimal` y `tick_fingerprint_sha256`);
+  - `pending_continuity`: la continuidad pendiente de cada símbolo, como en `deriveMarketData` (inicio, último cierre, `exceeded` y fin), con los ticks de los extremos del hueco. Del inicio guarda el primer tick observado y el canónico. Del fin, cuando se conoce, guarda el canónico del instante siguiente al rango pendiente y el primero observado con el menor tiempo posterior;
+  - `open_conditions`: cada apertura sin resolver, completa, con su incidencia causal y, para `connection_lost`, la `connection_id` cerrada;
+  - `previous_connection`: la última conexión abierta y la hora de su cierre, si lo tiene;
+  - `last_connection_event_time_utc`, `last_raw` (su `observation_id` y su hora de recepción) y `connected_in_log`, para la salud;
+  - `last_event_connection_id` y `symbol_not_allowed_seen`, para el arranque.
 
   Las incidencias y condiciones que abren o resuelven algo tienen los mismos cuerpos e IDs derivados que en `deriveMarketData`.
-- **Persistencia:** la tabla append-only `live_derivation_checkpoints` (migración `0005`), con el estado en JCS y su SHA-256. Su clave es única por fuente, segmento y SHA-256 de las versiones, y la hora de escritura no entra en el hash. Solo la escribe `ingest`, con el bloqueo de la fuente, después de cada cierre de segmento durable.
+- **Validación runtime:** además de la forma, que describe el JSON Schema, el esquema runtime exige `watermarks` y `pending_continuity` en orden de símbolo, y `open_conditions` en orden de `condition_key`, sin repetir. Cada condición abierta tiene que ser una apertura que cita a su incidencia, del mismo tipo, y llevar `closed_connection_id` solo si es `connection_lost`. `raw_frame_count` no puede superar `event_count`.
+- **Derivación** (`packages/domain`): `foldLiveDerivation` aplica eventos sobre un estado vivo con las mismas reglas que `deriveMarketData` (`derivation-rules.ts`), y falla donde ella falla. También falla con un resultado `partial` o `unavailable` que no cubre exactamente el hueco pendiente (ADR-0017 §3). `liveDerivationView` da lo que usan los lectores. `buildLiveDerivationCheckpoint` arma y valida el punto de control, y `liveCheckpointDigests` da el SHA-256 de su JCS completo, que comprueba la integridad, y el de sus versiones, que entra en la clave.
+- **Vector:** `packages/domain/test/fixtures/live-checkpoints.ndjson` fija en JCS, con sus SHA-256, el punto de control de cada límite de segmento del vector v1 y de los logs sintéticos de la prueba de equivalencia. La prueba fija además el SHA-256 del vector de cada `live_state_version`, así que un cambio que altere uno de esos estados sin subir la versión falla en CI.
+- **Persistencia** (PR 3): la tabla append-only `live_derivation_checkpoints` (migración `0005`), con el estado en JCS y su SHA-256. Su clave es única por fuente, segmento y SHA-256 de las versiones, y la hora de escritura no entra en el hash. Solo la escribe `ingest`, con el bloqueo de la fuente, después de cada cierre de segmento durable.
 
 ## `MarketTick`
 

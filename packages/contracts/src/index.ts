@@ -50,6 +50,14 @@ export {
   type JsonPrimitive,
   type JsonValue,
 } from './identity.js';
+export {
+  LIVE_STATE_VERSION,
+  liveCheckpointVersionsSchema,
+  liveDerivationCheckpointSchema,
+  type LiveCheckpointVersions,
+  type LiveDerivationCheckpoint,
+  type LiveDerivationState,
+} from './live-checkpoint.js';
 export { deriveTickFingerprint, marketTickSchema, type MarketTick } from './market-tick.js';
 export {
   absoluteUriSchema,
