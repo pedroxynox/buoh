@@ -414,6 +414,8 @@ function randomStimuli(seed: number, profile: PipelineProfile): unknown[] {
   let connected = true;
   let clock = T0 * 1000 + 100;
   let watermark = T0;
+  /** Ticks del símbolo en la conexión actual: sin ellos, la sesión puede cerrar sin símbolos. */
+  let ticksOnConnection = 1;
   const stimuli: unknown[] = [tick(1, connection, T0)];
   /** Huecos abiertos por un `partial` o `unavailable`, que solo puede resolver un `complete`. */
   const openGaps: { from: string; to: string }[] = [];
@@ -430,6 +432,7 @@ function randomStimuli(seed: number, profile: PipelineProfile): unknown[] {
       stimuli.push(open(sequence, next, connection, now));
       connection = next;
       connected = true;
+      ticksOnConnection = 0;
       continue;
     }
     const [gap] = deriveMarketData([eventsOf(stimuli, profile)], profile).pendingGaps;
@@ -445,13 +448,18 @@ function randomStimuli(seed: number, profile: PipelineProfile): unknown[] {
       const epoch = choose(instants);
       clock = Math.max(clock, epoch * 1000 + 50);
       watermark = Math.max(watermark, epoch);
+      ticksOnConnection += 1;
       stimuli.push(tickAt(epoch, { quote: choose(['100.124', '100.125', '100.126']) }));
     } else if (roll < 0.56) {
       stimuli.push(ping(sequence, connection, now));
     } else if (roll < 0.6) {
       stimuli.push(tickAt(watermark + 1, { symbol: 'SYNTH_050' }));
     } else if (roll < 0.78) {
-      stimuli.push(close(sequence, connection, now, choose(['repaired', 'requested', 'timeout'])));
+      const closed = close(sequence, connection, now, choose(['repaired', 'requested', 'timeout']));
+      // Una conexión que no llegó a suscribirse se cierra sin símbolos afectados.
+      stimuli.push(
+        ticksOnConnection === 0 && random() < 0.5 ? { ...closed, affected_symbols: [] } : closed,
+      );
       connected = false;
     } else if (gap !== undefined && gap.to_event_time_utc !== null) {
       const range = { from: gap.from_event_time_utc, to: gap.to_event_time_utc };
@@ -713,12 +721,13 @@ describe('derivación en pliegue del estado vivo (ADR-0017)', () => {
       timeout: 60_000,
     },
     () => {
+      // Semillas distintas por perfil, para que los 300 logs sean distintos.
       const profiles = [
-        ['medición', measurement],
-        ['publicación', publication],
+        ['medición', measurement, 0],
+        ['publicación', publication, 1000],
       ] as const;
-      for (const [name, profile] of profiles) {
-        for (let seed = 1; seed <= 150; seed += 1) {
+      for (const [name, profile, first] of profiles) {
+        for (let seed = first + 1; seed <= first + 150; seed += 1) {
           expectEquivalentAtEveryBoundary(
             eventsOf(randomStimuli(seed, profile), profile),
             profile,

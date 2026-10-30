@@ -71,7 +71,7 @@ function withId<K extends string>(
 }
 
 /** Una apertura `connection_lost` con su incidencia causal, como la deriva `deriveMarketData`. */
-function openConnectionLost(connection = CONNECTION, source = SOURCE) {
+function openConnectionLost(connection = CONNECTION) {
   const incident = withId('incident_id', {
     evidence: { affected_symbols: ['R_100'], closure_type: 'timeout', reason: 'ping_timeout' },
     incident_type: 'connection_lost',
@@ -81,24 +81,35 @@ function openConnectionLost(connection = CONNECTION, source = SOURCE) {
     related_refs: [],
     schema_version: '2.0.0',
     severity: 'warning',
-    source,
+    source: SOURCE,
     symbol: null,
   });
   const condition = withId('condition_event_id', {
     action: 'opened',
     cause_refs: [incident.incident_id],
-    condition_key: deriveConnectionConditionKey(source, connection),
+    condition_key: deriveConnectionConditionKey(SOURCE, connection),
     condition_type: 'connection_lost',
     occurred_at_utc: '2026-01-01T00:00:00.500Z',
     schema_version: '1.0.0',
-    source,
+    source: SOURCE,
     symbol: null,
   });
   return { closed_connection_id: connection, condition, incident };
 }
 
-/** Una apertura `event_gap_unresolved` con su incidencia causal, como la deriva `deriveMarketData`. */
-function openGapUnresolved() {
+/**
+ * Una apertura `event_gap_unresolved` con su incidencia causal, como la deriva `deriveMarketData`,
+ * o con la fuente de la condición o de la incidencia, el símbolo de la condición o el fin del rango
+ * de la clave cambiados.
+ */
+function openGapUnresolved(
+  changed: {
+    readonly conditionSource?: string;
+    readonly conditionSymbol?: string;
+    readonly incidentSource?: string;
+    readonly keyTo?: string;
+  } = {},
+) {
   const range = {
     from_event_time_utc: '2026-01-01T00:00:00.001Z',
     to_event_time_utc: '2026-01-01T00:00:00.999Z',
@@ -112,18 +123,23 @@ function openGapUnresolved() {
     related_refs: [TICK],
     schema_version: '2.0.0',
     severity: 'error',
-    source: SOURCE,
+    source: changed.incidentSource ?? SOURCE,
     symbol: 'R_100',
   });
   const condition = withId('condition_event_id', {
     action: 'opened',
     cause_refs: [incident.incident_id],
-    condition_key: deriveGapConditionKey({ ...range, source: SOURCE, symbol: 'R_100' }),
+    condition_key: deriveGapConditionKey({
+      ...range,
+      source: SOURCE,
+      symbol: 'R_100',
+      to_event_time_utc: changed.keyTo ?? range.to_event_time_utc,
+    }),
     condition_type: 'event_gap_unresolved',
     occurred_at_utc: '2026-01-01T00:01:00.000Z',
     schema_version: '1.0.0',
-    source: SOURCE,
-    symbol: 'R_100',
+    source: changed.conditionSource ?? SOURCE,
+    symbol: changed.conditionSymbol ?? 'R_100',
   });
   return { closed_connection_id: null, condition, incident };
 }
@@ -227,17 +243,21 @@ describe('LiveDerivationCheckpoint (ADR-0017)', () => {
     ).toBe(false);
   });
 
-  it('ata la conexión cerrada a su condition_key y la fuente a la del punto de control', () => {
+  it('ata cada condición abierta a su clave, a su fuente y al símbolo de su incidencia', () => {
     const lost = openConnectionLost();
     const gap = openGapUnresolved();
     expect(accepts({ ...emptyState, open_conditions: [lost] })).toBe(true);
     expect(accepts({ ...emptyState, open_conditions: [gap] })).toBe(true);
 
+    // Cada caso rompe una sola regla.
     for (const open of [
       { ...lost, closed_connection_id: null },
       { ...lost, closed_connection_id: OTHER_CONNECTION },
       { ...gap, closed_connection_id: CONNECTION },
-      openConnectionLost(CONNECTION, 'deriv_other'),
+      openGapUnresolved({ keyTo: '2026-01-01T00:00:00.500Z' }),
+      openGapUnresolved({ conditionSource: 'deriv_other' }),
+      openGapUnresolved({ incidentSource: 'deriv_other' }),
+      openGapUnresolved({ conditionSymbol: 'R_050' }),
     ]) {
       expect(accepts({ ...emptyState, open_conditions: [open] })).toBe(false);
     }

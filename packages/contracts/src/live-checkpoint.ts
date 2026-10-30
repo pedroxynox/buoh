@@ -7,6 +7,7 @@ import { z } from 'zod';
 
 import {
   deriveConnectionConditionKey,
+  deriveGapConditionKey,
   operationalConditionEventSchema,
   operationalConditionEventStructuralSchema,
 } from './conditions.js';
@@ -119,9 +120,10 @@ export const liveDerivationCheckpointStructuralSchema = z
 
 /**
  * Esquema runtime: además de la estructura, exige listas del estado ordenadas y sin repetir por su
- * clave, cada condición abierta como una apertura de la misma fuente causada por su incidencia, la
- * `connection_id` cerrada de un `connection_lost` como la de su `condition_key`, y no más raw
- * frames que eventos.
+ * clave, y no más raw frames que eventos. Cada condición abierta tiene que ser una apertura de la
+ * misma fuente y el mismo símbolo que su incidencia causal, con la `condition_key` que resuelve el
+ * pliegue: la de la `connection_id` cerrada de un `connection_lost`, o la del rango de la incidencia
+ * de un `event_gap_unresolved`, como en `validateConditionCausality`.
  */
 export const liveDerivationCheckpointSchema = liveDerivationCheckpointStructuralSchema.superRefine(
   (value, context) => {
@@ -156,18 +158,27 @@ export const liveDerivationCheckpointSchema = liveDerivationCheckpointStructural
         condition.data.action !== 'opened' ||
         condition.data.source !== value.source ||
         incident.data.source !== value.source ||
+        condition.data.symbol !== incident.data.symbol ||
         !condition.data.cause_refs.includes(incident.data.incident_id) ||
         condition.data.condition_type !== incident.data.incident_type ||
         (condition.data.condition_type === 'connection_lost') !==
           (open.closed_connection_id !== null) ||
         (open.closed_connection_id !== null &&
           condition.data.condition_key !==
-            deriveConnectionConditionKey(value.source, open.closed_connection_id))
+            deriveConnectionConditionKey(value.source, open.closed_connection_id)) ||
+        (incident.data.incident_type === 'event_gap_unresolved' &&
+          condition.data.condition_key !==
+            deriveGapConditionKey({
+              from_event_time_utc: incident.data.evidence.from_event_time_utc,
+              source: value.source,
+              symbol: incident.data.symbol,
+              to_event_time_utc: incident.data.evidence.to_event_time_utc,
+            }))
       ) {
         context.addIssue({
           code: 'custom',
           message:
-            'Una condición abierta tiene que ser una apertura de la fuente, causada por su incidencia y, si es connection_lost, de su conexión cerrada.',
+            'Una condición abierta tiene que ser una apertura de la fuente, causada por su incidencia y con la condition_key de su conexión cerrada o de su rango.',
           path: ['state', 'open_conditions', index],
         });
       }
