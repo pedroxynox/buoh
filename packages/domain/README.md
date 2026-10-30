@@ -12,6 +12,7 @@ segmentos ─ buildDatasetPublication ─▶ ticks, incidencias, condiciones (de
                                        DatasetManifestCore, dataset_id, objetos, documento JCS,
                                        PublishedManifestRecord
 estado durable ─ deriveHealthReport ─▶ HealthReport
+vista del estado vivo ─ deriveLiveHealthReport ─▶ HealthReport
 estado vivo + source events ─ foldLiveDerivation ─▶ estado vivo nuevo ─ buildLiveDerivationCheckpoint ─▶
                                                     LiveDerivationCheckpoint
 ```
@@ -23,7 +24,7 @@ estado vivo + source events ─ foldLiveDerivation ─▶ estado vivo nuevo ─ 
 - `normalizeRawFrame`: valida el payload exacto y conserva el lexema numérico de la cotización. Con reglas 2.0.0, además separa los mensajes declarados en `non_tick_msg_types`, reconoce errores de la fuente y atribuye el símbolo por `echo_req`.
 - `deriveMarketData`: reglas del perfil (1.0.0 o 2.0.0) en orden de observación; recomputar desde source events persistidos da el mismo resultado. Con un perfil de medición, la continuidad tras un cierre no pedido solo la decide la historia, y `pendingGaps` da el rango de cada hueco pendiente (ADR-0015 §2).
 - `foldLiveDerivation`: derivación en pliegue del estado vivo desde un punto de control, o desde el log vacío, con las mismas reglas que `deriveMarketData` (`derivation-rules.ts`). `liveDerivationView` da lo que usan los lectores en vivo, y `buildLiveDerivationCheckpoint` y `liveCheckpointDigests`, el punto de control y sus SHA-256 ([ADR-0017](../../docs/arquitectura/adr/0017-punto-de-control-de-la-derivacion-en-vivo.md)).
-- `deriveHealthReport`: salud del estado durable, con entradas opcionales para las condiciones del registro operativo, la conexión observada y una salud mínima; `unobservedHealthReport`, el informe cuando nada de lo observado es fiable (ADR-0015 §8).
+- `deriveHealthReport`: salud del estado durable, con entradas opcionales para las condiciones del registro operativo, la conexión observada y una salud mínima; `unobservedHealthReport`, el informe cuando nada de lo observado es fiable (ADR-0015 §8). `deriveLiveHealthReport` da el mismo informe desde la vista del estado vivo (`liveDerivationView`), sin derivar el log entero (ADR-0017 §4).
 - `evaluateSourceLimit`: matriz de límites de ADR-0004 §7.
 - `evaluateSegmentRotation`: política `segment_policy_version = 1.0.0` (bytes, frames y ventana; ADR-0005 §5), evaluada antes de añadir cada source event.
 - `buildDatasetPublication` acepta `encodeObject` para la codificación física (por defecto `none`, como los vectores); la usa `apps/market-data-worker` para gzip. Cambiarla no altera `dataset_id`.

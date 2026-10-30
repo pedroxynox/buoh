@@ -5,11 +5,13 @@ import {
 } from '@buoh/contracts';
 import {
   buildLiveDerivationCheckpoint,
+  deriveHealthReport,
   deriveMarketData,
   emptyLiveDerivationState,
   foldLiveDerivation,
   liveDerivationView,
   sourceEventTime,
+  unobservedHealthReport,
   type DerivedMarketData,
   type PipelineProfile,
 } from '@buoh/domain';
@@ -17,12 +19,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { gapState, type GapState } from '../src/deriv/gap-watch.js';
 import {
-  checkLogContent,
   checkLogSinceCheckpoint,
-  isCursorAheadOfLog,
+  hasOtherConnector,
+  isOtherSymbolSeen,
   type StartupCheck,
+  type StartupLog,
   type StoredCursors,
 } from '../src/deriv/log-check.js';
+import {
+  evaluateDataHealth,
+  writerView,
+  type HealthEvaluation,
+  type ObservedSource,
+} from '../src/health/evaluate.js';
+import { readObservedLog } from '../src/health/observe.js';
+import { type IngestionHeartbeat } from '../src/ingestion/status.js';
 import { contentKey } from '../src/object-keys.js';
 import { type OperationalAlert } from '../src/operational/registry.js';
 import {
@@ -36,12 +47,13 @@ import {
   readPreviousConnection,
 } from '../src/source-log/live-reader.js';
 import { type StoredLiveCheckpoint } from '../src/source-log/ports.js';
-import { previousConnection } from '../src/source-log/previous-connection.js';
+import { previousConnection, unrecordedClose } from '../src/source-log/previous-connection.js';
 import {
   failureReason,
   LogIntegrityError,
   LogNotDerivableError,
   LogReadError,
+  sourceEventId,
   SourceEventLog,
 } from '../src/source-log/source-event-log.js';
 import {
@@ -61,13 +73,15 @@ import {
 } from './support/live-corpus.js';
 import { MemoryObjectStore, MemorySourceLogStore } from './support/memory-stores.js';
 
-// Equivalencia de los lectores en vivo del worker (ADR-0017 §4 y §9, PR 4 de §11): en cada límite de
-// segmento cerrado del corpus de la equivalencia del dominio, el arranque (`checkLogSinceCheckpoint`),
-// la reparación de cierres (`readPreviousConnection`) y la vigilancia de huecos (`readLiveState` con
-// `gapState`) dan desde el punto de control de ese límite lo mismo que daban con el log entero, y no
-// leen los segmentos anteriores a él. Lo de antes se repite aquí con las funciones que comparte
-// `data:health` (`checkLogContent`, `isCursorAheadOfLog`, `previousConnection`) y con
-// `deriveMarketData`. Almacenes en memoria, sin red, reloj real ni azar; ningún precio es de mercado.
+// Equivalencia de los lectores en vivo del worker (ADR-0017 §4 y §9, PR 4 y 5 de §11): en cada límite
+// de segmento cerrado del corpus de la equivalencia del dominio, el arranque
+// (`checkLogSinceCheckpoint`), la reparación de cierres (`readPreviousConnection`), la vigilancia de
+// huecos (`readLiveState` con `gapState`) y `data:health` (`readObservedLog` con
+// `evaluateDataHealth`) dan desde el punto de control de ese límite lo mismo que daban con el log
+// entero, y no leen los segmentos anteriores a él. Lo de antes se repite aquí: las comprobaciones
+// del log entero que hacían el arranque y `data:health` (`checkLogContent` e `isCursorAheadOfLog`,
+// las de antes de ADR-0017), `previousConnection`, `deriveMarketData` y `deriveHealthReport`.
+// Almacenes en memoria, sin red, reloj real ni azar; ningún precio es de mercado.
 
 function forbidAmbientEffects(): void {
   vi.useFakeTimers({ now: new Date('2099-12-31T23:59:59.999Z'), toFake: ['Date'] });
@@ -101,14 +115,23 @@ interface Readers {
   /** El estado del hueco del símbolo y su high-watermark, o `not_derivable` si no se deriva. */
   readonly gap: { readonly state: GapState; readonly watermark: string | null } | 'not_derivable';
   readonly previous: ReturnType<typeof previousConnection>;
-  readonly startup: StartupCheck;
+  readonly startup: ComparableStartup;
 }
 
-/** Con `log_not_derivable` se compara el motivo, no su detalle saneado (ADR-0017 §9). */
-function comparable(check: StartupCheck): StartupCheck {
-  return check.status === 'failed' && check.reason === 'log_not_derivable'
-    ? { ...check, detail: 'detalle saneado' }
-    : check;
+/** El veredicto del arranque y lo que la sesión toma del log, sin el estado vivo que lo acompaña. */
+type ComparableStartup =
+  | Extract<StartupCheck, { status: 'failed' }>
+  | { readonly startup: StartupLog; readonly status: 'passed' };
+
+/**
+ * Con `log_not_derivable` se compara el motivo, no su detalle saneado (ADR-0017 §9). El estado vivo
+ * lo comparan las pruebas de `readLiveState`.
+ */
+function comparable(check: StartupCheck | ComparableStartup): ComparableStartup {
+  if (check.status === 'passed') {
+    return { startup: check.startup, status: 'passed' };
+  }
+  return check.reason === 'log_not_derivable' ? { ...check, detail: 'detalle saneado' } : check;
 }
 
 /** `gapState` antes de ADR-0017: los extremos, buscados en los ticks derivados del log entero. */
@@ -143,6 +166,70 @@ function gapStateOfTicks(derived: DerivedMarketData, symbol: string): GapState {
   };
 }
 
+/** Lo que daba `checkLogContent`: la derivación del log entero, o por qué no pasa. */
+type LogContentCheck =
+  | { readonly derived: DerivedMarketData; readonly status: 'passed' }
+  | {
+      readonly detail: string | null;
+      readonly reason: 'connector_version_mismatch' | 'log_not_derivable' | 'symbol_mismatch';
+      readonly status: 'failed';
+    };
+
+/**
+ * Las comprobaciones del contenido del log entero de antes de ADR-0017, las del arranque y las de
+ * `data:health`, en su orden: el conector de todos los frames, que `deriveMarketData` lo derive y el
+ * símbolo, con las incidencias `symbol_not_allowed` de la derivación.
+ */
+function checkLogContent(input: {
+  readonly cursorSymbols: readonly string[];
+  readonly profile: PipelineProfile;
+  readonly segments: readonly (readonly SourceEvent[])[];
+  readonly symbol: string;
+}): LogContentCheck {
+  const { profile, segments } = input;
+  if (segments.some((segment) => hasOtherConnector(segment, profile))) {
+    return { detail: null, reason: 'connector_version_mismatch', status: 'failed' };
+  }
+  let derived: DerivedMarketData;
+  try {
+    derived = deriveMarketData(segments, profile);
+  } catch (error) {
+    return { detail: failureReason(error), reason: 'log_not_derivable', status: 'failed' };
+  }
+  const symbolNotAllowedSeen = derived.incidents.some(
+    (incident) =>
+      incident.incident_type === 'invalid_source_frame' &&
+      incident.evidence.reason === 'symbol_not_allowed',
+  );
+  if (
+    isOtherSymbolSeen({
+      cursorSymbols: input.cursorSymbols,
+      symbol: input.symbol,
+      symbolNotAllowedSeen,
+    })
+  ) {
+    return { detail: null, reason: 'symbol_mismatch', status: 'failed' };
+  }
+  return { derived, status: 'passed' };
+}
+
+/**
+ * `cursor_ahead_of_log` antes de ADR-0017: el evento del último cursor, buscado recorriendo el log
+ * entero en lugar del índice. Sin cursor, no lo está.
+ */
+function isCursorAheadOfLog(input: {
+  readonly cursor: Pick<IngestionCursor, 'last_durable_source_event_id'> | null;
+  readonly segments: readonly (readonly SourceEvent[])[];
+}): boolean {
+  const { cursor } = input;
+  return (
+    cursor !== null &&
+    !input.segments.some((segment) =>
+      segment.some((event) => sourceEventId(event) === cursor.last_durable_source_event_id),
+    )
+  );
+}
+
 interface StartupInput {
   readonly cursors: StoredCursors | null;
   readonly now: () => string;
@@ -164,7 +251,7 @@ function wholeLogReaders(
   const events = segments.flat();
   const failed = (reason: Extract<StartupCheck, { status: 'failed' }>['reason']) =>
     ({ detail: null, reason, status: 'failed' }) as const;
-  const startup = ((): StartupCheck => {
+  const startup = ((): ComparableStartup => {
     const checked = checkLogContent({
       cursorSymbols: input.cursors?.symbols ?? [],
       profile,
@@ -635,7 +722,7 @@ describe('lectores en vivo: puntos de control rechazados y almacenes que fallan 
 
     expect(await state).toEqual(foldLiveDerivation(emptyLiveDerivationState(), snapshot, profile));
     expect(await previous).toEqual(previousConnection([snapshot]));
-    expect(await startup).toEqual(wholeLogReaders([snapshot], profile).startup);
+    expect(comparable(await startup)).toEqual(wholeLogReaders([snapshot], profile).startup);
     expect(alerts).toEqual([]);
     expect(failures).toEqual([]);
   });
@@ -847,6 +934,354 @@ describe('el arranque desde el punto de control: cursor, símbolo, retención y 
         eachEvent,
         name,
       );
+    },
+  );
+});
+
+/** Lo que `data:health` observa fuera del log (ADR-0015 §8, «Entradas»): todo menos el log. */
+type HealthInputs = Omit<ObservedSource, 'log'>;
+
+/** El PID del escritor vivo de los escenarios de las reglas 5 y 6. */
+const WRITER_PID = 4242;
+
+/**
+ * Lo observado fuera del log: sin escritor vivo, latido, cursor ni condiciones, con el símbolo como
+ * único de los cursores, y `overrides`. Cada llamada da IDs nuevos desde el mismo, para el cierre
+ * de la regla 4, que no son de ningún evento del corpus.
+ */
+function healthInputs(profile: PipelineProfile, overrides: Partial<HealthInputs>): HealthInputs {
+  let sequence = 0;
+  return {
+    cursorSymbols: [SYMBOL],
+    lastPublishedDatasetId: null,
+    latestCursor: null,
+    latestHeartbeat: null,
+    nextId: () => id(800_000 + (sequence += 1)),
+    now: NOW,
+    operationalConditionTypes: [],
+    profile,
+    source: profile.source,
+    status: 'observed',
+    symbol: SYMBOL,
+    writerPid: null,
+    ...overrides,
+  };
+}
+
+/** La hora del último `ConnectionOpened` o `ConnectionClosed` del log entero, como la buscaba. */
+function lastConnectionEventTime(segments: readonly (readonly SourceEvent[])[]): string | null {
+  let time: string | null = null;
+  for (const event of segments.flat()) {
+    if (event.kind === 'connection_opened' || event.kind === 'connection_closed') {
+      time = event.occurred_at_utc;
+    }
+  }
+  return time;
+}
+
+/**
+ * Lo que daba `evaluateDataHealth` con el log entero, antes de ADR-0017 (PR 5 de §11): con la regla
+ * 4, el cierre `close_not_recorded` al final del log si su última conexión no tiene cierre
+ * (`previousConnection`); la regla 2 con `checkLogContent` sobre ese log e `isCursorAheadOfLog`
+ * sobre el observado, y `deriveHealthReport` con la derivación y los eventos de ese log. La regla del
+ * escritor sale de `writerView`, con la hora del último evento de conexión buscada en el log.
+ */
+function wholeLogHealth(
+  segments: readonly (readonly SourceEvent[])[],
+  inputs: HealthInputs,
+  profile: PipelineProfile,
+): HealthEvaluation {
+  const writer = writerView(inputs, lastConnectionEventTime(segments));
+  let derivable = segments;
+  const previous = previousConnection(segments);
+  if (writer.rule === 4 && previous !== null && !previous.closed) {
+    const close = unrecordedClose({
+      affected_symbols: [inputs.symbol],
+      connection_id: previous.connection_id,
+      event_id: inputs.nextId(),
+      occurred_at_utc: inputs.now,
+      source: inputs.source,
+    });
+    derivable = [...segments.slice(0, -1), [...(segments.at(-1) ?? []), close]];
+  }
+  const failed = (reason: string): HealthEvaluation => ({
+    alert: { event: 'data_health_failed', reason },
+    exitCode: 1,
+    report: unobservedHealthReport({ service_health: 'failed', source: inputs.source }),
+  });
+  const checked = checkLogContent({
+    cursorSymbols: inputs.cursorSymbols,
+    profile,
+    segments: derivable,
+    symbol: inputs.symbol,
+  });
+  if (checked.status === 'failed') {
+    return failed(checked.reason);
+  }
+  if (isCursorAheadOfLog({ cursor: inputs.latestCursor, segments })) {
+    return failed('cursor_ahead_of_log');
+  }
+  const report = deriveHealthReport({
+    backlog_bytes: writer.backlog_bytes,
+    backlog_count: writer.backlog_count,
+    ...(writer.connection_state === undefined ? {} : { connection_state: writer.connection_state }),
+    derived: checked.derived,
+    last_published_dataset_id: inputs.lastPublishedDatasetId,
+    ...(writer.minimum_health === undefined ? {} : { minimum_health: writer.minimum_health }),
+    operational_condition_types: inputs.operationalConditionTypes,
+    source: inputs.source,
+    sourceEvents: derivable.flat(),
+  });
+  return { alert: null, exitCode: report.service_health === 'healthy' ? 0 : 1, report };
+}
+
+/**
+ * Los escritores de las reglas 4 a 6 (ADR-0015 §8) para un log cuyo último evento de conexión es de
+ * la hora `last`: ninguno; uno con un latido reciente, `connecting` y con backlog, posterior a ese
+ * evento y de su misma hora, que no es posterior; y uno con ese latido vencido.
+ */
+function writerScenarios(
+  last: string | null,
+  source: string,
+): readonly (readonly [string, Partial<HealthInputs>])[] {
+  const shift = (instant: string, ms: number) => new Date(Date.parse(instant) + ms).toISOString();
+  const heartbeatAt = (observedAt: string): IngestionHeartbeat => ({
+    backlog_bytes: 120,
+    backlog_count: 1,
+    connection_state: 'connecting',
+    heartbeat_id: id(810_001),
+    observed_at_utc: observedAt,
+    pg_backend_pid: WRITER_PID,
+    run_id: id(810_002),
+    source,
+  });
+  const later = shift(last ?? NOW, 1);
+  const recent = (observedAt: string) => ({
+    latestHeartbeat: heartbeatAt(observedAt),
+    now: shift(observedAt, 1000),
+    writerPid: WRITER_PID,
+  });
+  return [
+    ['sin escritor vivo', { latestHeartbeat: null, writerPid: null }],
+    ['con un latido reciente posterior al último evento de conexión', recent(later)],
+    ...(last === null
+      ? []
+      : [
+          [
+            'con un latido reciente de la hora del último evento de conexión',
+            recent(last),
+          ] as const,
+        ]),
+    [
+      'con un latido vencido',
+      { latestHeartbeat: heartbeatAt(later), now: shift(later, 45_001), writerPid: WRITER_PID },
+    ],
+  ];
+}
+
+/**
+ * En cada punto de control guardado, y sin ninguno, `data:health` da con el log leído desde él
+ * (`readObservedLog`) lo que daba con el log entero (`wholeLogHealth`), con cada escritor de las
+ * reglas 4 a 6 y el último cursor en el último evento del log, sin avisar de nada, y solo lee los
+ * objetos de los segmentos cerrados posteriores al punto de control. Con `variants`, también con un
+ * cursor que el log no tiene, sin cursor y con un cursor de otro símbolo.
+ */
+async function expectSameHealthFromEveryCheckpoint(
+  events: readonly SourceEvent[],
+  profile: PipelineProfile,
+  layout: Layout,
+  label: string,
+  variants: boolean,
+): Promise<void> {
+  const run = await memoryLog(events, profile, layout);
+  const segments = await run.log.readDurableSegments();
+  const last = segments.flat().at(-1);
+  const cursors: readonly (readonly [string, IngestionCursor | null])[] = [
+    ['el cursor en el último evento', last === undefined ? null : cursorAt(eventIdOf(last))],
+    ...(variants
+      ? ([
+          ['un cursor que el log no tiene', cursorAt(id(9999))],
+          ['sin cursor', null],
+        ] as const)
+      : []),
+  ];
+  const writers = writerScenarios(lastConnectionEventTime(segments), profile.source);
+  const symbolSets: readonly (readonly string[])[] = variants
+    ? [[SYMBOL], [SYMBOL, 'SYNTH_050']]
+    : [[SYMBOL]];
+  const scenarios = cursors.flatMap(([cursorLabel, cursor]) =>
+    writers.flatMap(([writerLabel, writer]) =>
+      symbolSets.map((cursorSymbols) => {
+        const inputs = () =>
+          healthInputs(profile, { ...writer, cursorSymbols, latestCursor: cursor });
+        return {
+          cursor,
+          expected: wholeLogHealth(segments, inputs(), profile),
+          inputs,
+          label: `${label}, ${cursorLabel}, ${writerLabel}, cursores de ${cursorSymbols.join(' y ')}`,
+        };
+      }),
+    ),
+  );
+  if (variants && scenarios[0]?.expected.alert === null) {
+    // Con un log que pasa la regla 2, las variantes recorren los motivos que no dependen de su
+    // contenido, y los escritores, la conexión de la regla 4 y la del latido de la regla 5.
+    const outcomes = new Set(
+      scenarios.map(({ expected }) => expected.alert?.reason ?? expected.report.connection_state),
+    );
+    for (const outcome of [
+      'cursor_ahead_of_log',
+      'symbol_mismatch',
+      'disconnected',
+      'connecting',
+    ]) {
+      expect(outcomes, label).toContain(outcome);
+    }
+  }
+  const open = run.log.openSegmentIndex;
+  for (let c = -1; c < run.rows.length; c += 1) {
+    keepCheckpointsUpTo(run, c);
+    run.reads.length = 0;
+    for (const [, cursor] of cursors) {
+      const progress = { alerts: [], rebuilding: false };
+      const log = await readObservedLog(run.log, {
+        latestCursor: cursor,
+        profile,
+        progress,
+        symbol: SYMBOL,
+      });
+      expect(progress, label).toEqual({ alerts: [], rebuilding: false });
+      for (const scenario of scenarios.filter((item) => item.cursor === cursor)) {
+        expect(
+          evaluateDataHealth({ ...scenario.inputs(), log }),
+          `${scenario.label}, punto de control ${String(c)}`,
+        ).toEqual(scenario.expected);
+      }
+    }
+    const after = Array.from({ length: open - c - 1 }, (_item, index) => c + 1 + index);
+    expect(
+      [...new Set(run.reads)].sort((left, right) => left - right),
+      label,
+    ).toEqual(after);
+  }
+}
+
+describe('data:health desde el punto de control: equivalencia en el worker (ADR-0017 §9, PR 5 de §11)', () => {
+  it.each(
+    CORPUS.flatMap(([name, stimuli, profile]) =>
+      LAYOUTS.map(([layout, closes]) => [`${name}, ${layout}`, stimuli, profile, closes] as const),
+    ),
+  )(
+    '%s: el informe, la salida y la alerta de evaluateDataHealth, como con el log entero, desde cada punto de control',
+    async (name, stimuli, profile, closes) => {
+      await expectSameHealthFromEveryCheckpoint(
+        eventsOf(stimuli, profile),
+        profile,
+        closes,
+        name,
+        true,
+      );
+    },
+  );
+
+  it.each(VECTOR_SCENARIOS)(
+    'el vector %s: lo mismo que con el log entero desde cada punto de control',
+    async (name, files) => {
+      for (const [layout, closes] of LAYOUTS) {
+        await expectSameHealthFromEveryCheckpoint(
+          vectorEvents(files),
+          vectorProfile(),
+          closes,
+          `${name}, ${layout}`,
+          true,
+        );
+      }
+    },
+  );
+
+  it(
+    '300 logs aleatorios del dominio de §3, con los dos perfiles y un segmento por transición: lo mismo desde cada punto de control',
+    // Como la de los otros lectores, con una lectura por punto de control en lugar de tres.
+    { timeout: 120_000 },
+    async () => {
+      const profiles = [
+        ['medición', measurement, 0],
+        ['publicación', publication, 1000],
+      ] as const;
+      for (const [name, profile, first] of profiles) {
+        for (let seed = first + 1; seed <= first + 150; seed += 1) {
+          await expectSameHealthFromEveryCheckpoint(
+            eventsOf(randomStimuli(seed, profile), profile),
+            profile,
+            atTransitions,
+            `semilla ${String(seed)} (${name})`,
+            false,
+          );
+        }
+      }
+    },
+  );
+
+  it.each(failureLogs())(
+    'un log que no se deriva, %s: falla igual, con log_not_derivable, desde cada punto de control',
+    async (name, events) => {
+      for (const [layout, closes] of LAYOUTS) {
+        await expectSameHealthFromEveryCheckpoint(
+          events,
+          measurement,
+          closes,
+          `${name}, ${layout}`,
+          false,
+        );
+      }
+    },
+  );
+
+  it.each(CORPUS)(
+    '%s: un frame de otro conector posterior al punto de control da connector_version_mismatch, en el segmento abierto o en uno cerrado, como con el log entero',
+    async (name, stimuli, profile) => {
+      const events = eventsOf(stimuli, profile);
+      await expectSameHealthFromEveryCheckpoint(
+        [...events, foreignFrame(9001)],
+        profile,
+        secondHalfOpen,
+        `${name}, en el abierto`,
+        false,
+      );
+      await expectSameHealthFromEveryCheckpoint(
+        [...events.slice(0, -1), foreignFrame(9001), ...events.slice(-1)],
+        profile,
+        eachEvent,
+        `${name}, en uno cerrado`,
+        false,
+      );
+    },
+  );
+
+  it.each(outOfDomainLogs())(
+    'fuera del dominio de §3, %s: falla cerrado con log_not_derivable desde cada punto de control, aunque deriveMarketData lo acepte',
+    async (name, events) => {
+      for (const [layout, closes] of LAYOUTS) {
+        const run = await memoryLog(events, measurement, closes);
+        const segments = await run.log.readDurableSegments();
+        const inputs = () => healthInputs(measurement, {});
+        const label = `${name}, ${layout}`;
+        expect(wholeLogHealth(segments, inputs(), measurement).alert, label).toBeNull();
+        for (let c = -1; c < run.rows.length; c += 1) {
+          keepCheckpointsUpTo(run, c);
+          const log = await readObservedLog(run.log, {
+            latestCursor: null,
+            profile: measurement,
+            progress: { alerts: [], rebuilding: false },
+            symbol: SYMBOL,
+          });
+          expect(evaluateDataHealth({ ...inputs(), log }), `${label}, ${String(c)}`).toEqual({
+            alert: { event: 'data_health_failed', reason: 'log_not_derivable' },
+            exitCode: 1,
+            report: unobservedHealthReport({ service_health: 'failed', source: 'synthetic' }),
+          });
+        }
+      }
     },
   );
 });

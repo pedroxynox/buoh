@@ -5,7 +5,7 @@ import { type ExpectedSchemaArchive } from '../deriv/schema-archive.js';
 import { parseHealthArgs } from '../health-args.js';
 import { UsageError } from '../replay-args.js';
 import { evaluateDataHealth, type HealthEvaluation } from './evaluate.js';
-import { observeDataHealth, type HealthStores } from './observe.js';
+import { observeDataHealth, type HealthObservationProgress, type HealthStores } from './observe.js';
 
 /** Las lecturas de `data:health` ya abiertas, y cómo liberar sus conexiones. */
 export interface HealthCommandStores extends HealthStores {
@@ -32,7 +32,8 @@ export interface HealthDependencies {
 /**
  * El plazo total de la observación y la evaluación, en milisegundos. Si no terminan antes, el
  * informe es el de la regla 3 con el motivo `deadline_exceeded` (ADR-0015 §8): un almacén no
- * contestó a tiempo.
+ * contestó a tiempo. Si en ese momento reconstruía el estado vivo desde el último punto de control
+ * válido, es `paused` con la alerta `data_health_checkpoint_rebuild_incomplete` (ADR-0017 §6).
  */
 export const HEALTH_DEADLINE_MS = 30_000;
 /** Lo que espera, como mucho, al cierre de los almacenes, después del plazo total o no. */
@@ -42,7 +43,11 @@ export const HEALTH_CLOSE_DEADLINE_MS = 5_000;
 export interface HealthCommandResult {
   /** 0 si la salud es `healthy`, 1 si es otra y 2 en la regla 1 (ADR-0015 §8, «Salida»). */
   readonly exitCode: 0 | 1 | 2;
-  /** La línea de stderr: la alerta de las reglas 2 y 3, el error de la regla 1, o `null`. */
+  /**
+   * Las líneas de stderr, sin el salto final, o `null`: el error de la regla 1, o las alertas de los
+   * puntos de control rechazados (`checkpoint_rejected`) y después la de las reglas 2 y 3 o la de
+   * una reconstrucción que no terminó.
+   */
   readonly stderr: string | null;
   /** La línea de stdout: el `HealthReport`, o `null` en la regla 1, que no tiene informe. */
   readonly stdout: string | null;
@@ -89,13 +94,18 @@ function withinDeadline<T>(
 async function observeAndEvaluate(
   dependencies: HealthDependencies,
   stores: HealthCommandStores,
-  input: { readonly environment: WorkerConfig['environment']; readonly symbol: string },
+  input: {
+    readonly environment: WorkerConfig['environment'];
+    readonly progress: HealthObservationProgress;
+    readonly symbol: string;
+  },
 ): Promise<HealthEvaluation> {
   const observation = await observeDataHealth({
     environment: input.environment,
     ...(dependencies.expected === undefined ? {} : { expected: dependencies.expected }),
     nextId: dependencies.nextId,
     now: dependencies.now,
+    progress: input.progress,
     stores,
     symbol: input.symbol,
   });
@@ -115,7 +125,9 @@ async function observeAndEvaluate(
  * - Si no, stdout lleva el `HealthReport` y stderr la alerta saneada de las reglas 2 y 3, si la hay.
  *   Un error de programación da el informe `failed` con la alerta `unexpected_error`.
  * - Si la observación y la evaluación no terminan en `HEALTH_DEADLINE_MS`, el informe es el de la
- *   regla 3 (`paused`) con la alerta `deadline_exceeded`, sin esperarlas más.
+ *   regla 3 (`paused`) con la alerta `deadline_exceeded`, sin esperarlas más; si reconstruía el
+ *   estado vivo, `paused` con la alerta `data_health_checkpoint_rebuild_incomplete`.
+ * - Antes de esa alerta, stderr lleva una línea por cada punto de control que rechazó la lectura.
  */
 export async function healthCommand(
   argv: readonly string[],
@@ -138,6 +150,7 @@ export async function healthCommand(
     throw error;
   }
   const { scheduler } = dependencies;
+  const progress: HealthObservationProgress = { alerts: [], rebuilding: false };
   let stores: HealthCommandStores | null = null;
   let evaluation: HealthEvaluation;
   try {
@@ -145,13 +158,17 @@ export async function healthCommand(
     evaluation = await withinDeadline(
       scheduler,
       HEALTH_DEADLINE_MS,
-      observeAndEvaluate(dependencies, stores, { environment: config.environment, symbol }),
+      observeAndEvaluate(dependencies, stores, {
+        environment: config.environment,
+        progress,
+        symbol,
+      }),
       () =>
-        evaluateDataHealth({
-          reason: DEADLINE_EXCEEDED,
-          source: DERIV_SOURCE,
-          status: 'storage_unavailable',
-        }),
+        evaluateDataHealth(
+          progress.rebuilding
+            ? { source: DERIV_SOURCE, status: 'checkpoint_rebuild_incomplete' }
+            : { reason: DEADLINE_EXCEEDED, source: DERIV_SOURCE, status: 'storage_unavailable' },
+        ),
     );
   } catch {
     evaluation = evaluateDataHealth({
@@ -164,9 +181,14 @@ export async function healthCommand(
       await withinDeadline(scheduler, HEALTH_CLOSE_DEADLINE_MS, stores.close(), () => undefined);
     }
   }
+  // Las alertas que ya había al terminar, también si el plazo cortó la observación.
+  const lines = [
+    ...progress.alerts.map((alert) => JSON.stringify(alert)),
+    ...(evaluation.alert === null ? [] : [JSON.stringify(evaluation.alert)]),
+  ];
   return {
     exitCode: evaluation.exitCode,
-    stderr: evaluation.alert === null ? null : JSON.stringify(evaluation.alert),
+    stderr: lines.length === 0 ? null : lines.join('\n'),
     stdout: JSON.stringify(evaluation.report),
   };
 }

@@ -82,7 +82,7 @@ export interface LiveDerivationView {
     readonly closed_at_utc: string | null;
     readonly connection_id: string;
   } | null;
-  /** Si algún frame se rechazó con `symbol_not_allowed` (`isOtherSymbol`). */
+  /** Si algún frame se rechazó con `symbol_not_allowed` (`isOtherSymbolSeen` del worker). */
   readonly symbolNotAllowedSeen: boolean;
   /** El high-watermark de cada símbolo, en orden. */
   readonly watermarks: readonly { readonly event_time_utc: string; readonly symbol: string }[];
