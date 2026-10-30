@@ -110,6 +110,31 @@ Cada PR sale de `main` actualizado. Si el trabajo siguiente necesita un PR que e
 
 El propietario puede pedir cambios, cerrar un PR sin fusionarlo o revertir uno fusionado cuando quiera. Nadie sube cambios directamente a `main`.
 
+## Eficiencia
+
+El propietario decidió el 2026-10-30 que el agente mantenga todas las reglas de este archivo y deje los extras que añadía por su cuenta («si la b y dejalo documentado para que otras sesiones lo interpreten bien, ojo, sin perder eficacia en el proyecto»). Cada comprobación cuesta tiempo y crédito, así que se hace cuando puede encontrar un error que las demás no encuentran.
+
+No cambian:
+
+- la revisión semántica de cada PR, las verificaciones del paso 6 de «Protocolo de ejecución de tareas», CI en verde y el comentario de listo («Fusión»);
+- las pruebas que salen de los criterios del plan, de las ADR y de los vectores, con sus casos de fallo;
+- la documentación que pide la guardia documental.
+
+Se hacen solo cuando el cambio las necesita:
+
+- **Mutaciones a propósito**, para ver si las pruebas detectan un cambio de una línea: en código que decide los contratos, qué datos se escriben, se leen o se publican, el riesgo, las señales, la ejecución o la seguridad, como el de un PR que marca en la plantilla «Contratos o compatibilidad», «Datos, migraciones o retención», «Seguridad, secretos o permisos» o «Riesgo, señales o ejecución», y solo en las líneas que deciden su comportamiento.
+- **Mediciones** de tiempo o de memoria: cuando un criterio, un plazo de prueba o una decisión dependen de ellas.
+- **Las pruebas de integración en local**: cuando el cambio toca PostgreSQL, el almacenamiento de objetos o una migración. CI las corre siempre.
+- **Una investigación con un subagente**: en un área que el agente no conoce. Su resultado se reutiliza y no se repite.
+- **Repetir una verificación**: cuando algo cambió desde la última. Tras un rebase que deja el mismo árbol que el commit verificado (`git diff --quiet <commit verificado> HEAD` sale con 0), las pruebas de entonces valen; la guardia documental se vuelve a ejecutar, porque compara con la base nueva (`DOCS_BASE_REF=origin/main pnpm run docs:check:pr`), y el PR lo dice. Un rebase que cambia el árbol, como el que trae commits nuevos de `main`, se verifica entero.
+
+Se escriben cortos:
+
+- la descripción del PR: la plantilla, con lo que otro modelo necesita para revisar sin la conversación («Relevo entre modelos»);
+- el encargo al revisor: contrastar el diff con las fuentes canónicas y con los vectores independientes («Relevo entre modelos») y buscar errores. Repite pruebas, mide o prueba sondas cuando sospecha uno.
+
+Si ahorrar choca con la corrección, gana la corrección, y el PR dice por qué hizo falta lo que no es habitual.
+
 ## Desarrollo por fases
 
 Solo crea directorios y dependencias requeridos por un plan activo (`plan` o `parallel_plans` de `PROJECT_STATUS.md`). La arquitectura objetivo describe el destino, no autoriza implementar todo el destino en una fase temprana. El instalador de skills del agente (`.kiro/instalar-skills.mjs`) y su steering no son componentes del producto y siguen ADR-0014.
