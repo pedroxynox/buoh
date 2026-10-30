@@ -231,6 +231,7 @@ export function lockedSourceLogStore(
       assertHeld(row.source);
       return store.insertLiveCheckpoint(row);
     },
+    hasSourceEvent: (source, eventId) => store.hasSourceEvent(source, eventId),
     listClosedSegments: (source, from, to) => store.listClosedSegments(source, from, to),
     readLiveCheckpoint: (source, versionsSha256, below) =>
       store.readLiveCheckpoint(source, versionsSha256, below),

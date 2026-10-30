@@ -114,6 +114,47 @@ export function storedCheckpointOf(
   };
 }
 
+/**
+ * Las pruebas comunes de la búsqueda de un evento en el índice (`hasSourceEvent`), con la que el
+ * arranque comprueba `cursor_ahead_of_log` (ADR-0017 §4); `open` da el almacén de cada prueba.
+ */
+export function sourceEventLookupRules(open: () => SourceLogStore): void {
+  it('hasSourceEvent encuentra un evento de un segmento cerrado y del abierto, y solo en su fuente', async () => {
+    const store = open();
+    const source = 'rules_lookup';
+    await closeSegments(store, source, 1);
+    const openId = eventId(source, 1, 0);
+    await store.insertIndexRow({
+      byte_length: 100,
+      event_id: openId,
+      event_time_utc: '2026-03-02T10:05:00.000Z',
+      kind: 'raw_source_frame',
+      object_sha256: sha256Hex(`object/${openId}`),
+      position: 0,
+      segment_index: 1,
+      source,
+    });
+
+    expect(await store.hasSourceEvent(source, eventId(source, 0, 0))).toBe(true);
+    expect(await store.hasSourceEvent(source, eventId(source, 0, 2))).toBe(true);
+    expect(await store.hasSourceEvent(source, openId)).toBe(true);
+    expect(await store.hasSourceEvent(source, eventId(source, 1, 1))).toBe(false);
+    expect(await store.hasSourceEvent('rules_lookup_other', openId)).toBe(false);
+  });
+
+  it('hasSourceEvent compara el ID como texto: en mayúsculas, sin guiones o sin ser un UUID, no lo encuentra', async () => {
+    const store = open();
+    const source = 'rules_lookup_text';
+    await closeSegments(store, source, 1);
+    const id = eventId(source, 0, 1);
+
+    expect(await store.hasSourceEvent(source, id)).toBe(true);
+    for (const other of [id.toUpperCase(), id.replaceAll('-', ''), `{${id}}`, 'no-es-un-uuid']) {
+      expect(await store.hasSourceEvent(source, other), other).toBe(false);
+    }
+  });
+}
+
 /** Define las pruebas comunes; `open` da el almacén de cada prueba. */
 export function checkpointStoreRules(open: () => SourceLogStore): void {
   it('sin puntos de control de la fuente y esas versiones, readLiveCheckpoint da null', async () => {

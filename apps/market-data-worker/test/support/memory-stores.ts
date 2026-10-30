@@ -202,6 +202,19 @@ export class MemorySourceLogStore extends InMemorySourceLogStore {
     }
     return super.readLiveCheckpoint(source, versionsSha256, below);
   }
+
+  /** Hace fallar la búsqueda de un evento en el índice, como un PostgreSQL que no responde. */
+  failEventLookups = false;
+  /** Los IDs que se buscaron en el índice, en orden. */
+  readonly eventLookups: string[] = [];
+
+  override hasSourceEvent(source: string, eventId: string): Promise<boolean> {
+    this.eventLookups.push(eventId);
+    if (this.failEventLookups) {
+      return Promise.reject(Object.assign(new Error('Fallo inyectado'), { code: 'ECONNREFUSED' }));
+    }
+    return super.hasSourceEvent(source, eventId);
+  }
 }
 
 /** Registro operativo en memoria; `failAppend` simula PostgreSQL no disponible. */

@@ -7,9 +7,11 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
+import { contentKey } from '../src/object-keys.js';
 import { checkpointRow } from '../src/source-log/live-checkpoint.js';
 import { settle, START_EPOCH, syntheticSchemas, uuid } from './support/connection-harness.js';
 import { derivMessages, type FakeDerivSocket } from './support/deriv-fixtures.js';
+import { type MemoryObjectStore } from './support/memory-stores.js';
 import {
   previousConnectionEvents,
   S,
@@ -94,6 +96,30 @@ const conflictingRow = () =>
     }),
     '2026-03-02T09:00:00.000Z',
   );
+
+/** ¿Son los bytes de un objeto de segmento? Los segmentos se guardan en gzip; los eventos, no. */
+const isGzip = (bytes: Uint8Array): boolean => bytes[0] === 0x1f && bytes[1] === 0x8b;
+
+/**
+ * Altera cada objeto de segmento desde su segunda lectura, o solo el de `key`: la primera lo lee
+ * bien, y la del punto de control ya no, como un almacenamiento que se corrompió después de
+ * verificarlo. Armada en `beforeStart`, la primera lectura de un segmento de una ejecución anterior
+ * es la del arranque, que lee los segmentos cerrados posteriores a su último punto de control
+ * (ADR-0017 §4); la de un segmento que cierra la sesión, la de su escritura verificada.
+ */
+function corruptSegmentsAfterFirstRead(objects: MemoryObjectStore, key?: string): void {
+  const reads = new Map<string, number>();
+  objects.onRead = (read, bytes) => {
+    if (!(key === undefined ? isGzip(bytes) : read === key)) {
+      return bytes;
+    }
+    const count = (reads.get(read) ?? 0) + 1;
+    reads.set(read, count);
+    return count === 1
+      ? bytes
+      : Uint8Array.from(bytes, (byte, index) => (index === 0 ? byte : byte ^ 0xff));
+  };
+}
 
 /** Responde el `forget_all` de la parada de la conexión, sea cual sea su `req_id`. */
 async function answerForgetAll(socket: FakeDerivSocket): Promise<void> {
@@ -193,7 +219,7 @@ describe('startDerivSession: el punto de control del estado vivo (ADR-0017 §5 y
     expect(run.sourceLog.checkpoints).toEqual([]);
   });
 
-  it('si el pliegue falla al reconstruir, termina failed con log_not_derivable sin conectar', async () => {
+  it('si un segmento cerrado no se pliega, el arranque termina failed con log_not_derivable sin conectar ni escribir ninguno', async () => {
     const [previous, stopped] = twoClosedSegments();
     const run = await sessionHarness({
       closedSegments: [
@@ -210,17 +236,41 @@ describe('startDerivSession: el punto de control del estado vivo (ADR-0017 §5 y
       status: 'failed',
     });
     expect(run.timeline).toEqual(['acquire:1', 'release:1']);
-    // El del segmento 0 sí: el pliegue falla en el 1.
+    // El arranque pliega los segmentos cerrados antes de reconstruir (ADR-0017 §4).
+    expect(run.sourceLog.checkpoints).toEqual([]);
+  });
+
+  it('si un segmento cerrado no pasa sus comprobaciones al reconstruir, termina failed con log_not_derivable sin conectar', async () => {
+    const run = await sessionHarness({
+      beforeStart: ({ objects, sourceLog }) => {
+        const segment = sourceLog.closed[1];
+        if (segment === undefined) {
+          throw new TypeError('Falta el segmento 1.');
+        }
+        // El arranque lo lee bien; la reconstrucción, ya alterado.
+        corruptSegmentsAfterFirstRead(objects, contentKey(segment.object_bytes_sha256));
+      },
+      closedSegments: twoClosedSegments(),
+      writeLiveCheckpoints: true,
+    });
+    const result = await run.done;
+
+    expect(result.end).toEqual({
+      detail: 'LogIntegrityError',
+      reason: 'log_not_derivable',
+      status: 'failed',
+    });
+    expect(run.timeline).toEqual(['acquire:1', 'release:1']);
+    // El del segmento 0 sí: la reconstrucción falla en el 1.
     expect(run.sourceLog.checkpoints.map((row) => row.segment_index)).toEqual([0]);
   });
 
-  it('si el pliegue falla al cerrar el último segmento, la sesión termina failed con log_not_derivable', async () => {
+  it('si el punto de control del último cierre no puede seguir, la sesión termina failed con log_not_derivable', async () => {
     const run = await sessionHarness({
-      events: [...previousConnectionEvents(), unavailableOfAnotherRange()].map((event) =>
-        event.kind === 'history_recovery_result'
-          ? { ...event, connection_id: previousConnectionEvents()[0]?.connection_id ?? '' }
-          : event,
-      ),
+      beforeStart: ({ objects }) => {
+        corruptSegmentsAfterFirstRead(objects);
+      },
+      events: previousConnectionEvents(),
       failingConnects: 1,
       writeLiveCheckpoints: true,
     });
@@ -228,7 +278,7 @@ describe('startDerivSession: el punto de control del estado vivo (ADR-0017 §5 y
     const result = await run.done;
 
     expect(result.end).toEqual({
-      detail: 'TypeError',
+      detail: 'LogIntegrityError',
       reason: 'log_not_derivable',
       status: 'failed',
     });
@@ -284,23 +334,23 @@ describe('startDerivSession: el punto de control del estado vivo (ADR-0017 §5 y
   it('si no puede seguir mientras el intento espera antes de su socket, lo aborta y termina sin abrirlo', async () => {
     // El segmento abierto del log anterior empieza a las 09:55 y su última conexión no tiene
     // cierre: el cierre reparado del intento, a las 10:00, lo rota antes de escribirse, y el intento
-    // espera 1 ms a pasarlo. El pliegue de ese segmento falla durante esa espera.
+    // espera 1 ms a pasarlo. El punto de control de ese segmento falla durante esa espera, porque su
+    // objeto ya no pasa sus comprobaciones.
     const [opened, ...rest] = stoppedBeforeRecoveryEvents().slice(0, -1);
     if (opened?.kind !== 'connection_opened') {
       throw new TypeError('Falta la apertura.');
     }
     const run = await sessionHarness({
-      events: [
-        { ...opened, occurred_at_utc: '2026-03-02T09:55:00.000Z' },
-        ...rest,
-        unavailableOfAnotherRange(),
-      ],
+      beforeStart: ({ objects }) => {
+        corruptSegmentsAfterFirstRead(objects);
+      },
+      events: [{ ...opened, occurred_at_utc: '2026-03-02T09:55:00.000Z' }, ...rest],
       writeLiveCheckpoints: true,
     });
     const result = await run.done;
 
     expect(result.end).toEqual({
-      detail: 'TypeError',
+      detail: 'LogIntegrityError',
       reason: 'log_not_derivable',
       status: 'failed',
     });

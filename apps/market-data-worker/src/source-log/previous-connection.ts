@@ -17,13 +17,15 @@ export interface PreviousConnection {
  * Conexión anterior según el log durable: la última con `ConnectionOpened` en el log, y si la sigue
  * su `ConnectionClosed`. Nunca sale de la memoria de una sesión: un intento cuyo `ConnectionOpened`
  * no quedó durable no existe para el log, así que no se supera ni se repara. Es `null` solo si el
- * log no tiene ningún `ConnectionOpened`.
+ * log no tiene ningún `ConnectionOpened`. Con `initial`, `segments` son los posteriores a un punto de
+ * control, y `initial` la conexión anterior hasta él (ADR-0017 §4).
  */
 export function previousConnection(
   segments: readonly (readonly SourceEvent[])[],
+  initial: PreviousConnection | null = null,
 ): PreviousConnection | null {
-  let connectionId: string | null = null;
-  let closedAt: string | null = null;
+  let connectionId: string | null = initial?.connection_id ?? null;
+  let closedAt: string | null = initial?.closed_at_utc ?? null;
   for (const event of segments.flat()) {
     if (event.kind === 'connection_opened') {
       connectionId = event.connection_id;

@@ -117,6 +117,12 @@ export interface SourceLogStore {
   /** Segmentos cerrados con índice en `[from, to]`, en orden. */
   listClosedSegments(source: string, from: number, to: number): Promise<ClosedSourceSegment[]>;
   /**
+   * ¿El índice de la fuente tiene el source event `eventId` (`source_event_index.event_id`: el
+   * `observation_id` de un frame y el `event_id` de los demás)? Con ella el arranque comprueba
+   * `cursor_ahead_of_log` sin recorrer el log (ADR-0017 §4).
+   */
+  hasSourceEvent(source: string, eventId: string): Promise<boolean>;
+  /**
    * Inserta un punto de control (ADR-0017 §5). Su clave es la fuente, el segmento y
    * `versions_sha256`, y nunca reemplaza una fila.
    */

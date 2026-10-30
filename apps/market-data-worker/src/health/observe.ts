@@ -138,11 +138,14 @@ async function readLog(stores: HealthStores): Promise<SourceEvent[][]> {
       },
       source: DERIV_SOURCE,
       store: {
+        // `readDurableSegments` no busca en el índice ni lee puntos de control: `data:health`
+        // todavía deriva el log entero.
+        hasSourceEvent: () =>
+          Promise.reject(new TypeError('data:health no busca eventos en el índice.')),
         insertClosedSegment: refuseWrite,
         insertIndexRow: refuseWrite,
         insertLiveCheckpoint: refuseWrite,
         listClosedSegments: (source, from, to) => sourceLog.listClosedSegments(source, from, to),
-        // `readDurableSegments` no lee puntos de control: `data:health` todavía deriva el log entero.
         readLiveCheckpoint: () =>
           Promise.reject(new TypeError('data:health no lee puntos de control.')),
         readLogState: (source) => sourceLog.readLogState(source),

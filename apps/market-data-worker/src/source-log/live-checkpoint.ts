@@ -150,10 +150,114 @@ export interface LiveCheckpointFailure {
   readonly segment_index: number | null;
 }
 
+/**
+ * El estado vivo al final del segmento cerrado `segment_index`, con los conteos acumulados hasta él:
+ * el de un punto de control, o el del log vacío, con `-1`.
+ */
+export interface LiveCheckpointBase {
+  readonly event_count: number;
+  readonly raw_frame_count: number;
+  readonly segment_index: number;
+  readonly state: LiveDerivationState;
+}
+
+function emptyBase(): LiveCheckpointBase {
+  return {
+    event_count: 0,
+    raw_frame_count: 0,
+    segment_index: -1,
+    state: emptyLiveDerivationState(),
+  };
+}
+
+function baseOf(checkpoint: LiveDerivationCheckpoint): LiveCheckpointBase {
+  return {
+    event_count: checkpoint.event_count,
+    raw_frame_count: checkpoint.raw_frame_count,
+    segment_index: checkpoint.segment_index,
+    state: checkpoint.state,
+  };
+}
+
+export interface LiveCheckpointLookupInput {
+  /** Alerta saneada de cada fila que rechaza (`checkpoint_rejected`). */
+  readonly alert: OperationalAlert;
+  readonly profile: PipelineProfile;
+  readonly symbol: string;
+}
+
+/**
+ * Busca el último punto de control válido del log de una fuente y un símbolo con las versiones del
+ * perfil (ADR-0017 §6): de mayor a menor segmento, con las comprobaciones de `checkStoredCheckpoint`.
+ * En una sesión la comparten quien escribe los puntos de control y los lectores en vivo, así que
+ * avisa una sola vez de cada fila que rechaza (`checkpoint_rejected`, con su motivo y su segmento),
+ * aunque la encuentren varias búsquedas, y la recuerda: su clave ya tiene esa fila, que nadie
+ * reemplaza. Una fila de otras versiones nunca llega aquí: la lectura solo da las del perfil.
+ */
+export class LiveCheckpointLookup {
+  readonly profile: PipelineProfile;
+  readonly symbol: string;
+  /** El SHA-256 de las versiones del perfil (`liveCheckpointVersionsSha256`). */
+  readonly versionsSha256: string;
+  readonly #alert: OperationalAlert;
+  /** Segmentos con una fila rechazada de estas versiones. */
+  readonly #rejected = new Set<number>();
+
+  constructor(input: LiveCheckpointLookupInput) {
+    this.#alert = input.alert;
+    this.profile = input.profile;
+    this.symbol = input.symbol;
+    this.versionsSha256 = liveCheckpointVersionsSha256(input.profile);
+  }
+
+  /** ¿Alguna búsqueda rechazó la fila de este segmento? */
+  hasRejected(segmentIndex: number): boolean {
+    return this.#rejected.has(segmentIndex);
+  }
+
+  /**
+   * El último punto de control válido del log por debajo del segmento `below`, o de cualquiera con
+   * `null`, o el del log vacío si no hay ninguno. Si el almacén no responde, lanza `LogReadError`.
+   */
+  async lastValid(log: SourceEventLog, below: number | null): Promise<LiveCheckpointBase> {
+    const expected = {
+      source: this.profile.source,
+      symbol: this.symbol,
+      versions_sha256: this.versionsSha256,
+    };
+    let limit = below;
+    for (;;) {
+      const candidate = await log.readLiveCheckpoint(this.versionsSha256, limit);
+      if (candidate === null) {
+        return emptyBase();
+      }
+      const checked = checkStoredCheckpoint(candidate, expected);
+      if (checked.status === 'valid') {
+        return baseOf(checked.checkpoint);
+      }
+      const segmentIndex = candidate.row.segment_index;
+      if (!this.#rejected.has(segmentIndex)) {
+        this.#rejected.add(segmentIndex);
+        this.#alert({
+          event: 'checkpoint_rejected',
+          reason: checked.reason,
+          segment_index: String(segmentIndex),
+        });
+      }
+      limit = segmentIndex;
+    }
+  }
+}
+
 export interface LiveCheckpointWriterInput {
   readonly alert: OperationalAlert;
   /** El log de la sesión: el vigente, también después de reabrirlo. */
   readonly log: () => SourceEventLog;
+  /**
+   * La búsqueda que comparte con los lectores de la sesión, del mismo perfil y el mismo símbolo,
+   * para avisar una sola vez de cada fila rechazada; sin ella, una propia.
+   */
+  readonly lookup?: LiveCheckpointLookup;
   /** La hora de escritura de cada fila, que no entra en ningún hash. */
   readonly now: () => string;
   /** El primer fallo que impide seguir; después, el escritor no escribe nada más. */
@@ -163,43 +267,15 @@ export interface LiveCheckpointWriterInput {
 }
 
 /**
- * El estado vivo al final del segmento `segment_index`, con los conteos acumulados hasta él: el del
- * último punto de control escrito, o que no hace falta escribir, o el del log vacío, con `-1`.
- */
-interface Base {
-  readonly event_count: number;
-  readonly raw_frame_count: number;
-  readonly segment_index: number;
-  readonly state: LiveDerivationState;
-}
-
-function emptyBase(): Base {
-  return {
-    event_count: 0,
-    raw_frame_count: 0,
-    segment_index: -1,
-    state: emptyLiveDerivationState(),
-  };
-}
-
-function baseOf(checkpoint: LiveDerivationCheckpoint): Base {
-  return {
-    event_count: checkpoint.event_count,
-    raw_frame_count: checkpoint.raw_frame_count,
-    segment_index: checkpoint.segment_index,
-    state: checkpoint.state,
-  };
-}
-
-/**
  * Escribe el punto de control de cada segmento cerrado del log de `ingest` (ADR-0017 §5 y §6). El
  * trabajo va en una cola, en orden, y nunca la rechaza:
  *
  * - `rebuild`, al abrir el log, busca el último punto de control válido de sus versiones, de mayor
- *   a menor segmento, y avisa de cada uno que rechaza (`checkpoint_rejected`, con el motivo de
- *   `checkStoredCheckpoint`). Después reconstruye por partes hasta el último segmento cerrado: lee y
- *   pliega cada segmento de uno en uno y escribe su punto de control, salvo en un segmento cuya clave
- *   ya tiene una fila rechazada, que no se reemplaza.
+ *   a menor segmento (`LiveCheckpointLookup`, que avisa una sola vez de cada uno que rechaza, con el
+ *   motivo de `checkStoredCheckpoint`). Después reconstruye por partes hasta el último segmento
+ *   cerrado: lee y pliega cada segmento de uno en uno y escribe su punto de control, salvo en un
+ *   segmento cuya clave ya tiene una fila rechazada, que no se reemplaza, la rechazara esta búsqueda
+ *   o la de un lector de la sesión.
  * - `onClosed`, con cada segmento cerrado, sigue igual desde el último punto de control escrito
  *   hasta ese segmento, así que también escribe los cierres que no le llegaron.
  *
@@ -211,17 +287,29 @@ function baseOf(checkpoint: LiveDerivationCheckpoint): Base {
  */
 export class LiveCheckpointWriter {
   readonly #input: LiveCheckpointWriterInput;
-  readonly #versionsSha256: string;
+  /** La búsqueda del último válido, que recuerda los segmentos con una fila rechazada (§6). */
+  readonly #lookup: LiveCheckpointLookup;
   /** El estado desde el que se escribe el siguiente, o `null` hasta encontrarlo en el log. */
-  #base: Base | null = null;
-  /** Segmentos cuya clave ya tiene una fila rechazada (ADR-0017 §6). */
-  readonly #taken = new Set<number>();
+  #base: LiveCheckpointBase | null = null;
   #failure: LiveCheckpointFailure | null = null;
   #queue: Promise<void> = Promise.resolve();
 
   constructor(input: LiveCheckpointWriterInput) {
+    const { lookup } = input;
+    if (
+      lookup !== undefined &&
+      (lookup.profile !== input.profile || lookup.symbol !== input.symbol)
+    ) {
+      throw new TypeError('La búsqueda de puntos de control es de otro perfil o de otro símbolo.');
+    }
     this.#input = input;
-    this.#versionsSha256 = liveCheckpointVersionsSha256(input.profile);
+    this.#lookup =
+      lookup ??
+      new LiveCheckpointLookup({
+        alert: input.alert,
+        profile: input.profile,
+        symbol: input.symbol,
+      });
   }
 
   /** El fallo que impidió seguir, o `null`. */
@@ -275,37 +363,15 @@ export class LiveCheckpointWriter {
   }
 
   /** El último punto de control válido de estas versiones, o el log vacío; `null` si no se pudo leer. */
-  async #establish(): Promise<Base | null> {
-    const log = this.#input.log();
-    const expected = {
-      source: this.#input.profile.source,
-      symbol: this.#input.symbol,
-      versions_sha256: this.#versionsSha256,
-    };
-    let below: number | null = null;
-    for (;;) {
-      let candidate: LiveCheckpointCandidate | null;
-      try {
-        candidate = await log.readLiveCheckpoint(this.#versionsSha256, below);
-      } catch (error) {
-        this.#input.alert({ event: 'checkpoint_unavailable', reason: failureReason(error) });
-        return null;
+  async #establish(): Promise<LiveCheckpointBase | null> {
+    try {
+      return await this.#lookup.lastValid(this.#input.log(), null);
+    } catch (error) {
+      if (!(error instanceof LogReadError)) {
+        throw error;
       }
-      if (candidate === null) {
-        return emptyBase();
-      }
-      const checked = checkStoredCheckpoint(candidate, expected);
-      if (checked.status === 'valid') {
-        return baseOf(checked.checkpoint);
-      }
-      const segmentIndex = candidate.row.segment_index;
-      this.#input.alert({
-        event: 'checkpoint_rejected',
-        reason: checked.reason,
-        segment_index: String(segmentIndex),
-      });
-      this.#taken.add(segmentIndex);
-      below = segmentIndex;
+      this.#input.alert({ event: 'checkpoint_unavailable', reason: error.reason });
+      return null;
     }
   }
 
@@ -313,7 +379,7 @@ export class LiveCheckpointWriter {
    * Pliega el segmento `segmentIndex` desde `base` y escribe su punto de control. Da el estado nuevo,
    * o `null` si no se pudo escribir o no se puede seguir.
    */
-  async #write(base: Base, segmentIndex: number): Promise<Base | null> {
+  async #write(base: LiveCheckpointBase, segmentIndex: number): Promise<LiveCheckpointBase | null> {
     const log = this.#input.log();
     let read: Awaited<ReturnType<SourceEventLog['readClosedSegment']>>;
     try {
@@ -351,7 +417,7 @@ export class LiveCheckpointWriter {
       return null;
     }
     const next = baseOf(checkpoint);
-    if (this.#taken.has(segmentIndex)) {
+    if (this.#lookup.hasRejected(segmentIndex)) {
       // Su clave ya tiene una fila rechazada, que no se reemplaza: la supera la del segmento
       // siguiente (ADR-0017 §6).
       return next;

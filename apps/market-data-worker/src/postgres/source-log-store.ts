@@ -54,6 +54,13 @@ const CHECKPOINT_COLUMNS = `source, symbol, segment_index, schema_version,
   source_event_schema_version, source_schema_sha256, versions_sha256, checkpoint_jcs,
   checkpoint_sha256, written_at_utc`;
 
+/**
+ * Un UUID como lo da `event_id::text`: en minúsculas y con guiones. Solo con esa forma `event_id =
+ * $2::uuid` compara lo mismo que el texto, como el índice en memoria: PostgreSQL también acepta un
+ * UUID en mayúsculas, entre llaves o sin guiones.
+ */
+const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+
 function checkpointFromRecord(record: CheckpointRecord): StoredLiveCheckpoint {
   return {
     ...record,
@@ -185,6 +192,24 @@ export class PostgresSourceLogStore implements SourceLogStore {
       [source, from, to],
     );
     return rows.map(closedFromRecord);
+  }
+
+  /**
+   * Con el índice único de `event_id`, sin recorrer las filas de la fuente. Un ID con otra forma que
+   * la de `event_id::text` no está en el índice: da `false` sin consultar, en lugar del error del
+   * cast o de encontrar el mismo UUID escrito de otra forma.
+   */
+  async hasSourceEvent(source: string, eventId: string): Promise<boolean> {
+    if (!UUID_TEXT.test(eventId)) {
+      return false;
+    }
+    const { rows } = await this.#pool.query<{ found: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM source_event_index WHERE source = $1 AND event_id = $2::uuid
+       ) AS found`,
+      [source, eventId],
+    );
+    return rows[0]?.found === true;
   }
 
   /**

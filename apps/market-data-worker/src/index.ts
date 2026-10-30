@@ -75,18 +75,28 @@ export {
 export {
   checkpointRow,
   checkStoredCheckpoint,
+  LiveCheckpointLookup,
   LiveCheckpointWriter,
   liveCheckpointVersionsSha256,
   type CheckedLiveCheckpoint,
+  type LiveCheckpointBase,
   type LiveCheckpointFailure,
+  type LiveCheckpointLookupInput,
   type LiveCheckpointRejection,
   type LiveCheckpointWriterInput,
 } from './source-log/live-checkpoint.js';
+export {
+  liveWatermark,
+  readLiveState,
+  readPreviousConnection,
+  readSinceCheckpoint,
+} from './source-log/live-reader.js';
 export { previousConnection, type PreviousConnection } from './source-log/previous-connection.js';
 export { publishFromLog, type PublishFromLogInput } from './source-log/publish-from-log.js';
 export {
   failureReason,
   LogIntegrityError,
+  LogNotDerivableError,
   LogPersistenceError,
   LogReadError,
   SourceEventLog,

@@ -1598,14 +1598,27 @@ describe('RawFirstIngestor: reabrir el log que falló', () => {
     },
   );
 
-  it('readDurableSegments da null con el log fallido, sin reabrirlo; con el log reabierto, da sus eventos durables', async () => {
+  it('readLog llama a la lectura sin esperar después de comprobar el log, así que su foto incluye todo lo durable', async () => {
+    const run = await failedLog();
+    await reopenWith.receiveEvent(run);
+    let snapshot: ReturnType<SourceEventLog['openSegment']> | null = null;
+    const read = run.ingestor.readLog((log) => {
+      snapshot = log.openSegment();
+      return Promise.resolve(snapshot);
+    });
+    // Ya la tomó, antes de que nada más pueda escribir en el log.
+    expect(snapshot).not.toBeNull();
+    expect(await read).toBe(snapshot);
+  });
+
+  it('readLog da null con el log fallido, sin reabrirlo; con el log reabierto, lee sus eventos durables', async () => {
     const run = await failedLog();
     const open = vi.spyOn(SourceEventLog, 'open');
 
-    expect(await run.ingestor.readDurableSegments()).toBeNull();
+    expect(await run.ingestor.readLog((log) => log.readDurableSegments())).toBeNull();
     expect(open).not.toHaveBeenCalled();
     await reopenWith.receiveEvent(run);
-    const segments = await run.ingestor.readDurableSegments();
+    const segments = await run.ingestor.readLog((log) => log.readDurableSegments());
     expect(
       segments
         ?.flat()
@@ -1694,8 +1707,8 @@ describe('RawFirstIngestor.markLogStale: el log desactualizado se reabre antes d
       0,
     ],
     [
-      'readDurableSegments da también el evento del otro escritor',
-      (run) => run.ingestor.readDurableSegments(),
+      'readLog lee también el evento del otro escritor',
+      (run) => run.ingestor.readLog((log) => log.readDurableSegments()),
       [[openedEvent(CONNECTION_A, id(1), OPENED_AT), closedEvent(CONNECTION_A, id(2), OTHER_AT)]],
       [id(1), id(2)],
       0,
@@ -1749,13 +1762,13 @@ describe('RawFirstIngestor.markLogStale: el log desactualizado se reabre antes d
     expect(run.ingestor.state).toBe('paused');
   });
 
-  it('si un almacén no responde al reabrirlo, readDurableSegments da null y registra persistence_unavailable, como tras un fallo: la lectura siguiente ya no lo reabre', async () => {
+  it('si un almacén no responde al reabrirlo, readLog da null y registra persistence_unavailable, como tras un fallo: la lectura siguiente ya no lo reabre', async () => {
     const run = await staleLog();
     run.objects.onRead = () => {
       throw Object.assign(new Error('sintético'), { code: 'ECONNREFUSED' });
     };
 
-    expect(await run.ingestor.readDurableSegments()).toBeNull();
+    expect(await run.ingestor.readLog((log) => log.readDurableSegments())).toBeNull();
     expect(run.operational.incidents).toEqual([
       expect.objectContaining({
         evidence: { reason: 'ECONNREFUSED', stage: 'source_event_index' },
@@ -1766,7 +1779,7 @@ describe('RawFirstIngestor.markLogStale: el log desactualizado se reabre antes d
     ]);
     expect(run.ingestor.state).toBe('paused');
     const open = vi.spyOn(SourceEventLog, 'open');
-    expect(await run.ingestor.readDurableSegments()).toBeNull();
+    expect(await run.ingestor.readLog((log) => log.readDurableSegments())).toBeNull();
     expect(open).not.toHaveBeenCalled();
   });
 });
