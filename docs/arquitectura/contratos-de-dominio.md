@@ -158,6 +158,28 @@ El procedimiento de desconexión persiste primero `ConnectionClosed` y luego con
 
 Decidido en [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §6 y persistido desde el PR 5 de su secuencia: la sesión de ingesta lo guarda en la tabla append-only `ingestion_cursors`, en versiones contiguas por fuente y símbolo, después de cada `ConnectionClosed` durable, también uno reparado, y al parar. `connection_id` es la conexión del último evento durable. `active_segment_index`, `source_event_count`, `last_durable_source_event_id` y `last_durable_observation_id` son los del log de la fuente en ese momento: segmento abierto, eventos durables, último evento y último raw. `high_watermark_event_time_utc` es el del símbolo: la hora de su tick durable más tardío. Al arrancar, el último evento del cursor del símbolo tiene que estar en el índice del log, y ningún cursor de la fuente puede ser de otro símbolo: un log lo escribe una sesión de un solo símbolo.
 
+## `LiveDerivationCheckpoint`
+
+Decidido en [ADR-0017](adr/0017-punto-de-control-de-la-derivacion-en-vivo.md) (F2.1). Lo implementa el PR 2 de su secuencia, con su esquema Zod y su JSON Schema; hasta entonces es conceptual.
+
+Es el estado vivo de un log al final de un segmento cerrado: lo que la derivación del log hasta ese segmento deja para los lectores en vivo (arranque, reparación de cierres, vigilancia de huecos y `data:health`). No es un artefacto de dataset ni participa en ningún `dataset_id`.
+
+- **Identidad del log:** `source`, `symbol` y el segmento cerrado que cubre, con su `logical_content_sha256` y los conteos acumulados de eventos y de raw frames hasta él, que se comprueban contra `closed_source_segments`.
+- **Versiones:** conector, conjunto de reglas de calidad, SHA-256 del perfil, SHA-256 del esquema de fuente guardado, política de segmentos, versión del contrato de los source events y versión del formato del estado vivo. Si alguna no coincide con la del lector, el punto de control no se usa ni se migra: el estado se reconstruye por partes.
+- **Estado vivo:**
+  - high-watermark por símbolo, con su tick canónico;
+  - continuidad pendiente por símbolo, con los ticks de los extremos del hueco;
+  - condiciones abiertas con sus incidencias causales;
+  - conexión anterior;
+  - hora del último evento de conexión;
+  - último raw;
+  - si el log quedó conectado;
+  - `connection_id` del último evento;
+  - si algún frame se rechazó con `symbol_not_allowed`.
+
+  Las incidencias y condiciones que abren o resuelven algo tienen los mismos cuerpos e IDs derivados que en `deriveMarketData`.
+- **Persistencia:** la tabla append-only `live_derivation_checkpoints` (migración `0005`), con el estado en JCS y su SHA-256. La hora de escritura no entra en el hash. Solo la escribe `ingest`, con el bloqueo de la fuente, después de cada cierre de segmento durable.
+
 ## `MarketTick`
 
 Proyección regenerable de un raw válido:
