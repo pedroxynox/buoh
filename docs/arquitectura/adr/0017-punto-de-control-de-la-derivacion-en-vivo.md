@@ -8,14 +8,14 @@
 
 ## Contexto
 
-Cuatro lectores leen y derivan con `deriveMarketData` el log durable entero de una fuente:
+Cuatro lectores leen el log durable entero de una fuente con `readDurableSegments`, y tres de ellos lo derivan con `deriveMarketData`:
 
 1. el arranque de la sesión de ingesta (`SessionRun.#openLog` y `checkLog`), al empezar y después de cada fallo de lectura del log;
-2. la reparación de un cierre no registrado (`RawFirstIngestor.repairUnrecordedClose`), antes de cada socket de una reconexión, que solo usa `previousConnection`;
+2. la reparación de un cierre no registrado (`RawFirstIngestor.repairUnrecordedClose`), antes de cada socket de una reconexión, que no deriva: solo calcula `previousConnection`;
 3. la vigilancia de un hueco (`SessionRun.#watchGap`), que vuelve a derivar el log con cada tick durable posterior al high-watermark del hueco;
 4. `data:health` (`readLog` en `src/health/observe.ts`), en cada ejecución.
 
-`readDurableSegments` devuelve todos los source events, ya validados, y la derivación los vuelve a validar, guarda todos los ticks y todas las incidencias, y al final ordena y comprueba la causalidad de todo. Con 17,8 horas de log, `ingest` llegó a 358 MB al arrancar y `data:health` a 317 MB, unos 8 KB por evento, y el worker Starter tiene 512 MB (ADR-0016, «Medición»). Con esa derivación, 7 días de log necesitarían unos 2,5 GB (estimación).
+`readDurableSegments` devuelve todos los source events, ya validados, y vuelve a leer y verificar el objeto de cada segmento cerrado. La derivación los vuelve a validar, guarda todos los ticks y todas las incidencias, y al final ordena y comprueba la causalidad de todo. Con 17,8 horas de log, `ingest` llegó a 358 MB al arrancar y `data:health` a 317 MB, unos 8 KB por evento, y el worker Starter tiene 512 MB (ADR-0016, «Medición»). Con esa derivación, 7 días de log necesitarían unos 2,5 GB (estimación).
 
 Hechos comprobados en el código el 2026-10-30:
 
@@ -62,7 +62,12 @@ El último tiempo de evento de todos los ticks, que `HealthReport` da como `last
 - **Las mismas identidades.** Las incidencias y condiciones que abren o resuelven algo se construyen como en `deriveMarketData`, con los mismos cuerpos y los mismos IDs derivados (ADR-0004 §4).
 - **Lo que no reproduce:** las incidencias de duplicado, conflicto de tiempo, fuera de orden y retraso, las marcas de los ticks y la lista de ticks, porque ningún lector en vivo las usa (Contexto).
 - **Comprobaciones.** Aplica a cada evento las de `deriveMarketData`: versión del contrato, fuente y conector (`assertProvenance`), un ID que no se repite dentro de lo que deriva y una conexión que no se cierra dos veces mientras sigue abierta. Entre el punto de control y lo posterior, los IDs únicos los garantiza el índice. Cada resolución nueva se comprueba contra su apertura, con las reglas y el orden de `validateConditionCausality` (`occurred_at_utc` y después `condition_event_id`): si la resolución quedaría antes que su apertura, o no la supera como esas reglas piden, la derivación falla igual que la completa.
-- **Dominio de la equivalencia.** La equivalencia de §4 vale para los logs que cumplen las reglas de la sesión de ingesta. Un `HistoryRecoveryResult` `partial` o `unavailable` cubre exactamente el hueco pendiente de su símbolo, porque la sesión lo pide con ese rango y solo lo persiste en la misma conexión (ADR-0015 §4). Si un log trae uno con otro rango, la derivación en pliegue no tiene sus extremos y falla con `log_not_derivable`, en lugar de dar otros IDs.
+- **Dominio de la equivalencia.** La equivalencia de §4 vale para los logs que cumplen tres reglas de la sesión de ingesta:
+  1. un `HistoryRecoveryResult` `partial` o `unavailable` cubre exactamente el hueco pendiente de su símbolo, con su fin ya conocido, porque la sesión lo pide con ese rango y solo lo persiste en la misma conexión (ADR-0015 §4);
+  2. ningún ID se repite en el log. En PostgreSQL lo garantiza el índice (`event_id UNIQUE`), y la sesión genera UUIDv7 nuevos;
+  3. una clave de condición resuelta no se vuelve a abrir: la sesión cierra cada conexión una vez y no vuelve a pedir un hueco resuelto.
+
+  Si un log trae un resultado `partial` o `unavailable` sin fin de hueco o con otro rango, la derivación en pliegue no tiene sus extremos y falla con `log_not_derivable`, en lugar de dar otros IDs. Las otras dos reglas no las puede comprobar a través del punto de control.
 
 ### 4. Lo que obtiene cada lector
 
@@ -72,22 +77,34 @@ La **vista viva** es lo que cada lector usa, y es igual desde un punto de contro
 |---|---|
 | Arranque | el veredicto de ADR-0015 §5 o su fallo, y lo que guarda la sesión: la `connection_id` del último evento, el high-watermark del símbolo y el evento más antiguo |
 | Reparación de cierres | `PreviousConnection` |
-| Vigilancia de huecos | el estado del hueco del símbolo (`none`, `open`, `boundary_unavailable` o `ready`, con su petición) |
+| Vigilancia de huecos | el estado del hueco del símbolo (`none`, `open`, `boundary_unavailable` o `ready`, con su petición) y el high-watermark del símbolo, que sube el del cursor |
 | `data:health` | el `HealthReport`, el código de salida y la alerta de ADR-0015 §8, con las mismas entradas de fuera del log |
 
 - **`connector_version_mismatch`** se comprueba en los eventos posteriores al punto de control. El punto de control lleva su conector (§6), así que uno de otro conector no se usa.
 - **`cursor_ahead_of_log`** se comprueba buscando en `source_event_index` el evento del último cursor, en lugar de recorrer el log.
-- **`retention_expired`** sigue usando `SourceLogState.firstEventTimeUtc`.
+- **`retention_expired`** y la retención que arma la sesión pasan a usar `SourceLogState.firstEventTimeUtc` en lugar del primer evento leído (`events[0]`). Es el mismo valor, porque la primera fila del índice guarda la hora de ese evento, pero sin leerlo.
 - **La regla 4 de `data:health`**, que añade en memoria el cierre que el próximo arranque registrará, aplica ese cierre sobre el estado vivo, sin persistir nada.
 
-Cada lector lee el último punto de control válido y después los segmentos cerrados posteriores, uno a uno, y los eventos del segmento abierto. La vigilancia de huecos sigue volviendo a leer y derivar con cada tick, como en ADR-0015 §4 («Cuándo»), y el estado sigue saliendo del log durable, nunca de la memoria de la sesión (ADR-0015 §3, «Conexión anterior»). Lo que vuelve a derivar queda acotado por lo que hay después del punto de control.
+Cada lector lee el último punto de control válido y después los segmentos cerrados posteriores, uno a uno, y los eventos del segmento abierto. `data:health`, que no toma el bloqueo, lee el punto de control en la misma instantánea que el estado del log (`readLogState`, `REPEATABLE READ`), y rechaza uno cuyo segmento no esté por debajo del abierto, para no aplicar dos veces un segmento recién cerrado.
+
+La vigilancia de huecos sigue volviendo a leer y derivar con cada tick, como en ADR-0015 §4 («Cuándo»), y el estado sigue saliendo del log durable, nunca de la memoria de la sesión (ADR-0015 §3, «Conexión anterior»). Lo que vuelve a derivar queda acotado por lo que hay después del punto de control.
+
+**Integridad de los objetos.** Los lectores en vivo verifican los objetos de lo que leen, después del punto de control, como hoy. Ya no vuelven a leer los de los segmentos anteriores:
+
+- el objeto de cada segmento se verificó al escribirlo, releyéndolo (`writeVerified`), antes de escribir su punto de control;
+- la publicación y el replay vuelven a verificar los objetos de los segmentos que usan (ADR-0004 §8 y §9);
+- la verificación periódica por partes de todos los segmentos la programa la ADR de despliegue, con su costo en R2.
+
+Un objeto antiguo que falta o cambió deja así de dar `log_not_derivable` en el arranque y en `data:health`, y lo encuentra esa verificación. Por la misma razón, nada borra objetos de `sha256/` con una regla de ciclo de vida: los de segmento y los de evento comparten ese prefijo (ADR-0005 §3).
 
 ### 5. Dónde se guarda y quién lo escribe
 
-- **Tabla.** La migración `0005` crea `live_derivation_checkpoints` en el esquema de la captura, append-only como las de la Fase 1: rechaza `UPDATE`, `DELETE` y `TRUNCATE`. Cada fila guarda la fuente, el símbolo, el segmento *k*, el enlace y las versiones de §6, el estado vivo en JCS, su SHA-256 y la hora de escritura. La hora no entra en el hash, así que el mismo log da siempre el mismo punto de control.
+- **Tabla.** La migración `0005` crea `live_derivation_checkpoints` en el esquema de la captura, append-only como las de la Fase 1: rechaza `UPDATE`, `DELETE` y `TRUNCATE`. Cada fila guarda la fuente, el símbolo, el segmento *k*, el enlace y las versiones de §6, el SHA-256 de esas versiones, el estado vivo en JCS, su SHA-256 y la hora de escritura. La hora no entra en el hash, así que el mismo log da siempre el mismo punto de control.
+- **Clave.** Es única por fuente, segmento y SHA-256 de las versiones, así que conviven filas de versiones distintas para el mismo segmento. El último punto de control válido de un lector es el de mayor segmento entre los que tienen sus versiones. Un reintento tras una inserción ambigua que encuentra la fila con la misma clave y el mismo SHA-256 del estado cuenta como escrito; con otro SHA-256, es un fallo de la derivación (abajo).
 - **Contrato.** `LiveDerivationCheckpoint` 1.0.0 va en `packages/contracts`, con su JSON Schema generado, y su semántica en los [contratos de dominio](../contratos-de-dominio.md).
 - **Escritor.** Solo lo escribe `ingest`, con el bloqueo de la fuente, a través del log protegido por él (ADR-0015 §3), después de que el cierre del segmento *k* sea durable. El estado vivo de *k* sale del punto de control anterior y de los eventos del segmento *k*.
-- **Fallo al escribirlo.** No detiene la ingesta, porque no es la durabilidad de los datos: deja una alerta saneada en stderr, como el cursor y el latido (ADR-0015 §6), y el siguiente cierre lo vuelve a intentar desde el último punto de control escrito.
+- **Fallo al guardarlo.** Si PostgreSQL no lo guarda, la ingesta sigue, porque no es la durabilidad de los datos: deja una alerta saneada en stderr, como el cursor y el latido (ADR-0015 §6), y el siguiente cierre lo vuelve a intentar desde el último punto de control escrito.
+- **Fallo de la derivación.** Si el pliegue falla, el log ya no se puede derivar, y la sesión termina `failed` con `log_not_derivable`, como cuando falla la vigilancia de huecos: seguir escribiendo un log cuyo próximo arranque fallará no tiene sentido.
 - **Rol.** El rol de ejecución que solo inserta y lee (`F2-ROLE-001`) también lo cubre.
 
 ### 6. Validez, enlace y reconstrucción
@@ -103,13 +120,19 @@ Si el último no cumple, el lector no lo usa ni lo migra, y reconstruye el estad
 - empieza por el último punto de control válido anterior, o por el log vacío;
 - lee cada segmento cerrado posterior de uno en uno y lo descarta después de aplicarlo, así que la memoria no crece con el log;
 - `ingest` escribe un punto de control por cada segmento que reconstruye;
-- `data:health`, que no escribe nada, reconstruye en memoria y puede pasar su plazo de 30 s (ADR-0015 §8), con `paused` y `deadline_exceeded`.
+- `data:health`, que no escribe nada, reconstruye en memoria. Si no termina en su plazo (`HEALTH_DEADLINE_MS`, 30 s), da `paused` con su propio motivo, `checkpoint_rebuild_incomplete`, y no el de un almacén que no responde. Es lo que informa mientras `ingest` todavía no escribió los puntos de control de una versión nueva.
 
-Una versión nueva del formato del estado vivo o de las reglas se pone así en producción: el primer arranque reconstruye por partes y escribe los puntos de control de la versión nueva. Derivar el log entero con `deriveMarketData` nunca es la salida, porque su memoria crece con el log.
+Un punto de control con otro enlace o con otro SHA-256 no es un cambio de versión, sino una corrupción o un error de programación: el lector deja una alerta saneada con el motivo (`checkpoint_binding_mismatch` o `checkpoint_digest_mismatch`) antes de reconstruir. Uno de otra versión se ignora sin alerta.
+
+**Versión del formato.** Todo cambio de lo que el pliegue produce para un mismo log, aunque no cambie ninguna regla de calidad, sube la versión del formato del estado vivo, un campo propio del punto de control, distinto del `schema_version` de su contrato. Un vector fija el JCS y el SHA-256 del punto de control en cada límite de segmento del vector v1, así que un cambio sin versión falla en CI.
+
+Una versión nueva del formato o de las reglas se pone así en producción: el primer arranque reconstruye por partes y escribe los puntos de control de la versión nueva. Derivar el log entero con `deriveMarketData` nunca es la salida, porque su memoria crece con el log.
 
 ### 7. Logs sucesivos
 
-Un punto de control pertenece a un solo log. Si la retención de producción parte la captura en logs sucesivos, por ejemplo con un esquema y un bucket nuevos (`F2-RETENTION-001`), el log nuevo empieza vacío y sin punto de control, como cualquier captura nueva. Nada de su estado pasa de un log a otro. Cómo se parte la captura lo decide la ADR de despliegue.
+Un punto de control pertenece a un solo log. Si la retención de producción parte la captura en logs sucesivos, por ejemplo con un esquema y un bucket nuevos (`F2-RETENTION-001`), el log nuevo empieza vacío y sin punto de control, como cualquier captura nueva. Nada de su estado pasa de un log a otro.
+
+Para que un corte no oculte una pérdida, solo se corta después de un cierre pedido, sin continuidad pendiente ni condiciones derivables abiertas en el log que termina. Si no se cumple, se espera, o la ADR de despliegue diseña un traspaso explícito al log nuevo. Cuándo y cómo se corta lo decide esa ADR.
 
 Como el estado vivo no necesita los segmentos anteriores a su punto de control, también permitiría derivar un log al que se le borraran segmentos antiguos. Hoy las tablas no lo permiten (ADR-0005 §3).
 
@@ -119,15 +142,24 @@ La publicación y el replay siguen derivando cada dataset desde sus propios segm
 
 ### 9. Pruebas y evidencia
 
-- **Equivalencia** (`packages/domain`, sin red, reloj real ni azar). En cada límite de segmento cerrado, la vista viva desde el punto de control de ese límite más el resto del log es igual a la vista viva derivada con `deriveMarketData` del log entero, fallos incluidos. Se comprueba sobre los vectores v1 y sobre logs sintéticos con:
+- **Corpus.** Los vectores v1 y logs sintéticos dentro del dominio de §3, con:
   - reconexiones, cierres pedidos y no pedidos y cierres reparados (`close_not_recorded`);
   - duplicados, conflictos de tiempo y ticks fuera de orden, también en el instante de un extremo de hueco;
-  - historias `complete`, `partial` y `unavailable`, con hueco excedido y sin él;
-  - perfiles de publicación con umbrales y perfiles de medición;
+  - huecos que demuestra la separación, con un perfil de publicación con umbrales, y huecos que solo decide la historia, con un perfil de medición;
+  - historias `complete`, `partial` y `unavailable`;
   - un log que no se puede derivar: una conexión cerrada dos veces o una resolución anterior a su apertura.
-- **Rechazos.** Un punto de control de otra versión, con otro enlace o con otro SHA-256 no se usa, y la reconstrucción por partes da el mismo estado vivo. Un resultado `partial` o `unavailable` con otro rango falla con `log_not_derivable` (§3).
-- **Integración** (PostgreSQL y almacenamiento S3-compatible locales): la tabla de la migración `0005` y su append-only, la escritura de `ingest` al cerrar cada segmento y la lectura de los cuatro lectores.
-- **Memoria.** Con un log sintético de al menos 7 días de R_100, se mide el máximo de RSS de `ingest` al arrancar y durante una reconexión con hueco, y el de `data:health`. Tiene que quedar a menos de un 10 % del de un log de un día, y por debajo de 200 MB y de 160 MB, medido como en ADR-0016 («Medición»). El script de la medición queda en `scripts/`, fuera de los comandos del producto, como en la evidencia de la Fase 1.
+- **Equivalencia en el dominio** (`packages/domain`, sin red, reloj real ni azar). En cada límite de segmento cerrado del corpus, el estado vivo y la vista que da el pliegue desde el punto de control de ese límite más el resto del log son los que da `deriveMarketData` sobre el log entero.
+- **Equivalencia en el worker** (sin red, con almacenes en memoria). En cada límite del mismo corpus, los cuatro lectores dan lo mismo desde el punto de control que desde el log entero:
+  - `checkLog`: el veredicto y lo que guarda la sesión;
+  - la reparación: `previousConnection`;
+  - `GapWatch`: la petición de historia y el high-watermark del cursor;
+  - `evaluateDataHealth`: el informe, el código de salida y la alerta, con las reglas 4 a 6.
+
+  Cuentan también `cursor_ahead_of_log` contra el índice, `retention_expired` con `SourceLogState` y `connector_version_mismatch` después del punto de control.
+- **Qué es fallar igual.** Se compara el motivo (`log_not_derivable`, `symbol_mismatch` y los demás de ADR-0015 §5). El detalle saneado de `log_not_derivable` puede ser otro, porque el pliegue comprueba cada resolución al aplicarla y `deriveMarketData` al final.
+- **Rechazos.** Un punto de control de otra versión, con otro enlace o con otro SHA-256 no se usa: los dos últimos dejan su alerta, y la reconstrucción por partes da el mismo estado vivo. Un resultado `partial` o `unavailable` sin fin de hueco o con otro rango falla con `log_not_derivable` (§3).
+- **Integración** (PostgreSQL y almacenamiento S3-compatible locales): la tabla de la migración `0005`, su clave y su append-only, la escritura de `ingest` al cerrar cada segmento, la lectura de `data:health` en la misma instantánea y la de los cuatro lectores.
+- **Memoria.** Con un log sintético de al menos 7 días de R_100, se mide el máximo de RSS de `ingest` al arrancar con puntos de control válidos, al arrancar reconstruyéndolos y durante una reconexión con hueco, y el de `data:health`. Tiene que quedar a menos de un 10 % del de un log de un día, y por debajo de 200 MB y de 160 MB, medido como en ADR-0016 («Medición»). El script de la medición queda en `scripts/`, fuera de los comandos del producto, como en la evidencia de la Fase 1.
 
 ### 10. La vista de cada instante de decisión
 
@@ -140,10 +172,15 @@ Un tick que llega en orden, con un tiempo posterior al high-watermark de su sím
 Cada PR es pequeño, con su revisión semántica:
 
 1. Esta ADR y los contratos de dominio.
-2. En `packages/domain` y `packages/contracts`: la derivación en pliegue, con las reglas compartidas con `deriveMarketData`, el contrato `LiveDerivationCheckpoint` y las pruebas de equivalencia de §9. El mismo PR añade la regla de `packages/domain/**` al mapa de impacto (`F2-GOV-001`).
-3. En el worker: la migración `0005`, el almacén, la escritura de `ingest` y la reconstrucción por partes, y el arranque, la reparación y la vigilancia de huecos desde el punto de control, con el runbook.
-4. `data:health` desde el punto de control, con el runbook.
-5. La evidencia de memoria de §9 y el estado del proyecto: F2.1 queda hecho, y F2.2 pasa a ser la siguiente tarea.
+2. En `packages/domain` y `packages/contracts`: la derivación en pliegue, con las reglas compartidas con `deriveMarketData`, el contrato `LiveDerivationCheckpoint`, el vector de §6 y la equivalencia en el dominio de §9. El mismo PR añade la regla de `packages/domain/**` al mapa de impacto, con sus pruebas (`F2-GOV-001`).
+3. En el worker: la migración `0005`, el almacén, la escritura de `ingest` en cada cierre y la reconstrucción por partes, con una prueba de que lo escrito es el pliegue del log entero. Los lectores todavía no lo usan.
+4. En el worker: el arranque, la reparación y la vigilancia de huecos desde el punto de control, con su equivalencia en el worker y el runbook.
+5. `data:health` desde el punto de control, con su equivalencia en el worker y el runbook.
+6. La evidencia de memoria de §9 y el estado del proyecto: F2.1 queda hecho, y F2.2 pasa a ser la siguiente tarea.
+
+### Relación con ADR-0005 y ADR-0015
+
+ADR-0005 §4 dejó diferida la calidad incremental en vivo, y la sección «Relación con ADR-0005» de ADR-0015 dice que el estado vivo «se vuelve a derivar entero cuando hace falta, sin calidad incremental y sin guardar lo derivado». ADR-0017 sustituye esa frase para el estado vivo: ahora se deriva por partes y se guarda en un punto de control. No cambia la calidad de los datasets: sus incidencias se siguen calculando al publicar (ADR-0005 §4). Para los lectores, ADR-0017 cambia cómo leen el log ADR-0015 §3 (conexión anterior), §4 (vigilancia de huecos), §5 (arranque) y §8 (entradas y regla 2 de `data:health`).
 
 ## Consecuencias
 
@@ -170,4 +207,7 @@ Cada PR es pequeño, con su revisión semántica:
 - [Plan de Fase 2](../../plan/fase-2-laboratorio-y-bot-shadow.md), `F2-CHECKPOINT-001`, `F2-GOV-001` y §8, punto 1.
 - [ADR-0015](0015-reconexion-recuperacion-y-salud-f1-5.md) §3, §4, §5, §6 y §8.
 - [ADR-0016](0016-alojamiento-del-sistema-de-datos.md), «Medición» y §4.
-- Código leído el 2026-10-30: `packages/domain/src/quality.ts`, `packages/domain/src/health.ts`, `packages/contracts/src/conditions.ts`, `apps/market-data-worker/src/deriv/log-check.ts`, `src/deriv/gap-watch.ts`, `src/health/evaluate.ts`, `src/source-log/previous-connection.ts`, `src/source-log/source-event-log.ts` y `migrations/0002_log_raw_first.sql`.
+- Código leído el 2026-10-30:
+  - en `packages/domain/src`, `quality.ts` y `health.ts`, y en `packages/contracts/src`, `conditions.ts`;
+  - en `apps/market-data-worker/src`, `deriv/session.ts`, `deriv/log-check.ts`, `deriv/gap-watch.ts`, `health/evaluate.ts`, `health/observe.ts`, `health/command.ts`, `ingestion/raw-first-ingestor.ts`, `source-log/previous-connection.ts` y `source-log/source-event-log.ts`;
+  - en `apps/market-data-worker/migrations`, `0002_log_raw_first.sql` y `0004_cursor_y_latido.sql`.

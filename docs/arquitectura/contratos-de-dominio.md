@@ -165,7 +165,7 @@ Decidido en [ADR-0017](adr/0017-punto-de-control-de-la-derivacion-en-vivo.md) (F
 Es el estado vivo de un log al final de un segmento cerrado: lo que la derivación del log hasta ese segmento deja para los lectores en vivo (arranque, reparación de cierres, vigilancia de huecos y `data:health`). No es un artefacto de dataset ni participa en ningún `dataset_id`.
 
 - **Identidad del log:** `source`, `symbol` y el segmento cerrado que cubre, con su `logical_content_sha256` y los conteos acumulados de eventos y de raw frames hasta él, que se comprueban contra `closed_source_segments`.
-- **Versiones:** conector, conjunto de reglas de calidad, SHA-256 del perfil, SHA-256 del esquema de fuente guardado, política de segmentos, versión del contrato de los source events y versión del formato del estado vivo. Si alguna no coincide con la del lector, el punto de control no se usa ni se migra: el estado se reconstruye por partes.
+- **Versiones:** conector, conjunto de reglas de calidad, SHA-256 del perfil, SHA-256 del esquema de fuente guardado, política de segmentos, versión del contrato de los source events y versión del formato del estado vivo, un campo propio, distinto de `schema_version`, que sube con cualquier cambio de lo que el pliegue produce para un mismo log. Si alguna no coincide con la del lector, el punto de control no se usa ni se migra: el estado se reconstruye por partes. Uno con otro enlace o con otro SHA-256 tampoco se usa, y deja una alerta.
 - **Estado vivo:**
   - high-watermark por símbolo, con su tick canónico;
   - continuidad pendiente por símbolo, con los ticks de los extremos del hueco;
@@ -178,7 +178,7 @@ Es el estado vivo de un log al final de un segmento cerrado: lo que la derivaci�
   - si algún frame se rechazó con `symbol_not_allowed`.
 
   Las incidencias y condiciones que abren o resuelven algo tienen los mismos cuerpos e IDs derivados que en `deriveMarketData`.
-- **Persistencia:** la tabla append-only `live_derivation_checkpoints` (migración `0005`), con el estado en JCS y su SHA-256. La hora de escritura no entra en el hash. Solo la escribe `ingest`, con el bloqueo de la fuente, después de cada cierre de segmento durable.
+- **Persistencia:** la tabla append-only `live_derivation_checkpoints` (migración `0005`), con el estado en JCS y su SHA-256. Su clave es única por fuente, segmento y SHA-256 de las versiones, y la hora de escritura no entra en el hash. Solo la escribe `ingest`, con el bloqueo de la fuente, después de cada cierre de segmento durable.
 
 ## `MarketTick`
 
