@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
 status_version: 33
-updated_at_utc: "2026-10-29T23:34:34.000Z"
+updated_at_utc: "2026-10-30T00:07:28.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -193,7 +193,7 @@ El antiguo pendiente 6 quedó resuelto en F1.5 ([ADR-0015](docs/arquitectura/adr
 - Servidor del motor de señales *shadow* (decisión del propietario del 2026-10-29, «1. Si, un servidor pequeño para el bot»): `apps/signal-engine` corre en su propio background worker Starter de Render, unos 7 USD más al mes, para que un fallo o una actualización del bot no corte la captura ni la web. El total de la Fase 2 queda en unos 29 USD al mes, y ese servidor se compra con F2.9 ([plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md) §11).
 - Símbolo de la Fase 2 (la misma respuesta del propietario, que el agente toma como un sí a su propuesta de empezar solo con R_100): el bot *shadow* empieza solo con R_100 (Volatility 100 Index), el índice que ya se captura. El universo definitivo sigue pendiente.
 - MetaTrader 5 entra por un puente MQL5 dentro de la terminal; cada servidor MT5 es una fuente propia; las contraseñas MT5, solo de cuentas propias, las guarda la terminal y los servicios de buoh nunca las reciben ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
-- Prioridad del propietario (2026-10-26): el sitio oficial y la app de escritorio, que debe mostrar datos reales de Deriv. Consecuencia técnica: esos datos llegan por la API de buoh ([arquitectura objetivo](docs/arquitectura/arquitectura-objetivo.md), «Windows (futuro)»), y para eso el sistema de datos tiene que funcionar todo el día en un servidor. Por eso fueron antes la reconexión y la salud de F1.5 y la decisión del costo del alojamiento ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)); el plan de esa línea (alojamiento, API y pantallas con datos reales) se escribe después.
+- Prioridad del propietario (2026-10-26): el sitio oficial y la app de escritorio, que debe mostrar datos reales de Deriv. Consecuencia técnica: esos datos llegan por la API de buoh ([arquitectura objetivo](docs/arquitectura/arquitectura-objetivo.md), «Windows (futuro)»), y para eso el sistema de datos tiene que funcionar todo el día en un servidor. Por eso fueron antes la reconexión y la salud de F1.5 y la decisión del costo del alojamiento ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)). El alojamiento, la API y las pantallas con datos reales están en el [plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md) (F2.2 a F2.4); el plan de la app de escritorio con datos reales se escribe cuando existan (plan §6).
 - Orden de fases (decisión del propietario del 2026-10-29, «Ok vamos con la fase 2»): la Fase 2 va antes que la Fase 1B (datos MT5), que queda para después, sin fecha.
 - Desde el móvil se pueden encender y apagar estrategias del bot, también con dinero real, como con un control remoto. Ningún cliente abre operaciones a mano ni se comunica con el bróker para ejecutar: todo pasa por el servidor, `execution-gateway` y su política de riesgo ([catálogo de funciones](docs/producto/funciones-y-disponibilidad.md) §1; decisión del propietario del 2026-10-25).
 
@@ -208,7 +208,10 @@ Ninguno.
 - Región de Render y de Cloudflare R2 para el sistema de datos. Se elige en el PR de despliegue (F2.2), porque Render no deja cambiarla después ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md) §4).
 - Cuánto tiempo se guardan en producción el log y los datasets, y el disco de PostgreSQL si eso sube el presupuesto. Se decide en la ADR de despliegue (F2.2, plan de Fase 2 §12).
 - Cómo inicia sesión el propietario en buoh. Se decide en la ADR de la API y las cuentas (F2.3).
-- Qué tipo de operación representan las posiciones hipotéticas del bot *shadow*, dentro de lo que ofrece Deriv para R_100. Se decide en la ADR del modelo de estrategia (F2.6).
+- Si el agente recibe un acceso de solo lectura a producción, o si la evidencia de producción llega solo por el propietario. Se decide en la ADR de despliegue (F2.2, plan de Fase 2 §4, punto 10).
+- Qué idiomas tiene el producto, para la preferencia de idioma del catálogo de funciones. Se decide en F2.4.
+- Qué tipo de operación representan las posiciones hipotéticas del bot *shadow*, dentro de lo que ofrece Deriv para R_100. Se decide antes de abrir la ADR del modelo de estrategia (F2.6).
+- Cómo se reanuda una estrategia *shadow* detenida por datos degradados: a mano, como pide hoy el [protocolo de validación](docs/gobierno/protocolo-de-validacion-de-estrategias.md) §5, o sola tras las degradaciones breves que la historia cubre, lo que cambia ese protocolo. Se decide antes de abrir la ADR del motor de señales (plan de Fase 2, `F2-STOP-001`).
 - Equipo de la terminal MT5 (PC dedicado del propietario o servidor Windows o Linux con Wine) y su protección. Se decide en el primer incremento de Fase 1B (ADR-0007).
 - Revisión de términos de Deriv MT5, Vantage y MetaQuotes, y entidad de Vantage aplicable. Se completa en el primer incremento de Fase 1B.
 - Dominio propio del sitio oficial y revisión legal de su texto, antes de comprar el dominio, quitar el `noindex` o anunciarlo (ADR-0013).

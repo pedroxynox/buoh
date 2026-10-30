@@ -170,9 +170,9 @@ La línea terminó el 2026-10-25 (P-V1-01). Los demás pendientes de esta secci�
   - no hay pruebas de `scaleFor`, `segments` ni del SVG exportado;
   - la descripción accesible de cada gráfico se escribe a mano, y no hay tabla alternativa;
   - la peor caída se muestra como «3,6 pts» y el contexto dice «−3,6 %».
-- **Esperado:** no hay un criterio de aceptación concreto para gráficos más allá de la guía §10.
+- **Esperado:** la guía §10 y, desde el [plan de Fase 2](fase-2-laboratorio-y-bot-shadow.md), el requisito `F2-CHART-001`.
 - **Componentes:** `apps/web/src/components/Charts.tsx`, `packages/design-system/test` y el concepto de interfaz §6.
-- **Aceptación:** no indicados.
+- **Aceptación:** la de `F2-CHART-001`. Con la paleta de hoy, la rejilla no llega a 3:1 de contraste, así que el requisito la trata como decorativa y pide 3:1 a la línea y al hueco.
 - **Propuesta:** antes de los gráficos con datos reales de la Fase 2, definir en el concepto de interfaz:
   - la alternativa textual o tabular;
   - la unidad de la peor caída;
