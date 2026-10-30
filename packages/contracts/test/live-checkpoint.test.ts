@@ -10,6 +10,7 @@ import * as publicContracts from '../src/index.js';
 import {
   deriveConnectionConditionKey,
   deriveEventId,
+  deriveGapConditionKey,
   LIVE_STATE_VERSION,
   liveDerivationCheckpointSchema,
   type JsonValue,
@@ -18,7 +19,9 @@ import {
 // LiveDerivationCheckpoint (ADR-0017 §5 y §6; contratos de dominio, `LiveDerivationCheckpoint`).
 const SOURCE = 'deriv_options';
 const CONNECTION = '019b76da-a800-7000-8000-00000000a000';
+const OTHER_CONNECTION = '019b76da-a800-7000-8000-00000000b000';
 const CLOSE_EVENT = '019b76da-a800-7000-8000-000000000002';
+const RECOVERY_EVENT = '019b76da-a800-7000-8000-000000000005';
 const TICK = '019b76da-a800-7000-8000-000000000001';
 const SHA = 'a'.repeat(64);
 const FINGERPRINT = 'b'.repeat(64);
@@ -68,7 +71,7 @@ function withId<K extends string>(
 }
 
 /** Una apertura `connection_lost` con su incidencia causal, como la deriva `deriveMarketData`. */
-function openConnectionLost() {
+function openConnectionLost(connection = CONNECTION, source = SOURCE) {
   const incident = withId('incident_id', {
     evidence: { affected_symbols: ['R_100'], closure_type: 'timeout', reason: 'ping_timeout' },
     incident_type: 'connection_lost',
@@ -78,20 +81,71 @@ function openConnectionLost() {
     related_refs: [],
     schema_version: '2.0.0',
     severity: 'warning',
-    source: SOURCE,
+    source,
     symbol: null,
   });
   const condition = withId('condition_event_id', {
     action: 'opened',
     cause_refs: [incident.incident_id],
-    condition_key: deriveConnectionConditionKey(SOURCE, CONNECTION),
+    condition_key: deriveConnectionConditionKey(source, connection),
     condition_type: 'connection_lost',
     occurred_at_utc: '2026-01-01T00:00:00.500Z',
     schema_version: '1.0.0',
-    source: SOURCE,
+    source,
     symbol: null,
   });
-  return { closed_connection_id: CONNECTION, condition, incident };
+  return { closed_connection_id: connection, condition, incident };
+}
+
+/** Una apertura `event_gap_unresolved` con su incidencia causal, como la deriva `deriveMarketData`. */
+function openGapUnresolved() {
+  const range = {
+    from_event_time_utc: '2026-01-01T00:00:00.001Z',
+    to_event_time_utc: '2026-01-01T00:00:00.999Z',
+  };
+  const incident = withId('incident_id', {
+    evidence: { ...range, reason: 'history_timeout' },
+    incident_type: 'event_gap_unresolved',
+    observed_at_utc: '2026-01-01T00:01:00.000Z',
+    observed_ref: RECOVERY_EVENT,
+    quality_rule_version: '2.0.0',
+    related_refs: [TICK],
+    schema_version: '2.0.0',
+    severity: 'error',
+    source: SOURCE,
+    symbol: 'R_100',
+  });
+  const condition = withId('condition_event_id', {
+    action: 'opened',
+    cause_refs: [incident.incident_id],
+    condition_key: deriveGapConditionKey({ ...range, source: SOURCE, symbol: 'R_100' }),
+    condition_type: 'event_gap_unresolved',
+    occurred_at_utc: '2026-01-01T00:01:00.000Z',
+    schema_version: '1.0.0',
+    source: SOURCE,
+    symbol: 'R_100',
+  });
+  return { closed_connection_id: null, condition, incident };
+}
+
+const pending = {
+  after_tick: null,
+  close_watermark_utc: '2026-01-01T00:00:00.000Z',
+  end_canonical_tick: null,
+  end_utc: null,
+  exceeded: false,
+  start_canonical_tick: {
+    observation_id: TICK,
+    quote_decimal: '100.12',
+    tick_fingerprint_sha256: FINGERPRINT,
+  },
+  symbol: 'R_100',
+  watermark_observation_id: TICK,
+  watermark_utc: '2026-01-01T00:00:00.000Z',
+};
+
+function accepts(state: Record<string, unknown>): boolean {
+  return liveDerivationCheckpointSchema.safeParse(checkpoint(state)).success;
 }
 
 const watermark = {
@@ -105,34 +159,37 @@ const watermark = {
   symbol: 'R_100',
 };
 
-describe('LiveDerivationCheckpoint (ADR-0017)', () => {
-  it('acepta un punto de control con el estado vacío y otro con una condición abierta', () => {
-    expect(liveDerivationCheckpointSchema.parse(checkpoint())).toEqual(checkpoint());
+/** Las aperturas dadas en orden de `condition_key`, como las guarda el estado vivo. */
+function byConditionKey<T extends { condition: Record<string, unknown> }>(openings: T[]): T[] {
+  const key = (open: T) => {
+    const value = open.condition['condition_key'];
+    if (typeof value !== 'string') {
+      throw new TypeError('Apertura sin condition_key.');
+    }
+    return value;
+  };
+  return openings.toSorted((left, right) => (key(left) < key(right) ? -1 : 1));
+}
 
-    const state = {
-      ...emptyState,
-      connected_in_log: false,
-      last_connection_event_time_utc: '2026-01-01T00:00:00.500Z',
-      last_event_connection_id: CONNECTION,
-      last_raw: { observation_id: TICK, received_at_utc: '2026-01-01T00:00:00.100Z' },
-      open_conditions: [openConnectionLost()],
-      pending_continuity: [
-        {
-          after_tick: null,
-          close_watermark_utc: '2026-01-01T00:00:00.000Z',
-          end_canonical_tick: null,
-          end_utc: null,
-          exceeded: false,
-          start_canonical_tick: watermark.canonical_tick,
-          symbol: 'R_100',
-          watermark_observation_id: TICK,
-          watermark_utc: '2026-01-01T00:00:00.000Z',
-        },
-      ],
-      previous_connection: { closed_at_utc: '2026-01-01T00:00:00.500Z', connection_id: CONNECTION },
-      watermarks: [watermark],
-    };
-    expect(liveDerivationCheckpointSchema.parse(checkpoint(state))).toEqual(checkpoint(state));
+/** Un estado con high-watermark, continuidad pendiente y las dos condiciones abiertas. */
+const fullState = {
+  ...emptyState,
+  connected_in_log: false,
+  last_connection_event_time_utc: '2026-01-01T00:00:00.500Z',
+  last_event_connection_id: CONNECTION,
+  last_raw: { observation_id: TICK, received_at_utc: '2026-01-01T00:00:00.100Z' },
+  open_conditions: byConditionKey([openConnectionLost(), openGapUnresolved()]),
+  pending_continuity: [pending],
+  previous_connection: { closed_at_utc: '2026-01-01T00:00:00.500Z', connection_id: CONNECTION },
+  watermarks: [watermark],
+};
+
+describe('LiveDerivationCheckpoint (ADR-0017)', () => {
+  it('acepta un punto de control con el estado vacío y otro con continuidad y condiciones', () => {
+    expect(liveDerivationCheckpointSchema.parse(checkpoint())).toEqual(checkpoint());
+    expect(liveDerivationCheckpointSchema.parse(checkpoint(fullState))).toEqual(
+      checkpoint(fullState),
+    );
   });
 
   it('rechaza campos desconocidos, en el registro y en el estado', () => {
@@ -156,6 +213,34 @@ describe('LiveDerivationCheckpoint (ADR-0017)', () => {
         checkpoint({ ...emptyState, watermarks: [watermark, watermark] }),
       ).success,
     ).toBe(false);
+
+    const otherPending = { ...pending, symbol: 'R_050' };
+    expect(accepts({ ...emptyState, pending_continuity: [otherPending, pending] })).toBe(true);
+    expect(accepts({ ...emptyState, pending_continuity: [pending, otherPending] })).toBe(false);
+    expect(accepts({ ...emptyState, pending_continuity: [pending, pending] })).toBe(false);
+
+    const openings = byConditionKey([openConnectionLost(), openConnectionLost(OTHER_CONNECTION)]);
+    expect(accepts({ ...emptyState, open_conditions: openings })).toBe(true);
+    expect(accepts({ ...emptyState, open_conditions: openings.toReversed() })).toBe(false);
+    expect(
+      accepts({ ...emptyState, open_conditions: [openConnectionLost(), openConnectionLost()] }),
+    ).toBe(false);
+  });
+
+  it('ata la conexión cerrada a su condition_key y la fuente a la del punto de control', () => {
+    const lost = openConnectionLost();
+    const gap = openGapUnresolved();
+    expect(accepts({ ...emptyState, open_conditions: [lost] })).toBe(true);
+    expect(accepts({ ...emptyState, open_conditions: [gap] })).toBe(true);
+
+    for (const open of [
+      { ...lost, closed_connection_id: null },
+      { ...lost, closed_connection_id: OTHER_CONNECTION },
+      { ...gap, closed_connection_id: CONNECTION },
+      openConnectionLost(CONNECTION, 'deriv_other'),
+    ]) {
+      expect(accepts({ ...emptyState, open_conditions: [open] })).toBe(false);
+    }
   });
 
   it('una condición abierta tiene que ser una apertura causada por su incidencia', () => {
@@ -200,6 +285,7 @@ describe('LiveDerivationCheckpoint (ADR-0017)', () => {
     const validate = ajv.compile(JSON.parse(readFileSync(fileURLToPath(url), 'utf8')) as object);
 
     expect(validate(checkpoint())).toBe(true);
+    expect(validate(checkpoint(fullState))).toBe(true);
     expect(validate({ ...checkpoint(), extra: 1 })).toBe(false);
     expect('liveDerivationCheckpointStructuralSchema' in publicContracts).toBe(false);
   });

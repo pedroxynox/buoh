@@ -30,19 +30,46 @@ import {
 
 // Derivación en pliegue del estado vivo (ADR-0017 §2 a §4, §6 y §9). En cada límite entre eventos,
 // que incluye cada límite de segmento, el pliegue desde el estado de ese límite más el resto del log
-// da la misma vista que `deriveMarketData` sobre el log entero, fallos incluidos. Un vector fija el
-// punto de control de cada límite de segmento.
+// da la misma vista que `deriveMarketData` sobre el log entero, fallos incluidos: en el vector v1, en
+// un corpus escrito a mano y en logs aleatorios con semilla. Un vector fija el punto de control de
+// cada límite de segmento.
 const vectorRoot = resolve(import.meta.dirname, '../../../test-vectors/market-data/v1');
 const sourceSchema = readFileSync(resolve(vectorRoot, 'source-schema.json'));
 
 /**
- * SHA-256 del vector de puntos de control de cada versión del formato del estado vivo (ADR-0017
- * §6). Un cambio de lo que el pliegue produce sube `LIVE_STATE_VERSION` y añade aquí el digest del
- * vector nuevo; el de una versión anterior nunca cambia. Para regenerar el vector:
+ * SHA-256 de las líneas de cada log del vector de puntos de control, por versión del formato del
+ * estado vivo (ADR-0017 §6). Un cambio de lo que el pliegue produce sube `LIVE_STATE_VERSION` y
+ * añade los digests de la versión nueva; los de una versión anterior no cambian. Un log nuevo del
+ * corpus solo añade su digest. Para regenerar el vector:
  * `pnpm --filter @buoh/domain exec vitest run test/live-derivation.test.ts -u`.
  */
-const VECTOR_SHA256_BY_VERSION: Readonly<Record<string, string>> = {
-  '1.0.0': '94d1eef635eca727dba3886c05d51b6df0fb3e4e47d5f29169ff0a95672a4776',
+const VECTOR_SHA256_BY_VERSION: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  '1.0.0': {
+    v1: 'a0c86447e7b3c89102b05f113b700a5eeb22b75af4e50e1b39ff25213c693153',
+    'v1/zero-valid-ticks': 'd197bea6b1a562ff908a1184e0d62ceb666dd5c0a51d1d3c05582a590a6fd21e',
+    'reconexión con hueco pendiente':
+      'ad4e08483709f483e12116d60bc24805c2ff814f55a3da6b1c4f662ea8dfb521',
+    'la separación demuestra la continuidad':
+      '5f5d39537a6337b3b4701029507ec21752fe2b5c0a80d8e523fd72ab838b227b',
+    'historia completa que cubre el hueco':
+      '22157ed7ed1b3d87b4a44b2fd88aa2002e9766582363a087703b486807046717',
+    'historia parcial y después completa del mismo rango':
+      'f42ac9753f8f9348289b4d81ba21a6bbbb1a9e24007613807effc5ff8bcab9f0',
+    'historia no disponible con el hueco abierto':
+      '539fdce8dba0cfd701a7b8ee0785a11ba386a307469692e030362517d7b40c86',
+    'la separación supera el umbral y la historia no está disponible':
+      'b4ca5f54983aa41cc295b36cb986cba9d1cd2c6de676220e0ac52ddd4796dc44',
+    'cierre pedido con el hueco pendiente y su fin ya conocido':
+      'c9b9640c30623e47f441b291ce6fec314b27a913860fe4b1f42ef09fdb8bbd61',
+    'cierre reparado al arrancar (close_not_recorded) e historia completa':
+      '1e798d72c35eee4661a5d4fba729640865f574aead957dbb8818e667b22304df',
+    'dos cierres seguidos conservan el inicio del hueco':
+      'fea9350d26ae232ba7b36768ee0f5bc6fa3d04fe1aa14ce9064313c3e01ba3a6',
+    'duplicados, conflictos y ticks fuera de orden en los extremos del hueco':
+      'b0145a7e62c36e4c13221fbe5e073b2202f44aa536024948d0229ca4058fcfdb',
+    'cierre pedido, cierre sin ticks, ping y símbolo no permitido':
+      '036e4b1351f20bdf21798f4797b027e2faa5188b97bc43e13f296d4018240488',
+  },
 };
 
 /**
@@ -190,9 +217,10 @@ function recovery(
       }
     | { readonly reason: string; readonly status: 'unavailable' },
   occurredAt = at(T0 + 60),
+  connection = B,
 ) {
   return {
-    connection_id: B,
+    connection_id: connection,
     event_id: id(sequence),
     fixture_sequence: sequence,
     from_event_time_utc: range.from,
@@ -327,22 +355,132 @@ function roundTrip(state: ReturnType<typeof emptyLiveDerivationState>, profile: 
 }
 
 /** En cada límite *i*: el pliegue de todo, y el del estado de *i* más el resto, dan la referencia. */
-function expectEquivalentAtEveryBoundary(events: readonly SourceEvent[], profile: PipelineProfile) {
+function expectEquivalentAtEveryBoundary(
+  events: readonly SourceEvent[],
+  profile: PipelineProfile,
+  label = 'log',
+) {
   const expected = referenceView(events, profile);
   const whole = foldLiveDerivation(emptyLiveDerivationState(), events, profile);
-  expect(liveDerivationView(whole)).toEqual(expected);
+  expect(liveDerivationView(whole), label).toEqual(expected);
   for (let boundary = 0; boundary <= events.length; boundary += 1) {
     const prefix = foldLiveDerivation(
       emptyLiveDerivationState(),
       events.slice(0, boundary),
       profile,
     );
-    expect(liveDerivationView(prefix), `prefijo ${String(boundary)}`).toEqual(
+    expect(liveDerivationView(prefix), `${label}, prefijo ${String(boundary)}`).toEqual(
       referenceView(events.slice(0, boundary), profile),
     );
     const resumed = foldLiveDerivation(roundTrip(prefix, profile), events.slice(boundary), profile);
-    expect(resumed, `límite ${String(boundary)}`).toEqual(whole);
+    expect(resumed, `${label}, límite ${String(boundary)}`).toEqual(whole);
   }
+}
+
+/** Generador con semilla (mulberry32), sin `Math.random`: los logs aleatorios son siempre los mismos. */
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = Math.imul(state ^ (state >>> 15), state | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function connectionId(index: number): string {
+  return `019b76da-a800-7000-8000-0000000c${index.toString(16).padStart(4, '0')}`;
+}
+
+/**
+ * Un log aleatorio del dominio de ADR-0017 §3, escrito como lo haría la sesión: cada conexión se
+ * cierra una vez y la siguiente la supera, y cada historia cubre exactamente el hueco pendiente, ya
+ * con su fin, o resuelve un hueco abierto. Mezcla ticks en orden, repetidos, en conflicto, fuera de
+ * orden y en los instantes de los extremos del hueco, pings, símbolos no permitidos, cierres pedidos,
+ * por timeout y reparados, e historias `complete`, `partial` y `unavailable`.
+ */
+function randomStimuli(seed: number, profile: PipelineProfile): unknown[] {
+  const random = seededRandom(seed);
+  const choose = <T>(items: readonly T[]): T => {
+    const item = items[Math.floor(random() * items.length)];
+    if (item === undefined) {
+      throw new TypeError('Nada que elegir.');
+    }
+    return item;
+  };
+  const length = 6 + Math.floor(random() * 24);
+  let connectionIndex = 0;
+  let connection = connectionId(connectionIndex);
+  let connected = true;
+  let clock = T0 * 1000 + 100;
+  let watermark = T0;
+  const stimuli: unknown[] = [tick(1, connection, T0)];
+  /** Huecos abiertos por un `partial` o `unavailable`, que solo puede resolver un `complete`. */
+  const openGaps: { from: string; to: string }[] = [];
+  const tickAt = (epoch: number, options: { quote?: string; symbol?: string }) =>
+    tick(stimuli.length + 1, connection, epoch, { ...options, delayMs: clock - epoch * 1000 });
+
+  while (stimuli.length < length) {
+    clock += 50 + Math.floor(random() * 1500);
+    const sequence = stimuli.length + 1;
+    const now = new Date(clock).toISOString();
+    if (!connected) {
+      connectionIndex += 1;
+      const next = connectionId(connectionIndex);
+      stimuli.push(open(sequence, next, connection, now));
+      connection = next;
+      connected = true;
+      continue;
+    }
+    const [gap] = deriveMarketData([eventsOf(stimuli, profile)], profile).pendingGaps;
+    const roll = random();
+    if (roll < 0.5) {
+      const instants = [watermark + 1 + Math.floor(random() * 3), watermark, watermark - 1];
+      if (gap !== undefined) {
+        instants.push((Date.parse(gap.from_event_time_utc) - 1) / 1000);
+        if (gap.to_event_time_utc !== null) {
+          instants.push((Date.parse(gap.to_event_time_utc) + 1) / 1000);
+        }
+      }
+      const epoch = choose(instants);
+      clock = Math.max(clock, epoch * 1000 + 50);
+      watermark = Math.max(watermark, epoch);
+      stimuli.push(tickAt(epoch, { quote: choose(['100.124', '100.125', '100.126']) }));
+    } else if (roll < 0.56) {
+      stimuli.push(ping(sequence, connection, now));
+    } else if (roll < 0.6) {
+      stimuli.push(tickAt(watermark + 1, { symbol: 'SYNTH_050' }));
+    } else if (roll < 0.78) {
+      stimuli.push(close(sequence, connection, now, choose(['repaired', 'requested', 'timeout'])));
+      connected = false;
+    } else if (gap !== undefined && gap.to_event_time_utc !== null) {
+      const range = { from: gap.from_event_time_utc, to: gap.to_event_time_utc };
+      const status = choose(['complete', 'partial', 'unavailable'] as const);
+      if (status !== 'complete') {
+        openGaps.push(range);
+      }
+      const result =
+        status === 'complete'
+          ? { recovered_event_count: 0, status }
+          : status === 'partial'
+            ? { reason: 'history_page_limit', recovered_event_count: 0, status }
+            : { reason: 'history_timeout', status };
+      stimuli.push(recovery(sequence, range, result, now, connection));
+    } else if (openGaps.length > 0) {
+      const range = choose(openGaps);
+      openGaps.splice(openGaps.indexOf(range), 1);
+      stimuli.push(
+        recovery(
+          sequence,
+          range,
+          { recovered_event_count: 0, status: 'complete' },
+          now,
+          connection,
+        ),
+      );
+    }
+  }
+  return stimuli;
 }
 
 /** Los segmentos persistidos de cada escenario del vector v1, en orden. */
@@ -426,6 +564,17 @@ const corpus: readonly (readonly [string, readonly unknown[], PipelineProfile])[
       ),
     ],
     publication,
+  ],
+  [
+    'cierre pedido con el hueco pendiente y su fin ya conocido',
+    [
+      ...RECONNECTION,
+      close(5, B, at(T0 + 1, 500), 'requested'),
+      open(6, C, B, at(T0 + 2)),
+      tick(7, C, T0 + 3),
+      recovery(8, GAP, { reason: 'history_timeout', status: 'unavailable' }),
+    ],
+    measurement,
   ],
   [
     'cierre reparado al arrancar (close_not_recorded) e historia completa',
@@ -558,8 +707,30 @@ describe('derivación en pliegue del estado vivo (ADR-0017)', () => {
     expectEquivalentAtEveryBoundary(vectorSegments(files).flat(), vectorProfile());
   });
 
+  it(
+    '300 logs aleatorios del dominio de §3, con los dos perfiles: igual en cada límite',
+    {
+      timeout: 60_000,
+    },
+    () => {
+      const profiles = [
+        ['medición', measurement],
+        ['publicación', publication],
+      ] as const;
+      for (const [name, profile] of profiles) {
+        for (let seed = 1; seed <= 150; seed += 1) {
+          expectEquivalentAtEveryBoundary(
+            eventsOf(randomStimuli(seed, profile), profile),
+            profile,
+            `semilla ${String(seed)} (${name})`,
+          );
+        }
+      }
+    },
+  );
+
   it('el vector fija el punto de control de cada límite de segmento (§6)', async () => {
-    const lines = VECTOR_SCENARIOS.flatMap(([name, files]) => {
+    const logs: (readonly [string, string[]])[] = VECTOR_SCENARIOS.map(([name, files]) => {
       const segments = vectorSegments(files);
       // El enlace usa el `logical_content_sha256` de cada segmento persistido.
       segments.forEach((segment, index) => {
@@ -567,18 +738,78 @@ describe('derivación en pliegue del estado vivo (ADR-0017)', () => {
           sha256Hex(readFileSync(resolve(vectorRoot, files[index] ?? ''))),
         );
       });
-      return vectorLines(name, segments, vectorProfile());
+      return [name, vectorLines(name, segments, vectorProfile())] as const;
     });
     for (const [name, stimuli, profile] of corpus) {
-      lines.push(...vectorLines(name, segmentsAtTransitions(eventsOf(stimuli, profile)), profile));
+      logs.push([
+        name,
+        vectorLines(name, segmentsAtTransitions(eventsOf(stimuli, profile)), profile),
+      ]);
     }
-    const content = `${lines.join('\n')}\n`;
+    const content = `${logs.flatMap(([, lines]) => lines).join('\n')}\n`;
 
     await expect(content).toMatchFileSnapshot('./fixtures/live-checkpoints.ndjson');
     expect(
-      sha256Hex(content),
-      `El vector cambió sin subir LIVE_STATE_VERSION (${LIVE_STATE_VERSION}).`,
-    ).toBe(VECTOR_SHA256_BY_VERSION[LIVE_STATE_VERSION]);
+      Object.fromEntries(logs.map(([name, lines]) => [name, sha256Hex(`${lines.join('\n')}\n`)])),
+      `Un log del vector cambió sin subir LIVE_STATE_VERSION (${LIVE_STATE_VERSION}), o le falta su digest.`,
+    ).toEqual(VECTOR_SHA256_BY_VERSION[LIVE_STATE_VERSION]);
+  });
+
+  it('con apertura y resolución en el mismo instante, falla donde falla la completa', () => {
+    const throws = (run: () => unknown) => {
+      try {
+        run();
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    const outcomes = {
+      connection_lost: new Set<boolean>(),
+      event_gap_unresolved: new Set<boolean>(),
+    };
+    // Cada variante cambia el ID del evento que resuelve, y con él el `condition_event_id` que
+    // decide el empate (ADR-0017 §3).
+    for (let variant = 0; variant < 16; variant += 1) {
+      const cases = [
+        [
+          'connection_lost',
+          [
+            tick(1, A, T0),
+            close(2, A, at(T0, 500)),
+            { ...open(3, B, A, at(T0, 500)), event_id: id(100 + variant) },
+            tick(4, B, T0 + 1),
+          ],
+        ],
+        [
+          'event_gap_unresolved',
+          [
+            ...RECONNECTION,
+            recovery(5, GAP, {
+              reason: 'history_page_limit',
+              recovered_event_count: 0,
+              status: 'partial',
+            }),
+            {
+              ...recovery(6, GAP, { recovered_event_count: 0, status: 'complete' }),
+              event_id: id(200 + variant),
+            },
+          ],
+        ],
+      ] as const;
+      for (const [type, stimuli] of cases) {
+        const events = eventsOf(stimuli, measurement);
+        const full = throws(() => deriveMarketData([events], measurement));
+        expect(
+          throws(() => foldLiveDerivation(emptyLiveDerivationState(), events, measurement)),
+          `${type}, variante ${String(variant)}`,
+        ).toBe(full);
+        outcomes[type].add(full);
+      }
+    }
+    // Las variantes recorren los dos órdenes del empate.
+    expect([...outcomes.connection_lost].sort()).toEqual([false, true]);
+    expect([...outcomes.event_gap_unresolved].sort()).toEqual([false, true]);
   });
 
   it('falla donde falla la derivación completa', () => {
@@ -612,22 +843,23 @@ describe('derivación en pliegue del estado vivo (ADR-0017)', () => {
       ],
       measurement,
     );
-    const otherRange = eventsOf(
-      [
-        ...RECONNECTION,
-        recovery(
-          5,
-          { from: GAP.from, to: at(T0, 500) },
-          {
+    const otherRanges = [
+      { from: GAP.from, to: at(T0, 500) },
+      { from: at(T0, 2), to: GAP.to },
+    ].map((range) =>
+      eventsOf(
+        [
+          ...RECONNECTION,
+          recovery(5, range, {
             reason: 'history_page_limit',
             recovered_event_count: 0,
             status: 'partial',
-          },
-        ),
-      ],
-      measurement,
+          }),
+        ],
+        measurement,
+      ),
     );
-    for (const events of [withoutEnd, otherRange]) {
+    for (const events of [withoutEnd, ...otherRanges]) {
       expect(() => deriveMarketData([events], measurement)).not.toThrow();
       expect(() => foldLiveDerivation(emptyLiveDerivationState(), events, measurement)).toThrow(
         /hueco pendiente/u,

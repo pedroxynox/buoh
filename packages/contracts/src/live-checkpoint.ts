@@ -6,6 +6,7 @@
 import { z } from 'zod';
 
 import {
+  deriveConnectionConditionKey,
   operationalConditionEventSchema,
   operationalConditionEventStructuralSchema,
 } from './conditions.js';
@@ -118,8 +119,9 @@ export const liveDerivationCheckpointStructuralSchema = z
 
 /**
  * Esquema runtime: además de la estructura, exige listas del estado ordenadas y sin repetir por su
- * clave, cada condición abierta como una apertura causada por su incidencia y no más raw frames que
- * eventos.
+ * clave, cada condición abierta como una apertura de la misma fuente causada por su incidencia, la
+ * `connection_id` cerrada de un `connection_lost` como la de su `condition_key`, y no más raw
+ * frames que eventos.
  */
 export const liveDerivationCheckpointSchema = liveDerivationCheckpointStructuralSchema.superRefine(
   (value, context) => {
@@ -152,14 +154,20 @@ export const liveDerivationCheckpointSchema = liveDerivationCheckpointStructural
         !condition.success ||
         !incident.success ||
         condition.data.action !== 'opened' ||
+        condition.data.source !== value.source ||
+        incident.data.source !== value.source ||
         !condition.data.cause_refs.includes(incident.data.incident_id) ||
         condition.data.condition_type !== incident.data.incident_type ||
         (condition.data.condition_type === 'connection_lost') !==
-          (open.closed_connection_id !== null)
+          (open.closed_connection_id !== null) ||
+        (open.closed_connection_id !== null &&
+          condition.data.condition_key !==
+            deriveConnectionConditionKey(value.source, open.closed_connection_id))
       ) {
         context.addIssue({
           code: 'custom',
-          message: 'Una condición abierta tiene que ser una apertura causada por su incidencia.',
+          message:
+            'Una condición abierta tiene que ser una apertura de la fuente, causada por su incidencia y, si es connection_lost, de su conexión cerrada.',
           path: ['state', 'open_conditions', index],
         });
       }

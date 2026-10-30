@@ -421,26 +421,28 @@ export function foldLiveDerivation(
             closed_at_utc: event.occurred_at_utc,
           };
         }
-        const pendingBefore = new Map(working.rules.pendingContinuity);
+        const pendingBefore = new Set(working.rules.pendingContinuity.keys());
         applyConnectionClosed(working.rules, event, profile, sink);
         for (const symbol of event.affected_symbols) {
-          const previous = pendingBefore.get(symbol);
           const current = working.rules.pendingContinuity.get(symbol);
+          if (current === undefined) {
+            continue;
+          }
           const watermark = working.rules.highWatermark.get(symbol);
           const canonical = working.watermarkCanonical.get(symbol);
-          if (
-            previous === undefined &&
-            current !== undefined &&
-            watermark !== undefined &&
-            canonical !== undefined
-          ) {
-            working.gaps.set(symbol, {
-              after_tick: null,
-              end_canonical_tick: null,
-              start_canonical_tick: canonical,
-              watermark_observation_id: watermark.observationId,
-            });
-          } else if (previous !== undefined && current !== undefined) {
+          if (!pendingBefore.has(symbol)) {
+            // Hueco nuevo: empieza en el high-watermark de este cierre.
+            if (watermark !== undefined && canonical !== undefined) {
+              working.gaps.set(symbol, {
+                after_tick: null,
+                end_canonical_tick: null,
+                start_canonical_tick: canonical,
+                watermark_observation_id: watermark.observationId,
+              });
+            }
+          } else if (current.end === undefined) {
+            // Otro cierre no pedido quitó el fin del hueco, y el tick siguiente fija uno nuevo. Un
+            // cierre pedido no cambia la continuidad, así que conserva los ticks del fin.
             const tracking = working.gaps.get(symbol);
             if (tracking !== undefined) {
               tracking.after_tick = null;
