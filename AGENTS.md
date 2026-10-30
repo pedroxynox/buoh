@@ -122,11 +122,11 @@ No cambian:
 
 Se hacen solo cuando el cambio las necesita:
 
-- **Mutaciones a propósito**, para ver si las pruebas detectan un cambio de una línea: en código que decide los contratos, qué datos se escriben, se leen o se publican, el riesgo, las señales, la ejecución o la seguridad, como el de un PR que marca alguna de las cuatro primeras casillas de «Impacto» de la plantilla, y solo en las líneas que deciden su comportamiento.
+- **Mutaciones a propósito**, para ver si las pruebas detectan un cambio de una línea: en código que decide los contratos, qué datos se escriben, se leen o se publican, el riesgo, las señales, la ejecución o la seguridad, como el de un PR que marca en la plantilla «Contratos o compatibilidad», «Datos, migraciones o retención», «Seguridad, secretos o permisos» o «Riesgo, señales o ejecución», y solo en las líneas que deciden su comportamiento.
 - **Mediciones** de tiempo o de memoria: cuando un criterio, un plazo de prueba o una decisión dependen de ellas.
 - **Las pruebas de integración en local**: cuando el cambio toca PostgreSQL, el almacenamiento de objetos o una migración. CI las corre siempre.
 - **Una investigación con un subagente**: en un área que el agente no conoce. Su resultado se reutiliza y no se repite.
-- **Repetir una verificación**: cuando algo cambió desde la última. Tras un rebase que deja el mismo árbol que el commit verificado (`git diff --quiet <commit verificado> HEAD` sale con 0), las pruebas de entonces valen; la guardia documental se vuelve a ejecutar, porque compara con la base nueva (`DOCS_BASE_REF=origin/main node scripts/check-doc-impact.mjs --require-base`), y el PR lo dice. Un rebase que cambia el árbol, como el que trae commits nuevos de `main`, se verifica entero.
+- **Repetir una verificación**: cuando algo cambió desde la última. Tras un rebase que deja el mismo árbol que el commit verificado (`git diff --quiet <commit verificado> HEAD` sale con 0), las pruebas de entonces valen; la guardia documental se vuelve a ejecutar, porque compara con la base nueva (`DOCS_BASE_REF=origin/main pnpm run docs:check:pr`), y el PR lo dice. Un rebase que cambia el árbol, como el que trae commits nuevos de `main`, se verifica entero.
 
 Se escriben cortos:
 
