@@ -64,10 +64,24 @@ export {
 export { PostgresSourceLogStore } from './postgres/source-log-store.js';
 export {
   type ClosedSourceSegment,
+  type LiveCheckpointBinding,
+  type LiveCheckpointCandidate,
+  type LiveCheckpointInsert,
   type SourceEventIndexRow,
   type SourceLogState,
   type SourceLogStore,
+  type StoredLiveCheckpoint,
 } from './source-log/ports.js';
+export {
+  checkpointRow,
+  checkStoredCheckpoint,
+  LiveCheckpointWriter,
+  liveCheckpointVersionsSha256,
+  type CheckedLiveCheckpoint,
+  type LiveCheckpointFailure,
+  type LiveCheckpointRejection,
+  type LiveCheckpointWriterInput,
+} from './source-log/live-checkpoint.js';
 export { previousConnection, type PreviousConnection } from './source-log/previous-connection.js';
 export { publishFromLog, type PublishFromLogInput } from './source-log/publish-from-log.js';
 export {

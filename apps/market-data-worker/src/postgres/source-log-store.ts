@@ -2,9 +2,12 @@ import { type Pool } from 'pg';
 
 import {
   type ClosedSourceSegment,
+  type LiveCheckpointCandidate,
+  type LiveCheckpointInsert,
   type SourceEventIndexRow,
   type SourceLogState,
   type SourceLogStore,
+  type StoredLiveCheckpoint,
 } from '../source-log/ports.js';
 
 interface IndexRecord {
@@ -35,7 +38,35 @@ function closedFromRecord(record: ClosedRecord): ClosedSourceSegment {
   };
 }
 
-/** Log raw-first sobre PostgreSQL estándar (migración `0002_log_raw_first`). */
+/** Una fila de `live_derivation_checkpoints`: `pg` da los `bigint` como texto. */
+interface CheckpointRecord extends Omit<
+  StoredLiveCheckpoint,
+  'event_count' | 'raw_frame_count' | 'segment_index'
+> {
+  event_count: string;
+  raw_frame_count: string;
+  segment_index: string;
+}
+
+const CHECKPOINT_COLUMNS = `source, symbol, segment_index, schema_version,
+  segment_logical_content_sha256, event_count, raw_frame_count, connector_version,
+  live_state_version, quality_profile_sha256, quality_rule_version, segment_policy_version,
+  source_event_schema_version, source_schema_sha256, versions_sha256, checkpoint_jcs,
+  checkpoint_sha256, written_at_utc`;
+
+function checkpointFromRecord(record: CheckpointRecord): StoredLiveCheckpoint {
+  return {
+    ...record,
+    event_count: Number(record.event_count),
+    raw_frame_count: Number(record.raw_frame_count),
+    segment_index: Number(record.segment_index),
+  };
+}
+
+/**
+ * Log raw-first sobre PostgreSQL estándar (migración `0002_log_raw_first`) y los puntos de control de
+ * su estado vivo (migración `0005`).
+ */
 export class PostgresSourceLogStore implements SourceLogStore {
   readonly #pool: Pool;
 
@@ -154,5 +185,104 @@ export class PostgresSourceLogStore implements SourceLogStore {
       [source, from, to],
     );
     return rows.map(closedFromRecord);
+  }
+
+  /**
+   * `ON CONFLICT DO NOTHING` y, si la clave ya tenía fila, la lee para comparar su
+   * `checkpoint_sha256`: como la tabla es append-only, esa fila no puede cambiar entre las dos
+   * consultas.
+   */
+  async insertLiveCheckpoint(row: StoredLiveCheckpoint): Promise<LiveCheckpointInsert> {
+    const inserted = await this.#pool.query(
+      `INSERT INTO live_derivation_checkpoints (${CHECKPOINT_COLUMNS})
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+       ON CONFLICT (source, segment_index, versions_sha256) DO NOTHING`,
+      [
+        row.source,
+        row.symbol,
+        row.segment_index,
+        row.schema_version,
+        row.segment_logical_content_sha256,
+        row.event_count,
+        row.raw_frame_count,
+        row.connector_version,
+        row.live_state_version,
+        row.quality_profile_sha256,
+        row.quality_rule_version,
+        row.segment_policy_version,
+        row.source_event_schema_version,
+        row.source_schema_sha256,
+        row.versions_sha256,
+        row.checkpoint_jcs,
+        row.checkpoint_sha256,
+        row.written_at_utc,
+      ],
+    );
+    if (inserted.rowCount === 1) {
+      return 'inserted';
+    }
+    const { rows } = await this.#pool.query<{ checkpoint_sha256: string }>(
+      `SELECT checkpoint_sha256 FROM live_derivation_checkpoints
+        WHERE source = $1 AND segment_index = $2 AND versions_sha256 = $3`,
+      [row.source, row.segment_index, row.versions_sha256],
+    );
+    const stored = rows[0];
+    if (stored === undefined) {
+      throw new TypeError('El punto de control de esa clave no se insertó ni existe.');
+    }
+    return stored.checkpoint_sha256 === row.checkpoint_sha256 ? 'exists' : 'conflict';
+  }
+
+  async readLiveCheckpoint(
+    source: string,
+    versionsSha256: string,
+    below: number | null,
+  ): Promise<LiveCheckpointCandidate | null> {
+    const client = await this.#pool.connect();
+    try {
+      // La fila y su enlace en una misma instantánea (ADR-0017 §4 y §6).
+      await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const candidate = await client.query<CheckpointRecord>(
+        `SELECT ${CHECKPOINT_COLUMNS} FROM live_derivation_checkpoints
+          WHERE source = $1 AND versions_sha256 = $2
+            AND ($3::bigint IS NULL OR segment_index < $3::bigint)
+          ORDER BY segment_index DESC LIMIT 1`,
+        [source, versionsSha256, below],
+      );
+      const record = candidate.rows[0];
+      if (record === undefined) {
+        await client.query('COMMIT');
+        return null;
+      }
+      const row = checkpointFromRecord(record);
+      const binding = await client.query<{
+        event_count: string;
+        logical_content_sha256: string | null;
+        raw_frame_count: string;
+      }>(
+        `SELECT coalesce(sum(event_count), 0)::text AS event_count,
+                coalesce(sum(raw_frame_count), 0)::text AS raw_frame_count,
+                max(logical_content_sha256) FILTER (WHERE segment_index = $2::bigint)
+                  AS logical_content_sha256
+           FROM closed_source_segments
+          WHERE source = $1 AND segment_index <= $2::bigint`,
+        [source, row.segment_index],
+      );
+      await client.query('COMMIT');
+      const facts = binding.rows[0];
+      return {
+        binding: {
+          event_count: Number(facts?.event_count ?? 0),
+          logical_content_sha256: facts?.logical_content_sha256 ?? null,
+          raw_frame_count: Number(facts?.raw_frame_count ?? 0),
+        },
+        row,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }

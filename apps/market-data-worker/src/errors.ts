@@ -65,3 +65,20 @@ export class ObjectReadError extends Error {
     this.reason = reason;
   }
 }
+
+/**
+ * El mismo log dio dos puntos de control distintos del segmento `segmentIndex` con las mismas
+ * versiones: la clave ya tiene uno con otro SHA-256 (ADR-0017 §5, «Conflicto»). Solo puede ser un
+ * error de programación, y se corrige con una versión nueva del formato del estado vivo. Su código
+ * es el motivo con que termina la sesión, `checkpoint_conflict`.
+ */
+export class LiveCheckpointConflictError extends Error {
+  readonly code = 'checkpoint_conflict';
+  readonly segmentIndex: number;
+
+  constructor(segmentIndex: number) {
+    super(`El punto de control del segmento ${String(segmentIndex)} ya existe con otro SHA-256.`);
+    this.name = 'LiveCheckpointConflictError';
+    this.segmentIndex = segmentIndex;
+  }
+}

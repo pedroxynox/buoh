@@ -18,8 +18,11 @@ import { contentKey } from '../object-keys.js';
 import { type ObjectStore } from '../ports.js';
 import {
   type ClosedSourceSegment,
+  type LiveCheckpointCandidate,
+  type LiveCheckpointInsert,
   type SourceEventIndexRow,
   type SourceLogStore,
+  type StoredLiveCheckpoint,
 } from './ports.js';
 
 /** Etapa de `PersistenceStage` que falló en el log. */
@@ -446,6 +449,56 @@ export class SourceEventLog {
    * lanza `LogReadError`; si el contenido no pasa una comprobación, `LogIntegrityError`.
    */
   async readClosedSegments(from: number, to: number): Promise<SourceEvent[][]> {
+    const segments = await this.#listClosed(from, to);
+    const result: SourceEvent[][] = [];
+    for (const segment of segments) {
+      result.push(await this.#readSegment(segment));
+    }
+    return result;
+  }
+
+  /**
+   * El segmento cerrado `index`, leído y verificado como en `readClosedSegments`, con su fila de
+   * `closed_source_segments`: el punto de control del estado vivo lo deriva de uno en uno y se enlaza
+   * con esa fila (ADR-0017 §5 y §6). Lanza los mismos errores.
+   */
+  async readClosedSegment(
+    index: number,
+  ): Promise<{ readonly events: SourceEvent[]; readonly segment: ClosedSourceSegment }> {
+    const [segment] = await this.#listClosed(index, index);
+    if (segment === undefined) {
+      throw new TypeError(`Falta el segmento ${String(index)}.`);
+    }
+    return { events: await this.#readSegment(segment), segment };
+  }
+
+  /**
+   * Inserta un punto de control del estado vivo con el almacén del log (ADR-0017 §5): el de `ingest`
+   * está protegido por el bloqueo de la fuente, así que sin él falla con `source_lock_lost`. No
+   * depende de lo que la instancia tiene en memoria: un punto de control sale de segmentos cerrados.
+   * Lanza el error del almacén, sin convertirlo.
+   */
+  writeLiveCheckpoint(row: StoredLiveCheckpoint): Promise<LiveCheckpointInsert> {
+    if (row.source !== this.source) {
+      return Promise.reject(new TypeError(`Punto de control de otra fuente: ${row.source}.`));
+    }
+    return this.#store.insertLiveCheckpoint(row);
+  }
+
+  /**
+   * El punto de control de este log con esas versiones y el mayor segmento, por debajo de `below`
+   * si no es `null`, con su enlace con el log (`SourceLogStore.readLiveCheckpoint`). Lanza el error
+   * del almacén, sin convertirlo.
+   */
+  readLiveCheckpoint(
+    versionsSha256: string,
+    below: number | null,
+  ): Promise<LiveCheckpointCandidate | null> {
+    return this.#store.readLiveCheckpoint(this.source, versionsSha256, below);
+  }
+
+  /** Las filas de los segmentos cerrados `[from, to]`, que tienen que estar todos cerrados. */
+  async #listClosed(from: number, to: number): Promise<ClosedSourceSegment[]> {
     if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to < from) {
       throw new TypeError('Rango de segmentos inválido.');
     }
@@ -458,50 +511,48 @@ export class SourceEventLog {
         `Los segmentos ${String(from)}–${String(to)} no están todos cerrados.`,
       );
     }
-    const result: SourceEvent[][] = [];
-    for (const segment of segments) {
-      const physical = await fromStore(
-        () => this.#objects.get(contentKey(segment.object_bytes_sha256), segment.object_size_bytes),
-        `del segmento ${String(segment.segment_index)}`,
-      );
-      if (sha256Hex(physical) !== segment.object_bytes_sha256) {
-        throw new LogIntegrityError(
-          `Objeto del segmento ${String(segment.segment_index)} alterado.`,
-        );
-      }
-      const logical =
-        segment.compression === 'gzip'
-          ? verified(
-              () =>
-                new Uint8Array(
-                  gunzipSync(physical, { maxOutputLength: SEGMENT_POLICY.maximum_bytes }),
-                ),
-            )
-          : physical;
-      if (sha256Hex(logical) !== segment.logical_content_sha256) {
-        throw new LogIntegrityError(
-          `Hash lógico del segmento ${String(segment.segment_index)} inválido.`,
-        );
-      }
-      const text = verified(() => decoder.decode(logical));
-      if (!text.endsWith('\n')) {
-        throw new LogIntegrityError(`Segmento ${String(segment.segment_index)} sin newline final.`);
-      }
-      const events = text
-        .slice(0, -1)
-        .split('\n')
-        .map((line) => verified(() => parseLine(new TextEncoder().encode(line))));
-      if (
-        events.length !== segment.event_count ||
-        events.filter((event) => event.kind === 'raw_source_frame').length !==
-          segment.raw_frame_count
-      ) {
-        throw new LogIntegrityError(
-          `Conteos del segmento ${String(segment.segment_index)} inválidos.`,
-        );
-      }
-      result.push(events);
+    return segments;
+  }
+
+  /** Los source events de un segmento cerrado, desde su objeto y verificados contra su fila. */
+  async #readSegment(segment: ClosedSourceSegment): Promise<SourceEvent[]> {
+    const physical = await fromStore(
+      () => this.#objects.get(contentKey(segment.object_bytes_sha256), segment.object_size_bytes),
+      `del segmento ${String(segment.segment_index)}`,
+    );
+    if (sha256Hex(physical) !== segment.object_bytes_sha256) {
+      throw new LogIntegrityError(`Objeto del segmento ${String(segment.segment_index)} alterado.`);
     }
-    return result;
+    const logical =
+      segment.compression === 'gzip'
+        ? verified(
+            () =>
+              new Uint8Array(
+                gunzipSync(physical, { maxOutputLength: SEGMENT_POLICY.maximum_bytes }),
+              ),
+          )
+        : physical;
+    if (sha256Hex(logical) !== segment.logical_content_sha256) {
+      throw new LogIntegrityError(
+        `Hash lógico del segmento ${String(segment.segment_index)} inválido.`,
+      );
+    }
+    const text = verified(() => decoder.decode(logical));
+    if (!text.endsWith('\n')) {
+      throw new LogIntegrityError(`Segmento ${String(segment.segment_index)} sin newline final.`);
+    }
+    const events = text
+      .slice(0, -1)
+      .split('\n')
+      .map((line) => verified(() => parseLine(new TextEncoder().encode(line))));
+    if (
+      events.length !== segment.event_count ||
+      events.filter((event) => event.kind === 'raw_source_frame').length !== segment.raw_frame_count
+    ) {
+      throw new LogIntegrityError(
+        `Conteos del segmento ${String(segment.segment_index)} inválidos.`,
+      );
+    }
+    return events;
   }
 }

@@ -194,9 +194,10 @@ export class SourceLock {
 }
 
 /**
- * Log de la fuente protegido por su bloqueo: cada escritura comprueba antes que el bloqueo sigue
- * tomado y, si no, falla con el código `source_lock_lost`. El log lo trata como cualquier fallo de
- * persistencia: el evento no es durable y la entrada se pausa. Las lecturas no cambian.
+ * Log de la fuente protegido por su bloqueo: cada escritura, también la de un punto de control del
+ * estado vivo, comprueba antes que el bloqueo sigue tomado y, si no, falla con el código
+ * `source_lock_lost`. El log lo trata como cualquier fallo de persistencia: el evento no es durable
+ * y la entrada se pausa. Las lecturas no cambian.
  *
  * Si el bloqueo se pierde a mitad de una escritura, los triggers de `0002` siguen exigiendo
  * posiciones contiguas, así que dos escritores nunca dejan un log incoherente: uno de los dos falla.
@@ -224,7 +225,15 @@ export function lockedSourceLogStore(
       assertHeld(row.source);
       await store.insertIndexRow(row);
     },
+    // El punto de control del estado vivo también lo escribe solo quien tiene el bloqueo (ADR-0017
+    // §5, «Escritor»).
+    insertLiveCheckpoint: async (row) => {
+      assertHeld(row.source);
+      return store.insertLiveCheckpoint(row);
+    },
     listClosedSegments: (source, from, to) => store.listClosedSegments(source, from, to),
+    readLiveCheckpoint: (source, versionsSha256, below) =>
+      store.readLiveCheckpoint(source, versionsSha256, below),
     readLogState: (source) => store.readLogState(source),
   };
 }

@@ -165,6 +165,11 @@ export interface SessionHarnessOptions {
   readonly answerPings?: boolean;
   /** Las primeras `n` llamadas a `connect` lanzan, como un host que no responde. */
   readonly failingConnects?: number;
+  /**
+   * Segmentos que el log ya tiene cerrados (`requested`), de ejecuciones anteriores, antes de
+   * `events`; por defecto, ninguno.
+   */
+  readonly closedSegments?: readonly (readonly SourceEvent[])[];
   /** Source events que el log ya tiene, de ejecuciones anteriores; por defecto, ninguno. */
   readonly events?: readonly SourceEvent[];
   /** Cierra el segmento de esos eventos (`requested`) antes de la sesión. */
@@ -220,6 +225,11 @@ export interface SessionHarnessOptions {
   readonly interruptAfterMs?: number;
   /** Cada socket falso avisa del cierre solo con `finishClose`, como `ws`; por defecto, enseguida. */
   readonly deferClose?: boolean;
+  /**
+   * La sesión escribe el punto de control del estado vivo en cada cierre de segmento, como `ingest`
+   * (ADR-0017 §5); por defecto, no, como el smoke.
+   */
+  readonly writeLiveCheckpoints?: boolean;
 }
 
 /**
@@ -242,6 +252,8 @@ export async function sessionHarness(options: SessionHarnessOptions = {}) {
   const sockets: FakeDerivSocket[] = [];
   /** Filas del índice cuando la sesión llama a `connect`, en orden. */
   const rowsAtConnect: number[] = [];
+  /** Puntos de control guardados cuando la sesión llama a `connect`, en orden. */
+  const checkpointsAtConnect: number[] = [];
   /** Los bloqueos con que la sesión abrió el log, en orden. */
   const openedWith: SessionLock[] = [];
   let failingConnects = options.failingConnects ?? 0;
@@ -249,6 +261,12 @@ export async function sessionHarness(options: SessionHarnessOptions = {}) {
   const unlockedLog = () =>
     SourceEventLog.open({ objects, source: DERIV_SOURCE, store: sourceLog, zlibVersion: 'test' });
   const seed = await unlockedLog();
+  for (const segment of options.closedSegments ?? []) {
+    for (const event of segment) {
+      await seed.append(event);
+    }
+    await seed.close('requested');
+  }
   for (const event of options.events ?? []) {
     await seed.append(event);
   }
@@ -297,6 +315,7 @@ export async function sessionHarness(options: SessionHarnessOptions = {}) {
       : { interruptAfterMs: options.interruptAfterMs }),
     connect: (input) => {
       rowsAtConnect.push(sourceLog.rows.length);
+      checkpointsAtConnect.push(sourceLog.checkpoints.length);
       timeline.push(`connect:${String(rowsAtConnect.length)}`);
       if (options.stopOnConnect === rowsAtConnect.length) {
         stopSession();
@@ -360,6 +379,7 @@ export async function sessionHarness(options: SessionHarnessOptions = {}) {
       },
     },
     symbol: 'SYNTH_100',
+    ...(options.writeLiveCheckpoints === true ? { writeLiveCheckpoints: true } : {}),
   });
   stopSession = () => {
     session.stop();
@@ -400,6 +420,7 @@ export async function sessionHarness(options: SessionHarnessOptions = {}) {
 
   return {
     alerts,
+    checkpointsAtConnect,
     clock,
     done: session.done,
     events,

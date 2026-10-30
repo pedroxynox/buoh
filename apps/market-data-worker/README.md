@@ -2,6 +2,8 @@
 
 Log raw-first de source events, registro operativo, publicación atómica y replay de datasets (F1.3: `F1-STREAM-001`, `F1-DATASET-001`). Decisiones en [ADR-0004](../../docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md) §7–§12 y [ADR-0005](../../docs/arquitectura/adr/0005-persistencia-local-y-formato-fisico-f1-3.md); operación en el [runbook](../../docs/operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13).
 
+Desde F2.1, `ingest` escribe también, con el log protegido por el bloqueo, el punto de control del estado vivo de cada segmento que cierra (migración `0005`, `src/source-log/live-checkpoint.ts`; [ADR-0017](../../docs/arquitectura/adr/0017-punto-de-control-de-la-derivacion-en-vivo.md)).
+
 Desde F1.4b tiene el adaptador público de Deriv, solo para escuchar, y su catálogo versionado ([ADR-0012](../../docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md)). `pnpm run data:smoke` corre en memoria la sesión de ingesta, que reconecta tras una pérdida y recupera la historia del hueco ([ADR-0015](../../docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md)); con `--interrupt-after-seconds`, corta su propio socket una vez para probarlo. `ingest` corre la misma sesión de forma continua sobre PostgreSQL y el almacenamiento de objetos, con un esquema y un bucket propios, el cursor y el latido, y para sola a las 23 horas para que la captura se borre antes de las 24 ([runbook](../../docs/operacion/runbook-ingesta-de-datos.md#captura-viva-continua-ingest)). `pnpm run data:health -- --json` deriva el `HealthReport` de esa captura desde fuera del proceso que ingiere, sin tomar el bloqueo ni escribir nada (`src/health/`; [runbook](../../docs/operacion/runbook-ingesta-de-datos.md#salud-de-datos-datahealth)).
 
 ## Flujo
@@ -12,6 +14,7 @@ frame del transporte ─ RawFirstIngestor ─▶ límite de bytes (source_limit_
                                           ▶ solo si es durable: normalizeRawFrame → sink
                                           ▶ si no: persistence_unavailable → pausa
 segmentos (rotación 1.0.0 o cierre explícito) ─▶ objeto NDJSON gzip + fila de cierre
+segmento cerrado (solo ingest) ─ LiveCheckpointWriter ─▶ foldLiveDerivation ─▶ live_derivation_checkpoints
 segmentos cerrados ─ publishFromLog ─▶ publishDataset ─▶ objetos sha256/<hash>, documento, commit
 dataset_id ─ replayDataset ─▶ verify-only: record, documento, hashes físicos/lógicos, contratos,
                              │              invariantes entre artefactos, versiones de contrato, core

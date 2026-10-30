@@ -11,6 +11,7 @@ import {
 import { contentKey } from '../object-keys.js';
 import { stderrAlert, type OperationalAlert } from '../operational/registry.js';
 import { type ObjectStore } from '../ports.js';
+import { LiveCheckpointWriter, type LiveCheckpointFailure } from '../source-log/live-checkpoint.js';
 import {
   failureReason,
   LogIntegrityError,
@@ -170,6 +171,17 @@ export interface DerivSessionInput extends Pick<
    * el smoke, la sesión no lo guarda.
    */
   readonly schemaObjects?: ObjectStore;
+  /**
+   * Con `true`, la sesión escribe el punto de control del estado vivo con el log protegido por su
+   * bloqueo (ADR-0017 §5 y §6, `LiveCheckpointWriter`): antes de la primera conexión reconstruye por
+   * partes los que falten hasta el último segmento cerrado, y después escribe el de cada segmento
+   * que cierra. Un almacén que no responde solo avisa con `checkpoint_unavailable`, y la ingesta
+   * sigue. Si el pliegue falla o un segmento cerrado no pasa sus comprobaciones, la sesión para la
+   * conexión en curso y termina `failed` con `log_not_derivable`; con dos puntos de control distintos
+   * del mismo segmento, con `checkpoint_conflict` y ese segmento como `detail`. Solo lo pasa
+   * `ingest`; sin él, como en el smoke, la sesión no escribe ninguno.
+   */
+  readonly writeLiveCheckpoints?: boolean;
 }
 
 /**
@@ -305,6 +317,26 @@ function integrityEnd(error: unknown): SessionEnd {
 
 const isNotDerivable = (end: SessionEnd): boolean =>
   end.status === 'failed' && end.reason === 'log_not_derivable';
+
+/** Lo que impide seguir a la sesión: la vigilancia del hueco o el punto de control del estado vivo. */
+type SessionFailure = GapWatchFailure | LiveCheckpointFailure;
+
+/**
+ * El fin de una sesión que no puede seguir: `log_not_derivable` o `checkpoint_conflict`, con el
+ * segmento como `detail`. Un error de programación se relanza.
+ */
+function failureEnd(failure: SessionFailure): SessionEnd {
+  if (failure.reason === 'unexpected') {
+    throw failure.error;
+  }
+  if (failure.reason === 'checkpoint_conflict') {
+    return failed(
+      'checkpoint_conflict',
+      failure.segment_index === null ? null : String(failure.segment_index),
+    );
+  }
+  return notDerivable(failure.error);
+}
 
 /**
  * El esquema de fuente guardado no coincide con su SHA-256 fijado (ADR-0015 §5): su clave ya tiene
@@ -449,8 +481,13 @@ class SessionRun {
   #watch: GapWatch | null = null;
   /** Los resultados de las recuperaciones pedidas, en orden. */
   readonly #recoveries: Promise<HistoryRecoveryOutcome>[] = [];
-  /** La vigilancia del hueco no pudo seguir: la sesión termina cuando la conexión termine. */
-  #failure: GapWatchFailure | null = null;
+  /**
+   * La vigilancia del hueco o el punto de control no pudieron seguir: la sesión termina cuando la
+   * conexión en curso termine, o antes de la siguiente.
+   */
+  #failure: SessionFailure | null = null;
+  /** Quien escribe el punto de control del estado vivo, con `writeLiveCheckpoints`. */
+  #checkpoints: LiveCheckpointWriter | null = null;
   /** Ya empezó a contar el plazo del cierre previsto, con el primer tick durable de la sesión. */
   #deadlineArmed = false;
   #cancelDeadline: (() => void) | null = null;
@@ -522,6 +559,7 @@ class SessionRun {
       end = await this.#session();
     } catch (error) {
       this.#cancelTimers();
+      await this.#checkpoints?.settle();
       await this.#settleStatus();
       await this.#releaseLock();
       throw error;
@@ -553,9 +591,16 @@ class SessionRun {
         }
       }
     } finally {
-      // Antes de soltar el bloqueo: después de `done` no se escribe nada más.
+      // Antes de soltar el bloqueo: después de `done` no se escribe nada más. El punto de control del
+      // segmento que cerró la parada también.
+      await this.#checkpoints?.settle();
       await this.#settleStatus();
       await this.#releaseLock();
+    }
+    // El punto de control de un cierre posterior al último intento, como el de la parada, también
+    // puede impedir seguir: el fin lo dice, si no había fallado ya (ADR-0017 §5).
+    if (end.status === 'completed' && this.#failure !== null) {
+      end = failureEnd(this.#failure);
     }
     const last = this.#last;
     // Cada una se resolvió antes de que terminara su conexión.
@@ -596,6 +641,9 @@ class SessionRun {
       onDurable: (event) => {
         this.#onDurable(event);
       },
+      onSegmentClosed: (segment) => {
+        this.#checkpoints?.onClosed(segment);
+      },
       profile: preparation.profile,
       registry: input.registry,
       // Siempre con el bloqueo vigente: después de perderlo, la sesión toma otro antes de escribir.
@@ -621,6 +669,21 @@ class SessionRun {
       },
     });
     this.#ingestor = ingestor;
+    if (input.writeLiveCheckpoints === true) {
+      this.#checkpoints = new LiveCheckpointWriter({
+        alert: (payload) => {
+          this.#alert(payload);
+        },
+        // El log vigente del ingestor: también el que reabrió con un bloqueo nuevo.
+        log: () => ingestor.log,
+        now: input.now,
+        onFailure: (failure) => {
+          this.#onCheckpointFailure(failure);
+        },
+        profile: preparation.profile,
+        symbol: preparation.symbol,
+      });
+    }
     if (startup.oldest_utc !== null) {
       this.#armRetention(startup.oldest_utc);
     }
@@ -628,7 +691,12 @@ class SessionRun {
     if (stored !== null) {
       return stored;
     }
+    // Antes de la primera conexión, los puntos de control que falten (ADR-0017 §6).
+    await this.#checkpoints?.rebuild();
     for (;;) {
+      if (this.#failure !== null) {
+        return failureEnd(this.#failure);
+      }
       if (this.#stopped) {
         return COMPLETED;
       }
@@ -872,13 +940,14 @@ class SessionRun {
     }
     if (attempt.status === 'not_connected') {
       // Sin socket: el cierre reparado no quedó durable o un almacén no respondió, y se espera; o
-      // llegó la parada, y la espera no empieza.
-      return null;
+      // llegó la parada, y la espera no empieza; o el punto de control del cierre que rotó la
+      // reparación no pudo seguir, y la sesión termina.
+      return this.#failure === null ? null : failureEnd(this.#failure);
     }
     const { connection } = attempt;
     this.#connection = connection;
-    if (this.#stopped) {
-      // Una parada que llegó mientras se creaba la conexión, antes de verla aquí.
+    if (this.#stopped || this.#failure !== null) {
+      // Una parada o un fallo que llegaron mientras se creaba la conexión, antes de verla aquí.
       connection.stop();
     } else {
       this.#watchGap(connection, ingestor, preparation);
@@ -902,10 +971,7 @@ class SessionRun {
     this.#last = result;
     const failure = this.#failure;
     if (failure !== null) {
-      if (failure.reason === 'unexpected') {
-        throw failure.error;
-      }
-      return notDerivable(failure.error);
+      return failureEnd(failure);
     }
     const { end } = result;
     if (end.status === 'completed') {
@@ -981,6 +1047,19 @@ class SessionRun {
       return;
     }
     this.#failure ??= failure;
+    this.#connection?.stop();
+  }
+
+  /**
+   * El punto de control del estado vivo no puede seguir (ADR-0017 §5): para la conexión en curso, y
+   * la sesión termina cuando esa conexión termine, con `log_not_derivable` o `checkpoint_conflict`,
+   * o rechazándose con el error de programación. Sin conexión, corta la espera o aborta el intento
+   * que todavía no conectó, y la sesión termina antes de conectar otra vez.
+   */
+  #onCheckpointFailure(failure: LiveCheckpointFailure): void {
+    this.#failure ??= failure;
+    this.#cancelWait?.();
+    this.#abort?.abort();
     this.#connection?.stop();
   }
 

@@ -2,7 +2,14 @@ import { type SourceEvent } from '@buoh/contracts';
 import { type Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { DERIV_SOURCE } from '../src/deriv/profile.js';
+import {
+  buildLiveDerivationCheckpoint,
+  emptyLiveDerivationState,
+  foldLiveDerivation,
+} from '@buoh/domain';
+
+import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
+import { openSchemaArchive } from '../src/deriv/schema-archive.js';
 import {
   contentKey,
   createPool,
@@ -21,6 +28,10 @@ import {
   type WorkerConfig,
 } from '../src/index.js';
 import { sourceLockHolder } from '../src/postgres/source-lock.js';
+import {
+  checkStoredCheckpoint,
+  liveCheckpointVersionsSha256,
+} from '../src/source-log/live-checkpoint.js';
 import { START, START_EPOCH, uuid } from '../test/support/connection-harness.js';
 import {
   derivMessages,
@@ -192,6 +203,73 @@ async function heartbeatRows() {
 const indexId = (event: SourceEvent | undefined): string | undefined =>
   event?.kind === 'raw_source_frame' ? event.observation_id : event?.event_id;
 
+/** El perfil con que deriva la sesión: el de medición con los esquemas sintéticos. */
+function sessionProfile() {
+  const loaded = openSchemaArchive(fixture.archive, fixture.expected);
+  if (loaded.status !== 'loaded') {
+    throw new TypeError(loaded.reason);
+  }
+  return createDerivMeasurementProfile({ schemas: loaded.schemas, symbol: SYMBOL });
+}
+
+/** Los puntos de control de la fuente en PostgreSQL, en orden de segmento. */
+async function storedCheckpoints() {
+  const { rows } = await stores.pool.query<{ checkpoint_jcs: string; segment_index: number }>(
+    `SELECT segment_index::int AS segment_index, checkpoint_jcs
+       FROM live_derivation_checkpoints WHERE source = $1 ORDER BY segment_index`,
+    [DERIV_SOURCE],
+  );
+  return rows.map((row) => ({
+    checkpoint: JSON.parse(row.checkpoint_jcs) as unknown,
+    segment_index: row.segment_index,
+  }));
+}
+
+/**
+ * Los que tendría que haber, uno por segmento cerrado del log: el pliegue del log entero, desde el
+ * vacío, hasta ese segmento (ADR-0017 §5).
+ */
+async function foldedCheckpoints() {
+  const profile = sessionProfile();
+  const log = await SourceEventLog.open({
+    objects: stores.objects,
+    source: DERIV_SOURCE,
+    store: stores.sourceLog,
+    zlibVersion: process.versions.zlib,
+  });
+  const last = log.openSegmentIndex - 1;
+  const segments = last < 0 ? [] : await log.readClosedSegments(0, last);
+  const closed = last < 0 ? [] : await stores.sourceLog.listClosedSegments(DERIV_SOURCE, 0, last);
+  return segments.map((_segment, k) => {
+    const events = segments.slice(0, k + 1).flat();
+    return {
+      checkpoint: buildLiveDerivationCheckpoint({
+        event_count: events.length,
+        profile,
+        raw_frame_count: events.filter((event) => event.kind === 'raw_source_frame').length,
+        segment_index: k,
+        segment_logical_content_sha256: closed[k]?.logical_content_sha256 ?? '',
+        state: foldLiveDerivation(emptyLiveDerivationState(), events, profile),
+        symbol: SYMBOL,
+      }),
+      segment_index: k,
+    };
+  });
+}
+
+/** El último punto de control de la fuente, comprobado como lo haría un lector (ADR-0017 §6). */
+async function latestCheckpoint() {
+  const versions = liveCheckpointVersionsSha256(sessionProfile());
+  const candidate = await stores.sourceLog.readLiveCheckpoint(DERIV_SOURCE, versions, null);
+  return candidate === null
+    ? null
+    : checkStoredCheckpoint(candidate, {
+        source: DERIV_SOURCE,
+        symbol: SYMBOL,
+        versions_sha256: versions,
+      });
+}
+
 /** El almacén del cursor y del latido de PostgreSQL, que anota lo que lee y lo que obtiene. */
 function recording(inner: IngestionStatusStore) {
   const reads: unknown[] = [];
@@ -214,12 +292,13 @@ function recording(inner: IngestionStatusStore) {
 }
 
 describe('pendingMigrations contra PostgreSQL', () => {
-  it('a un esquema recién creado le faltan las cuatro migraciones, y después de db:migrate ninguna', () => {
+  it('a un esquema recién creado le faltan las cinco migraciones, y después de db:migrate ninguna', () => {
     expect(pendingBefore).toEqual([
       '0001_publicaciones.sql',
       '0002_log_raw_first.sql',
       '0003_catalogo_y_respuestas_pedidas.sql',
       '0004_cursor_y_latido.sql',
+      '0005_punto_de_control_en_vivo.sql',
     ]);
     expect(pendingAfter).toEqual([]);
   });
@@ -316,6 +395,15 @@ describe('runIngest sobre PostgreSQL y S3-compatible (ADR-0015 §6 y §7)', () =
       beat('connected', START),
       beat('disconnected', '2026-03-02T10:00:02.200Z'),
     ]);
+    // El punto de control del segmento que cerró la parada: el pliegue del log entero hasta él, y
+    // un lector lo acepta con su enlace (ADR-0017 §5 y §6).
+    const checkpoints = await storedCheckpoints();
+    expect(checkpoints.map((item) => item.segment_index)).toEqual([0]);
+    expect(checkpoints).toEqual(await foldedCheckpoints());
+    expect(await latestCheckpoint()).toMatchObject({
+      checkpoint: { segment_index: 0 },
+      status: 'valid',
+    });
     expect(run.alerts).toEqual([]);
   });
 
@@ -368,5 +456,14 @@ describe('runIngest sobre PostgreSQL y S3-compatible (ADR-0015 §6 y §7)', () =
     const runs = (await heartbeatRows()).map((row) => row['run_id']);
     expect(new Set(runs).size).toBe(2);
     expect(runs.at(-1)).not.toBe(uuid(1));
+    // Partió del punto de control de la primera y escribió el del segmento que cerró al parar.
+    const checkpoints = await storedCheckpoints();
+    expect(checkpoints.map((item) => item.segment_index)).toEqual([0, 1]);
+    expect(checkpoints).toEqual(await foldedCheckpoints());
+    expect(await latestCheckpoint()).toMatchObject({
+      checkpoint: { segment_index: 1 },
+      status: 'valid',
+    });
+    expect(run.alerts).toEqual([]);
   });
 });

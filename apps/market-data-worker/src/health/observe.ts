@@ -140,7 +140,11 @@ async function readLog(stores: HealthStores): Promise<SourceEvent[][]> {
       store: {
         insertClosedSegment: refuseWrite,
         insertIndexRow: refuseWrite,
+        insertLiveCheckpoint: refuseWrite,
         listClosedSegments: (source, from, to) => sourceLog.listClosedSegments(source, from, to),
+        // `readDurableSegments` no lee puntos de control: `data:health` todavía deriva el log entero.
+        readLiveCheckpoint: () =>
+          Promise.reject(new TypeError('data:health no lee puntos de control.')),
         readLogState: (source) => sourceLog.readLogState(source),
       },
       zlibVersion: UNUSED_WRITER_VERSION,

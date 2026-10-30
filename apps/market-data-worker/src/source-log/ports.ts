@@ -51,11 +51,84 @@ export interface SourceLogState {
   readonly totalEventCount: number;
 }
 
-/** Puerto PostgreSQL del log raw-first (migración `0002_log_raw_first`). */
+/**
+ * Fila de `live_derivation_checkpoints` (migración `0005`, ADR-0017 §5): un
+ * `LiveDerivationCheckpoint` con cada campo de su enlace y de sus versiones en su columna, el
+ * SHA-256 del JCS de sus versiones, que entra en la clave, el punto de control entero en JCS, el
+ * SHA-256 de ese JCS y la hora de escritura, que no entra en ningún hash.
+ */
+export interface StoredLiveCheckpoint {
+  readonly checkpoint_jcs: string;
+  readonly checkpoint_sha256: string;
+  readonly connector_version: string;
+  /** Los eventos de los segmentos 0 a `segment_index`. */
+  readonly event_count: number;
+  readonly live_state_version: string;
+  readonly quality_profile_sha256: string;
+  readonly quality_rule_version: string;
+  /** Los raw frames de los segmentos 0 a `segment_index`. */
+  readonly raw_frame_count: number;
+  readonly schema_version: string;
+  readonly segment_index: number;
+  readonly segment_logical_content_sha256: string;
+  readonly segment_policy_version: string;
+  readonly source: string;
+  readonly source_event_schema_version: string;
+  readonly source_schema_sha256: string;
+  readonly symbol: string;
+  readonly versions_sha256: string;
+  readonly written_at_utc: string;
+}
+
+/**
+ * Lo que `closed_source_segments` dice de los segmentos 0 a *k* de un punto de control, leído en la
+ * misma instantánea que su fila (ADR-0017 §6, «Enlace con el log»).
+ */
+export interface LiveCheckpointBinding {
+  /** La suma de `event_count` de los segmentos cerrados 0 a *k*. */
+  readonly event_count: number;
+  /** El `logical_content_sha256` del segmento *k*, o `null` si no está cerrado. */
+  readonly logical_content_sha256: string | null;
+  /** La suma de `raw_frame_count` de los segmentos cerrados 0 a *k*. */
+  readonly raw_frame_count: number;
+}
+
+/** Un punto de control guardado y su enlace con el log, todavía sin comprobar. */
+export interface LiveCheckpointCandidate {
+  readonly binding: LiveCheckpointBinding;
+  readonly row: StoredLiveCheckpoint;
+}
+
+/**
+ * Lo que da insertar un punto de control: `inserted`; `exists` si su clave ya tenía uno con el mismo
+ * `checkpoint_sha256`, como al reintentar una inserción ambigua; o `conflict` si lo tenía con otro
+ * (ADR-0017 §5, «Conflicto»), y entonces la fila guardada no cambia.
+ */
+export type LiveCheckpointInsert = 'conflict' | 'exists' | 'inserted';
+
+/**
+ * Puerto PostgreSQL del log raw-first (migración `0002_log_raw_first`) y de los puntos de control de
+ * su estado vivo (migración `0005`).
+ */
 export interface SourceLogStore {
   readLogState(source: string): Promise<SourceLogState>;
   insertIndexRow(row: SourceEventIndexRow): Promise<void>;
   insertClosedSegment(segment: ClosedSourceSegment): Promise<void>;
   /** Segmentos cerrados con índice en `[from, to]`, en orden. */
   listClosedSegments(source: string, from: number, to: number): Promise<ClosedSourceSegment[]>;
+  /**
+   * Inserta un punto de control (ADR-0017 §5). Su clave es la fuente, el segmento y
+   * `versions_sha256`, y nunca reemplaza una fila.
+   */
+  insertLiveCheckpoint(row: StoredLiveCheckpoint): Promise<LiveCheckpointInsert>;
+  /**
+   * El punto de control de la fuente con esas versiones (`versions_sha256`) y el mayor segmento, por
+   * debajo de `below` si no es `null`, con su enlace con el log, o `null` si no hay ninguno. Nunca da
+   * uno de otras versiones (ADR-0017 §6).
+   */
+  readLiveCheckpoint(
+    source: string,
+    versionsSha256: string,
+    below: number | null,
+  ): Promise<LiveCheckpointCandidate | null>;
 }

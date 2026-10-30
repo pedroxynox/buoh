@@ -120,12 +120,13 @@ afterAll(async () => {
 });
 
 describe('migraciones', () => {
-  it('aplica la 0003 después de las dos anteriores, y la 0004', () => {
+  it('aplica la 0003 después de las dos anteriores, y la 0004 y la 0005', () => {
     expect(applied).toEqual([
       '0001_publicaciones.sql',
       '0002_log_raw_first.sql',
       '0003_catalogo_y_respuestas_pedidas.sql',
       '0004_cursor_y_latido.sql',
+      '0005_punto_de_control_en_vivo.sql',
     ]);
   });
 });

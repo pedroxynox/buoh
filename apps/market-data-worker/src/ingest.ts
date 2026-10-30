@@ -188,6 +188,8 @@ export async function runIngest(input: IngestInput): Promise<IngestReport> {
     sink: { invalidFrame: () => undefined, tick: () => undefined },
     status: stores.ingestionStatus,
     symbol: input.symbol,
+    // El único escritor del punto de control del estado vivo (ADR-0017 §5).
+    writeLiveCheckpoints: true,
   });
   let stopAsked = false;
   const stopListening = input.signals(() => {
