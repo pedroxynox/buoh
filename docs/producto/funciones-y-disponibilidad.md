@@ -75,7 +75,7 @@ Qué cuenta como reautenticación en un teléfono todavía no está definido: lo
 |---|---|---|:-:|:-:|:-:|
 | Auditoría | Registro inmutable de datos, estrategias, señales y órdenes | 2 (datos y estrategias), 4 (órdenes) | ● | ◐ | ● |
 | Conexiones | Estado de fuentes, del puente MT5 y de las autorizaciones | 1B / 4 | ● | ◐ | ● |
-| Preferencias | Tema noche o día, idioma, notificaciones | 2 | ● | ● | ● |
+| Preferencias | Tema noche o día, idioma, notificaciones | 2; notificaciones, 3 | ● | ● | ● |
 | Capa Android pasiva (opcional) | Consulta flotante sin controles | 7 | — | ◐ | — |
 
 ## 3. Disponibilidad por modo de ejecución

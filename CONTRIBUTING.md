@@ -28,7 +28,7 @@ Ante un conflicto, no elijas una interpretación silenciosa: aplica el protocolo
 
 ## Organización autorizada para Fase 1
 
-La Fase 1 terminó el 2026-10-29. Su [plan](docs/plan/fase-1-fundacion-de-datos.md) autorizó estas piezas, que siguen en el repositorio; los directorios y dependencias nuevos necesitan un plan activo, y el de la Fase 2 es la siguiente tarea de `PROJECT_STATUS.md`:
+La Fase 1 terminó el 2026-10-29. Su [plan](docs/plan/fase-1-fundacion-de-datos.md) autorizó estas piezas, que siguen en el repositorio; los directorios y dependencias nuevos necesitan un plan activo, como el de la Fase 2 (sección siguiente):
 
 - `apps/market-data-worker/`: adaptación de fuente y orquestación de ingesta.
 - `packages/contracts/`: esquemas runtime y JSON Schema generado.
@@ -37,7 +37,17 @@ La Fase 1 terminó el 2026-10-29. Su [plan](docs/plan/fase-1-fundacion-de-datos.
 - `test-vectors/`: oráculos sintéticos compartidos.
 - `docs/`: planes, decisiones, semántica y operación.
 
-No crees componentes futuros o directorios vacíos fuera del [corte de Fase 1](docs/plan/fase-1-fundacion-de-datos.md) y del corte de la línea visual V1 (sección siguiente).
+No crees componentes futuros o directorios vacíos fuera del [corte de Fase 1](docs/plan/fase-1-fundacion-de-datos.md), del de la Fase 2 y del de la línea visual V1 (secciones siguientes).
+
+## Organización autorizada para Fase 2
+
+El [plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md) (§6) autoriza estas piezas, cada una solo desde su incremento y después de su ADR:
+
+- `apps/api/` (F2.3): API Fastify con cuentas, sesiones, laboratorio y backtests, que sirve también la web.
+- `packages/strategy-sdk/` (F2.6): modelo de estrategia, indicadores y evaluador puros.
+- `apps/signal-engine/` (F2.9): motor de señales `shadow`.
+
+También amplía `apps/market-data-worker`, `packages/domain`, `packages/contracts`, `apps/web`, `render.yaml` y `test-vectors/`. Cada directorio nuevo entra en `docs/impact-map.json` en el PR que lo crea (`F2-GOV-001`).
 
 ## Organización autorizada para la línea visual V1
 

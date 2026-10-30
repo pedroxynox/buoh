@@ -1,13 +1,13 @@
 ---
 schema_version: "1.0.0"
-status_version: 32
-updated_at_utc: "2026-10-29T19:24:51.000Z"
+status_version: 33
+updated_at_utc: "2026-10-30T00:39:13.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
-next_delivery: "F2.0"
-next_requirements: []
-plan: null
+next_delivery: "F2.1"
+next_requirements: ["F2-CHECKPOINT-001", "F2-GOV-001"]
+plan: "docs/plan/fase-2-laboratorio-y-bot-shadow.md"
 parallel_plans: []
 ---
 
@@ -17,11 +17,12 @@ Este archivo describe únicamente el estado vigente. No es un diario: Git y los 
 
 ## Objetivo actual
 
-Transformar una hipótesis en una estrategia viva, explicable y no ejecutora, para uso propio ([roadmap](docs/producto/roadmap.md), Fase 2). La fase termina cuando una estrategia *shadow* puede reproducir cada decisión desde datos y versiones fijados y detenerse sola ante una degradación de los datos. El primer paso es su plan ejecutable («Siguiente tarea autorizada»).
+Transformar una hipótesis en una estrategia viva, explicable y no ejecutora, para uso propio ([roadmap](docs/producto/roadmap.md), Fase 2). La fase termina cuando una estrategia *shadow* puede reproducir cada decisión desde datos y versiones fijados y detenerse sola ante una degradación de los datos. Su alcance, su aceptación y su secuencia, de F2.1 a F2.11, están en el [plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md).
 
 ## Situación
 
 - La Fase 1 terminó el 2026-10-29 y cumplió su puerta de salida: la evidencia está en el [documento de la puerta de salida](docs/operacion/evidencia-puerta-fase-1.md) y en «Evidencia de F1.5», más abajo. Ese día el propietario decidió hacer antes la Fase 2 que la Fase 1B («Decisiones vigentes relevantes»).
+- El [plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md) fija sus requisitos `F2-*`, el corte de implementación (`apps/api`, `packages/strategy-sdk` y `apps/signal-engine`, cada uno con su incremento), las ADR que van antes del código y su orden, y el presupuesto. Primero lleva el sistema de datos a un servidor (F2.1 y F2.2), para que la captura acumule datos mientras avanza lo demás.
 - La fundación de producto, arquitectura, seguridad y operación está aprobada.
 - F1.1 proporciona monorepo reproducible, contratos runtime, JSON Schema generado, vectores verificables y guardia documental.
 - F1.2 proporciona `packages/domain`: adaptador sintético, normalización, reglas de calidad 1.0.0, construcción de publicación y salud, todo puro y determinista.
@@ -44,20 +45,13 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 
 ## Siguiente tarea autorizada
 
-**`F2.0` — Plan de Fase 2.**
+**`F2.1` — Punto de control.**
 
-Escribir el plan ejecutable de la Fase 2 en `docs/plan/`: sus requisitos `F2-*` con su aceptación, la Definition of Ready y la de Done, el corte de implementación y la secuencia de entrega, y las ADR que haya que decidir antes del código. El [roadmap](docs/producto/roadmap.md) da sus siete incrementos y su criterio de salida («Objetivo actual»). Hasta que ese plan se fusione, la Fase 2 no autoriza código, directorios ni dependencias nuevos (AGENTS.md, «Desarrollo por fases»).
+Primero, la ADR del punto de control (plan de Fase 2, §8, punto 1). Después, su implementación: el arranque de `ingest`, la reparación de cierres antes de cada reconexión, la vigilancia de huecos y `data:health` dejan de leer y derivar el log durable entero, y parten del último punto de control (`F2-CHECKPOINT-001`). El mismo incremento añade `packages/domain/**` al mapa de impacto (`F2-GOV-001`, pendiente 3 de F1.2).
 
-Puntos de partida comprobados al cerrar la Fase 1:
+Punto de partida: con 17,8 horas de log, `ingest` llegó a 358 MB y `data:health` a 317 MB, y el worker Starter tiene 512 MB ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md), «Medición»). Por eso el punto de control va antes del despliegue (F2.2), también para una captura de un solo día. Los demás puntos de partida de la fase están en el plan §3.
 
-- Una estrategia `shadow` necesita datos vivos todo el día. Hoy `ingest` no corre en ningún servidor, rechaza los entornos `staging` y `production` y para sola a las 23 horas para borrar la captura antes de las 24 ([runbook](docs/operacion/runbook-ingesta-de-datos.md), «Captura viva continua»). El alojamiento ya está decidido: Render y Cloudflare R2, unos 15 USD al mes, y nada se compra hasta el PR de despliegue ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)). Sus condiciones antes de desplegar están en ADR-0016 §4.
-- Antes de desplegar hacen falta el rol de PostgreSQL de solo inserción y lectura (pendiente 4 de F1.3) y una retención de producción. El arranque, la recuperación de un hueco y `data:health` derivan el log entero, y su memoria crece con él: con 17,8 horas de log, `ingest` llegó a 358 MB y `data:health` a 317 MB, y el worker Starter tiene 512 MB (ADR-0016, «Medición»). El punto de control va antes del despliegue, también para una captura de un solo día.
-- Con la derivación de hoy, todo en memoria, un mes de datos ocuparía unos 10 GB, así que el backtest tiene que leer los datos por partes (ADR-0016, «Consecuencias»).
-- La Fase 2 empieza solo con R_100 («Decisiones vigentes relevantes»).
-- Los datos live no se publican como dataset mientras no haya umbrales live de retraso y de hueco («Decisiones vigentes relevantes»), y un backtest reproducible necesita datos fijados por su `dataset_id`.
-- P-V1-04 de la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md) propone resolver la accesibilidad, las pruebas y las unidades de los gráficos antes de mostrar datos reales.
-
-No crea todavía señales comerciales, conexión de cuentas ni ejecución `demo` o `real`.
+F2.1 se prueba sin red, sin secretos y sin servicios de pago. No despliega nada, ni crea señales, conexión de cuentas o ejecución `demo` o `real`.
 
 ## Evidencia de F1.1
 
@@ -196,9 +190,10 @@ El antiguo pendiente 6 quedó resuelto en F1.5 ([ADR-0015](docs/arquitectura/adr
 - Hasta incorporar un writer Parquet, ticks e incidencias se publican como NDJSON sin compresión; `dataset_id` no depende del formato físico.
 - Alojamiento productivo en Render para PostgreSQL, API y web; el despliegue sigue diferido ([ADR-0006](docs/arquitectura/adr/0006-alojamiento-en-render.md)), salvo el sitio oficial, que se publica como sitio estático gratuito ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)).
 - Alojamiento del sistema de datos (decisión del propietario del 2026-10-29, «Ok me parece perfecto todo»): `market-data-worker` en un background worker Starter de Render, PostgreSQL en Render Postgres Basic-256mb y los objetos en Cloudflare R2, por unos 15 USD al mes, unos 22 cuando exista la API. No se crea ni se paga nada hasta que esté listo el PR de despliegue ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)).
+- Servidor del motor de señales *shadow* (decisión del propietario del 2026-10-29, «1. Si, un servidor pequeño para el bot»): `apps/signal-engine` corre en su propio background worker Starter de Render, unos 7 USD más al mes, para que un fallo o una actualización del bot no corte la captura ni la web. El total de la Fase 2 queda en unos 29 USD al mes, y ese servidor se compra con F2.9 ([plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md) §11).
 - Símbolo de la Fase 2 (la misma respuesta del propietario, que el agente toma como un sí a su propuesta de empezar solo con R_100): el bot *shadow* empieza solo con R_100 (Volatility 100 Index), el índice que ya se captura. El universo definitivo sigue pendiente.
 - MetaTrader 5 entra por un puente MQL5 dentro de la terminal; cada servidor MT5 es una fuente propia; las contraseñas MT5, solo de cuentas propias, las guarda la terminal y los servicios de buoh nunca las reciben ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)).
-- Prioridad del propietario (2026-10-26): el sitio oficial y la app de escritorio, que debe mostrar datos reales de Deriv. Consecuencia técnica: esos datos llegan por la API de buoh ([arquitectura objetivo](docs/arquitectura/arquitectura-objetivo.md), «Windows (futuro)»), y para eso el sistema de datos tiene que funcionar todo el día en un servidor. Por eso fueron antes la reconexión y la salud de F1.5 y la decisión del costo del alojamiento ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)); el plan de esa línea (alojamiento, API y pantallas con datos reales) se escribe después.
+- Prioridad del propietario (2026-10-26): el sitio oficial y la app de escritorio, que debe mostrar datos reales de Deriv. Consecuencia técnica: esos datos llegan por la API de buoh ([arquitectura objetivo](docs/arquitectura/arquitectura-objetivo.md), «Windows (futuro)»), y para eso el sistema de datos tiene que funcionar todo el día en un servidor. Por eso fueron antes la reconexión y la salud de F1.5 y la decisión del costo del alojamiento ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)). El alojamiento, la API y las pantallas con datos reales están en el [plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md) (F2.2 a F2.4); el plan de la app de escritorio con datos reales se escribe cuando existan (plan §6).
 - Orden de fases (decisión del propietario del 2026-10-29, «Ok vamos con la fase 2»): la Fase 2 va antes que la Fase 1B (datos MT5), que queda para después, sin fecha.
 - Desde el móvil se pueden encender y apagar estrategias del bot, también con dinero real, como con un control remoto. Ningún cliente abre operaciones a mano ni se comunica con el bróker para ejecutar: todo pasa por el servidor, `execution-gateway` y su política de riesgo ([catálogo de funciones](docs/producto/funciones-y-disponibilidad.md) §1; decisión del propietario del 2026-10-25).
 
@@ -210,7 +205,13 @@ Ninguno.
 
 - Jurisdicción inicial del producto comercial.
 - Universo definitivo de índices y tipos de contrato. La Fase 2 empieza solo con R_100 («Decisiones vigentes relevantes»).
-- Región de Render y de Cloudflare R2 para el sistema de datos. Se elige en el PR de despliegue, porque Render no deja cambiarla después ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md) §4).
+- Región de Render y de Cloudflare R2 para el sistema de datos. Se elige en el PR de despliegue (F2.2), porque Render no deja cambiarla después ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md) §4).
+- Cuánto tiempo se guardan en producción el log y los datasets, y el disco de PostgreSQL si eso sube el presupuesto. Se decide en la ADR de despliegue (F2.2, plan de Fase 2 §12).
+- Cómo inicia sesión el propietario en buoh. Se decide en la ADR de la API y las cuentas (F2.3).
+- Si el agente recibe un acceso de solo lectura a producción, o si la evidencia de producción llega solo por el propietario. Se decide en la ADR de despliegue (F2.2, plan de Fase 2 §4, punto 10).
+- Qué idiomas tiene el producto, para la preferencia de idioma del catálogo de funciones. Se decide en F2.4.
+- Qué tipo de operación representan las posiciones hipotéticas del bot *shadow*, dentro de lo que ofrece Deriv para R_100. Se decide antes de abrir la ADR del modelo de estrategia (F2.6).
+- Cómo se reanuda una estrategia *shadow* detenida por datos degradados: a mano, como pide hoy el [protocolo de validación](docs/gobierno/protocolo-de-validacion-de-estrategias.md) §5, o sola tras las degradaciones breves que la historia cubre, lo que cambia ese protocolo. Se decide antes de abrir la ADR del motor de señales (plan de Fase 2, `F2-STOP-001`).
 - Equipo de la terminal MT5 (PC dedicado del propietario o servidor Windows o Linux con Wine) y su protección. Se decide en el primer incremento de Fase 1B (ADR-0007).
 - Revisión de términos de Deriv MT5, Vantage y MetaQuotes, y entidad de Vantage aplicable. Se completa en el primer incremento de Fase 1B.
 - Dominio propio del sitio oficial y revisión legal de su texto, antes de comprar el dominio, quitar el `noindex` o anunciarlo (ADR-0013).
@@ -222,7 +223,7 @@ Ninguno.
 
 ## Evidencia requerida para cambiar de fase
 
-La Fase 2 solo puede marcarse `done` cuando cumple el criterio de salida del roadmap («Objetivo actual») con la evidencia que fije su plan. La Fase 1 cumplió el suyo el 2026-10-29 («Evidencia de F1.5»).
+La Fase 2 solo puede marcarse `done` cuando cumple la Definition of Done de su [plan](docs/plan/fase-2-laboratorio-y-bot-shadow.md) (§13), que concreta el criterio de salida del roadmap («Objetivo actual»). La Fase 1 cumplió el suyo el 2026-10-29 («Evidencia de F1.5»).
 
 ## Mantenimiento obligatorio
 
