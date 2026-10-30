@@ -160,7 +160,7 @@ Decidido en [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §6 y p
 
 ## `LiveDerivationCheckpoint`
 
-Decidido en [ADR-0017](adr/0017-punto-de-control-de-la-derivacion-en-vivo.md) (F2.1). Desde el PR 2 de su secuencia, `LiveDerivationCheckpoint` 1.0.0 está en `packages/contracts`, con su esquema Zod y su JSON Schema, y el pliegue que lo produce está en `packages/domain`. Desde el PR 3, `ingest` lo escribe en su tabla; los lectores que lo usan llegan con los PR 4 y 5.
+Decidido en [ADR-0017](adr/0017-punto-de-control-de-la-derivacion-en-vivo.md) (F2.1). Desde el PR 2 de su secuencia, `LiveDerivationCheckpoint` 1.0.0 está en `packages/contracts`, con su esquema Zod y su JSON Schema, y el pliegue que lo produce está en `packages/domain`. Desde el PR 3, `ingest` lo escribe en su tabla. Desde el PR 4, el arranque, la reparación de cierres y la vigilancia de huecos de la sesión parten de él; `data:health` lo hará con el PR 5.
 
 Es el estado vivo de un log al final de un segmento cerrado: lo que la derivación del log hasta ese segmento deja para los lectores en vivo (arranque, reparación de cierres, vigilancia de huecos y `data:health`). No es un artefacto de dataset ni participa en ningún `dataset_id`.
 
@@ -192,6 +192,7 @@ state: LiveDerivationState
 - **Equivalencia:** la prueba del dominio compara el pliegue con `deriveMarketData` en cada límite entre eventos del vector v1, de los logs sintéticos escritos a mano y de 300 logs aleatorios del dominio de ADR-0017 §3, con semilla fija y los dos perfiles.
 - **Vector:** `packages/domain/test/fixtures/live-checkpoints.ndjson` fija en JCS, con sus SHA-256, el punto de control de cada límite de segmento del vector v1 y de los logs sintéticos escritos a mano. La prueba fija además el SHA-256 de cada log del vector para cada `live_state_version`, así que un cambio que altere uno de esos estados sin subir la versión falla en CI. Un log nuevo solo añade su digest.
 - **Persistencia** (desde el PR 3): la tabla append-only `live_derivation_checkpoints` (migración `0005`), con el punto de control entero en JCS y su SHA-256, el mismo de `liveCheckpointDigests`. Su clave es única por fuente, segmento y SHA-256 de las versiones, y la hora de escritura no entra en el hash. Solo la escribe `ingest`, con el bloqueo de la fuente, después de cada cierre de segmento durable (`LiveCheckpointWriter`, en `apps/market-data-worker`). Quien lo lee lo usa solo si pasa las comprobaciones de ADR-0017 §6 (`checkStoredCheckpoint`): integridad, identidad y enlace con `closed_source_segments`, en ese orden.
+- **Lectura** (desde el PR 4, `apps/market-data-worker/src/source-log/live-reader.ts`): un lector toma la foto del segmento abierto, busca el último punto de control válido por debajo de él (`LiveCheckpointLookup`, que en una sesión comparten los lectores y quien escribe, y avisa una sola vez de cada fila rechazada) y aplica después los segmentos cerrados posteriores, de uno en uno, y los eventos del abierto. Así el estado vivo es el del log durable entero sin leer los segmentos anteriores al punto de control.
 
 ## `MarketTick`
 

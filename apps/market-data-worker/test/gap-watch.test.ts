@@ -1,15 +1,20 @@
 import { type PendingGap } from '@buoh/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { GapWatch, type GapWatchFailure, type GapWatchInput } from '../src/deriv/gap-watch.js';
+import {
+  GapWatch,
+  type GapDerivation,
+  type GapWatchFailure,
+  type GapWatchInput,
+} from '../src/deriv/gap-watch.js';
 import { type HistoryRecoveryRequest } from '../src/deriv/history-recovery.js';
-import { LogIntegrityError } from '../src/source-log/source-event-log.js';
+import { LogIntegrityError, LogNotDerivableError } from '../src/source-log/source-event-log.js';
 import { START } from './support/connection-harness.js';
 import { flush, ManualClock } from './support/deriv-fixtures.js';
 import { REQUEST } from './support/recovery-harness.js';
 
-// El hueco pendiente durante una conexión de la sesión (ADR-0015 §4, «Cuándo»), con la lectura y la
-// derivación del log inyectadas: los casos que un log derivado por las reglas no da, como un
+// El hueco pendiente durante una conexión de la sesión (ADR-0015 §4, «Cuándo»), con la lectura del
+// estado vivo del log inyectada: los casos que un log derivado por las reglas no da, como un
 // extremo del hueco sin su tick. Reloj y temporizador manuales; ningún precio es de mercado.
 
 function forbidAmbientEffects(): void {
@@ -47,10 +52,29 @@ const AT_END = {
   symbol: 'SYNTH_100',
 };
 
-/** Un `GapWatch` de SYNTH_100 con un log que `derive` describe; `recover` anota cada pedido. */
+/**
+ * Lo que la vigilancia lee del estado vivo: el hueco de `REQUEST` con la cotización canónica de sus
+ * dos extremos, la de S y la de E, salvo la que se dé como `null`.
+ */
+function gapView(
+  quotes: { readonly end?: string | null; readonly start?: string | null } = {},
+): GapDerivation {
+  return {
+    gapQuotes: [
+      {
+        end_quote: quotes.end === undefined ? AT_END.quote_decimal : quotes.end,
+        start_quote: quotes.start === undefined ? AT_START.quote_decimal : quotes.start,
+        symbol: 'SYNTH_100',
+      },
+    ],
+    pendingGaps: [GAP],
+  };
+}
+
+/** Un `GapWatch` de SYNTH_100 con un log que `read` describe; `recover` anota cada pedido. */
 function watchHarness(
-  derive: GapWatchInput['derive'],
-  overrides: Partial<Pick<GapWatchInput, 'read' | 'recover'>> = {},
+  read: GapWatchInput['read'],
+  overrides: Partial<Pick<GapWatchInput, 'recover'>> = {},
 ) {
   const clock = new ManualClock(START);
   const alerts: Parameters<GapWatchInput['alert']>[0][] = [];
@@ -59,12 +83,11 @@ function watchHarness(
   let settled = 0;
   const watch = new GapWatch({
     alert: (payload) => alerts.push(payload),
-    derive,
     onFailure: (failure) => failures.push(failure),
     onSettled: () => {
       settled += 1;
     },
-    read: overrides.read ?? (() => Promise.resolve([])),
+    read,
     recover:
       overrides.recover ??
       ((request) => {
@@ -86,8 +109,8 @@ async function startAndTick(run: ReturnType<typeof watchHarness>): Promise<void>
 }
 
 describe('GapWatch: los extremos del hueco (ADR-0015 §4)', () => {
-  it('con los dos extremos en los ticks derivados, pide 2000 ms después el hueco con la cotización canónica de cada uno', async () => {
-    const run = watchHarness(() => ({ pendingGaps: [GAP], ticks: [AT_START, AT_END] }));
+  it('con los dos extremos en el estado vivo, pide 2000 ms después el hueco con la cotización canónica de cada uno', async () => {
+    const run = watchHarness(() => Promise.resolve(gapView()));
     await startAndTick(run);
     expect(run.clock.pendingDelays()).toEqual([2000]);
     await run.clock.advance(2000);
@@ -96,13 +119,14 @@ describe('GapWatch: los extremos del hueco (ADR-0015 §4)', () => {
     expect(run.alerts).toEqual([]);
   });
 
-  it.each<[string, readonly (typeof AT_START)[]]>([
-    ['el del high-watermark', [AT_END]],
-    ['el primero posterior al cierre', [AT_START]],
+  it.each<[string, GapDerivation]>([
+    ['el del high-watermark', gapView({ start: null })],
+    ['el primero posterior al cierre', gapView({ end: null })],
+    ['los dos, sin cotizaciones del símbolo', { gapQuotes: [], pendingGaps: [GAP] }],
   ])(
     'si falta el tick de un extremo, %s, no pide la historia: avisa una vez con history_boundary_unavailable y no deja nada pendiente',
-    async (_label, ticks) => {
-      const run = watchHarness(() => ({ pendingGaps: [GAP], ticks }));
+    async (_label, derived) => {
+      const run = watchHarness(() => Promise.resolve(derived));
       await startAndTick(run);
       run.watch.onTick({ ...AT_END, event_time_utc: '2026-03-02T10:00:02.000Z' });
       await run.clock.advance(10_000);
@@ -118,11 +142,9 @@ describe('GapWatch: los extremos del hueco (ADR-0015 §4)', () => {
 });
 
 describe('GapWatch: errores', () => {
-  it('si la derivación lanza, el log no se puede derivar: lo entrega como log_not_derivable, sin pedir la historia', async () => {
-    const error = new TypeError('La conexión se cerró dos veces.');
-    const run = watchHarness(() => {
-      throw error;
-    });
+  it('si el pliegue falla, el log no se puede derivar (LogNotDerivableError): lo entrega como log_not_derivable, sin pedir la historia', async () => {
+    const error = new LogNotDerivableError(new TypeError('La conexión se cerró dos veces.'));
+    const run = watchHarness(() => Promise.reject(error));
     run.watch.start();
     await flush();
 
@@ -140,9 +162,7 @@ describe('GapWatch: errores', () => {
     ],
     ['un error de programación', 'unexpected', new TypeError('sintético')],
   ])('si la lectura del log falla con %s, lo entrega como %s', async (_label, reason, error) => {
-    const run = watchHarness(() => ({ pendingGaps: [GAP], ticks: [AT_START, AT_END] }), {
-      read: () => Promise.reject(error),
-    });
+    const run = watchHarness(() => Promise.reject(error));
     run.watch.start();
     await flush();
 
@@ -152,10 +172,8 @@ describe('GapWatch: errores', () => {
 
   it('si la lectura dice que el log tuvo un fallo de persistencia (null), termina sin pedir la historia, sin avisar ni fallar, con la recuperación todavía pendiente', async () => {
     let reads = 0;
-    const run = watchHarness(() => ({ pendingGaps: [GAP], ticks: [AT_START, AT_END] }), {
-      // Al empezar, el log se lee; con el tick de E, ya falló.
-      read: () => Promise.resolve((reads += 1) === 1 ? [] : null),
-    });
+    // Al empezar, el log se lee; con el tick de E, ya falló.
+    const run = watchHarness(() => Promise.resolve((reads += 1) === 1 ? gapView() : null));
     await startAndTick(run);
     run.watch.onTick({ ...AT_END, event_time_utc: '2026-03-02T10:00:02.000Z' });
     await run.clock.advance(10_000);
@@ -172,7 +190,7 @@ describe('GapWatch: errores', () => {
 
   it('si recoverHistory lanza, es un error de programación: lo entrega como unexpected', async () => {
     const error = new TypeError('La conexión ya tiene una recuperación de historia en curso.');
-    const run = watchHarness(() => ({ pendingGaps: [GAP], ticks: [AT_START, AT_END] }), {
+    const run = watchHarness(() => Promise.resolve(gapView()), {
       recover: () => {
         throw error;
       },

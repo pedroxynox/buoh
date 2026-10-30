@@ -143,6 +143,12 @@ export class InMemorySourceLogStore implements SourceLogStore {
     );
   }
 
+  hasSourceEvent(source: string, eventId: string): Promise<boolean> {
+    return Promise.resolve(
+      this.rows.some((row) => row.source === source && row.event_id === eventId),
+    );
+  }
+
   insertLiveCheckpoint(row: StoredLiveCheckpoint): Promise<LiveCheckpointInsert> {
     const existing = this.checkpoints.find(
       (item) =>

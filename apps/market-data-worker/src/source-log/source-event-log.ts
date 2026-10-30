@@ -72,6 +72,23 @@ export class LogIntegrityError extends TypeError {
 }
 
 /**
+ * El pliegue del estado vivo falló con lo leído del log (ADR-0017 §3): el log no se puede derivar.
+ * Es un `LogIntegrityError`, así que quien lo recibe lo trata igual (`log_not_derivable`). Guarda
+ * el error del pliegue como `cause`, y su motivo saneado como `code`, así que `failureReason` da el
+ * mismo motivo que con ese error, como cuando fallaba `deriveMarketData`.
+ */
+export class LogNotDerivableError extends LogIntegrityError {
+  readonly code: string;
+
+  constructor(cause: unknown) {
+    const code = failureReason(cause);
+    super(`El log no se puede derivar: ${code}.`, { cause });
+    this.name = 'LogNotDerivableError';
+    this.code = code;
+  }
+}
+
+/**
  * Al leer o reabrir el log, no respondió un almacén: el de objetos o el índice. No dice nada del
  * contenido, así que se puede reintentar. `reason` es el motivo saneado (`failureReason`).
  */
@@ -487,14 +504,38 @@ export class SourceEventLog {
 
   /**
    * El punto de control de este log con esas versiones y el mayor segmento, por debajo de `below`
-   * si no es `null`, con su enlace con el log (`SourceLogStore.readLiveCheckpoint`). Lanza el error
-   * del almacén, sin convertirlo.
+   * si no es `null`, con su enlace con el log (`SourceLogStore.readLiveCheckpoint`). Si el almacén no
+   * responde, lanza `LogReadError`, como las demás lecturas del log.
    */
   readLiveCheckpoint(
     versionsSha256: string,
     below: number | null,
   ): Promise<LiveCheckpointCandidate | null> {
-    return this.#store.readLiveCheckpoint(this.source, versionsSha256, below);
+    return fromStore(() => this.#store.readLiveCheckpoint(this.source, versionsSha256, below));
+  }
+
+  /**
+   * ¿El índice de este log tiene el source event `eventId` (`sourceEventId`)? Mira las filas del
+   * almacén, sin leer objetos ni lo que la instancia tiene en memoria: el arranque comprueba con
+   * ella `cursor_ahead_of_log` (ADR-0017 §4). Si el almacén no responde, lanza `LogReadError`.
+   */
+  hasEvent(eventId: string): Promise<boolean> {
+    return fromStore(() => this.#store.hasSourceEvent(this.source, eventId));
+  }
+
+  /**
+   * La foto del segmento abierto: su índice y sus eventos, desde las líneas que esta instancia
+   * releyó al abrirse o escribió. Se toma al llamarla, sin esperar, así que nada de lo que se
+   * escriba después entra. Con ella, un lector que parte de un punto de control lee los segmentos
+   * cerrados por debajo de `segment_index` y después estos eventos (ADR-0017 §4). Tras un fallo de
+   * persistencia falla, como `readDurableSegments`.
+   */
+  openSegment(): { readonly events: SourceEvent[]; readonly segment_index: number } {
+    this.#assertUsable();
+    return {
+      events: this.#lines.map((line) => verified(() => parseLine(line))),
+      segment_index: this.#segmentIndex,
+    };
   }
 
   /** Las filas de los segmentos cerrados `[from, to]`, que tienen que estar todos cerrados. */

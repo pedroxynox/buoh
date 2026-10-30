@@ -18,7 +18,11 @@ import {
 
 import { type OperationalRegistry } from '../operational/registry.js';
 import { type ClosedSourceSegment } from '../source-log/ports.js';
-import { previousConnection, unrecordedClose } from '../source-log/previous-connection.js';
+import {
+  previousConnection,
+  unrecordedClose,
+  type PreviousConnection,
+} from '../source-log/previous-connection.js';
 import {
   LogPersistenceError,
   LogReadError,
@@ -131,6 +135,21 @@ export interface RawFirstIngestorInput {
    * (ADR-0017 §5). Si lanza, como `onDurable`.
    */
   readonly onSegmentClosed?: (segment: ClosedSourceSegment) => void;
+  /**
+   * Lee del log durable la conexión anterior (ADR-0015 §3) para `repairUnrecordedClose`. La sesión de
+   * ingesta la lee desde el último punto de control válido (`readPreviousConnection`, ADR-0017 §4);
+   * sin ella, del log entero (`previousConnection` de `readDurableSegments`). Como esas lecturas,
+   * lanza `LogReadError` si un almacén no responde y `LogIntegrityError` si el contenido no pasa sus
+   * comprobaciones.
+   */
+  readonly readPreviousConnection?: (log: SourceEventLog) => Promise<PreviousConnection | null>;
+}
+
+/** La conexión anterior del log entero, sin `readPreviousConnection`. */
+async function previousConnectionOfWholeLog(
+  log: SourceEventLog,
+): Promise<PreviousConnection | null> {
+  return previousConnection(await log.readDurableSegments());
 }
 
 /**
@@ -393,9 +412,11 @@ export class RawFirstIngestor {
         return failure;
       }
     }
-    let segments: SourceEvent[][];
+    let previous: PreviousConnection | null;
     try {
-      segments = await this.#log.readDurableSegments();
+      previous = await (this.#input.readPreviousConnection ?? previousConnectionOfWholeLog)(
+        this.#log,
+      );
     } catch (error) {
       // Solo un almacén que no responde cuenta como no poder reabrir el log: sin leerlo no se sabe
       // qué conexión cerrar. Un contenido que no pasa sus comprobaciones (`LogIntegrityError`) no se
@@ -408,7 +429,6 @@ export class RawFirstIngestor {
         closeId(),
       );
     }
-    const previous = previousConnection(segments);
     if (previous === null || previous.closed) {
       return {
         closed_at_utc: previous?.closed_at_utc ?? null,
@@ -436,24 +456,26 @@ export class RawFirstIngestor {
   }
 
   /**
-   * Los source events durables del log (`SourceEventLog.readDurableSegments`), o `null` si el log tuvo
-   * un fallo de persistencia y todavía no se reabrió: lo que tiene en memoria podría no ser lo
-   * durable, y la entrada sigue cerrada. Un log fallido no lo reabre. Uno desactualizado
-   * (`markLogStale`) lo reabre antes, como las demás operaciones: si un almacén no responde al
-   * reabrirlo, queda `persistence_unavailable` con un ID nuevo como `observed_ref`, como tras un
-   * fallo, y da `null`. La sesión lo deriva durante una conexión para seguir el hueco pendiente
-   * (ADR-0015 §4); un fallo del log cierra esa conexión. Como `SourceEventLog.readDurableSegments`,
-   * lanza `LogReadError` si un almacén no responde al leer y `LogIntegrityError` si el contenido no
-   * pasa sus comprobaciones, también al reabrirlo.
+   * Lee el log durable con `read`, que recibe el log vigente, o da `null` si el log tuvo un fallo de
+   * persistencia y todavía no se reabrió: lo que tiene en memoria podría no ser lo durable, y la
+   * entrada sigue cerrada. Un log fallido no lo reabre. Uno desactualizado (`markLogStale`) lo
+   * reabre antes, como las demás operaciones: si un almacén no responde al reabrirlo, queda
+   * `persistence_unavailable` con un ID nuevo como `observed_ref`, como tras un fallo, y da `null`.
+   * Llama a `read` sin esperar después de comprobar el log, así que una lectura que toma su foto al
+   * llamarla, como `SourceEventLog.readDurableSegments` o las que parten del último punto de control
+   * (`readLiveState`), incluye todo lo que ya es durable. La sesión lee así el estado vivo durante una
+   * conexión para seguir el hueco pendiente (ADR-0015 §4); un fallo del log cierra esa conexión.
+   * Rechaza con lo que lance `read`, y con `LogIntegrityError` si el contenido no pasa sus
+   * comprobaciones al reabrirlo.
    */
-  async readDurableSegments(): Promise<SourceEvent[][] | null> {
+  async readLog<T>(read: (log: SourceEventLog) => Promise<T>): Promise<T | null> {
     if (this.#logFailed) {
       return null;
     }
     if (this.#logStale && (await this.#reopenLog(this.#input.nextId())) !== null) {
       return null;
     }
-    return this.#log.readDurableSegments();
+    return read(this.#log);
   }
 
   /**

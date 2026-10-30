@@ -13,6 +13,7 @@ import {
   checkpointStoreRules,
   closeSegments,
   logicalSha256,
+  sourceEventLookupRules,
   storedCheckpointOf,
 } from '../test/support/checkpoint-store-rules.js';
 import { syntheticSchemas } from '../test/support/connection-harness.js';
@@ -96,6 +97,10 @@ describe('migración 0005', () => {
       '0005_punto_de_control_en_vivo.sql',
     ]);
   });
+});
+
+describe('PostgresSourceLogStore: búsqueda de un evento en el índice (ADR-0017 §4)', () => {
+  sourceEventLookupRules(() => stores.sourceLog);
 });
 
 describe('PostgresSourceLogStore: puntos de control del estado vivo (ADR-0017 §5 y §6)', () => {

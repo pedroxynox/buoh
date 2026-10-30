@@ -1,5 +1,5 @@
 import { type IngestionCursor, type SourceEvent } from '@buoh/contracts';
-import { deriveMarketData, sourceEventTime, type DerivedMarketData } from '@buoh/domain';
+import { liveDerivationView, sourceEventTime } from '@buoh/domain';
 
 import { ObjectReadError } from '../errors.js';
 import { RawFirstIngestor } from '../ingestion/raw-first-ingestor.js';
@@ -11,7 +11,12 @@ import {
 import { contentKey } from '../object-keys.js';
 import { stderrAlert, type OperationalAlert } from '../operational/registry.js';
 import { type ObjectStore } from '../ports.js';
-import { LiveCheckpointWriter, type LiveCheckpointFailure } from '../source-log/live-checkpoint.js';
+import {
+  LiveCheckpointLookup,
+  LiveCheckpointWriter,
+  type LiveCheckpointFailure,
+} from '../source-log/live-checkpoint.js';
+import { liveWatermark, readLiveState, readPreviousConnection } from '../source-log/live-reader.js';
 import {
   failureReason,
   LogIntegrityError,
@@ -35,7 +40,12 @@ import {
 } from './connection.js';
 import { GapWatch, type GapWatchFailure } from './gap-watch.js';
 import { type HistoryRecoveryOutcome } from './history-recovery.js';
-import { checkLogContent, isCursorAheadOfLog } from './log-check.js';
+import {
+  checkLogSinceCheckpoint,
+  type StartupCheck,
+  type StartupLog,
+  type StoredCursors,
+} from './log-check.js';
 import { DERIV_SCHEMA_RELEASE, schemaEntryName } from './schema-archive.js';
 
 /** El bloqueo de la fuente que tiene la sesión (ADR-0012 §9): `SourceLock` en PostgreSQL. */
@@ -360,101 +370,15 @@ function holdsOtherBytes(error: unknown): boolean {
   );
 }
 
-/** Lo que el arranque lee del almacén del cursor (ADR-0015 §5). */
-interface StoredCursors {
-  /** El último cursor del símbolo pedido, o `null` si no tiene ninguno. */
-  readonly latest: IngestionCursor | null;
-  /** Los símbolos que tienen algún cursor de la fuente. */
-  readonly symbols: readonly string[];
-}
-
 /** El último cursor del símbolo y los símbolos con algún cursor de la fuente. */
 async function readCursors(
   status: IngestionStatusStore,
-  preparation: DerivPreparation,
+  of: Pick<DerivPreparation, 'profile' | 'symbol'>,
 ): Promise<StoredCursors> {
-  const { source } = preparation.profile;
+  const { source } = of.profile;
   const symbols = await status.cursorSymbols(source);
-  const latest = await status.latestCursor(source, preparation.symbol);
+  const latest = await status.latestCursor(source, of.symbol);
   return { latest: latest?.cursor ?? null, symbols };
-}
-
-/** Lo que la sesión toma del log al arrancar, cuando pasa sus comprobaciones. */
-interface StartupLog {
-  /** La conexión del último evento del log, o `null` si está vacío. */
-  readonly connection_id: string | null;
-  /** La hora del último tick del símbolo en la derivación, la mayor, o `null` si no tiene ninguno. */
-  readonly high_watermark_utc: string | null;
-  /** La hora del evento durable más antiguo, el primero del log, o `null` si está vacío. */
-  readonly oldest_utc: string | null;
-}
-
-/**
- * La hora del último tick derivado del símbolo: los ticks van en orden canónico, por su hora, así
- * que es la mayor, el high-watermark del símbolo. `null` si no tiene ninguno.
- */
-function latestTickTime(ticks: DerivedMarketData['ticks'], symbol: string): string | null {
-  return ticks.findLast((tick) => tick.symbol === symbol)?.event_time_utc ?? null;
-}
-
-/**
- * Las comprobaciones del log antes de conectar (ADR-0015 §5), en este orden:
- *
- * 1. a 3. las del contenido del log, que comparte con `data:health` (`checkLogContent`): todos sus
- *    frames son de este conector (`connector_version_mismatch`), se deriva con el perfil de
- *    medición (`log_not_derivable`) y es del símbolo pedido (`symbol_mismatch`), con los símbolos
- *    de los cursores de la fuente;
- * 4. el último cursor del símbolo apunta a un evento del log (`cursor_ahead_of_log`,
- *    `isCursorAheadOfLog`, que también comparte con `data:health`): si no, el log perdió datos
- *    confirmados;
- * 5. con `retentionMs`, el evento durable más antiguo, el primero del log, no la cumplió todavía
- *    (`retention_expired`, ADR-0015 §7). Su hora es la de `sourceEventTime`: la recepción de un
- *    frame y `occurred_at_utc` de los demás.
- *
- * Sin `cursors`, no hay comprobación con el cursor. Devuelve el fin `failed` o, si las pasa, lo que
- * la sesión toma del log.
- */
-function checkLog(
-  segments: readonly (readonly SourceEvent[])[],
-  preparation: DerivPreparation,
-  startup: {
-    readonly cursors: StoredCursors | null;
-    readonly now: string;
-    readonly retentionMs: number | undefined;
-  },
-): { readonly end: SessionEnd } | { readonly log: StartupLog } {
-  const { profile, symbol } = preparation;
-  const { cursors } = startup;
-  const checked = checkLogContent({
-    cursorSymbols: cursors?.symbols ?? [],
-    profile,
-    segments,
-    symbol,
-  });
-  if (checked.status === 'failed') {
-    return { end: failed(checked.reason, checked.detail) };
-  }
-  const { derived } = checked;
-  const events = segments.flat();
-  if (isCursorAheadOfLog({ cursor: cursors?.latest ?? null, segments })) {
-    return { end: failed('cursor_ahead_of_log') };
-  }
-  const oldest = events[0];
-  const oldestUtc = oldest === undefined ? null : sourceEventTime(oldest);
-  if (
-    startup.retentionMs !== undefined &&
-    oldestUtc !== null &&
-    Date.parse(startup.now) >= Date.parse(oldestUtc) + startup.retentionMs
-  ) {
-    return { end: failed('retention_expired') };
-  }
-  return {
-    log: {
-      connection_id: events.at(-1)?.connection_id ?? null,
-      high_watermark_utc: latestTickTime(derived.ticks, symbol),
-      oldest_utc: oldestUtc,
-    },
-  };
 }
 
 /** Una sesión en curso: su estado vive aquí, y `startDerivSession` expone `done` y `stop`. */
@@ -488,6 +412,12 @@ class SessionRun {
   #failure: SessionFailure | null = null;
   /** Quien escribe el punto de control del estado vivo, con `writeLiveCheckpoints`. */
   #checkpoints: LiveCheckpointWriter | null = null;
+  /**
+   * La búsqueda del último punto de control válido que comparten los lectores en vivo de la sesión y
+   * quien los escribe (ADR-0017 §4 y §6): avisa una sola vez de cada fila rechazada. Se crea con la
+   * preparación.
+   */
+  #lookup: LiveCheckpointLookup | null = null;
   /** Ya empezó a contar el plazo del cierre previsto, con el primer tick durable de la sesión. */
   #deadlineArmed = false;
   #cancelDeadline: (() => void) | null = null;
@@ -626,7 +556,15 @@ class SessionRun {
       return preparation.end;
     }
     this.#preparation = preparation;
-    const opened = await this.#openLog(preparation);
+    const lookup = new LiveCheckpointLookup({
+      alert: (payload) => {
+        this.#alert(payload);
+      },
+      profile: preparation.profile,
+      symbol: preparation.symbol,
+    });
+    this.#lookup = lookup;
+    const opened = await this.#openLog(lookup);
     if ('end' in opened) {
       return opened.end;
     }
@@ -645,6 +583,8 @@ class SessionRun {
         this.#checkpoints?.onClosed(segment);
       },
       profile: preparation.profile,
+      // La conexión anterior, desde el último punto de control válido (ADR-0017 §4).
+      readPreviousConnection: (current) => readPreviousConnection(current, lookup),
       registry: input.registry,
       // Siempre con el bloqueo vigente: después de perderlo, la sesión toma otro antes de escribir.
       reopenLog: () => input.openLog(this.#heldLock()),
@@ -676,6 +616,7 @@ class SessionRun {
         },
         // El log vigente del ingestor: también el que reabrió con un bloqueo nuevo.
         log: () => ingestor.log,
+        lookup,
         now: input.now,
         onFailure: (failure) => {
           this.#onCheckpointFailure(failure);
@@ -722,13 +663,14 @@ class SessionRun {
   }
 
   /**
-   * Toma el bloqueo, abre el log con él, lo lee entero, lee el cursor si tiene `status` y comprueba
-   * el log antes de conectar (`checkLog`, ADR-0015 §5). Si un almacén del log o el del cursor no
-   * responde, espera y lo intenta otra vez, con un bloqueo nuevo si mientras tanto se perdió. Si el
-   * contenido del log no pasa sus comprobaciones, el fin es `log_not_derivable`.
+   * Toma el bloqueo, abre el log con él, lee el cursor si tiene `status` y comprueba el log antes de
+   * conectar, desde su último punto de control válido (`checkLogSinceCheckpoint`, ADR-0015 §5 y
+   * ADR-0017 §4). Si un almacén del log o el del cursor no responde, espera y lo intenta otra vez,
+   * con un bloqueo nuevo si mientras tanto se perdió. Si el contenido del log no pasa sus
+   * comprobaciones, el fin es `log_not_derivable`.
    */
   async #openLog(
-    preparation: DerivPreparation,
+    lookup: LiveCheckpointLookup,
   ): Promise<
     { readonly end: SessionEnd } | { readonly log: SourceEventLog; readonly startup: StartupLog }
   > {
@@ -747,20 +689,12 @@ class SessionRun {
         continue;
       }
       let log: SourceEventLog;
-      let segments: SourceEvent[][];
       try {
         log = await this.#input.openLog(this.#heldLock());
-        segments = await log.readDurableSegments();
       } catch (error) {
-        if (error instanceof LogIntegrityError) {
-          return { end: notDerivable(error) };
-        }
-        if (!(error instanceof LogReadError)) {
-          throw error;
-        }
-        this.#alert({ event: 'source_log_unavailable', reason: error.reason });
-        if (!(await this.#backoff())) {
-          return { end: COMPLETED };
+        const end = await this.#onStartupReadFailure(error);
+        if (end !== null) {
+          return { end };
         }
         continue;
       }
@@ -768,7 +702,7 @@ class SessionRun {
       let cursors: StoredCursors | null = null;
       if (status !== undefined) {
         try {
-          cursors = await readCursors(status, preparation);
+          cursors = await readCursors(status, lookup);
         } catch (error) {
           // Cualquier rechazo cuenta como un almacén que no responde: la interfaz del almacén no
           // separa ese caso del de una fila que no pasa sus comprobaciones. El motivo sale saneado:
@@ -780,13 +714,41 @@ class SessionRun {
           continue;
         }
       }
-      const checked = checkLog(segments, preparation, {
-        cursors,
-        now: this.#input.now(),
-        retentionMs: this.#input.retentionMs,
-      });
-      return 'end' in checked ? checked : { log, startup: checked.log };
+      let checked: StartupCheck;
+      try {
+        checked = await checkLogSinceCheckpoint(log, lookup, {
+          cursors,
+          now: this.#input.now(),
+          retentionMs: this.#input.retentionMs,
+        });
+      } catch (error) {
+        const end = await this.#onStartupReadFailure(error);
+        if (end !== null) {
+          return { end };
+        }
+        continue;
+      }
+      return checked.status === 'failed'
+        ? { end: failed(checked.reason, checked.detail) }
+        : { log, startup: checked.startup };
     }
+  }
+
+  /**
+   * Un rechazo al abrir o leer el log en el arranque: con `LogIntegrityError`, el log no se puede
+   * derivar, y ese es el fin. Con `LogReadError`, un almacén no respondió: avisa con
+   * `source_log_unavailable` y espera, y da `null` para intentarlo otra vez, o `completed` si la
+   * parada no deja empezar la espera. Cualquier otro error es de programación y se relanza.
+   */
+  async #onStartupReadFailure(error: unknown): Promise<SessionEnd | null> {
+    if (error instanceof LogIntegrityError) {
+      return notDerivable(error);
+    }
+    if (!(error instanceof LogReadError)) {
+      throw error;
+    }
+    this.#alert({ event: 'source_log_unavailable', reason: error.reason });
+    return (await this.#backoff()) ? null : COMPLETED;
   }
 
   /**
@@ -1003,26 +965,23 @@ class SessionRun {
 
   /**
    * Vigila durante la conexión el hueco pendiente del símbolo y pide su historia por ella, una vez
-   * como mucho (ADR-0015 §4, «Cuándo»; ver `GapWatch`). Lee el log del ingestor de la sesión, ya con
-   * el cierre reparado del intento, y lo deriva con el perfil de medición; cada derivación sube
-   * también el high-watermark del cursor. Cada recuperación pedida entra en el resultado de la
-   * sesión.
+   * como mucho (ADR-0015 §4, «Cuándo»; ver `GapWatch`). Lee el estado vivo del log del ingestor de
+   * la sesión, ya con el cierre reparado del intento, desde su último punto de control válido y con
+   * el perfil de medición (`readLiveState`, ADR-0017 §4); cada lectura sube también el
+   * high-watermark del cursor. Cada recuperación pedida entra en el resultado de la sesión.
    */
   #watchGap(
     connection: DerivConnection,
     ingestor: RawFirstIngestor,
     preparation: DerivPreparation,
   ): void {
+    const lookup = this.#lookup;
+    if (lookup === null) {
+      throw new TypeError('La vigilancia del hueco necesita la búsqueda de puntos de control.');
+    }
     const watch: GapWatch = new GapWatch({
       alert: (payload) => {
         this.#alert(payload);
-      },
-      derive: (segments) => {
-        const derived = deriveMarketData(segments, preparation.profile);
-        // Todo lo derivado es durable, también un tick que el log adoptó al reabrirse, que no pasó
-        // por el sink: el high-watermark del cursor sale también del log (ADR-0015 §3).
-        this.#raiseWatermark(latestTickTime(derived.ticks, preparation.symbol));
-        return derived;
       },
       onFailure: (failure) => {
         this.#onWatchFailure(watch, failure);
@@ -1030,7 +989,14 @@ class SessionRun {
       onSettled: () => {
         this.#onSettled(watch);
       },
-      read: () => ingestor.readDurableSegments(),
+      read: () =>
+        ingestor.readLog(async (log) => {
+          const view = liveDerivationView(await readLiveState(log, lookup));
+          // Todo lo leído es durable, también un tick que el log adoptó al reabrirse, que no pasó
+          // por el sink: el high-watermark del cursor sale también del log (ADR-0015 §3).
+          this.#raiseWatermark(liveWatermark(view, preparation.symbol));
+          return view;
+        }),
       recover: (request) => {
         const outcome = connection.recoverHistory(request);
         this.#recoveries.push(outcome);

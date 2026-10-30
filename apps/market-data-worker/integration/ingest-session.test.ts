@@ -15,6 +15,7 @@ import {
   createPool,
   loadConfig,
   migrate,
+  ObjectReadError,
   openLockedSourceLog,
   openStores,
   pendingMigrations,
@@ -25,6 +26,7 @@ import {
   type IngestReport,
   type ObjectStore,
   type OperationalAlert,
+  type SourceLogStore,
   type WorkerConfig,
 } from '../src/index.js';
 import { sourceLockHolder } from '../src/postgres/source-lock.js';
@@ -97,10 +99,15 @@ async function eventually(check: () => boolean | Promise<boolean>): Promise<void
  * anota en orden cada escritura en el bucket que pide la sesión, con su clave, y cada `connect`: el
  * bucket guarda los objetos de ejecuciones anteriores, así que la prueba ve aquí lo que escribe esta.
  */
-function capture(status: IngestionStatusStore = stores.ingestionStatus) {
+function capture(
+  status: IngestionStatusStore = stores.ingestionStatus,
+  refused: ReadonlySet<string> = new Set(),
+) {
   const sockets: FakeDerivSocket[] = [];
   const alerts: Parameters<OperationalAlert>[0][] = [];
   const timeline: string[] = [];
+  /** Las lecturas del log de un objeto de `refused`, que fallan como si faltara. */
+  const refusedReads: string[] = [];
   const objects: ObjectStore = {
     bucket: stores.objects.bucket,
     get: (key, maxBytes) => stores.objects.get(key, maxBytes),
@@ -108,6 +115,33 @@ function capture(status: IngestionStatusStore = stores.ingestionStatus) {
       timeline.push(`put:${key}`);
       return stores.objects.putIfAbsent(key, bytes, contentType);
     },
+  };
+  const logObjects: ObjectStore = {
+    bucket: stores.objects.bucket,
+    get: (key, maxBytes) => {
+      if (refused.has(key)) {
+        refusedReads.push(key);
+        return Promise.reject(new ObjectReadError('not_found', key));
+      }
+      return stores.objects.get(key, maxBytes);
+    },
+    putIfAbsent: (key, bytes, contentType) => stores.objects.putIfAbsent(key, bytes, contentType),
+  };
+  /** Los IDs que el log buscó en el índice de PostgreSQL (`hasSourceEvent`), en orden. */
+  const eventLookups: string[] = [];
+  const { sourceLog } = stores;
+  const logStore: SourceLogStore = {
+    hasSourceEvent: (source, eventId) => {
+      eventLookups.push(eventId);
+      return sourceLog.hasSourceEvent(source, eventId);
+    },
+    insertClosedSegment: (segment) => sourceLog.insertClosedSegment(segment),
+    insertIndexRow: (row) => sourceLog.insertIndexRow(row),
+    insertLiveCheckpoint: (row) => sourceLog.insertLiveCheckpoint(row),
+    listClosedSegments: (source, from, to) => sourceLog.listClosedSegments(source, from, to),
+    readLiveCheckpoint: (source, versionsSha256, below) =>
+      sourceLog.readLiveCheckpoint(source, versionsSha256, below),
+    readLogState: (source) => sourceLog.readLogState(source),
   };
   let signal: (() => void) | null = null;
   const report: Promise<IngestReport> = runIngest({
@@ -125,9 +159,9 @@ function capture(status: IngestionStatusStore = stores.ingestionStatus) {
     now: clock.now,
     openLog: (lock) =>
       openLockedSourceLog(lock, {
-        objects: stores.objects,
+        objects: logObjects,
         source: DERIV_SOURCE,
-        store: stores.sourceLog,
+        store: logStore,
         zlibVersion: process.versions.zlib,
       }),
     random: () => 0,
@@ -144,6 +178,8 @@ function capture(status: IngestionStatusStore = stores.ingestionStatus) {
   });
   return {
     alerts,
+    eventLookups,
+    refusedReads,
     report,
     sockets,
     stop: () => {
@@ -464,6 +500,48 @@ describe('runIngest sobre PostgreSQL y S3-compatible (ADR-0015 §6 y §7)', () =
       checkpoint: { segment_index: 1 },
       status: 'valid',
     });
+    expect(run.alerts).toEqual([]);
+  });
+
+  it('una tercera ejecución parte del último punto de control: arranca, busca el cursor en el índice, repara y vigila sin leer ningún objeto de los segmentos ya cerrados', async () => {
+    await clock.advance(10_000);
+    const log = await SourceEventLog.open({
+      objects: stores.objects,
+      source: DERIV_SOURCE,
+      store: stores.sourceLog,
+      zlibVersion: process.versions.zlib,
+    });
+    const closed = await stores.sourceLog.listClosedSegments(
+      DERIV_SOURCE,
+      0,
+      log.openSegmentIndex - 1,
+    );
+    expect(closed.map((segment) => segment.segment_index)).toEqual([0, 1]);
+    const cursor = (await cursorRows()).at(-1)?.['last_durable_source_event_id'];
+    expect(typeof cursor).toBe('string');
+    // Leer cualquiera de esos objetos fallaría como si faltara: `log_not_derivable`.
+    const run = capture(
+      stores.ingestionStatus,
+      new Set(closed.map((segment) => contentKey(segment.object_bytes_sha256))),
+    );
+    await eventually(() => run.sockets.length === 1);
+    const [socket] = run.sockets;
+    if (socket === undefined) {
+      throw new TypeError('Falta el socket.');
+    }
+    socket.open();
+    await eventually(() => socket.requests().some((request) => 'active_symbols' in request));
+    run.stop();
+    const report = await run.report;
+
+    expect(report.end).toEqual({ status: 'completed' });
+    expect(run.refusedReads).toEqual([]);
+    // El arranque buscó en el índice el evento del último cursor, y lo encontró.
+    expect(run.eventLookups).toEqual([cursor]);
+    // Escribió el punto de control del segmento que cerró al parar, el pliegue del log entero.
+    const checkpoints = await storedCheckpoints();
+    expect(checkpoints.map((item) => item.segment_index)).toEqual([0, 1, 2]);
+    expect(checkpoints).toEqual(await foldedCheckpoints());
     expect(run.alerts).toEqual([]);
   });
 });
