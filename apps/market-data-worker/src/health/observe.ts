@@ -1,14 +1,20 @@
-import { sha256Hex, type DeploymentEnvironment, type SourceEvent } from '@buoh/contracts';
-import { SOURCE_LIMITS } from '@buoh/domain';
+import { sha256Hex, type DeploymentEnvironment, type IngestionCursor } from '@buoh/contracts';
+import { SOURCE_LIMITS, type PipelineProfile } from '@buoh/domain';
 
+import { checkFoldedContent, foldSinceCheckpoint } from '../deriv/log-check.js';
 import { createDerivMeasurementProfileFromSourceSchema, DERIV_SOURCE } from '../deriv/profile.js';
 import { DERIV_SCHEMA_RELEASE, type ExpectedSchemaArchive } from '../deriv/schema-archive.js';
 import { SOURCE_SCHEMA_ENTRY } from '../deriv/session.js';
 import { ObjectReadError } from '../errors.js';
 import { type IngestionStatusStore } from '../ingestion/status.js';
 import { contentKey } from '../object-keys.js';
-import { OperationalRegistry, type OperationalStore } from '../operational/registry.js';
+import {
+  OperationalRegistry,
+  type OperationalAlert,
+  type OperationalStore,
+} from '../operational/registry.js';
 import { type ObjectStore } from '../ports.js';
+import { LiveCheckpointLookup } from '../source-log/live-checkpoint.js';
 import { type SourceLogStore } from '../source-log/ports.js';
 import {
   failureReason,
@@ -16,7 +22,7 @@ import {
   LogReadError,
   SourceEventLog,
 } from '../source-log/source-event-log.js';
-import { type HealthObservation } from './evaluate.js';
+import { type HealthObservation, type ObservedLog } from './evaluate.js';
 
 /**
  * Lo que lee `data:health` (ADR-0015 §8, «Entradas»), en el esquema PostgreSQL y el bucket de la
@@ -37,8 +43,11 @@ export interface HealthStores {
   readonly objects: Pick<ObjectStore, 'bucket' | 'get'>;
   /** El registro operativo (`PostgresOperationalStore`). */
   readonly operational: Pick<OperationalStore, 'load'>;
-  /** El índice del log (`PostgresSourceLogStore`). */
-  readonly sourceLog: Pick<SourceLogStore, 'listClosedSegments' | 'readLogState'>;
+  /** El índice del log y los puntos de control de su estado vivo (`PostgresSourceLogStore`). */
+  readonly sourceLog: Pick<
+    SourceLogStore,
+    'hasSourceEvent' | 'listClosedSegments' | 'readLiveCheckpoint' | 'readLogState'
+  >;
   /**
    * El PID de la sesión de PostgreSQL que tiene el bloqueo de la fuente según `pg_locks`, o `null`
    * (`sourceLockHolder`): el escritor vivo.
@@ -46,6 +55,17 @@ export interface HealthStores {
   lockHolder(source: string): Promise<number | null>;
   /** Las migraciones del worker que el esquema todavía no tiene, sin aplicar nada. */
   pendingMigrations(): Promise<readonly string[]>;
+}
+
+/**
+ * Lo que la observación cuenta mientras lee, para quien la espera con un plazo (ADR-0017 §6): las
+ * alertas de los puntos de control que rechaza y si está reconstruyendo el estado vivo.
+ */
+export interface HealthObservationProgress {
+  /** Las alertas `checkpoint_rejected`, en orden, saneadas como las de la sesión. */
+  readonly alerts: Parameters<OperationalAlert>[0][];
+  /** Lee y pliega los segmentos cerrados posteriores al último punto de control válido. */
+  rebuilding: boolean;
 }
 
 export interface ObserveDataHealthInput {
@@ -57,6 +77,8 @@ export interface ObserveDataHealthInput {
   readonly nextId: () => string;
   /** La hora UTC con milisegundos (`toISOString()`). */
   readonly now: () => string;
+  /** Recibe las alertas y el avance de la reconstrucción; sin él, no los recibe nadie. */
+  readonly progress?: HealthObservationProgress;
   readonly stores: HealthStores;
   /** El símbolo pedido. */
   readonly symbol: string;
@@ -121,38 +143,10 @@ async function fromStore<T>(read: () => Promise<T>): Promise<T> {
   }
 }
 
-/**
- * El log durable, cerrado y abierto, leído sin el bloqueo y sin escribir: `SourceEventLog.open` y
- * `readDurableSegments` sobre almacenes que rechazan toda escritura. Un contenido que no pasa sus
- * comprobaciones (`LogIntegrityError`) es `log_not_derivable` (regla 2); un almacén que no responde
- * (`LogReadError`), la regla 3.
- */
-async function readLog(stores: HealthStores): Promise<SourceEvent[][]> {
-  const { objects, sourceLog } = stores;
+/** Una lectura del log: su contenido que no pasa (regla 2) o un almacén que no responde (regla 3). */
+async function fromLog<T>(read: () => Promise<T>): Promise<T> {
   try {
-    const log = await SourceEventLog.open({
-      objects: {
-        bucket: objects.bucket,
-        get: (key, maxBytes) => objects.get(key, maxBytes),
-        putIfAbsent: refuseWrite,
-      },
-      source: DERIV_SOURCE,
-      store: {
-        // `readDurableSegments` no busca en el índice ni lee puntos de control: `data:health`
-        // todavía deriva el log entero.
-        hasSourceEvent: () =>
-          Promise.reject(new TypeError('data:health no busca eventos en el índice.')),
-        insertClosedSegment: refuseWrite,
-        insertIndexRow: refuseWrite,
-        insertLiveCheckpoint: refuseWrite,
-        listClosedSegments: (source, from, to) => sourceLog.listClosedSegments(source, from, to),
-        readLiveCheckpoint: () =>
-          Promise.reject(new TypeError('data:health no lee puntos de control.')),
-        readLogState: (source) => sourceLog.readLogState(source),
-      },
-      zlibVersion: UNUSED_WRITER_VERSION,
-    });
-    return await log.readDurableSegments();
+    return await read();
   } catch (error) {
     if (error instanceof LogIntegrityError) {
       throw incompatible('log_not_derivable');
@@ -161,6 +155,86 @@ async function readLog(stores: HealthStores): Promise<SourceEvent[][]> {
       throw unanswered(error.reason);
     }
     throw error;
+  }
+}
+
+/**
+ * El log durable abierto sin el bloqueo y sin escribir: `SourceEventLog.open`, que lee el estado del
+ * índice y relee el segmento abierto, sobre almacenes que rechazan toda escritura. Cada lectura de
+ * los segmentos cerrados es de la reconstrucción del estado vivo desde el último punto de control
+ * válido: la anota en `progress`.
+ */
+function openLog(
+  stores: HealthStores,
+  progress: HealthObservationProgress,
+): Promise<SourceEventLog> {
+  const { objects, sourceLog } = stores;
+  return fromLog(() =>
+    SourceEventLog.open({
+      objects: {
+        bucket: objects.bucket,
+        get: (key, maxBytes) => objects.get(key, maxBytes),
+        putIfAbsent: refuseWrite,
+      },
+      source: DERIV_SOURCE,
+      store: {
+        hasSourceEvent: (source, eventId) => sourceLog.hasSourceEvent(source, eventId),
+        insertClosedSegment: refuseWrite,
+        insertIndexRow: refuseWrite,
+        insertLiveCheckpoint: refuseWrite,
+        listClosedSegments: (source, from, to) => {
+          progress.rebuilding = true;
+          return sourceLog.listClosedSegments(source, from, to);
+        },
+        readLiveCheckpoint: (source, versionsSha256, below) =>
+          sourceLog.readLiveCheckpoint(source, versionsSha256, below),
+        readLogState: (source) => sourceLog.readLogState(source),
+      },
+      zlibVersion: UNUSED_WRITER_VERSION,
+    }),
+  );
+}
+
+/**
+ * El log durable desde su último punto de control válido (ADR-0017 §4 y §6), sin escribir nada. Sin
+ * perfil, solo dice si tiene eventos. Con él, lo pliega desde el último punto de control válido por
+ * debajo del segmento abierto que leyó `SourceEventLog.open` (`foldSinceCheckpoint`), así que un
+ * segmento que se cierre mientras lee no entra dos veces, y avisa en `progress` de cada fila que
+ * rechaza. Como el arranque, solo si el contenido pasa sus comprobaciones (`checkFoldedContent`),
+ * busca en el índice el evento del último cursor del símbolo (`SourceEventLog.hasEvent`). Lanza
+ * `ObservationEnd` con la regla 2 o la 3 si el contenido no pasa las del log o un almacén no
+ * responde.
+ */
+export async function readObservedLog(
+  log: SourceEventLog,
+  input: {
+    readonly cursorSymbols: readonly string[];
+    readonly latestCursor: IngestionCursor | null;
+    readonly profile: PipelineProfile | null;
+    readonly progress: HealthObservationProgress;
+    readonly symbol: string;
+  },
+): Promise<ObservedLog> {
+  const { cursorSymbols, latestCursor, profile, progress, symbol } = input;
+  if (profile === null) {
+    return { empty: log.firstEventTimeUtc === null, status: 'unprofiled' };
+  }
+  const lookup = new LiveCheckpointLookup({
+    alert: (payload) => progress.alerts.push(payload),
+    profile,
+    symbol,
+  });
+  try {
+    const fold = await fromLog(() => foldSinceCheckpoint(log, lookup));
+    progress.rebuilding = false;
+    const cursorInLog =
+      latestCursor === null ||
+      checkFoldedContent(fold, { cursorSymbols, symbol }).status === 'failed'
+        ? null
+        : await fromLog(() => log.hasEvent(latestCursor.last_durable_source_event_id));
+    return { cursor_in_log: cursorInLog, fold, status: 'folded' };
+  } finally {
+    progress.rebuilding = false;
   }
 }
 
@@ -203,8 +277,9 @@ async function readSourceSchema(
  *    lee el log ya dejó su cierre en él;
  * 3. los símbolos de los cursores de la fuente y el último cursor del símbolo pedido, antes que el
  *    log, como el arranque: un cursor escrito mientras se lee apunta a un evento que el índice ya
- *    tenía; después, el log durable y el esquema de fuente guardado, con el que arma el perfil de
- *    medición; sin él, el perfil es `null` y la evaluación decide;
+ *    tenía; después, el estado del log y su segmento abierto, el esquema de fuente guardado, con el
+ *    que arma el perfil de medición, y el log desde su último punto de control válido, con ese
+ *    perfil (`readObservedLog`); sin esquema, el perfil es `null` y la evaluación decide;
  * 4. los tipos abiertos del registro operativo y el último dataset activo de la fuente en el
  *    entorno.
  *
@@ -216,6 +291,7 @@ async function readSourceSchema(
 export async function observeDataHealth(input: ObserveDataHealthInput): Promise<HealthObservation> {
   const { stores, symbol } = input;
   const expected = input.expected ?? DERIV_SCHEMA_RELEASE;
+  const progress = input.progress ?? { alerts: [], rebuilding: false };
   try {
     const pending = await fromStore(() => stores.pendingMigrations());
     if (pending.length > 0) {
@@ -229,8 +305,23 @@ export async function observeDataHealth(input: ObserveDataHealthInput): Promise<
     const latestCursor = await fromStore(() =>
       stores.ingestionStatus.latestCursor(DERIV_SOURCE, symbol),
     );
-    const segments = await readLog(stores);
+    const log = await openLog(stores, progress);
     const sourceSchema = await readSourceSchema(stores.objects, expected);
+    const profile =
+      sourceSchema === null
+        ? null
+        : createDerivMeasurementProfileFromSourceSchema({
+            source_schema_bytes: sourceSchema,
+            source_schema_release: expected.release,
+            symbol,
+          });
+    const observedLog = await readObservedLog(log, {
+      cursorSymbols,
+      latestCursor: latestCursor?.cursor ?? null,
+      profile,
+      progress,
+      symbol,
+    });
     const registry = await fromStore(() =>
       OperationalRegistry.open({
         source: DERIV_SOURCE,
@@ -245,18 +336,11 @@ export async function observeDataHealth(input: ObserveDataHealthInput): Promise<
       lastPublishedDatasetId,
       latestCursor: latestCursor?.cursor ?? null,
       latestHeartbeat,
+      log: observedLog,
       nextId: input.nextId,
       now: input.now(),
       operationalConditionTypes: registry.openConditionTypes(),
-      profile:
-        sourceSchema === null
-          ? null
-          : createDerivMeasurementProfileFromSourceSchema({
-              source_schema_bytes: sourceSchema,
-              source_schema_release: expected.release,
-              symbol,
-            }),
-      segments,
+      profile,
       source: DERIV_SOURCE,
       status: 'observed',
       symbol,

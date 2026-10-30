@@ -4,14 +4,26 @@ import {
   historyRecoveryResultSchema,
   rawSourceFrameSchema,
   sha256Hex,
+  type IngestionCursor,
   type SourceEvent,
 } from '@buoh/contracts';
+import { emptyLiveDerivationState, type PipelineProfile } from '@buoh/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  checkFoldedContent,
+  foldCheckedSegment,
+  type CheckedFold,
+} from '../src/deriv/log-check.js';
 import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
-import { evaluateDataHealth, type ObservedSource } from '../src/health/evaluate.js';
+import {
+  evaluateDataHealth,
+  type ObservedLog,
+  type ObservedSource,
+} from '../src/health/evaluate.js';
 import { buildRawSourceFrame } from '../src/ingestion/raw-first-ingestor.js';
 import { type IngestionHeartbeat } from '../src/ingestion/status.js';
+import { sourceEventId } from '../src/source-log/source-event-log.js';
 import { syntheticSchemas, uuid } from './support/connection-harness.js';
 import { derivMessages } from './support/deriv-fixtures.js';
 import {
@@ -80,13 +92,51 @@ function previousParts() {
 }
 
 /**
+ * El log que observa `data:health` de un log durable sin puntos de control, como lo lee
+ * `readObservedLog`: sin perfil, solo si tiene eventos; con él, su pliegue desde el log vacío,
+ * segmento a segmento (`foldCheckedSegment`), y, si su contenido pasa sus comprobaciones, si tiene
+ * el evento del último cursor.
+ */
+function observedLog(
+  segments: readonly (readonly SourceEvent[])[],
+  profile: PipelineProfile | null,
+  cursor: IngestionCursor | null,
+  cursorSymbols: readonly string[],
+): ObservedLog {
+  if (profile === null) {
+    return { empty: segments.every((segment) => segment.length === 0), status: 'unprofiled' };
+  }
+  const fold = segments.reduce<CheckedFold>(
+    (current, events) => foldCheckedSegment(current, events, profile),
+    { state: emptyLiveDerivationState(), status: 'derived' },
+  );
+  return {
+    cursor_in_log:
+      cursor === null ||
+      checkFoldedContent(fold, { cursorSymbols, symbol: SYMBOL }).status === 'failed'
+        ? null
+        : segments.some((segment) =>
+            segment.some((event) => sourceEventId(event) === cursor.last_durable_source_event_id),
+          ),
+    fold,
+    status: 'folded',
+  };
+}
+
+/** Lo observado, con el log durable por segmentos (`segments`) en lugar del log ya leído. */
+type ObservedOverrides = Partial<Omit<ObservedSource, 'log'>> & {
+  readonly segments?: readonly (readonly SourceEvent[])[];
+};
+
+/**
  * Lo observado a las 09:59:10: el log de la conexión anterior todavía abierta, con su tick durable,
  * el escritor vivo de este esquema y su latido conectado de hace 5 s.
  */
-function observed(overrides: Partial<ObservedSource> = {}): ObservedSource {
+function observed(overrides: ObservedOverrides = {}): ObservedSource {
   const { opened, tick } = previousParts();
+  const { segments = [[opened, tick]], ...rest } = overrides;
   let sequence = 0;
-  return {
+  const observation: Omit<ObservedSource, 'log'> = {
     cursorSymbols: [SYMBOL],
     lastPublishedDatasetId: null,
     latestCursor: null,
@@ -95,12 +145,20 @@ function observed(overrides: Partial<ObservedSource> = {}): ObservedSource {
     now: '2026-03-02T09:59:10.000Z',
     operationalConditionTypes: [],
     profile: PROFILE,
-    segments: [[opened, tick]],
     source: DERIV_SOURCE,
     status: 'observed',
     symbol: SYMBOL,
     writerPid: WRITER_PID,
-    ...overrides,
+    ...rest,
+  };
+  return {
+    ...observation,
+    log: observedLog(
+      segments,
+      observation.profile,
+      observation.latestCursor,
+      observation.cursorSymbols,
+    ),
   };
 }
 
@@ -204,6 +262,16 @@ describe('evaluateDataHealth: lo que la lectura no pudo observar (ADR-0015 §8, 
       }),
     ).toEqual({
       alert: { event: 'data_health_storage_unavailable', reason: 'ECONNREFUSED' },
+      exitCode: 1,
+      report: unobserved('paused'),
+    });
+  });
+
+  it('si el plazo se cumplió mientras reconstruía el estado vivo desde el último punto de control válido, da paused, desconectado, backlog 0 y lo demás null, con la alerta data_health_checkpoint_rebuild_incomplete y salida 1 (ADR-0017 §6)', () => {
+    expect(
+      evaluateDataHealth({ source: DERIV_SOURCE, status: 'checkpoint_rebuild_incomplete' }),
+    ).toEqual({
+      alert: { event: 'data_health_checkpoint_rebuild_incomplete', reason: 'deadline_exceeded' },
       exitCode: 1,
       report: unobserved('paused'),
     });
@@ -392,6 +460,23 @@ describe('evaluateDataHealth: sin escritor vivo (ADR-0015 §8, regla 4)', () => 
     });
     // El cierre es solo para la derivación: nunca se persiste.
     expect(segments[0]).toHaveLength(5);
+  });
+
+  it('si el log no se deriva con ese cierre, como uno de otra fuente que la del perfil, da failed con log_not_derivable, como cuando deriveMarketData no lo derivaba', () => {
+    // El cierre en memoria lleva la fuente de lo observado, y el perfil solo acepta la suya.
+    const source = 'synthetic_other';
+
+    expect(evaluateDataHealth(observed({ source, writerPid: null }))).toEqual({
+      alert: { event: 'data_health_failed', reason: 'log_not_derivable' },
+      exitCode: 1,
+      report: { ...unobserved('failed'), source },
+    });
+    // Con la última conexión cerrada no añade ningún cierre.
+    expect(
+      evaluateDataHealth(
+        observed({ segments: [previousConnectionEvents()], source, writerPid: null }),
+      ).alert,
+    ).toBeNull();
   });
 
   it('con el log vacío y sin esquema de fuente guardado, da paused y desconectado: starting, con el mínimo de la regla', () => {

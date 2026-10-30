@@ -52,6 +52,25 @@ export interface HealthInput {
   readonly sourceEvents: readonly unknown[];
 }
 
+/**
+ * Lo que el informe toma del log durable: si el log sigue conectado según su último evento de ciclo
+ * de vida, el último raw durable, el último tiempo de evento, el mayor, y lo derivable que sigue
+ * abierto. Lo da la derivación del log entero (`deriveHealthReport`) o la vista de su estado vivo
+ * (`LiveDerivationView`, ADR-0017 §4), con los mismos nombres.
+ */
+export interface HealthLogFacts {
+  readonly connectedInLog: boolean;
+  readonly lastEventTimeUtc: string | null;
+  readonly lastRaw: { readonly observation_id: string; readonly received_at_utc: string } | null;
+  readonly openConditionTypes: readonly string[];
+  readonly pendingContinuitySymbols: readonly string[];
+}
+
+/** Las entradas de `deriveLiveHealthReport`: las de `deriveHealthReport`, con el log en su vista. */
+export type LiveHealthInput = Omit<HealthInput, 'derived' | 'sourceEvents'> & {
+  readonly view: HealthLogFacts;
+};
+
 function sortedUnique<T extends string>(values: readonly T[]): T[] {
   return [...new Set(values)].sort();
 }
@@ -76,17 +95,46 @@ export function deriveHealthReport(input: HealthInput): HealthReport {
       connectedInLog = true;
     }
   }
+  const lastRaw = events.filter((event) => event.kind === 'raw_source_frame').at(-1);
+  return healthReportOf(
+    {
+      connectedInLog,
+      lastEventTimeUtc: input.derived.ticks.at(-1)?.event_time_utc ?? null,
+      lastRaw:
+        lastRaw === undefined
+          ? null
+          : { observation_id: lastRaw.observation_id, received_at_utc: lastRaw.received_at_utc },
+      openConditionTypes: input.derived.openConditionTypes,
+      pendingContinuitySymbols: input.derived.pendingContinuitySymbols,
+    },
+    input,
+  );
+}
+
+/**
+ * El `HealthReport` de `deriveHealthReport` desde la vista del estado vivo del log (ADR-0017 §4),
+ * sin derivar el log entero: lo que usa `data:health` desde el último punto de control válido.
+ */
+export function deriveLiveHealthReport(input: LiveHealthInput): HealthReport {
+  return healthReportOf(input.view, input);
+}
+
+/** El informe con lo que da el log y lo que observa quien mira la ingesta desde fuera. */
+function healthReportOf(
+  log: HealthLogFacts,
+  input: Omit<HealthInput, 'derived' | 'sourceEvents'>,
+): HealthReport {
+  const { connectedInLog, lastRaw } = log;
   const connectionState = input.connection_state ?? (connectedInLog ? 'connected' : 'disconnected');
 
-  const lastRaw = events.filter((event) => event.kind === 'raw_source_frame').at(-1);
   const openTypes = sortedUnique([
-    ...(input.derived.openConditionTypes as ConditionType[]),
+    ...(log.openConditionTypes as ConditionType[]),
     ...(input.operational_condition_types ?? []),
   ]);
 
   // Cada causa impone una salud mínima; gana la más severa.
   const minimums: ServiceHealth[] = openTypes.map((type) => CONDITION_HEALTH[type]);
-  if (input.derived.pendingContinuitySymbols.length > 0) {
+  if (log.pendingContinuitySymbols.length > 0) {
     minimums.push('recovering');
   }
   if (
@@ -101,7 +149,7 @@ export function deriveHealthReport(input: HealthInput): HealthReport {
   ) {
     minimums.push(input.minimum_health);
   }
-  if (lastRaw !== undefined && connectedInLog && connectionState !== 'connected') {
+  if (lastRaw !== null && connectedInLog && connectionState !== 'connected') {
     // El log sigue conectado, pero quien observa la ingesta ya la ve reconectando (ADR-0015 §8,
     // regla 5): es una causa más, así que un hueco antiguo sin resolver no la tapa.
     minimums.push('recovering');
@@ -112,7 +160,7 @@ export function deriveHealthReport(input: HealthInput): HealthReport {
     health = minimums.reduce((worst, candidate) =>
       SEVERITY_RANK[candidate] > SEVERITY_RANK[worst] ? candidate : worst,
     );
-  } else if (lastRaw === undefined) {
+  } else if (lastRaw === null) {
     health = 'starting';
   } else if (!connectedInLog) {
     // Cierre solicitado sin reapertura: no se procesa entrada, pero no hay incidencia abierta.
@@ -126,7 +174,7 @@ export function deriveHealthReport(input: HealthInput): HealthReport {
     backlog_count: input.backlog_count,
     connection_state: connectionState,
     execution_mode: 'disabled',
-    last_event_time_utc: input.derived.ticks.at(-1)?.event_time_utc ?? null,
+    last_event_time_utc: log.lastEventTimeUtc,
     last_observation_id: lastRaw?.observation_id ?? null,
     last_published_dataset_id: input.last_published_dataset_id,
     last_received_at_utc: lastRaw?.received_at_utc ?? null,

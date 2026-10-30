@@ -1,49 +1,9 @@
 import { type IngestionCursor, type LiveDerivationState, type SourceEvent } from '@buoh/contracts';
-import {
-  deriveMarketData,
-  foldLiveDerivation,
-  liveDerivationView,
-  type DerivedMarketData,
-  type PipelineProfile,
-} from '@buoh/domain';
+import { foldLiveDerivation, liveDerivationView, type PipelineProfile } from '@buoh/domain';
 
 import { type LiveCheckpointLookup } from '../source-log/live-checkpoint.js';
 import { liveWatermark, readSinceCheckpoint } from '../source-log/live-reader.js';
-import {
-  failureReason,
-  sourceEventId,
-  type SourceEventLog,
-} from '../source-log/source-event-log.js';
-
-/**
- * ¿El último cursor del símbolo apunta a un evento que no está en el log durable? (ADR-0015 §5 y §6,
- * `cursor_ahead_of_log`): el log perdió datos que el índice había confirmado. Lo comprueba
- * `data:health` (§8, regla 2), después de `checkLogContent`, recorriendo el log; el arranque de la
- * sesión lo busca en el índice (`checkLogSinceCheckpoint`). Un cursor que va por detrás del log,
- * porque el proceso cayó después de escribirlo, no lo está; sin cursor, tampoco.
- */
-export function isCursorAheadOfLog(input: {
-  readonly cursor: Pick<IngestionCursor, 'last_durable_source_event_id'> | null;
-  readonly segments: readonly (readonly SourceEvent[])[];
-}): boolean {
-  const { cursor } = input;
-  return (
-    cursor !== null &&
-    !input.segments.some((segment) =>
-      segment.some((event) => sourceEventId(event) === cursor.last_durable_source_event_id),
-    )
-  );
-}
-
-/** Lo que da `checkLogContent`: la derivación del log, o por qué no pasa sus comprobaciones. */
-export type LogContentCheck =
-  | { readonly derived: DerivedMarketData; readonly status: 'passed' }
-  | {
-      /** Con `log_not_derivable`, el error de la derivación saneado (`failureReason`); si no, `null`. */
-      readonly detail: string | null;
-      readonly reason: 'connector_version_mismatch' | 'log_not_derivable' | 'symbol_mismatch';
-      readonly status: 'failed';
-    };
+import { failureReason, type SourceEventLog } from '../source-log/source-event-log.js';
 
 /** ¿Algún frame de estos eventos es de otro conector que el del perfil? (`connector_version_mismatch`) */
 export function hasOtherConnector(
@@ -69,56 +29,6 @@ export function isOtherSymbolSeen(input: {
   readonly symbolNotAllowedSeen: boolean;
 }): boolean {
   return input.cursorSymbols.some((item) => item !== input.symbol) || input.symbolNotAllowedSeen;
-}
-
-/** `isOtherSymbolSeen` con la derivación del log entero: con sus incidencias `symbol_not_allowed`. */
-export function isOtherSymbol(input: {
-  readonly cursorSymbols: readonly string[];
-  readonly derived: DerivedMarketData;
-  readonly symbol: string;
-}): boolean {
-  return isOtherSymbolSeen({
-    cursorSymbols: input.cursorSymbols,
-    symbol: input.symbol,
-    symbolNotAllowedSeen: input.derived.incidents.some(
-      (incident) =>
-        incident.incident_type === 'invalid_source_frame' &&
-        incident.evidence.reason === 'symbol_not_allowed',
-    ),
-  });
-}
-
-/**
- * Las comprobaciones del contenido del log entero que hace `data:health` (ADR-0015 §8, regla 2), en
- * este orden, el mismo que el del arranque de la sesión (`checkLogSinceCheckpoint`):
- *
- * 1. todos sus frames son del conector del perfil (`connector_version_mismatch`);
- * 2. se deriva con el perfil (`log_not_derivable`);
- * 3. es del símbolo pedido (`symbol_mismatch`, `isOtherSymbol`), con los símbolos que tienen algún
- *    cursor de la fuente.
- *
- * Si las pasa, devuelve la derivación.
- */
-export function checkLogContent(input: {
-  readonly cursorSymbols: readonly string[];
-  readonly profile: PipelineProfile;
-  readonly segments: readonly (readonly SourceEvent[])[];
-  readonly symbol: string;
-}): LogContentCheck {
-  const { profile, segments } = input;
-  if (segments.some((segment) => hasOtherConnector(segment, profile))) {
-    return { detail: null, reason: 'connector_version_mismatch', status: 'failed' };
-  }
-  let derived: DerivedMarketData;
-  try {
-    derived = deriveMarketData(segments, profile);
-  } catch (error) {
-    return { detail: failureReason(error), reason: 'log_not_derivable', status: 'failed' };
-  }
-  if (isOtherSymbol({ cursorSymbols: input.cursorSymbols, derived, symbol: input.symbol })) {
-    return { detail: null, reason: 'symbol_mismatch', status: 'failed' };
-  }
-  return { derived, status: 'passed' };
 }
 
 /** Lo que el arranque lee del almacén del cursor (ADR-0015 §5). */
@@ -154,11 +64,91 @@ export type StartupCheck =
       readonly status: 'failed';
     };
 
-/** El pliegue del arranque: el estado vivo, el error que lo paró o un frame de otro conector. */
-type StartupFold =
+/**
+ * El pliegue de un lector que comprueba el log (ADR-0015 §5 y §8, regla 2): el estado vivo, el error
+ * que lo paró o un frame de otro conector.
+ */
+export type CheckedFold =
   | { readonly state: LiveDerivationState; readonly status: 'derived' }
   | { readonly error: unknown; readonly status: 'not_derivable' }
   | { readonly status: 'foreign' };
+
+/**
+ * Aplica al pliegue los eventos de un segmento. Un frame de otro conector gana a un pliegue que ya
+ * falló, como cuando la comprobación del conector recorría el log entero antes de derivarlo.
+ */
+export function foldCheckedSegment(
+  current: CheckedFold,
+  events: readonly SourceEvent[],
+  profile: PipelineProfile,
+): CheckedFold {
+  if (current.status === 'foreign' || hasOtherConnector(events, profile)) {
+    return { status: 'foreign' };
+  }
+  if (current.status === 'not_derivable') {
+    return current;
+  }
+  try {
+    return { state: foldLiveDerivation(current.state, events, profile), status: 'derived' };
+  } catch (error) {
+    return { error, status: 'not_derivable' };
+  }
+}
+
+/**
+ * El pliegue del log durable desde su último punto de control válido (`readSinceCheckpoint`), con
+ * `foldCheckedSegment`. Lee todos los segmentos posteriores al punto de control, también después de
+ * uno que no se pliega. Lanza `LogReadError` si un almacén no responde y `LogIntegrityError` si el
+ * contenido no pasa sus comprobaciones.
+ */
+export function foldSinceCheckpoint(
+  log: SourceEventLog,
+  lookup: LiveCheckpointLookup,
+): Promise<CheckedFold> {
+  return readSinceCheckpoint<CheckedFold>(
+    log,
+    lookup,
+    (base) => ({ state: base.state, status: 'derived' }),
+    (current, events) => foldCheckedSegment(current, events, lookup.profile),
+  );
+}
+
+/** Lo que da `checkFoldedContent`: el estado vivo, o por qué el contenido no pasa. */
+export type FoldedContentCheck =
+  | { readonly state: LiveDerivationState; readonly status: 'passed' }
+  | {
+      /** Con `log_not_derivable`, el error del pliegue saneado (`failureReason`); si no, `null`. */
+      readonly detail: string | null;
+      readonly reason: 'connector_version_mismatch' | 'log_not_derivable' | 'symbol_mismatch';
+      readonly status: 'failed';
+    };
+
+/**
+ * Las comprobaciones del contenido del log sobre su pliegue, en el orden de siempre: el conector, que
+ * se derive y el símbolo, con los símbolos de los cursores de la fuente (`isOtherSymbolSeen`). Las
+ * comparten el arranque de la sesión y `data:health`.
+ */
+export function checkFoldedContent(
+  fold: CheckedFold,
+  input: { readonly cursorSymbols: readonly string[]; readonly symbol: string },
+): FoldedContentCheck {
+  if (fold.status === 'foreign') {
+    return { detail: null, reason: 'connector_version_mismatch', status: 'failed' };
+  }
+  if (fold.status === 'not_derivable') {
+    return { detail: failureReason(fold.error), reason: 'log_not_derivable', status: 'failed' };
+  }
+  if (
+    isOtherSymbolSeen({
+      cursorSymbols: input.cursorSymbols,
+      symbol: input.symbol,
+      symbolNotAllowedSeen: fold.state.symbol_not_allowed_seen,
+    })
+  ) {
+    return { detail: null, reason: 'symbol_mismatch', status: 'failed' };
+  }
+  return { state: fold.state, status: 'passed' };
+}
 
 const failedWith = (
   reason: Extract<StartupCheck, { status: 'failed' }>['reason'],
@@ -198,42 +188,16 @@ export async function checkLogSinceCheckpoint(
     readonly retentionMs: number | undefined;
   },
 ): Promise<StartupCheck> {
-  const { profile, symbol } = lookup;
-  const folded = await readSinceCheckpoint<StartupFold>(
-    log,
-    lookup,
-    (base) => ({ state: base.state, status: 'derived' }),
-    (current, events) => {
-      if (current.status === 'foreign' || hasOtherConnector(events, profile)) {
-        return { status: 'foreign' };
-      }
-      if (current.status === 'not_derivable') {
-        return current;
-      }
-      try {
-        return { state: foldLiveDerivation(current.state, events, profile), status: 'derived' };
-      } catch (error) {
-        return { error, status: 'not_derivable' };
-      }
-    },
-  );
-  if (folded.status === 'foreign') {
-    return failedWith('connector_version_mismatch');
-  }
-  if (folded.status === 'not_derivable') {
-    return failedWith('log_not_derivable', failureReason(folded.error));
-  }
-  const view = liveDerivationView(folded.state);
+  const { symbol } = lookup;
   const { cursors } = input;
-  if (
-    isOtherSymbolSeen({
-      cursorSymbols: cursors?.symbols ?? [],
-      symbol,
-      symbolNotAllowedSeen: view.symbolNotAllowedSeen,
-    })
-  ) {
-    return failedWith('symbol_mismatch');
+  const content = checkFoldedContent(await foldSinceCheckpoint(log, lookup), {
+    cursorSymbols: cursors?.symbols ?? [],
+    symbol,
+  });
+  if (content.status === 'failed') {
+    return content;
   }
+  const view = liveDerivationView(content.state);
   const cursor = cursors?.latest ?? null;
   if (cursor !== null && !(await log.hasEvent(cursor.last_durable_source_event_id))) {
     return failedWith('cursor_ahead_of_log');

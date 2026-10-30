@@ -1,7 +1,7 @@
 import { healthReportSchema, type SourceEvent } from '@buoh/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { DERIV_SOURCE } from '../src/deriv/profile.js';
+import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
 import {
   contentKey,
   HEALTH_CLOSE_DEADLINE_MS,
@@ -14,8 +14,9 @@ import {
   type HealthDependencies,
   type WorkerConfig,
 } from '../src/index.js';
-import { uuid } from './support/connection-harness.js';
+import { syntheticSchemas, uuid } from './support/connection-harness.js';
 import { ManualClock, syntheticSchemaArchive } from './support/deriv-fixtures.js';
+import { checkpointRowsOf } from './support/live-checkpoint-rows.js';
 import {
   MemoryIngestionStatusStore,
   MemoryObjectStore,
@@ -92,6 +93,8 @@ const unobserved = (serviceHealth: 'failed' | 'paused') => ({
 });
 
 interface CommandOptions {
+  /** Dónde se cierran segmentos: antes de cada uno de estos eventos, por su índice. */
+  readonly closedEvents?: readonly number[];
   /** El log durable; por defecto, la conexión anterior todavía abierta, con su tick. */
   readonly events?: readonly SourceEvent[];
   /** Los bytes bajo la clave del esquema de fuente; por defecto, los del esquema guardado. */
@@ -117,7 +120,10 @@ async function commandHarness(options: CommandOptions = {}) {
     store: sourceLog,
     zlibVersion: 'test',
   });
-  for (const event of options.events ?? openConnection()) {
+  for (const [index, event] of (options.events ?? openConnection()).entries()) {
+    if (options.closedEvents?.includes(index) === true) {
+      await seed.close('requested');
+    }
     await seed.append(event);
   }
   await objects.putIfAbsent(
@@ -166,6 +172,7 @@ async function commandHarness(options: CommandOptions = {}) {
   /** Lo que guardan los almacenes, para comprobar que el comando no escribe nada. */
   const contents = () =>
     structuredClone({
+      checkpoints: sourceLog.checkpoints,
       closed: sourceLog.closed,
       conditions: operational.conditions,
       cursors: status.cursors,
@@ -174,7 +181,26 @@ async function commandHarness(options: CommandOptions = {}) {
       objects: [...objects.objects.entries()],
       rows: sourceLog.rows,
     });
-  return { clock, closed: () => closed, contents, deps, opened };
+  /** Las filas de los puntos de control de los segmentos cerrados, como las escribe `ingest`. */
+  const checkpointRows = () =>
+    checkpointRowsOf({
+      log: seed,
+      profile: createDerivMeasurementProfile({ schemas: syntheticSchemas(), symbol: SYMBOL }),
+      symbol: SYMBOL,
+      writtenAt: NOW,
+    });
+  return {
+    checkpointRows,
+    clock,
+    closed: () => closed,
+    contents,
+    deps,
+    objects,
+    opened,
+    sourceLog,
+    status,
+    stores,
+  };
 }
 
 /** Una lectura que nunca termina: un almacén que acepta la conexión y no contesta. */
@@ -380,6 +406,128 @@ describe('healthCommand: un almacén que no contesta (ADR-0015 §8, regla 3)', (
     expect(result.stderr).toBe('{"event":"data_health_storage_unavailable","reason":"ETIMEDOUT"}');
     expect(result.stderr).not.toContain('s3.interno');
     expect(run.clock.pendingDelays()).toEqual([]);
+  });
+});
+
+describe('healthCommand: los puntos de control del estado vivo (ADR-0017 §6)', () => {
+  /** La conexión abierta con su apertura en el segmento cerrado 0 y su tick en el abierto. */
+  const splitLog = { closedEvents: [1] } as const;
+
+  /** Guarda el punto de control del segmento 0 con otro SHA-256: uno que se rechaza y avisa. */
+  async function rejectedCheckpoint(run: Awaited<ReturnType<typeof commandHarness>>) {
+    const [row] = await run.checkpointRows();
+    if (row === undefined) {
+      throw new TypeError('Falta la fila del segmento 0.');
+    }
+    run.sourceLog.checkpoints.push({ ...row, checkpoint_sha256: 'f'.repeat(64) });
+  }
+
+  const REJECTED =
+    '{"event":"checkpoint_rejected","reason":"checkpoint_digest_mismatch","segment_index":"0"}';
+
+  /**
+   * El objeto del segmento cerrado 0 nunca contesta, como un almacén lento. `reached` se cumple
+   * cuando la lectura llega a él.
+   */
+  const silentSegment = (run: Awaited<ReturnType<typeof commandHarness>>) => {
+    const key = contentKey(run.sourceLog.closed[0]?.object_bytes_sha256 ?? '');
+    const reached = Promise.withResolvers<undefined>();
+    const overrides: Partial<HealthCommandStores> = {
+      objects: {
+        bucket: run.objects.bucket,
+        get: (wanted, maxBytes) => {
+          if (wanted !== key) {
+            return run.objects.get(wanted, maxBytes);
+          }
+          reached.resolve(undefined);
+          return silent<Uint8Array>();
+        },
+      },
+    };
+    return { overrides, reached: reached.promise };
+  };
+
+  it('escribe en stderr una línea por cada punto de control que rechaza, antes de la alerta de la regla 2, y el informe sale del log reconstruido', async () => {
+    const healthy = await commandHarness(splitLog);
+    await rejectedCheckpoint(healthy);
+    const result = await healthCommand(ARGS, ENV, healthy.deps());
+
+    expect(result.exitCode).toBe(0);
+    expect(reportOf(result.stdout)).toMatchObject({
+      last_observation_id: uuid(9003),
+      service_health: 'healthy',
+    });
+    expect(result.stderr).toBe(REJECTED);
+
+    // Con el último cursor por delante del log: la alerta de la regla 2 va después.
+    const ahead = await commandHarness(splitLog);
+    await rejectedCheckpoint(ahead);
+    await ahead.status.appendCursor(
+      cursorOf(DERIV_SOURCE, { last_durable_source_event_id: uuid(9999) }),
+    );
+    const failed = await healthCommand(ARGS, ENV, ahead.deps());
+    expect(failed.exitCode).toBe(1);
+    expect(reportOf(failed.stdout)).toEqual(unobserved('failed'));
+    expect(failed.stderr).toBe(
+      `${REJECTED}\n{"event":"data_health_failed","reason":"cursor_ahead_of_log"}`,
+    );
+  });
+
+  it(`si el plazo total se cumple mientras reconstruye el estado vivo, da paused con la alerta data_health_checkpoint_rebuild_incomplete, no la de un almacén que no responde, y sale con 1`, async () => {
+    const run = await commandHarness(splitLog);
+    await rejectedCheckpoint(run);
+    const segment = silentSegment(run);
+    const pending = healthCommand(ARGS, ENV, run.deps(segment.overrides));
+    await segment.reached;
+    await run.clock.advance(HEALTH_DEADLINE_MS);
+    const result = await pending;
+
+    expect(result.exitCode).toBe(1);
+    expect(reportOf(result.stdout)).toEqual(unobserved('paused'));
+    // La alerta del punto de control rechazado ya estaba: también sale.
+    expect(result.stderr).toBe(
+      `${REJECTED}\n{"event":"data_health_checkpoint_rebuild_incomplete","reason":"deadline_exceeded"}`,
+    );
+    expect(run.closed()).toBe(1);
+    expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
+  it('si ya terminó de reconstruir, o el punto de control válido es el del último segmento cerrado, un almacén que no contesta es deadline_exceeded', async () => {
+    // Reconstruyó el segmento 0 y después no contesta el último dataset.
+    const rebuilt = await commandHarness(splitLog);
+    const reached = Promise.withResolvers<undefined>();
+    const late = healthCommand(
+      ARGS,
+      ENV,
+      rebuilt.deps({
+        datasets: {
+          lastActiveDatasetId: () => {
+            reached.resolve(undefined);
+            return silent<string | null>();
+          },
+        },
+      }),
+    );
+    await reached.promise;
+    await rebuilt.clock.advance(HEALTH_DEADLINE_MS);
+    expect(await late).toMatchObject({
+      exitCode: 1,
+      stderr: '{"event":"data_health_storage_unavailable","reason":"deadline_exceeded"}',
+    });
+
+    // Con el punto de control del segmento 0 no lee ningún segmento cerrado.
+    const checkpointed = await commandHarness(splitLog);
+    for (const row of await checkpointed.checkpointRows()) {
+      await checkpointed.sourceLog.insertLiveCheckpoint(row);
+    }
+    const quick = await healthCommand(
+      ARGS,
+      ENV,
+      checkpointed.deps(silentSegment(checkpointed).overrides),
+    );
+    expect(quick.exitCode).toBe(0);
+    expect(quick.stderr).toBeNull();
+    expect(checkpointed.clock.pendingDelays()).toEqual([]);
   });
 });
 

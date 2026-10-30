@@ -8,7 +8,7 @@ import {
 import { type Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { DERIV_SOURCE } from '../src/deriv/profile.js';
+import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
 import { type ExpectedSchemaArchive } from '../src/deriv/schema-archive.js';
 import {
   contentKey,
@@ -23,19 +23,22 @@ import {
   runIngest,
   SourceEventLog,
   SourceLock,
+  type HealthCommandStores,
   type IngestReport,
   type OperationalAlert,
   type WorkerConfig,
 } from '../src/index.js';
 import { loadMigrations } from '../src/postgres/migrate.js';
 import { sourceLockHolder } from '../src/postgres/source-lock.js';
-import { START, START_EPOCH, uuid } from '../test/support/connection-harness.js';
+import { START, START_EPOCH, syntheticSchemas, uuid } from '../test/support/connection-harness.js';
 import {
   derivMessages,
   FakeDerivSocket,
   ManualClock,
   syntheticSchemaArchive,
 } from '../test/support/deriv-fixtures.js';
+import { checkpointRowsOf } from '../test/support/live-checkpoint-rows.js';
+import { previousConnectionEvents } from '../test/support/recovery-harness.js';
 
 /**
  * `data:health` (ADR-0015 §8) contra PostgreSQL y S3-compatible locales: el comando completo
@@ -49,6 +52,8 @@ import {
 const SCHEMA = 'buoh_integration_health';
 /** Un esquema con las migraciones 0001 a 0003, sin la 0004 del cursor y el latido. */
 const OLD_SCHEMA = 'buoh_integration_health_old';
+/** Un esquema con un log escrito por la prueba y sus puntos de control, sin captura. */
+const CHECKPOINT_SCHEMA = 'buoh_integration_health_checkpoint';
 const SYMBOL = 'SYNTH_100';
 const ARGS = ['--', '--json', '--symbol', SYMBOL];
 const environment = {
@@ -68,7 +73,7 @@ let lastDataset: string | null = null;
 beforeAll(async () => {
   config = loadConfig(environment);
   admin = createPool({ ...config.postgres, schema: 'public' });
-  for (const schema of [SCHEMA, OLD_SCHEMA]) {
+  for (const schema of [SCHEMA, OLD_SCHEMA, CHECKPOINT_SCHEMA]) {
     await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
     await admin.query(`CREATE SCHEMA ${schema}`);
   }
@@ -168,6 +173,10 @@ async function health(
     readonly env?: Readonly<Record<string, string | undefined>>;
     readonly expected?: ExpectedSchemaArchive;
     readonly schema?: string;
+    /** Envuelve las lecturas reales, para anotarlas o intercalar escrituras. */
+    readonly wrap?: (opened: HealthCommandStores) => HealthCommandStores;
+    /** Las filas que escribe la prueba mientras `data:health` lee, por tabla. */
+    readonly writes?: Readonly<Record<string, number>>;
   } = {},
 ) {
   const schema = options.schema ?? SCHEMA;
@@ -179,11 +188,15 @@ async function health(
       expected: options.expected ?? fixture.expected,
       nextId: () => uuid((sequence += 1)),
       now: clock.now,
-      openStores: (opened) => openHealthStores(opened),
+      openStores: (opened) => (options.wrap ?? ((real) => real))(openHealthStores(opened)),
       scheduler: clock.scheduler,
     },
   );
-  expect(await footprint(schema)).toEqual(before);
+  const counts = { ...before.counts };
+  for (const [table, rows] of Object.entries(options.writes ?? {})) {
+    counts[table] = (counts[table] ?? 0) + rows;
+  }
+  expect(await footprint(schema)).toEqual({ ...before, counts });
   const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
   for (const secret of [
     config.postgres.password,
@@ -583,5 +596,167 @@ describe('data:health sobre PostgreSQL y S3-compatible (ADR-0015 §8)', () => {
       service_health: 'failed',
     });
     expect(result.stderr).toBe('{"event":"data_health_failed","reason":"cursor_ahead_of_log"}');
+  });
+});
+
+describe('data:health desde el punto de control sobre PostgreSQL y S3-compatible (ADR-0017 §4 y §6)', () => {
+  let checkpointStores: ReturnType<typeof openStores>;
+  /** El log, que escribe la prueba sin bloqueo: la conexión anterior y su cierre remoto. */
+  let log: SourceEventLog;
+  const profile = createDerivMeasurementProfile({ schemas: syntheticSchemas(), symbol: SYMBOL });
+  /** El informe del log leído entero, sin puntos de control. */
+  let wholeLog: Awaited<ReturnType<typeof health>> | null = null;
+
+  beforeAll(async () => {
+    checkpointStores = openStores(
+      loadConfig({ ...environment, BUOH_POSTGRES_SCHEMA: CHECKPOINT_SCHEMA }),
+    );
+    await migrate(checkpointStores.pool);
+    // El esquema de fuente guardado, como lo deja `ingest` al arrancar.
+    await checkpointStores.objects.putIfAbsent(
+      contentKey(fixture.expected.entries_sha256['ticks_response.schema.json']),
+      fixture.entries['ticks_response.schema.json'],
+      'application/json',
+    );
+    log = await SourceEventLog.open({
+      objects: checkpointStores.objects,
+      source: DERIV_SOURCE,
+      store: checkpointStores.sourceLog,
+      zlibVersion: process.versions.zlib,
+    });
+    // Los segmentos 0 (la apertura) y 1 (el tick) cerrados, y el 2 abierto con el cierre remoto.
+    const [opened, tick, closed] = previousConnectionEvents();
+    for (const event of [opened, tick]) {
+      if (event !== undefined) {
+        await log.append(event);
+        await log.close('requested');
+      }
+    }
+    if (closed !== undefined) {
+      await log.append(closed);
+    }
+  });
+
+  afterAll(async () => {
+    await checkpointStores.close();
+  });
+
+  /** Las filas de los puntos de control de los segmentos cerrados, como las escribe `ingest`. */
+  const rows = () => checkpointRowsOf({ log, profile, symbol: SYMBOL, writtenAt: clock.now() });
+
+  /** Las claves de los objetos de los segmentos cerrados, por índice. */
+  async function segmentKeys(): Promise<string[]> {
+    const segments = await checkpointStores.sourceLog.listClosedSegments(
+      DERIV_SOURCE,
+      0,
+      log.openSegmentIndex - 1,
+    );
+    return segments.map((segment) => contentKey(segment.object_bytes_sha256));
+  }
+
+  /**
+   * `data:health` sobre el esquema de la prueba, anotando las claves de los objetos que lee. `writes`
+   * son las filas que escribe `wrap` mientras lee.
+   */
+  async function healthReading(
+    wrap?: (opened: HealthCommandStores) => HealthCommandStores,
+    writes?: Readonly<Record<string, number>>,
+  ) {
+    const keys: string[] = [];
+    const result = await health({
+      schema: CHECKPOINT_SCHEMA,
+      ...(writes === undefined ? {} : { writes }),
+      wrap: (real) => {
+        const wrapped = wrap === undefined ? real : wrap(real);
+        return {
+          ...wrapped,
+          objects: {
+            bucket: wrapped.objects.bucket,
+            get: (key, maxBytes) => {
+              keys.push(key);
+              return wrapped.objects.get(key, maxBytes);
+            },
+          },
+        };
+      },
+    });
+    return { keys, result };
+  }
+
+  it('sin puntos de control, lee y pliega todos los segmentos cerrados; con el del segmento 0, solo los objetos posteriores, y da el mismo informe', async () => {
+    const [first, second] = await segmentKeys();
+    const whole = await healthReading();
+    expect(whole.result.stderr).toBeNull();
+    expect(whole.result.report).toMatchObject({
+      connection_state: 'disconnected',
+      open_condition_types: ['connection_lost'],
+      service_health: 'paused',
+    });
+    expect(whole.keys).toEqual(expect.arrayContaining([first, second]));
+    wholeLog = whole.result;
+
+    const [row] = await rows();
+    if (row === undefined) {
+      throw new TypeError('Falta la fila del segmento 0.');
+    }
+    expect(await checkpointStores.sourceLog.insertLiveCheckpoint(row)).toBe('inserted');
+    const fromCheckpoint = await healthReading();
+    expect(fromCheckpoint.keys).toContain(second);
+    expect(fromCheckpoint.keys).not.toContain(first);
+    expect(fromCheckpoint.result.stderr).toBeNull();
+    expect(fromCheckpoint.result.report).toEqual(wholeLog.report);
+    expect(fromCheckpoint.result.exitCode).toBe(wholeLog.exitCode);
+  });
+
+  it('un segmento que se cierra después de leer el estado del log, con su punto de control ya escrito, no se aplica dos veces: da el informe de su foto', async () => {
+    if (wholeLog === null) {
+      throw new TypeError('Falta el informe del log entero.');
+    }
+    const [, second] = await rows();
+    if (second === undefined) {
+      throw new TypeError('Falta la fila del segmento 1.');
+    }
+    expect(await checkpointStores.sourceLog.insertLiveCheckpoint(second)).toBe('inserted');
+    /** El límite de la primera lectura de los puntos de control, la que se cruza con el cierre. */
+    let raced: number | null | undefined;
+    // Entre el estado del log y su punto de control, `ingest` cierra el segmento 2, con el cierre
+    // remoto, y escribe su punto de control. Aplicar ese cierre otra vez no se puede.
+    const racing = await healthReading(
+      (real) => ({
+        ...real,
+        sourceLog: {
+          hasSourceEvent: (source, eventId) => real.sourceLog.hasSourceEvent(source, eventId),
+          listClosedSegments: (source, from, to) =>
+            real.sourceLog.listClosedSegments(source, from, to),
+          readLiveCheckpoint: async (source, versionsSha256, below) => {
+            if (raced === undefined) {
+              raced = below;
+              await log.close('requested');
+              const third = (await rows())[2];
+              if (third === undefined) {
+                throw new TypeError('Falta la fila del segmento 2.');
+              }
+              expect(await checkpointStores.sourceLog.insertLiveCheckpoint(third)).toBe('inserted');
+            }
+            return real.sourceLog.readLiveCheckpoint(source, versionsSha256, below);
+          },
+          readLogState: (source) => real.sourceLog.readLogState(source),
+        },
+      }),
+      { closed_source_segments: 1, live_derivation_checkpoints: 1 },
+    );
+    // Buscó por debajo del segmento abierto de su foto, el 2.
+    expect(raced).toBe(2);
+    expect(racing.result.stderr).toBeNull();
+    expect(racing.result.report).toEqual(wholeLog.report);
+    // Partió del punto de control del segmento 1: no leyó los objetos de los segmentos 0 y 1.
+    for (const key of (await segmentKeys()).slice(0, 2)) {
+      expect(racing.keys).not.toContain(key);
+    }
+
+    // Después, desde el punto de control del segmento 2, con el segmento 3 abierto y vacío.
+    const after = await healthReading();
+    expect(after.result.stderr).toBeNull();
+    expect(after.result.report).toEqual(wholeLog.report);
   });
 });

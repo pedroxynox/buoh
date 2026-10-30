@@ -15,6 +15,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildLiveDerivationCheckpoint,
   createPipelineProfile,
+  deriveHealthReport,
+  deriveLiveHealthReport,
   deriveMarketData,
   emptyLiveDerivationState,
   foldLiveDerivation,
@@ -399,6 +401,51 @@ describe('derivación en pliegue del estado vivo (ADR-0017)', () => {
       expect(() => foldLiveDerivation(emptyLiveDerivationState(), events, measurement)).toThrow(
         /hueco pendiente/u,
       );
+    }
+  });
+
+  it('el informe de salud desde la vista viva es el de deriveHealthReport con el log entero, en cada límite', () => {
+    const logs: (readonly [string, readonly SourceEvent[], PipelineProfile])[] = [
+      ...corpus.map(
+        ([name, stimuli, profile]) => [name, eventsOf(stimuli, profile), profile] as const,
+      ),
+      ...VECTOR_SCENARIOS.map(
+        ([name, files]) => [name, vectorSegments(files).flat(), vectorProfile()] as const,
+      ),
+    ];
+    // Lo que da quien observa la ingesta desde fuera (ADR-0015 §8, reglas 4 a 6).
+    const observers = [
+      {},
+      { connection_state: 'disconnected', minimum_health: 'paused' },
+      { backlog_bytes: 10, backlog_count: 2, connection_state: 'connected' },
+      { operational_condition_types: ['persistence_unavailable'] },
+    ] as const;
+    for (const [name, events, profile] of logs) {
+      for (let boundary = 0; boundary <= events.length; boundary += 1) {
+        const prefix = events.slice(0, boundary);
+        const view = liveDerivationView(
+          foldLiveDerivation(emptyLiveDerivationState(), prefix, profile),
+        );
+        for (const observer of observers) {
+          const shared = {
+            backlog_bytes: 0,
+            backlog_count: 0,
+            last_published_dataset_id: null,
+            source: profile.source,
+            ...observer,
+          };
+          expect(
+            deriveLiveHealthReport({ ...shared, view }),
+            `${name}, ${String(boundary)}`,
+          ).toEqual(
+            deriveHealthReport({
+              ...shared,
+              derived: deriveMarketData([prefix], profile),
+              sourceEvents: prefix,
+            }),
+          );
+        }
+      }
     }
   });
 

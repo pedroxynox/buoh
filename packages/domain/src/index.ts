@@ -13,8 +13,11 @@ export {
 export {
   CONDITION_HEALTH,
   deriveHealthReport,
+  deriveLiveHealthReport,
   unobservedHealthReport,
   type HealthInput,
+  type HealthLogFacts,
+  type LiveHealthInput,
 } from './health.js';
 export {
   JsonLexemeError,

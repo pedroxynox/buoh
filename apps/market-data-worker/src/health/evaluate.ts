@@ -2,19 +2,36 @@ import {
   type ConditionType,
   type HealthReport,
   type IngestionCursor,
+  type LiveDerivationState,
   type ServiceHealth,
-  type SourceEvent,
 } from '@buoh/contracts';
 import {
-  deriveHealthReport,
+  deriveLiveHealthReport,
+  emptyLiveDerivationState,
+  foldLiveDerivation,
+  liveDerivationView,
   unobservedHealthReport,
-  type DerivedMarketData,
   type PipelineProfile,
 } from '@buoh/domain';
 
-import { checkLogContent, isCursorAheadOfLog, isOtherSymbol } from '../deriv/log-check.js';
+import { checkFoldedContent, isOtherSymbolSeen, type CheckedFold } from '../deriv/log-check.js';
 import { type IngestionHeartbeat } from '../ingestion/status.js';
-import { previousConnection, unrecordedClose } from '../source-log/previous-connection.js';
+import { unrecordedClose } from '../source-log/previous-connection.js';
+
+/**
+ * El log durable que observó `data:health`, leído desde su último punto de control válido (ADR-0017
+ * §4). Sin el esquema de fuente guardado no hay perfil con el que plegarlo, y solo se sabe si tiene
+ * eventos (`unprofiled`). Con él, su pliegue (`foldSinceCheckpoint`) y si el índice tiene el evento
+ * del último cursor del símbolo (`cursor_in_log`: `null` sin cursor o si el contenido del log no
+ * pasa sus comprobaciones, que van antes, como al arrancar).
+ */
+export type ObservedLog =
+  | { readonly empty: boolean; readonly status: 'unprofiled' }
+  | {
+      readonly cursor_in_log: boolean | null;
+      readonly fold: CheckedFold;
+      readonly status: 'folded';
+    };
 
 /** Lo observado de una fuente que se pudo leer entera (ADR-0015 §8, «Entradas»). */
 export interface ObservedSource {
@@ -33,6 +50,8 @@ export interface ObservedSource {
   readonly nextId: () => string;
   /** La hora de la observación, UTC con milisegundos. */
   readonly now: string;
+  /** El log durable, desde su último punto de control válido. */
+  readonly log: ObservedLog;
   /** Los tipos abiertos del registro operativo. */
   readonly operationalConditionTypes: readonly ConditionType[];
   /**
@@ -40,8 +59,6 @@ export interface ObservedSource {
    * no hay esquema guardado.
    */
   readonly profile: PipelineProfile | null;
-  /** El log durable: sus segmentos, cerrados y abierto, en orden. */
-  readonly segments: readonly (readonly SourceEvent[])[];
   readonly source: string;
   readonly status: 'observed';
   /** El símbolo pedido. */
@@ -55,16 +72,22 @@ export interface ObservedSource {
  * con un motivo saneado (un código o un nombre, nunca el mensaje de un error):
  * `storage_unavailable` si PostgreSQL o el almacenamiento de objetos no responden (regla 3), e
  * `incompatible` si lo leído ya es incompatible (regla 2), como un esquema de fuente guardado que
- * falta o que no coincide con su SHA-256 fijado.
+ * falta o que no coincide con su SHA-256 fijado. Quien espera la observación con un plazo decide el
+ * tercero: `checkpoint_rebuild_incomplete` si el plazo se cumplió mientras reconstruía el estado vivo
+ * desde el último punto de control válido (ADR-0017 §6).
  */
 export type HealthObservation =
   | { readonly reason: string; readonly source: string; readonly status: 'incompatible' }
   | { readonly reason: string; readonly source: string; readonly status: 'storage_unavailable' }
+  | { readonly source: string; readonly status: 'checkpoint_rebuild_incomplete' }
   | ObservedSource;
 
-/** La alerta de stderr de las reglas 2 y 3, con el motivo saneado. */
+/** La alerta de stderr de las reglas 2 y 3 y de una reconstrucción que no terminó, saneada. */
 export interface HealthAlert {
-  readonly event: 'data_health_failed' | 'data_health_storage_unavailable';
+  readonly event:
+    | 'data_health_checkpoint_rebuild_incomplete'
+    | 'data_health_failed'
+    | 'data_health_storage_unavailable';
   readonly reason: string;
 }
 
@@ -85,72 +108,47 @@ function failedEvaluation(source: string, reason: string): HealthEvaluation {
   };
 }
 
-/** La derivación del log, o el motivo de la regla 2 que no pasa. */
+/** El estado vivo del log, o el motivo de la regla 2 que no pasa. */
 type ObservedLogCheck =
-  | { readonly derived: DerivedMarketData; readonly status: 'passed' }
+  | { readonly state: LiveDerivationState; readonly status: 'passed' }
   | { readonly reason: string; readonly status: 'failed' };
 
-/** La derivación de un log vacío: sin eventos no hay nada que derivar, ni hace falta el perfil. */
-function emptyDerivation(): DerivedMarketData {
-  return {
-    conditions: [],
-    incidents: [],
-    openConditionTypes: [],
-    pendingContinuitySymbols: [],
-    pendingGaps: [],
-    ticks: [],
-  };
-}
-
 /**
- * Las comprobaciones del contenido del log que se deriva. Con el esquema de fuente guardado, son las
- * del arranque de la sesión, en el mismo orden, sobre el log entero (`checkLogContent`; el arranque
- * las hace desde el último punto de control, con `checkLogSinceCheckpoint`). Sin él, un log no vacío
- * no se puede derivar (`source_schema_missing`), y uno vacío solo se comprueba con los cursores de la
- * fuente.
+ * Las comprobaciones de la regla 2 sobre el log observado, las del arranque de la sesión y en su
+ * orden (ADR-0015 §5): las del contenido sobre su pliegue (`checkFoldedContent`) y después el último
+ * cursor del símbolo contra el índice, sin el cierre que la regla 4 añade en memoria
+ * (`cursor_ahead_of_log`), como pide §6. Sin el esquema de fuente guardado, un log no vacío no se
+ * puede derivar (`source_schema_missing`), y uno vacío solo se comprueba con los cursores de la
+ * fuente: un cursor nunca apunta a un evento de un log sin eventos.
  */
-function checkObservedContent(
-  observation: ObservedSource,
-  segments: readonly (readonly SourceEvent[])[],
-): ObservedLogCheck {
-  const { cursorSymbols, profile, symbol } = observation;
-  if (profile !== null) {
-    return checkLogContent({ cursorSymbols, profile, segments, symbol });
+function checkObservedLog(observation: ObservedSource): ObservedLogCheck {
+  const { cursorSymbols, latestCursor, log, symbol } = observation;
+  if (log.status === 'unprofiled') {
+    if (!log.empty) {
+      return { reason: 'source_schema_missing', status: 'failed' };
+    }
+    if (isOtherSymbolSeen({ cursorSymbols, symbol, symbolNotAllowedSeen: false })) {
+      return { reason: 'symbol_mismatch', status: 'failed' };
+    }
+    return latestCursor === null
+      ? { state: emptyLiveDerivationState(), status: 'passed' }
+      : { reason: 'cursor_ahead_of_log', status: 'failed' };
   }
-  if (segments.some((segment) => segment.length > 0)) {
-    return { reason: 'source_schema_missing', status: 'failed' };
+  const content = checkFoldedContent(log.fold, { cursorSymbols, symbol });
+  if (content.status === 'failed') {
+    return { reason: content.reason, status: 'failed' };
   }
-  const derived = emptyDerivation();
-  return isOtherSymbol({ cursorSymbols, derived, symbol })
-    ? { reason: 'symbol_mismatch', status: 'failed' }
-    : { derived, status: 'passed' };
-}
-
-/**
- * Las comprobaciones de la regla 2 sobre el log que se deriva, en el orden del arranque de la sesión
- * (ADR-0015 §5): las del contenido (`checkObservedContent`) y después el último cursor del símbolo
- * contra el log durable observado, sin el cierre que la regla 4 añade en memoria
- * (`isCursorAheadOfLog`, `cursor_ahead_of_log`), como pide §6.
- */
-function checkObservedLog(
-  observation: ObservedSource,
-  segments: readonly (readonly SourceEvent[])[],
-): ObservedLogCheck {
-  const checked = checkObservedContent(observation, segments);
-  if (
-    checked.status === 'passed' &&
-    isCursorAheadOfLog({ cursor: observation.latestCursor, segments: observation.segments })
-  ) {
+  if (log.cursor_in_log === false) {
     return { reason: 'cursor_ahead_of_log', status: 'failed' };
   }
-  return checked;
+  return { state: content.state, status: 'passed' };
 }
 
 /**
  * Lo que da la regla del escritor que se aplica (ADR-0015 §8, reglas 4 a 6): el backlog, la conexión
  * si no sale del log y la salud mínima.
  */
-interface WriterView {
+export interface WriterView {
   readonly backlog_bytes: number;
   readonly backlog_count: number;
   /** La conexión observada fuera del log; sin ella, sale del log. */
@@ -174,22 +172,15 @@ const NO_WRITER: WriterView = {
  */
 const HEARTBEAT_MAX_AGE_MS = 45_000;
 
-/** La hora del último `ConnectionOpened` o `ConnectionClosed` del log, o `null` si no tiene. */
-function lastConnectionEventTime(segments: readonly (readonly SourceEvent[])[]): string | null {
-  let time: string | null = null;
-  for (const event of segments.flat()) {
-    if (event.kind === 'connection_opened' || event.kind === 'connection_closed') {
-      time = event.occurred_at_utc;
-    }
-  }
-  return time;
-}
-
 /**
  * La regla del escritor que se aplica (ADR-0015 §8, reglas 4 a 6). El escritor vivo es el de este
- * esquema si su PID es el del último latido.
+ * esquema si su PID es el del último latido. `lastConnectionEventTimeUtc` es la hora del último
+ * `ConnectionOpened` o `ConnectionClosed` del log, o `null` si no tiene.
  */
-function writerView(observation: ObservedSource): WriterView {
+export function writerView(
+  observation: Pick<ObservedSource, 'latestHeartbeat' | 'now' | 'writerPid'>,
+  lastConnectionEventTimeUtc: string | null,
+): WriterView {
   const { latestHeartbeat: heartbeat, writerPid } = observation;
   if (writerPid === null) {
     return NO_WRITER;
@@ -203,9 +194,9 @@ function writerView(observation: ObservedSource): WriterView {
   ) {
     // Regla 5. Si el latido no es posterior al último evento de conexión del log, el log ya sabe más
     // que él, como entre una reconexión y su latido (ADR-0015 §11), y la conexión sale del log.
-    const lastConnection = lastConnectionEventTime(observation.segments);
     const later =
-      lastConnection === null || Date.parse(own.observed_at_utc) > Date.parse(lastConnection);
+      lastConnectionEventTimeUtc === null ||
+      Date.parse(own.observed_at_utc) > Date.parse(lastConnectionEventTimeUtc);
     return {
       backlog_bytes: own.backlog_bytes,
       backlog_count: own.backlog_count,
@@ -225,16 +216,20 @@ function writerView(observation: ObservedSource): WriterView {
 }
 
 /**
- * El log como lo dejará el próximo arranque (regla 4): si su última conexión no tiene cierre durable,
- * le añade al final, solo en memoria, el cierre que la sesión persistirá antes de abrir el socket
- * siguiente (`unrecordedClose`), con el símbolo pedido como afectado y la hora de la observación. El
- * log observado no cambia.
+ * El estado vivo como lo dejará el próximo arranque (regla 4): si la última conexión del log no tiene
+ * cierre durable, le aplica al final, solo en memoria, el cierre que la sesión persistirá antes de
+ * abrir el socket siguiente (`unrecordedClose`), con el símbolo pedido como afectado y la hora de la
+ * observación (ADR-0017 §4). El log observado no cambia. Un log sin perfil no tiene eventos, así que
+ * tampoco una conexión que cerrar. Si el pliegue no acepta el cierre, el log no se deriva con él:
+ * `null`.
  */
-function withUnrecordedClose(observation: ObservedSource): readonly (readonly SourceEvent[])[] {
-  const { segments } = observation;
-  const previous = previousConnection(segments);
-  if (previous === null || previous.closed) {
-    return segments;
+function withUnrecordedClose(
+  state: LiveDerivationState,
+  observation: ObservedSource,
+): LiveDerivationState | null {
+  const previous = state.previous_connection;
+  if (previous?.closed_at_utc !== null || observation.profile === null) {
+    return state;
   }
   const close = unrecordedClose({
     affected_symbols: [observation.symbol],
@@ -243,29 +238,36 @@ function withUnrecordedClose(observation: ObservedSource): readonly (readonly So
     occurred_at_utc: observation.now,
     source: observation.source,
   });
-  return [...segments.slice(0, -1), [...(segments.at(-1) ?? []), close]];
+  try {
+    return foldLiveDerivation(state, [close], observation.profile);
+  } catch {
+    return null;
+  }
 }
 
 /** Las reglas 4 a 7 sobre lo observado, después de la regla 2. */
 function evaluateObserved(observation: ObservedSource): HealthEvaluation {
-  const writer = writerView(observation);
   // El cierre de la regla 4 es de una conexión sin cierre durable, así que no cambia lo que comprueba
-  // la regla 2, y basta una derivación.
-  const segments = writer.rule === 4 ? withUnrecordedClose(observation) : observation.segments;
-  const checked = checkObservedLog(observation, segments);
+  // la regla 2: se comprueba el log observado.
+  const checked = checkObservedLog(observation);
   if (checked.status === 'failed') {
     return failedEvaluation(observation.source, checked.reason);
   }
-  const report = deriveHealthReport({
+  const writer = writerView(observation, checked.state.last_connection_event_time_utc);
+  const state = writer.rule === 4 ? withUnrecordedClose(checked.state, observation) : checked.state;
+  if (state === null) {
+    // Como cuando `deriveMarketData` no derivaba el log con ese cierre.
+    return failedEvaluation(observation.source, 'log_not_derivable');
+  }
+  const report = deriveLiveHealthReport({
     backlog_bytes: writer.backlog_bytes,
     backlog_count: writer.backlog_count,
     ...(writer.connection_state === undefined ? {} : { connection_state: writer.connection_state }),
-    derived: checked.derived,
     last_published_dataset_id: observation.lastPublishedDatasetId,
     ...(writer.minimum_health === undefined ? {} : { minimum_health: writer.minimum_health }),
     operational_condition_types: observation.operationalConditionTypes,
     source: observation.source,
-    sourceEvents: segments.flat(),
+    view: liveDerivationView(state),
   });
   return { alert: null, exitCode: report.service_health === 'healthy' ? 0 : 1, report };
 }
@@ -285,6 +287,14 @@ export function evaluateDataHealth(observation: HealthObservation): HealthEvalua
       };
     case 'incompatible':
       return failedEvaluation(observation.source, observation.reason);
+    case 'checkpoint_rebuild_incomplete':
+      // ADR-0017 §6: sin un punto de control válido, como mientras `ingest` todavía no escribió los
+      // de una versión nueva, la reconstrucción en memoria no terminó en el plazo.
+      return {
+        alert: { event: 'data_health_checkpoint_rebuild_incomplete', reason: 'deadline_exceeded' },
+        exitCode: 1,
+        report: unobservedHealthReport({ service_health: 'paused', source: observation.source }),
+      };
     case 'observed':
       return evaluateObserved(observation);
   }
