@@ -123,6 +123,14 @@ export interface RawFirstIngestorInput {
    * §6 y §7). Si lanza, la escritura se rechaza con ese error, como un error de programación.
    */
   readonly onDurable?: (event: SourceEvent) => void;
+  /**
+   * Recibe cada segmento que este ingestor acaba de cerrar de forma durable, en orden: al rotar antes
+   * de un evento, antes de su `onDurable`, y con `rotate`. Un cierre durable que no llega aquí, porque
+   * falló el evento que lo siguió o porque la fila quedó confirmada aunque informó error, lo encuentra
+   * después en el log quien lo lee. La sesión deriva con él el punto de control del estado vivo
+   * (ADR-0017 §5). Si lanza, como `onDurable`.
+   */
+  readonly onSegmentClosed?: (segment: ClosedSourceSegment) => void;
 }
 
 /**
@@ -197,6 +205,9 @@ export class RawFirstIngestor {
         return this.#onPersistenceFailure(error, observedRef);
       }
       throw error;
+    }
+    if (result.closed !== null) {
+      this.#input.onSegmentClosed?.(result.closed);
     }
     this.#input.onDurable?.(event);
     return { position: result.position, segment_index: result.segment_index, status: 'durable' };
@@ -479,14 +490,19 @@ export class RawFirstIngestor {
         return failure;
       }
     }
+    let segment: ClosedSourceSegment | null;
     try {
-      return { segment: await this.#log.close(reason), status: 'closed' };
+      segment = await this.#log.close(reason);
     } catch (error) {
       if (error instanceof LogPersistenceError) {
         return this.#onPersistenceFailure(error, this.#input.nextId());
       }
       throw error;
     }
+    if (segment !== null) {
+      this.#input.onSegmentClosed?.(segment);
+    }
+    return { segment, status: 'closed' };
   }
 
   /** Resultado fail-closed tras la última pérdida de durabilidad, o `null` si no hubo. */

@@ -24,16 +24,19 @@ import { type OperationalStore } from '../operational/registry.js';
 import { type ObjectStore } from '../ports.js';
 import {
   type ClosedSourceSegment,
+  type LiveCheckpointCandidate,
+  type LiveCheckpointInsert,
   type SourceEventIndexRow,
   type SourceLogState,
   type SourceLogStore,
+  type StoredLiveCheckpoint,
 } from '../source-log/ports.js';
 
 /**
  * Almacenes en memoria con las mismas reglas que los de PostgreSQL y almacenamiento de objetos:
- * triggers de `0002`, `0003` y `0004`, claves únicas y validación de lo que se guarda. Los usa
- * `data:smoke`, que no escribe nada fuera de su proceso (ADR-0012 §10): todo se borra al terminar.
- * Las pruebas les añaden fallos inyectables en `test/support/memory-stores.ts`.
+ * triggers de `0002`, `0003` y `0004`, claves únicas de `0001` a `0005` y validación de lo que se
+ * guarda. Los usa `data:smoke`, que no escribe nada fuera de su proceso (ADR-0012 §10): todo se
+ * borra al terminar. Las pruebas les añaden fallos inyectables en `test/support/memory-stores.ts`.
  */
 
 /** Objetos por clave; nunca reemplaza una clave existente. */
@@ -67,10 +70,14 @@ export class InMemoryObjectStore implements ObjectStore {
   }
 }
 
-/** Log raw-first con las mismas invariantes que los triggers de `0002_log_raw_first`. */
+/**
+ * Log raw-first con las mismas invariantes que los triggers de `0002_log_raw_first`, y los puntos de
+ * control de su estado vivo con la clave de `0005`.
+ */
 export class InMemorySourceLogStore implements SourceLogStore {
   readonly rows: SourceEventIndexRow[] = [];
   readonly closed: ClosedSourceSegment[] = [];
+  readonly checkpoints: StoredLiveCheckpoint[] = [];
 
   readLogState(source: string): Promise<SourceLogState> {
     const closed = this.closed.filter((segment) => segment.source === source);
@@ -134,6 +141,57 @@ export class InMemorySourceLogStore implements SourceLogStore {
           segment.source === source && segment.segment_index >= from && segment.segment_index <= to,
       ),
     );
+  }
+
+  insertLiveCheckpoint(row: StoredLiveCheckpoint): Promise<LiveCheckpointInsert> {
+    const existing = this.checkpoints.find(
+      (item) =>
+        item.source === row.source &&
+        item.segment_index === row.segment_index &&
+        item.versions_sha256 === row.versions_sha256,
+    );
+    if (existing !== undefined) {
+      return Promise.resolve(
+        existing.checkpoint_sha256 === row.checkpoint_sha256 ? 'exists' : 'conflict',
+      );
+    }
+    this.checkpoints.push({ ...row });
+    return Promise.resolve('inserted');
+  }
+
+  readLiveCheckpoint(
+    source: string,
+    versionsSha256: string,
+    below: number | null,
+  ): Promise<LiveCheckpointCandidate | null> {
+    const row = this.checkpoints
+      .filter(
+        (item) =>
+          item.source === source &&
+          item.versions_sha256 === versionsSha256 &&
+          (below === null || item.segment_index < below),
+      )
+      .reduce<StoredLiveCheckpoint | null>(
+        (latest, item) =>
+          latest === null || item.segment_index > latest.segment_index ? item : latest,
+        null,
+      );
+    if (row === null) {
+      return Promise.resolve(null);
+    }
+    const closed = this.closed.filter(
+      (segment) => segment.source === source && segment.segment_index <= row.segment_index,
+    );
+    return Promise.resolve({
+      binding: {
+        event_count: closed.reduce((sum, segment) => sum + segment.event_count, 0),
+        logical_content_sha256:
+          closed.find((segment) => segment.segment_index === row.segment_index)
+            ?.logical_content_sha256 ?? null,
+        raw_frame_count: closed.reduce((sum, segment) => sum + segment.raw_frame_count, 0),
+      },
+      row: { ...row },
+    });
   }
 }
 

@@ -411,6 +411,10 @@ describe('ingestCommand: la captura', () => {
     expect(run.stores.sourceLog.closed.map((segment) => segment.close_reason)).toEqual([
       'requested',
     ]);
+    // El punto de control del segmento que cerró la parada, con el log protegido (ADR-0017 §5).
+    expect(
+      run.stores.sourceLog.checkpoints.map((row) => [row.segment_index, row.event_count]),
+    ).toEqual([[0, 5]]);
     expect(run.alerts).toEqual([]);
   });
 

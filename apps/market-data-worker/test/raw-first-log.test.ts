@@ -40,6 +40,7 @@ import {
   RawFirstIngestor,
   replayDataset,
   SourceEventLog,
+  type ClosedSourceSegment,
   type OperationalAlert,
   type SyntheticFixture,
 } from '../src/index.js';
@@ -113,6 +114,8 @@ async function harness(
     now?: () => string;
     /** Recibe cada source event que el ingestor hizo durable; por defecto, ninguno. */
     onDurable?: (event: SourceEvent) => void;
+    /** Recibe cada segmento que el ingestor cerró de forma durable; por defecto, ninguno. */
+    onSegmentClosed?: (segment: ClosedSourceSegment) => void;
     operational?: MemoryOperationalStore;
     profile?: PipelineProfile;
   } = {},
@@ -144,6 +147,7 @@ async function harness(
     nextId: () => id((counter += 1)),
     now: options.now ?? (() => DETECTED_AT),
     ...(options.onDurable === undefined ? {} : { onDurable: options.onDurable }),
+    ...(options.onSegmentClosed === undefined ? {} : { onSegmentClosed: options.onSegmentClosed }),
     profile,
     registry,
     reopenLog: openLog,
@@ -697,6 +701,29 @@ describe('log de source events: rotación 1.0.0 y reinicio', () => {
       ['window', 2],
     ]);
     expect(log.openSegmentIndex).toBe(1);
+  });
+
+  it('readClosedSegment da un segmento cerrado con su fila de closed_source_segments, verificado como en readClosedSegments', async () => {
+    const { log, objects, store } = await freshLog();
+    await log.append(raw(1, '2026-01-01T00:00:00.000Z'));
+    await log.append(raw(2, '2026-01-01T00:00:01.000Z'));
+    await log.close('requested');
+    await log.append(raw(3, '2026-01-01T00:00:02.000Z'));
+    await log.close('requested');
+
+    const second = await log.readClosedSegment(1);
+    expect(second.segment).toEqual(store.closed[1]);
+    expect(second.events).toEqual((await log.readClosedSegments(1, 1))[0]);
+    // El segmento abierto no está cerrado.
+    await expect(log.readClosedSegment(2)).rejects.toBeInstanceOf(LogIntegrityError);
+    // Un objeto alterado no pasa sus comprobaciones.
+    const first = store.closed[0];
+    if (first === undefined) {
+      throw new TypeError('Falta el segmento 0.');
+    }
+    objects.objects.set(contentKey(first.object_bytes_sha256), new Uint8Array([1, 2, 3]));
+    await expect(log.readClosedSegment(0)).rejects.toBeInstanceOf(LogIntegrityError);
+    await expect(log.readClosedSegment(-1)).rejects.toThrow(/inválido/u);
   });
 
   it('continúa el segmento no finalizado tras un reinicio', async () => {
@@ -1433,6 +1460,38 @@ describe('RawFirstIngestor: onDurable', () => {
 
     expect(run.sourceLog.rows.map((row) => row.event_id)).toEqual([id(1), id(2), id(9001)]);
     expect(durable).toEqual([id(1), id(9001)]);
+  });
+});
+
+// Cada segmento cerrado de forma durable, para el punto de control del estado vivo (ADR-0017 §5).
+describe('RawFirstIngestor: onSegmentClosed', () => {
+  const frameAt = (observationId: string, receivedAt: string) => ({
+    connection_id: CONNECTION_A,
+    observation_id: observationId,
+    payload_utf8: tickPayload(1767225601),
+    received_at_utc: receivedAt,
+  });
+
+  it('recibe en orden cada segmento que el ingestor cerró, al rotar antes de un evento y con rotate, y nunca uno que no quedó durable', async () => {
+    const closed: ClosedSourceSegment[] = [];
+    const run = await harness({ onSegmentClosed: (segment) => closed.push(segment) });
+    await run.ingestor.receiveEvent(openedEvent(CONNECTION_A, id(1), '2026-01-01T00:00:00.000Z'));
+    // Cinco minutos después del primero: la ventana cierra el segmento 0 antes del frame.
+    await run.ingestor.receiveFrame(frameAt(id(2), '2026-01-01T00:05:00.000Z'));
+    expect(closed).toEqual([run.sourceLog.closed[0]]);
+    // Un cierre que no queda durable no pasa por aquí.
+    run.sourceLog.failClose = true;
+    expect(await run.ingestor.rotate('requested')).toMatchObject({ status: 'not_durable' });
+    expect(closed).toHaveLength(1);
+    run.sourceLog.failClose = false;
+    await run.ingestor.receiveEvent(
+      openedEvent(CONNECTION_B, id(3), '2026-01-01T00:05:01.000Z', CONNECTION_A),
+    );
+    expect(await run.ingestor.rotate('requested')).toMatchObject({ status: 'closed' });
+    // El vacío no se cierra.
+    expect(await run.ingestor.rotate('requested')).toEqual({ segment: null, status: 'closed' });
+    expect(closed).toEqual(run.sourceLog.closed);
+    expect(closed.map((segment) => segment.segment_index)).toEqual([0, 1]);
   });
 });
 

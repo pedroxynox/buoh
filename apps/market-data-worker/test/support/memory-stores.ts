@@ -21,7 +21,13 @@ import {
   InMemorySourceLogStore,
 } from '../../src/memory/stores.js';
 import { type CommitPublicationInput, type MetadataStore } from '../../src/ports.js';
-import { type ClosedSourceSegment, type SourceEventIndexRow } from '../../src/source-log/ports.js';
+import {
+  type ClosedSourceSegment,
+  type LiveCheckpointCandidate,
+  type LiveCheckpointInsert,
+  type SourceEventIndexRow,
+  type StoredLiveCheckpoint,
+} from '../../src/source-log/ports.js';
 
 /**
  * Dobles de prueba: los almacenes en memoria de `src/memory/stores.ts`, con las mismas reglas que
@@ -144,6 +150,57 @@ export class MemorySourceLogStore extends InMemorySourceLogStore {
       );
     }
     return super.insertClosedSegment(segment);
+  }
+
+  /** Devuelve true para hacer fallar la inserción de ese punto de control del estado vivo. */
+  failCheckpoint: (row: StoredLiveCheckpoint) => boolean = () => false;
+  /**
+   * Devuelve true para insertar ese punto de control y aun así informar un error: la fila quedó
+   * guardada, pero quien escribe no lo sabe (un resultado ambiguo, ADR-0017 §5).
+   */
+  failCheckpointAfterInsert: (row: StoredLiveCheckpoint) => boolean = () => false;
+  /** Hace fallar la lectura de los puntos de control, como un PostgreSQL que no responde. */
+  failCheckpointReads = false;
+  #checkpointGate: Promise<void> | null = null;
+
+  /**
+   * Retiene las inserciones de puntos de control hasta `release`, como un PostgreSQL lento: las que
+   * llegan mientras tanto esperan, ya pasado el bloqueo.
+   */
+  holdCheckpointWrites(): { readonly release: () => void } {
+    const gate = Promise.withResolvers<undefined>();
+    this.#checkpointGate = gate.promise;
+    return {
+      release: () => {
+        this.#checkpointGate = null;
+        gate.resolve(undefined);
+      },
+    };
+  }
+
+  override async insertLiveCheckpoint(row: StoredLiveCheckpoint): Promise<LiveCheckpointInsert> {
+    await this.#checkpointGate;
+    if (this.failCheckpoint(row)) {
+      throw Object.assign(new Error('Fallo inyectado'), { code: 'synthetic_checkpoint_failure' });
+    }
+    const result = await super.insertLiveCheckpoint(row);
+    if (this.failCheckpointAfterInsert(row)) {
+      throw Object.assign(new Error('Fallo inyectado tras insertar'), {
+        code: 'synthetic_checkpoint_ambiguous',
+      });
+    }
+    return result;
+  }
+
+  override readLiveCheckpoint(
+    source: string,
+    versionsSha256: string,
+    below: number | null,
+  ): Promise<LiveCheckpointCandidate | null> {
+    if (this.failCheckpointReads) {
+      return Promise.reject(Object.assign(new Error('Fallo inyectado'), { code: 'ECONNREFUSED' }));
+    }
+    return super.readLiveCheckpoint(source, versionsSha256, below);
   }
 }
 
