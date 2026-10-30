@@ -4,7 +4,7 @@ schema_version: "1.0.0"
 status: "active"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-10-30T00:07:28.000Z"
+last_reviewed_utc: "2026-10-30T00:39:13.000Z"
 ---
 
 # Plan ejecutable: Fase 2 — Laboratorio y bot shadow para uso propio
@@ -97,7 +97,7 @@ La API y el motor necesitan leer el log y los datasets con el código del worker
 
 - `execution-gateway`, `packages/risk-policy`, la autorización OAuth de Deriv, las cuentas de bróker y los modos `demo` y `real` (Fases 4 a 6).
 - Alertas, notificaciones y la app móvil con datos reales (Fase 3). El prototipo móvil sigue con datos ficticios.
-- La app de escritorio con datos reales. Su plan se escribe aparte cuando existan la API y las pantallas de F2.3 y F2.4, y entonces se revisa la decisión 6 de ADR-0001 (`PROJECT_STATUS.md`). Hasta entonces, el prototipo de escritorio sigue con datos ficticios, sin cambiar [ADR-0010](../arquitectura/adr/0010-prototipo-de-escritorio.md): como empaqueta la exportación de `apps/web` y su política de contenido no deja llamar a la API, F2.4 mantiene para él una exportación con los datos ficticios.
+- La app de escritorio con datos reales. Su plan se escribe aparte cuando existan la API y las pantallas de F2.3 y F2.4, y entonces se revisa la decisión 6 de ADR-0001 (`PROJECT_STATUS.md`). Hasta entonces, el prototipo de escritorio sigue con datos ficticios, sin cambiar [ADR-0010](../arquitectura/adr/0010-prototipo-de-escritorio.md): como empaqueta la exportación de `apps/web` y su política de contenido no deja llamar a la API, F2.4 mantiene para él, en `apps/web/out`, una exportación con los datos ficticios (`F2-UI-001`).
 - Más símbolos que R_100: el universo sigue pendiente.
 - Suscriptores, pagos y registro público (Fase 3B).
 - Python, TimescaleDB, Redis y un writer Parquet, salvo que una ADR de la fase demuestre que hacen falta.
@@ -114,7 +114,7 @@ El arranque de `ingest`, la reparación de cierres antes de cada reconexión, la
 **Aceptación:**
 
 - en cada límite de segmento cerrado de los vectores v1 y de logs sintéticos con reconexiones, cierres reparados, duplicados, ticks fuera de orden e historias `complete`, `partial` y `unavailable`, los cuatro lectores obtienen desde el punto de control y el resto del log lo mismo que derivando el log entero, incluidos los fallos del arranque (ADR-0015 §5) y las reglas de `data:health` (ADR-0015 §8);
-- si el punto de control falta, es de otra versión o no corresponde al log, el lector no lo usa: lo reconstruye por partes, dentro del mismo techo de memoria, o falla, como fije su ADR. Derivar desde el principio todo el log no es una salida, porque 7 días de log son unos 2,5 GB con la derivación de hoy (estimación con los 8 KB por evento de ADR-0016). Nunca lo usa en silencio ni lo migra, y la ADR da el camino de una versión nueva del punto de control;
+- si el punto de control falta, es de otra versión o no corresponde al log, el lector no lo usa: lo reconstruye por partes, dentro del mismo techo de memoria, o falla, como fije su ADR. Derivar desde el principio todo el log no es una salida, porque derivar 7 días de log necesita unos 2,5 GB de memoria con el código de hoy, aunque el log ocupe unos 330 MB (estimación con los 8 KB por evento de ADR-0016). Nunca lo usa en silencio ni lo migra, y la ADR da el camino de una versión nueva del punto de control;
 - con un log sintético de al menos 7 días de R_100, el máximo de memoria (RSS) de `ingest`, al arrancar y durante una reconexión con hueco, y el de `data:health` no superan en más de un 10 % los de un log de un día, y quedan por debajo de 200 MB y de 160 MB, medidos como en ADR-0016 («Medición»);
 - los vectores v1 se reproducen byte a byte, y `deriveMarketData` no cambia su resultado.
 
@@ -127,7 +127,7 @@ El arranque de `ingest`, la reparación de cierres antes de cada reconexión, la
 - la ADR de despliegue sustituye en `production` las reglas de ADR-0015 §7 que rechazan `staging` y `production` y paran a las 23 horas, con su prueba, su comentario y el runbook, y dice qué queda de ellas en `development` y `test`;
 - antes de crear el bucket de producción, las tres comprobaciones de ADR-0016 §4 (412 con `If-None-Match: *`, lectura justo después de escribir y sumas de comprobación en `WHEN_REQUIRED`) pasan contra un bucket de prueba de R2, y el PR registra el resultado;
 - `render.yaml` describe los servicios, y su prueba los fija. La región elegida queda registrada, y las credenciales solo existen como variables `BUOH_*` de cada servicio;
-- cada proceso tiene su token de R2, limitado al bucket de su entorno y a lo que hace: `ingest` lee y escribe, y `data:health`, la API y el motor solo leen. La ADR fija el cifrado de la conexión a PostgreSQL, y una prueba comprueba que el worker lo aplica;
+- cada proceso tiene su token de R2, limitado al bucket de su entorno y a lo que hace: `ingest` y, si es otro, el proceso que publica datasets (`F2-DATASET-001`) leen y escriben, y `data:health`, la API y el motor solo leen. La ADR fija el cifrado de la conexión a PostgreSQL, y una prueba comprueba que el worker lo aplica; la API y el motor lo comprueban en su incremento;
 - la ADR fija dónde y cada cuánto corre `data:health`, con su costo en R2 calculado, y si una parada programada, como un despliegue, recupera su historia, algo que ADR-0015 §10 dejó para el plan de alojamiento;
 - evidencia de 7 días seguidos de captura en producción, por el canal de §4, punto 10. `data:health` da `healthy` salvo en episodios registrados con su causa. La memoria máxima medida en Render no pasa de 256 MB, la mitad del Starter. Las operaciones de R2 y el tráfico de salida medidos caben en el presupuesto de §11;
 - el runbook tiene una sección de producción: preparar, desplegar, parar, recuperar, rotar credenciales y borrar.
@@ -168,7 +168,7 @@ La captura de producción se publica como datasets inmutables.
 
 **Aceptación:**
 
-- la ADR fija la cadencia y el tamaño de cada dataset y en qué proceso de los de §11 corre la publicación, que se hace sola, desde segmentos cerrados del log;
+- la ADR fija la cadencia y el tamaño de cada dataset y en qué proceso del plano de datos corre la publicación: el worker de `ingest` u otro proceso de ese plano, nunca la API ni el motor (§4, punto 5). La publicación se hace sola, desde segmentos cerrados del log;
 - publicar aplica los límites de lectura del replay y divide en partes los artefactos derivados (pendiente 2 de F1.3), con un techo de memoria que no depende del tamaño del dataset;
 - cada dataset publicado se reproduce con `data:replay`, en los dos modos, con el mismo `dataset_id`;
 - un fallo de publicación no deja nada visible y queda en el registro operativo (pendiente 3 de F1.3). Si la conexión cae durante el `COMMIT`, el intento siguiente comprueba si se confirmó antes de repetirlo (pendiente 1 de F1.3);
@@ -184,7 +184,9 @@ La captura de producción se publica como datasets inmutables.
 - lee el sistema de datos con un rol de PostgreSQL y un token de R2 de solo lectura, y solo escribe en sus propias tablas;
 - ninguna respuesta, registro o error contiene secretos, tokens ni credenciales, y las pruebas lo comprueban;
 - todas las respuestas llevan cabeceras de seguridad y una política de contenido, sin recursos de terceros;
-- un backtest corre aislado del proceso que atiende las peticiones, con límites de memoria y de tiempo, y su fallo no tumba la API. Corre como mucho uno a la vez, y la memoria máxima del servicio con un backtest en curso, medida en Render, no pasa de 435 MB, el 85 % del Starter.
+- un backtest corre aislado del proceso que atiende las peticiones, con límites de memoria y de tiempo, y su fallo no tumba la API. Corre como mucho uno a la vez, y la memoria máxima del servicio con un backtest en curso, medida en Render, no pasa de 435 MB, el 85 % del Starter;
+- su conexión a PostgreSQL va cifrada como fije la ADR de despliegue, y una prueba lo comprueba;
+- sus lecturas de R2 y su tráfico de salida se miden en producción y caben en el presupuesto de §11.
 
 ### `F2-AUTH-001` — Cuentas y espacios personales
 
@@ -218,7 +220,8 @@ Observatorio, Mercados y Datos de `apps/web` ([concepto de interfaz](../diseno/c
 - Datos muestra los datasets publicados, con su identificador, período, conteos, incidencias y el resultado de su verificación. Sus pruebas usan datasets sintéticos, y en producción la sección muestra su estado vacío hasta que F2.5 publique los primeros;
 - toda vista de datos dice símbolo, fuente, zona horaria UTC, intervalo, frescura y calidad. Una sección con datos reales nunca muestra datos ficticios, y las que siguen ficticias conservan la marca «Datos ficticios»;
 - las preferencias de la Fase 2 del [catálogo de funciones](../producto/funciones-y-disponibilidad.md) se guardan por cuenta: el tema noche o día y el idioma, con los idiomas que decida el propietario (§12). Las preferencias de notificaciones llegan con la Fase 3, que trae las alertas y sus permisos y preferencias ([roadmap](../producto/roadmap.md), Fase 3);
-- cada pantalla tiene los estados del concepto de interfaz §5: cargando, vacío, error y degradado.
+- cada pantalla tiene los estados del concepto de interfaz §5: cargando, vacío, error y degradado;
+- la exportación con datos ficticios sigue en `apps/web/out`, la carpeta que empaqueta el escritorio (ADR-0010), y la API sirve otra exportación. Una prueba comprueba que la de `apps/web/out` solo tiene datos ficticios y no llama a la API.
 
 ### `F2-CHART-001` — Gráficos accesibles y probados
 
@@ -241,7 +244,7 @@ Una estrategia es un documento declarativo (`StrategyDefinition`), no código: r
 - la identidad de una versión es el hash de su contenido: cambiar cualquier cosa crea otra versión, y nada se modifica en su lugar. Cada versión lleva además su versión semántica y su propietario responsable ([seguridad y rigor](../gobierno/seguridad-y-rigor-cuantitativo.md) §2);
 - una definición inválida se rechaza con errores estructurados;
 - el evaluador es puro y determinista: los vectores fijan sus decisiones, y sus pruebas prohíben red, reloj real y azar, como `F1-VECTOR-001`. Sin azar no hace falta semilla; si una ADR introduce azar, lo inyecta con una semilla registrada;
-- el ciclo de vida (`draft`, `reviewed`, `active`, `paused`, `retired`) avanza solo con las puertas del [protocolo de validación](../gobierno/protocolo-de-validacion-de-estrategias.md) §4, y cada cambio queda en la auditoría. La puerta `reviewed` → `shadow` del protocolo deja la versión en `active` con `execution_mode = shadow`, y la estrategia declara ese modo ([operación y control de riesgo](../gobierno/operacion-y-control-de-riesgo.md) §2);
+- el ciclo de vida (`draft`, `reviewed`, `active`, `paused`, `retired`) avanza solo con las puertas del [protocolo de validación](../gobierno/protocolo-de-validacion-de-estrategias.md) §4, y cada cambio queda en la auditoría. La puerta `reviewed` → `shadow` del protocolo pone la estrategia en `active` con `execution_mode = shadow`, y la estrategia declara ese modo ([operación y control de riesgo](../gobierno/operacion-y-control-de-riesgo.md) §2). Como la promoción crea una versión nueva (seguridad y rigor §2), la ADR del modelo de estrategia fija cómo la versión en `shadow` queda ligada a la evidencia de la versión congelada;
 - la sección Laboratorio de la web crea, versiona y revisa estrategias. Nunca edita una versión existente: guardar un cambio crea otra.
 
 ### `F2-BACKTEST-001` — Backtest reproducible por partes
@@ -251,7 +254,7 @@ Un backtest evalúa una versión de estrategia sobre datasets publicados, con el
 **Aceptación:**
 
 - la ADR de la semántica del backtest fija cómo se reconstruye cada instante de decisión desde los source events del dataset (§4, punto 2), qué entradas forman la identidad del backtest y cómo trata los datos degradados según la política de datos de la estrategia;
-- su identidad es el hash de sus entradas: versión de estrategia, parámetros, `dataset_id`, rango, versión del motor, costes y supuestos. El resultado guarda también el entorno de ejecución (versiones de Node y de los contratos). Repetirlo da el mismo resultado, byte a byte;
+- su identidad es el hash de sus entradas: versión de estrategia, parámetros, `dataset_id`, rango, versión del motor, costes y supuestos. El entorno de ejecución (versiones de Node y de los contratos) se guarda junto al resultado, fuera de la comparación: repetirlo con las mismas entradas da las mismas decisiones, posiciones y métricas, byte a byte;
 - lee los datos por partes, cada una verificada por su hash antes de usarla, y un backtest de 30 días sintéticos de R_100 no pasa de 256 MB;
 - declara costes, latencia y supuestos, y cuenta las decisiones que la política de datos dejó sin tomar;
 - vectores sintéticos fijan las decisiones, las posiciones y las métricas esperadas, también con huecos, duplicados y ticks fuera de orden;
@@ -270,7 +273,7 @@ La evaluación sigue el protocolo de validación, con las reglas medibles que fi
 - una estrategia sin muestra, costes, línea base o prueba fuera de muestra sale como «no validada» (protocolo §3);
 - antes de pasar a `shadow`, el backtest de la versión congelada se repite y da el mismo resultado: es la réplica del ciclo de seguridad y rigor §2;
 - un vector sintético en el que la estrategia gana en entrenamiento y pierde fuera de muestra produce exactamente ese informe;
-- la sección Laboratorio de la web muestra el registro previo y el informe de evidencia, cada cifra con su contexto.
+- desde la sección Laboratorio de la web, el propietario guarda el registro previo, pide la evaluación, la prueba fuera de muestra y la puerta `reviewed` → `shadow`, y ve el informe de evidencia, cada cifra con su contexto.
 
 ### `F2-SHADOW-001` — Motor de señales shadow
 
@@ -282,6 +285,7 @@ La evaluación sigue el protocolo de validación, con las reglas medibles que fi
 - no abre ninguna conexión con Deriv ni con un bróker, y una prueba lo comprueba. Su `execution_mode` es `shadow`;
 - tras un reinicio, sigue desde su último estado durable, y las decisiones que no tomó a tiempo quedan registradas como omitidas, con su causa;
 - tiene pruebas sin red, con log, reloj y temporizador falsos, y corre desplegado en producción, con una memoria máxima medida en Render que no pasa de 256 MB, la mitad del Starter;
+- su conexión a PostgreSQL va cifrada como fije la ADR de despliegue, y sus lecturas de R2 y su tráfico de salida se miden en producción y caben en el presupuesto de §11;
 - la web muestra el estado del motor por estrategia: en marcha o detenida, y por qué.
 
 ### `F2-SIGNAL-001` — Registro de señales
@@ -336,7 +340,7 @@ Es la primera mitad del criterio de salida del roadmap: cada decisión del motor
 
 Cada ADR es un PR propio, con su revisión semántica, y se fusiona antes del primer PR de código que gobierna. Cada una fija la secuencia de PR de su incremento, como ADR-0015 §13. Este es su orden:
 
-1. **Punto de control** (F2.1): qué resume, dónde se guarda, cómo se liga a los segmentos cerrados y a las versiones, cómo se demuestra la equivalencia con la derivación completa y cómo lo usan los cuatro lectores. Diseña la derivación para que la vista de cada instante de decisión (§4, punto 2) pueda reutilizarla.
+1. **Punto de control** (F2.1): qué resume, dónde se guarda, cómo se liga a los segmentos cerrados y a las versiones, cómo se demuestra la equivalencia con la derivación completa y cómo lo usan los cuatro lectores. Dice también cómo sigue valiendo si la retención parte la captura en logs sucesivos (`F2-RETENTION-001`). Diseña la derivación para que la vista de cada instante de decisión (§4, punto 2) pueda reutilizarla.
 2. **Despliegue del sistema de datos** (F2.2): las condiciones de ADR-0016 §4 que quedan después del punto de control. Son los roles, la retención, las reglas de `ingest` en producción, las comprobaciones de R2, dónde y cada cuánto corre `data:health`, las credenciales y la región. Decide también el cifrado de la conexión a PostgreSQL, `render.yaml`, la historia tras una parada programada, qué pasa si dos instancias se solapan durante un despliegue, cómo se mide el tráfico de salida y cómo llega al repositorio la evidencia de producción (§4, punto 10).
 3. **API y cuentas** (F2.3): el método de inicio de sesión, las sesiones, las cuentas sin registro público, los espacios personales, la auditoría, los contratos y su OpenAPI, cómo se sirve la web y sus roles y tokens de lectura. Decide también cómo se aíslan los backtests y cómo comparten la API y el motor el código de lectura de datos (§6).
 4. **Datasets vivos** (F2.5): los umbrales, el perfil de publicación, la cadencia y el tamaño, las partes y los límites al publicar, los ticks de la historia y la lectura por partes. Se escribe con 7 días de captura en producción.
@@ -438,7 +442,7 @@ La Fase 2 está `done` únicamente cuando:
 
 - todos los requisitos `F2-*` tienen evidencia fusionada;
 - el sistema de datos cumple `F2-DEPLOY-001` durante toda la ventana de la puerta de salida;
-- una estrategia estuvo en `shadow` al menos 7 días seguidos en producción, `active` salvo en las pausas de sus detenciones, y cada una de sus decisiones de esa ventana se reprodujo con el mismo registro desde datasets publicados y versiones fijados (`F2-REPLAY-001`);
+- una estrategia en `shadow` sumó en producción al menos 7 días en `active`, sin contar sus pausas, y cada una de sus decisiones de esa ventana se reprodujo con el mismo registro desde datasets publicados y versiones fijados (`F2-REPLAY-001`);
 - en esa ventana el motor se detuvo sin intervención ante cada degradación de los datos, natural o provocada en un ensayo de la puerta, y cada reanudación siguió su regla (`F2-STOP-001`);
 - esa estrategia tiene su informe completo de backtest, validación, prueba fuera de muestra y `shadow`, también si es negativo. La puerta no exige ganancias. Exige que la estrategia haya pasado la puerta `reviewed` → `shadow` del protocolo §4, con su criterio de promoción registrado antes de ver resultados (protocolo §1), sea cual sea ese criterio;
 - el costo mensual medido está dentro del presupuesto aprobado;
