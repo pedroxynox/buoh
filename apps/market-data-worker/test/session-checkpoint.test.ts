@@ -77,6 +77,24 @@ async function foldedRows(run: SessionRun) {
   });
 }
 
+/**
+ * Un punto de control del segmento 0 con las versiones de la sesión y otro SHA-256 que el que dará
+ * su pliegue: como si otro escritor ya lo hubiera guardado.
+ */
+const conflictingRow = () =>
+  checkpointRow(
+    buildLiveDerivationCheckpoint({
+      event_count: 1,
+      profile,
+      raw_frame_count: 0,
+      segment_index: 0,
+      segment_logical_content_sha256: 'e'.repeat(64),
+      state: emptyLiveDerivationState(),
+      symbol: SYMBOL,
+    }),
+    '2026-03-02T09:00:00.000Z',
+  );
+
 /** Responde el `forget_all` de la parada de la conexión, sea cual sea su `req_id`. */
 async function answerForgetAll(socket: FakeDerivSocket): Promise<void> {
   await settle();
@@ -217,6 +235,130 @@ describe('startDerivSession: el punto de control del estado vivo (ADR-0017 §5 y
     expect(run.sourceLog.closed).toHaveLength(1);
     expect(run.sourceLog.checkpoints).toEqual([]);
     expect(run.timeline.at(-1)).toBe('release:1');
+  });
+
+  it('después de perder el bloqueo y tomar otro, escribe con el log reabierto con el bloqueo nuevo', async () => {
+    const run = await sessionHarness({ answerPings: true, writeLiveCheckpoints: true });
+    await rotateOnce(run);
+    expect(run.sourceLog.checkpoints.map((row) => row.segment_index)).toEqual([0]);
+    // La escritura del tick siguiente falla, la conexión termina en pausa y la sesión toma otro.
+    run.provider.lock(1).lose();
+    run.socket(1).text(derivMessages.tick(2, START_EPOCH + 302, '100.75'));
+    await settle();
+    await run.clock.advance(500);
+    await run.clock.advance(1);
+    expect(run.timeline).toEqual(['acquire:1', 'connect:1', 'release:1', 'acquire:2', 'connect:2']);
+    const second = run.socket(2);
+    await run.subscribe(second, START_EPOCH + 303);
+    await run.clock.advance(300_000);
+    second.text(derivMessages.tick(2, START_EPOCH + 603, '100.5'));
+    await settle();
+    run.session.stop();
+    await answerForgetAll(second);
+    expect((await run.done).end).toEqual({ status: 'completed' });
+
+    expect(run.sourceLog.checkpoints.map((row) => row.segment_index)).toEqual([0, 1, 2]);
+    expect(run.sourceLog.checkpoints).toEqual(await foldedRows(run));
+    expect(run.alerts.filter((alert) => String(alert['event']).startsWith('checkpoint'))).toEqual(
+      [],
+    );
+  });
+
+  it('si no puede seguir mientras espera entre intentos, corta la espera y termina sin conectar otra vez', async () => {
+    const run = await sessionHarness({ answerPings: true, writeLiveCheckpoints: true });
+    await run.sourceLog.insertLiveCheckpoint(conflictingRow());
+    const writes = run.sourceLog.holdCheckpointWrites();
+    await rotateOnce(run);
+    // La conexión se pierde; la escritura del punto de control sigue retenida.
+    run.socket(1).emit({ code: 1001, kind: 'closed' });
+    await settle();
+    expect(run.clock.pendingDelays()).toContain(500);
+    writes.release();
+    await settle();
+    const result = await run.done;
+
+    expect(result.end).toEqual({ detail: '0', reason: 'checkpoint_conflict', status: 'failed' });
+    expect(run.timeline).toEqual(['acquire:1', 'connect:1', 'release:1']);
+  });
+
+  it('si no puede seguir mientras el intento espera antes de su socket, lo aborta y termina sin abrirlo', async () => {
+    // El segmento abierto del log anterior empieza a las 09:55 y su última conexión no tiene
+    // cierre: el cierre reparado del intento, a las 10:00, lo rota antes de escribirse, y el intento
+    // espera 1 ms a pasarlo. El pliegue de ese segmento falla durante esa espera.
+    const [opened, ...rest] = stoppedBeforeRecoveryEvents().slice(0, -1);
+    if (opened?.kind !== 'connection_opened') {
+      throw new TypeError('Falta la apertura.');
+    }
+    const run = await sessionHarness({
+      events: [
+        { ...opened, occurred_at_utc: '2026-03-02T09:55:00.000Z' },
+        ...rest,
+        unavailableOfAnotherRange(),
+      ],
+      writeLiveCheckpoints: true,
+    });
+    const result = await run.done;
+
+    expect(result.end).toEqual({
+      detail: 'TypeError',
+      reason: 'log_not_derivable',
+      status: 'failed',
+    });
+    expect(result.connections).toEqual([]);
+    expect(run.timeline).toEqual(['acquire:1', 'release:1']);
+    expect(run.sourceLog.closed).toHaveLength(1);
+  });
+
+  it('si no puede seguir mientras espera para volver a tomar el bloqueo, termina con su motivo sin tomarlo', async () => {
+    const run = await sessionHarness({
+      answerPings: true,
+      locks: ['lock', 'unavailable', 'taken'],
+      writeLiveCheckpoints: true,
+    });
+    await run.sourceLog.insertLiveCheckpoint(conflictingRow());
+    const writes = run.sourceLog.holdCheckpointWrites();
+    await rotateOnce(run);
+    // El bloqueo se pierde, la conexión termina en pausa y PostgreSQL no responde al tomar otro.
+    run.provider.lock(1).lose();
+    run.socket(1).text(derivMessages.tick(2, START_EPOCH + 302, '100.75'));
+    await settle();
+    await run.clock.advance(500);
+    expect(run.timeline).toEqual(['acquire:1', 'connect:1', 'release:1', 'acquire:unavailable']);
+    writes.release();
+    await settle();
+    const result = await run.done;
+
+    expect(result.end).toEqual({ detail: '0', reason: 'checkpoint_conflict', status: 'failed' });
+    expect(run.timeline).toEqual(['acquire:1', 'connect:1', 'release:1', 'acquire:unavailable']);
+  });
+
+  it('si la sesión se rechaza con un error de programación, espera al punto de control pendiente antes de soltar el bloqueo', async () => {
+    let failTick = false;
+    const run = await sessionHarness({
+      answerPings: true,
+      onTick: () => {
+        if (failTick) {
+          throw new TypeError('sintético');
+        }
+      },
+      writeLiveCheckpoints: true,
+    });
+    let checkpointsAtRelease: number | null = null;
+    run.provider.onRelease = () => {
+      checkpointsAtRelease = run.sourceLog.checkpoints.length;
+    };
+    const socket = run.socket(1);
+    await run.subscribe(socket, START_EPOCH);
+    const writes = run.sourceLog.holdCheckpointWrites();
+    await run.clock.advance(300_000);
+    failTick = true;
+    socket.text(derivMessages.tick(2, START_EPOCH + 300, '100.5'));
+    await settle();
+    expect(run.provider.lock(1).released).toBe(false);
+    writes.release();
+
+    await expect(run.done).rejects.toThrow('sintético');
+    expect(checkpointsAtRelease).toBe(1);
   });
 
   it('con otro punto de control en la clave del segmento que cierra, avisa con checkpoint_conflict, para la conexión y termina failed con checkpoint_conflict', async () => {

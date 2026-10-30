@@ -795,12 +795,18 @@ class SessionRun {
    * responde (`SourceLockUnavailableError`), o si el bloqueo que recibe ya no está tomado, y entonces
    * lo suelta, avisa con `source_lock_unavailable` y su motivo, espera y lo intenta otra vez
    * (ADR-0015 §3, «Bloqueo»). Cualquier otro rechazo de `acquire` es de programación y se relanza.
-   * Tras la parada, el fin es `completed` y no toma otro. Quien la llama vuelve a mirar la parada
-   * antes de seguir: un bloqueo tomado mientras llegaba la parada lo suelta el cierre de la sesión.
+   * Tras la parada, el fin es `completed` y no toma otro; si el punto de control del estado vivo ya
+   * no puede seguir, el de ese fallo. Quien la llama vuelve a mirar la parada antes de seguir: un
+   * bloqueo tomado mientras llegaba la parada lo suelta el cierre de la sesión.
    */
   async #takeLock(): Promise<SessionEnd | null> {
     await this.#releaseLock();
     for (;;) {
+      // Si el punto de control ya no puede seguir, la sesión termina con su motivo, sin otro
+      // bloqueo (ADR-0017 §5).
+      if (this.#failure !== null) {
+        return failureEnd(this.#failure);
+      }
       // Una parada mientras se soltaba el bloqueo anterior: no se toma otro.
       if (this.#stopped) {
         return COMPLETED;

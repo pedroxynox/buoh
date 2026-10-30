@@ -387,7 +387,15 @@ describe('LiveCheckpointWriter (ADR-0017 §5 y §6)', () => {
     ) {
       throw new TypeError('Faltan filas.');
     }
-    // El 2 con su JCS alterado, el 3 enlazado con otro hash lógico y otro del 3 de otras versiones.
+    // El 1 de otro símbolo, el 2 con su JCS alterado, el 3 enlazado con otro hash lógico y otro del
+    // 3 de otras versiones.
+    const otherSymbol = checkpointRow(
+      {
+        ...expectedCheckpoint(run.segments, 1, second.segment_logical_content_sha256),
+        symbol: 'SYNTH_50',
+      },
+      WRITTEN_AT,
+    );
     const misbound = checkpointRow(expectedCheckpoint(run.segments, 3, 'e'.repeat(64)), WRITTEN_AT);
     const other = expectedCheckpoint(run.segments, 3, fourth.segment_logical_content_sha256);
     const otherVersions = checkpointRow(
@@ -396,7 +404,7 @@ describe('LiveCheckpointWriter (ADR-0017 §5 y §6)', () => {
     );
     for (const row of [
       first,
-      second,
+      otherSymbol,
       { ...third, checkpoint_sha256: 'f'.repeat(64) },
       misbound,
       otherVersions,
@@ -410,6 +418,7 @@ describe('LiveCheckpointWriter (ADR-0017 §5 y §6)', () => {
     expect(alerts).toEqual([
       { event: 'checkpoint_rejected', reason: 'checkpoint_binding_mismatch', segment_index: '3' },
       { event: 'checkpoint_rejected', reason: 'checkpoint_digest_mismatch', segment_index: '2' },
+      { event: 'checkpoint_rejected', reason: 'checkpoint_identity_mismatch', segment_index: '1' },
     ]);
     expect(run.store.checkpoints).toEqual(stored);
     // El del segmento siguiente sale del pliegue del log entero, como si no hubiera ninguno.

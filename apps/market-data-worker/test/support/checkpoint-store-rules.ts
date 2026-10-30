@@ -195,6 +195,13 @@ export function checkpointStoreRules(open: () => SourceLogStore): void {
       logical_content_sha256: null,
       raw_frame_count: 4,
     });
+    // Uno por debajo del último segmento cerrado: las sumas paran en su segmento.
+    await store.insertLiveCheckpoint(storedCheckpointOf(source, 0));
+    expect((await store.readLiveCheckpoint(source, VERSIONS_SHA256, 1))?.binding).toEqual({
+      event_count: 3,
+      logical_content_sha256: logicalSha256(source, 0),
+      raw_frame_count: 2,
+    });
     // Sin ningún segmento cerrado de la fuente.
     await store.insertLiveCheckpoint(storedCheckpointOf('rules_cp_binding_none', 0));
     expect(

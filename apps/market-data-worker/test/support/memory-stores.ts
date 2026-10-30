@@ -161,8 +161,25 @@ export class MemorySourceLogStore extends InMemorySourceLogStore {
   failCheckpointAfterInsert: (row: StoredLiveCheckpoint) => boolean = () => false;
   /** Hace fallar la lectura de los puntos de control, como un PostgreSQL que no responde. */
   failCheckpointReads = false;
+  #checkpointGate: Promise<void> | null = null;
+
+  /**
+   * Retiene las inserciones de puntos de control hasta `release`, como un PostgreSQL lento: las que
+   * llegan mientras tanto esperan, ya pasado el bloqueo.
+   */
+  holdCheckpointWrites(): { readonly release: () => void } {
+    const gate = Promise.withResolvers<undefined>();
+    this.#checkpointGate = gate.promise;
+    return {
+      release: () => {
+        this.#checkpointGate = null;
+        gate.resolve(undefined);
+      },
+    };
+  }
 
   override async insertLiveCheckpoint(row: StoredLiveCheckpoint): Promise<LiveCheckpointInsert> {
+    await this.#checkpointGate;
     if (this.failCheckpoint(row)) {
       throw Object.assign(new Error('Fallo inyectado'), { code: 'synthetic_checkpoint_failure' });
     }
