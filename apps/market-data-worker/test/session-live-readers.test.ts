@@ -3,6 +3,7 @@ import {
   buildLiveDerivationCheckpoint,
   emptyLiveDerivationState,
   foldLiveDerivation,
+  sourceEventTime,
 } from '@buoh/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,7 +11,7 @@ import { createDerivMeasurementProfile } from '../src/deriv/profile.js';
 import { contentKey } from '../src/object-keys.js';
 import { checkpointRow } from '../src/source-log/live-checkpoint.js';
 import { type StoredLiveCheckpoint } from '../src/source-log/ports.js';
-import { settle, syntheticSchemas, uuid } from './support/connection-harness.js';
+import { settle, START, syntheticSchemas, uuid } from './support/connection-harness.js';
 import { derivMessages, type FakeDerivSocket } from './support/deriv-fixtures.js';
 import { type MemorySourceLogStore } from './support/memory-stores.js';
 import {
@@ -356,6 +357,48 @@ describe('startDerivSession: los lectores desde el último punto de control vál
     expect(run.sourceLog.rows.map((row) => row.kind).slice(2)).toEqual(['connection_closed']);
     run.session.stop();
     expect((await run.done).end).toEqual({ status: 'completed' });
+  });
+
+  it('si la retención se cumple mientras el arranque lee los segmentos posteriores al punto de control, termina failed con retention_expired sin conectar ni escribir nada', async () => {
+    const events = stoppedBeforeRecoveryEvents();
+    const first = events[0];
+    if (first === undefined) {
+      throw new TypeError('Falta el primer evento.');
+    }
+    // Al arrancar faltan 30 s para que el evento más antiguo cumpla la retención.
+    const retentionMs = Date.parse(START) - Date.parse(sourceEventTime(first));
+    const gate = Promise.withResolvers<undefined>();
+    let gated = false;
+    const run = await sessionHarness({
+      beforeStart: ({ objects, sourceLog }) => {
+        const keys = new Set(
+          sourceLog.closed.map((segment) => contentKey(segment.object_bytes_sha256)),
+        );
+        const get = objects.get.bind(objects);
+        vi.spyOn(objects, 'get').mockImplementation(async (key, maxBytes) => {
+          if (!gated && keys.has(key)) {
+            gated = true;
+            await gate.promise;
+          }
+          return get(key, maxBytes);
+        });
+      },
+      closedSegments: [events.slice(0, 3)],
+      events: events.slice(3),
+      retentionMs: retentionMs + 30_000,
+    });
+    expect(gated).toBe(true);
+    // La lectura del segmento cerrado tarda 60 s.
+    run.clock.jumpWallClock(60_000);
+    gate.resolve(undefined);
+    const rows = run.sourceLog.rows.length;
+    const result = await run.done;
+
+    expect(result.end).toEqual({ detail: null, reason: 'retention_expired', status: 'failed' });
+    expect(result.stopped_for_retention).toBe(false);
+    expect(run.timeline).toEqual(['acquire:1', 'release:1']);
+    expect(run.sourceLog.rows).toHaveLength(rows);
+    expect(run.sourceLog.closed).toHaveLength(1);
   });
 
   it('si PostgreSQL no responde al leer los puntos de control mientras vigila el hueco, avisa con source_log_unavailable y lo intenta otra vez con el tick siguiente', async () => {

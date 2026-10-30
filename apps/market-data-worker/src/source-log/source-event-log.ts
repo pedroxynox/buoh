@@ -298,8 +298,10 @@ export class SourceEventLog {
   /**
    * La hora del evento durable más antiguo del log, el primero (segmento 0, posición 0), o `null`
    * si no tiene ninguno: la de recepción de un frame y `occurred_at_utc` de los demás. Tras
-   * reabrirse incluye un evento que el índice confirmó aunque informó error, que el log adopta. La
-   * sesión de ingesta cuenta desde ella la retención de un log vacío al arrancar (ADR-0015 §7).
+   * reabrirse incluye un evento que el índice confirmó aunque informó error, que el log adopta. Sale
+   * de la primera fila del índice, sin leer el evento. La sesión de ingesta comprueba con ella al
+   * arrancar si el log ya cumplió su retención (`retention_expired`), cuenta desde ella la parada por
+   * retención y, con un log vacío al arrancar, la del primer evento que escribe (ADR-0015 §7).
    */
   get firstEventTimeUtc(): string | null {
     return this.#firstEventTime;

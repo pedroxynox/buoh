@@ -482,7 +482,7 @@ export class RawFirstIngestor {
    * El log abierto ya no vale, aunque no falló. Lo usa la sesión después de tomar un bloqueo nuevo
    * (ADR-0015 §3, «Conexión anterior»): el log abierto escribe con el bloqueo anterior, y en los
    * segundos que tardó en notarse la pérdida otro proceso pudo escribir. Lo siguiente que use el log
-   * (un frame, un evento, la reparación del cierre, `readDurableSegments` o `rotate`) lo vuelve a
+   * (un frame, un evento, la reparación del cierre, `readLog` o `rotate`) lo vuelve a
    * abrir antes desde los almacenes con `reopenLog`, sin registrar nada ni cerrar la entrada. Si un
    * almacén no responde al reabrirlo, queda `persistence_unavailable`, como tras un fallo. A
    * diferencia de un log fallido, que sigue cerrado hasta el `ConnectionOpened` o la reparación.

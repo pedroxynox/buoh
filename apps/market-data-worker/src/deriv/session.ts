@@ -718,7 +718,8 @@ class SessionRun {
       try {
         checked = await checkLogSinceCheckpoint(log, lookup, {
           cursors,
-          now: this.#input.now(),
+          // Se lee al comprobar la retención, después de leer el log (ADR-0015 §7).
+          now: () => this.#input.now(),
           retentionMs: this.#input.retentionMs,
         });
       } catch (error) {

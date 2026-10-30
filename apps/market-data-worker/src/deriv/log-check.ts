@@ -180,7 +180,9 @@ const failedWith = (
  *    perdió datos confirmados;
  * 5. con `retentionMs`, el evento durable más antiguo, el primero del índice (`firstEventTimeUtc`),
  *    no la cumplió todavía (`retention_expired`, ADR-0015 §7). Su hora es la de `sourceEventTime`:
- *    la recepción de un frame y `occurred_at_utc` de los demás.
+ *    la recepción de un frame y `occurred_at_utc` de los demás. La hora actual (`now`) se lee al
+ *    comprobarla, después de leer el log: una lectura larga, como la de todo el log sin un punto de
+ *    control válido, no deja arrancar un log que la cumplió mientras se leía.
  *
  * Lee todos los segmentos posteriores al punto de control, también después de uno que no se pliega,
  * así que un frame de otro conector en cualquiera de ellos da su motivo, como con el log entero. Sin
@@ -192,7 +194,7 @@ export async function checkLogSinceCheckpoint(
   lookup: LiveCheckpointLookup,
   input: {
     readonly cursors: StoredCursors | null;
-    readonly now: string;
+    readonly now: () => string;
     readonly retentionMs: number | undefined;
   },
 ): Promise<StartupCheck> {
@@ -240,7 +242,7 @@ export async function checkLogSinceCheckpoint(
   if (
     input.retentionMs !== undefined &&
     oldestUtc !== null &&
-    Date.parse(input.now) >= Date.parse(oldestUtc) + input.retentionMs
+    Date.parse(input.now()) >= Date.parse(oldestUtc) + input.retentionMs
   ) {
     return failedWith('retention_expired');
   }

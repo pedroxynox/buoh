@@ -104,8 +104,10 @@ function emptyDerivation(): DerivedMarketData {
 
 /**
  * Las comprobaciones del contenido del log que se deriva. Con el esquema de fuente guardado, son las
- * del arranque de la sesión (`checkLogContent`). Sin él, un log no vacío no se puede derivar
- * (`source_schema_missing`), y uno vacío solo se comprueba con los cursores de la fuente.
+ * del arranque de la sesión, en el mismo orden, sobre el log entero (`checkLogContent`; el arranque
+ * las hace desde el último punto de control, con `checkLogSinceCheckpoint`). Sin él, un log no vacío
+ * no se puede derivar (`source_schema_missing`), y uno vacío solo se comprueba con los cursores de la
+ * fuente.
  */
 function checkObservedContent(
   observation: ObservedSource,

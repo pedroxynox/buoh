@@ -25,7 +25,11 @@ import {
 } from '../src/deriv/log-check.js';
 import { contentKey } from '../src/object-keys.js';
 import { type OperationalAlert } from '../src/operational/registry.js';
-import { checkpointRow, LiveCheckpointLookup } from '../src/source-log/live-checkpoint.js';
+import {
+  checkpointRow,
+  LiveCheckpointLookup,
+  LiveCheckpointWriter,
+} from '../src/source-log/live-checkpoint.js';
 import {
   liveWatermark,
   readLiveState,
@@ -34,6 +38,7 @@ import {
 import { type StoredLiveCheckpoint } from '../src/source-log/ports.js';
 import { previousConnection } from '../src/source-log/previous-connection.js';
 import {
+  failureReason,
   LogIntegrityError,
   LogNotDerivableError,
   LogReadError,
@@ -140,11 +145,11 @@ function gapStateOfTicks(derived: DerivedMarketData, symbol: string): GapState {
 
 interface StartupInput {
   readonly cursors: StoredCursors | null;
-  readonly now: string;
+  readonly now: () => string;
   readonly retentionMs: number | undefined;
 }
 
-const NO_CURSORS: StartupInput = { cursors: null, now: NOW, retentionMs: undefined };
+const NO_CURSORS: StartupInput = { cursors: null, now: () => NOW, retentionMs: undefined };
 
 /**
  * Lo que daban los lectores con el log entero: el arranque de antes (`checkLogContent`,
@@ -177,7 +182,7 @@ function wholeLogReaders(
     if (
       input.retentionMs !== undefined &&
       oldest !== null &&
-      Date.parse(input.now) >= Date.parse(oldest) + input.retentionMs
+      Date.parse(input.now()) >= Date.parse(oldest) + input.retentionMs
     ) {
       return failed('retention_expired');
     }
@@ -557,6 +562,106 @@ describe('lectores en vivo: puntos de control rechazados y almacenes que fallan 
     ).rejects.toMatchObject({ name: 'LogReadError', reason: 'ECONNREFUSED' });
   });
 
+  it('un segmento que se cierra mientras leen, con su punto de control ya escrito, no se aplica dos veces: los tres dan el estado de su foto', async () => {
+    const [, stimuli, profile] =
+      CORPUS.find(
+        ([name]) => name === 'cierre pedido con el hueco pendiente y su fin ya conocido',
+      ) ?? [];
+    if (stimuli === undefined || profile === undefined) {
+      throw new TypeError('Falta el log del corpus.');
+    }
+    const events = eventsOf(stimuli, profile);
+    const objects = new MemoryObjectStore();
+    const store = new MemorySourceLogStore();
+    const log = await SourceEventLog.open({
+      objects,
+      source: 'synthetic',
+      store,
+      zlibVersion: 'test',
+    });
+    const alerts: Parameters<OperationalAlert>[0][] = [];
+    const failures: unknown[] = [];
+    const lookup = new LiveCheckpointLookup({
+      alert: (payload) => alerts.push(payload),
+      profile,
+      symbol: SYMBOL,
+    });
+    // El escritor de `ingest`, con la misma búsqueda que los lectores.
+    const writer = new LiveCheckpointWriter({
+      alert: (payload) => alerts.push(payload),
+      log: () => log,
+      lookup,
+      now: () => WRITTEN_AT,
+      onFailure: (failure) => failures.push(failure),
+      profile,
+      symbol: SYMBOL,
+    });
+    const append = async (from: number, to: number) => {
+      for (const event of events.slice(from, to)) {
+        await log.append(event);
+      }
+    };
+    const closeAndWrite = async () => {
+      const closed = await log.close('requested');
+      if (closed === null) {
+        throw new TypeError('No había nada que cerrar.');
+      }
+      writer.onClosed(closed);
+      await writer.settle();
+    };
+    await append(0, 2);
+    await closeAndWrite();
+    await append(2, 4);
+    await closeAndWrite();
+    await append(4, 6);
+    // La foto: los segmentos 0 y 1, con sus puntos de control, y el 2 abierto con dos eventos.
+    const snapshot = events.slice(0, 6);
+    const gate = Promise.withResolvers<undefined>();
+    const read = store.readLiveCheckpoint.bind(store);
+    const held = vi.spyOn(store, 'readLiveCheckpoint').mockImplementation(async (...args) => {
+      await gate.promise;
+      return read(...args);
+    });
+    const state = readLiveState(log, lookup);
+    const previous = readPreviousConnection(log, lookup);
+    const startup = checkLogSinceCheckpoint(log, lookup, NO_CURSORS);
+    held.mockImplementation(read);
+    // Mientras esperan los puntos de control: el segmento 2 se cierra, el escritor escribe el suyo
+    // y el 3 recibe los dos eventos siguientes.
+    await closeAndWrite();
+    await append(6, 8);
+    expect(store.checkpoints.map((row) => row.segment_index)).toEqual([0, 1, 2]);
+    gate.resolve(undefined);
+
+    expect(await state).toEqual(foldLiveDerivation(emptyLiveDerivationState(), snapshot, profile));
+    expect(await previous).toEqual(previousConnection([snapshot]));
+    expect(await startup).toEqual(wholeLogReaders([snapshot], profile).startup);
+    expect(alerts).toEqual([]);
+    expect(failures).toEqual([]);
+  });
+
+  it('un pliegue que falla lanza LogNotDerivableError, un LogIntegrityError, con el motivo saneado de su error, como cuando fallaba deriveMarketData', async () => {
+    const [, events] = failureLogs()[0] ?? [];
+    if (events === undefined) {
+      throw new TypeError('Falta el log.');
+    }
+    const run = await memoryLog(events, measurement, eachEvent);
+    let before: unknown = null;
+    try {
+      deriveMarketData([events], measurement);
+    } catch (error) {
+      before = error;
+    }
+    const error: unknown = await readLiveState(run.log, lookupOf(run)).catch(
+      (rejected: unknown) => rejected,
+    );
+
+    expect(error).toBeInstanceOf(LogNotDerivableError);
+    expect(error).toBeInstanceOf(LogIntegrityError);
+    expect(failureReason(before)).toBe('TypeError');
+    expect(failureReason(error)).toBe(failureReason(before));
+  });
+
   it('solo leen los objetos posteriores al punto de control: uno anterior que falta no se nota, y uno posterior es LogIntegrityError', async () => {
     const { expected, run } = await corpusLog();
     keepCheckpointsUpTo(run, 3);
@@ -627,27 +732,37 @@ describe('el arranque desde el punto de control: cursor, símbolo, retención y 
         // Un cursor en cada evento del log, en un segmento cerrado o en el abierto.
         ...events.map((event) => ({
           cursors: { latest: cursorAt(eventIdOf(event)), symbols: [SYMBOL] },
-          now: NOW,
+          now: () => NOW,
           retentionMs: undefined,
         })),
-        // Uno que apunta a un evento que el log no tiene, y uno de otro símbolo.
+        // Uno que apunta a un evento que el log no tiene, también con la retención cumplida, que
+        // va después, y uno de otro símbolo.
         {
           cursors: { latest: cursorAt(id(9999)), symbols: [SYMBOL] },
-          now: NOW,
+          now: () => NOW,
           retentionMs: undefined,
         },
         {
+          cursors: { latest: cursorAt(id(9999)), symbols: [SYMBOL] },
+          now: () => new Date(oldest + RETENTION).toISOString(),
+          retentionMs: RETENTION,
+        },
+        {
           cursors: { latest: null, symbols: ['SYNTH_050', SYMBOL] },
-          now: NOW,
+          now: () => NOW,
           retentionMs: undefined,
         },
         // La retención, 1 ms antes de cumplirse y al cumplirse.
         {
           cursors: null,
-          now: new Date(oldest + RETENTION - 1).toISOString(),
+          now: () => new Date(oldest + RETENTION - 1).toISOString(),
           retentionMs: RETENTION,
         },
-        { cursors: null, now: new Date(oldest + RETENTION).toISOString(), retentionMs: RETENTION },
+        {
+          cursors: null,
+          now: () => new Date(oldest + RETENTION).toISOString(),
+          retentionMs: RETENTION,
+        },
       ];
       const reasons = new Set<string>();
       for (const input of inputs) {
