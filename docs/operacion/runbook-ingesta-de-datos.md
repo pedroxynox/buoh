@@ -744,7 +744,7 @@ Antes de crear nada de producción tiene que estar fusionado el PR 7 de ADR-0018
 
 **El propietario, en Cloudflare** ([dash.cloudflare.com](https://dash.cloudflare.com)):
 
-1. En **R2 Object Storage**, pulsa **Create bucket**, con el nombre `buoh-captura` y, en **Location**, la indicación **Eastern North America (ENAM)** (`enam`), sin jurisdicción. Deja la clase de almacenamiento **Standard**, la que viene por defecto: con **Infrequent Access**, R2 cobra además los datos que se leen, cobra cada objeto al menos 30 días y no aplica lo gratuito de cada mes, con lo que cuenta ADR-0018 §14. No lo hagas público.
+1. En **R2 Object Storage**, pulsa **Create bucket**, con el nombre `buoh-captura` y, en **Location**, la indicación **Eastern North America (ENAM)** (`enam`), sin jurisdicción. Deja la clase de almacenamiento **Standard**, la que viene por defecto: con **Infrequent Access**, R2 no aplica lo gratuito de cada mes, con lo que cuenta ADR-0018 §14, cobra cada operación al doble o más y cobra además los datos que se leen. No lo hagas público.
 2. En el bucket, en la pestaña **Settings**, tarjeta **Bucket lock rules**, pulsa **Add rule**: nombre `logs-30-dias`, prefijo `logs/` y retención de 30 días. Pulsa **Save changes**. Desde ese momento, nadie puede borrar ni sobrescribir un objeto de `logs/` hasta que cumple 30 días, tampoco con un token filtrado (ADR-0018 §10).
 
 **El propietario, en Render** ([dashboard.render.com](https://dashboard.render.com)):
