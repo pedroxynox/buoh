@@ -683,6 +683,46 @@ Cada informe se guarda además, como `buoh_dueno`, en la tabla `operations_repor
 | 1 | un paso terminó `failed` o un informe no se pudo guardar (`operations_run` con `status: failed`), o un error inesperado (`code: UNEXPECTED`) |
 | 2 | configuración inválida (`code: ConfigError`) |
 
+## Producción (F2.2)
+
+Los pasos para poner en producción el sistema de datos de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) llegan en dos PR (§16, PR 6): el 6a trae las comprobaciones previas de R2, y el 6b, el Blueprint `render-datos.yaml` y los pasos para preparar, desplegar, parar, recuperar, rotar credenciales y borrar. Todavía no hay nada desplegado. Nada de esta sección cuesta dinero salvo que se diga, y ninguna credencial pasa por el chat ni por Git.
+
+### Comprobaciones previas de R2
+
+Antes de crear el bucket de la captura, `buoh-captura`, se comprueba en un bucket de prueba, `buoh-prueba`, que R2 hace lo que el log necesita (ADR-0018 §10; ADR-0016 §4): que no sobrescribe un objeto que ya existe, que un objeto se lee enseguida tal como se escribió y que el cliente del worker escribe y lee sin las sumas de comprobación que R2 no admite. Las hace `scripts/evidencia-f2-2/comprobar-r2.mjs`, que no es un comando del producto: usa el `S3ObjectStore` y el `writeVerified` del worker compilado, como el log. Su resultado, saneado, lo registra el PR 7 de §16.
+
+**El propietario, en Cloudflare** ([dash.cloudflare.com](https://dash.cloudflare.com)):
+
+1. Entra con su cuenta, con la verificación en dos pasos activada.
+2. En **R2 Object Storage**, activa R2 si todavía no lo está: Cloudflare lo pide antes de dejar crear un token, y puede pedir un medio de pago. Lo incluido gratis cada mes son 10 GB guardados, 1 millón de operaciones de clase A y 10 millones de clase B; cada ejecución de las comprobaciones hace 5 escrituras, de clase A, contando las dos que R2 rechaza, y 9 lecturas, de clase B, y borrar es gratis.
+3. Pulsa **Create bucket**, con el nombre `buoh-prueba` y, en **Location**, la indicación **Eastern North America (ENAM)** (`enam`), sin jurisdicción. No lo hagas público. Cloudflare solo respeta la indicación la primera vez que se crea un bucket con ese nombre.
+4. En **R2 Object Storage**, **Account Details**, junto a **API Tokens**, pulsa **Manage** y **Create Account API token**:
+   - nombre: `prueba`;
+   - permiso: **Object Read & Write**, solo para el bucket `buoh-prueba` (**Apply to specific buckets only**);
+   - **TTL**: 1 día, para que venza solo aunque se olvide borrarlo.
+
+   Al crearlo, Cloudflare muestra una vez el **Access Key ID** y el **Secret Access Key**, y el endpoint de la cuenta, `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
+5. En Kiro Web, en **Settings → Sandbox → Secrets**, guarda tres secretos con esos valores: `BUOH_PRUEBA_S3_ENDPOINT`, `BUOH_PRUEBA_S3_ACCESS_KEY_ID` y `BUOH_PRUEBA_S3_SECRET_ACCESS_KEY`. Llegan al sandbox del agente como variables de entorno. Nunca en el chat ni en Git.
+6. Le dice al agente que ya están. Si el agente no los ve en la sesión abierta, se abre una nueva.
+
+**El agente**, desde la raíz del repositorio, con el worker compilado (`pnpm run build`):
+
+```sh
+node scripts/evidencia-f2-2/comprobar-r2.mjs
+```
+
+Lee solo esas variables y, opcionales, `BUOH_PRUEBA_S3_BUCKET`, que solo admite `buoh-prueba`, y `BUOH_PRUEBA_S3_REGION`, `auto` por defecto. Con otro bucket, sin claves o con un endpoint `http:` que no es local, sale con 2 y una línea `ConfigError` que nombra las variables, nunca sus valores, sin conectar. Escribe sus objetos bajo un prefijo nuevo, `comprobaciones/<id>/`, y al terminar los borra. Comprueba, en orden:
+
+1. `sin_sobrescribir`: con un objeto ya escrito, `writeVerified` con otros bytes en la misma clave recibe 412 (`putIfAbsent` da `exists`), falla al releerlos (`object_verification_failed`), y el objeto sigue con los suyos;
+2. `lectura_tras_escritura`: un objeto recién escrito se lee enseguida con los mismos bytes, y `HeadObject` da su tamaño;
+3. `sumas_de_comprobacion`: un objeto de 1 MiB se escribe y se lee igual, con el cliente del worker, que solo calcula y valida sumas de comprobación cuando la operación las exige (`WHEN_REQUIRED`).
+
+Escribe una sola línea JSON con el bucket, cada comprobación con `pass`, o `fail` y su motivo (un código, como `second_write_not_rejected`, nunca un mensaje), y `status`. No lleva el endpoint, que tiene el ID de la cuenta, ni las claves. Sale con 0 si pasan las tres y con 1 si alguna falla. Si alguna falla, no se crea `buoh-captura`: el diseño del log supone las tres (ADR-0016 §4), y el agente se lo presenta al propietario.
+
+**Al terminar, el propietario** borra el token `prueba` en **Manage API tokens**, borra el bucket `buoh-prueba` (vacío, porque el script borra lo suyo; si quedara algo, se vacía antes) y borra los tres secretos de Kiro (ADR-0018 §12).
+
+El 2026-10-31, contra el SeaweedFS de «Entorno local y replay», con un bucket `buoh-prueba` creado para el ensayo, las tres pasaron y no quedó ningún objeto; con un servidor S3 falso que sobrescribe, `sin_sobrescribir` falló con `second_write_not_rejected` y la salida fue 1.
+
 ## Reporte y evidencia
 
 `pnpm run data:health -- --json` emite el `HealthReport` canónico (F1.5; ver «Salud de datos (`data:health`)»). La salud nunca se guarda: cada ejecución la deriva otra vez de lo que lee. Desde el PR 6 de ADR-0015 §13, `evaluateDataHealth` (`apps/market-data-worker/src/health/evaluate.ts`) deriva ese informe con las reglas 2 a 7 de ADR-0015 §8 a partir de lo que lee `observeDataHealth` (`src/health/observe.ts`): el log durable con el perfil de medición, el registro operativo, el último latido, el escritor vivo y el último dataset activo de la fuente. Todo incidente conserva:
