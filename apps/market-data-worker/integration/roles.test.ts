@@ -474,7 +474,9 @@ describe('dos rotaciones de la credencial dueña (ADR-0018 §8)', () => {
       await first.end();
     }
     // Atributos cambiados a mano, que ensureRuntimeRoles vuelve a fijar.
-    await server.query(`ALTER ROLE ${POSTGRES_ROLES.owner} LOGIN`);
+    // Sin CREATEROLE, buoh_dueno no podría ajustar los roles de ejecución en el paso 3: lo recupera
+    // antes, en la misma transacción.
+    await server.query(`ALTER ROLE ${POSTGRES_ROLES.owner} LOGIN NOCREATEROLE`);
     await server.query(`ALTER ROLE ${POSTGRES_ROLES.reader} LOGIN`);
     await server.query(`ALTER ROLE ${POSTGRES_ROLES.ingest} CREATEROLE`);
     const pool = createPool(roleConfig(ROTATED[1], passwords.rotated[1] ?? '').postgres);
