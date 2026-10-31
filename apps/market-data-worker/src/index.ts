@@ -248,6 +248,7 @@ export {
   CHILD_TIMEOUT_MS,
   runNodeScript,
   runWorkerChild,
+  workerChildScript,
   type ChildResult,
   type RunChild,
   type WorkerChild,
@@ -262,6 +263,7 @@ export {
   OPERATIONS_CONNECTION_TIMEOUT_MS,
   OPERATIONS_QUERY_TIMEOUT_MS,
   openOwnerDatabase,
+  type LoginCheck,
   type OperationsReportRow,
   type OwnerDatabase,
 } from './operations/owner-database.js';

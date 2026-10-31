@@ -76,10 +76,10 @@ const plainConfig = (config: WorkerConfig): WorkerConfig => ({
   postgres: plain(config.postgres),
 });
 
-/** Las variables de `buoh-operaciones` sobre los servicios locales, con la contraseña de salud dada. */
-function operationsEnvironment(healthPassword = passwords.health) {
+/** Las variables de `buoh-operaciones` sobre los servicios locales, con otras contraseñas si se dan. */
+function operationsEnvironment(rotated: { agent?: string; health?: string } = {}) {
   return {
-    BUOH_AGENTE_POSTGRES_PASSWORD: passwords.agent,
+    BUOH_AGENTE_POSTGRES_PASSWORD: rotated.agent ?? passwords.agent,
     BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
     BUOH_DUENO_POSTGRES_DB: DATABASE,
     BUOH_DUENO_POSTGRES_HOST: local.postgres.host,
@@ -88,7 +88,7 @@ function operationsEnvironment(healthPassword = passwords.health) {
     BUOH_DUENO_POSTGRES_SSLMODE: 'require',
     BUOH_DUENO_POSTGRES_USER: RENDER_USER,
     BUOH_INGESTA_POSTGRES_PASSWORD: passwords.ingest,
-    BUOH_SALUD_POSTGRES_PASSWORD: healthPassword,
+    BUOH_SALUD_POSTGRES_PASSWORD: rotated.health ?? passwords.health,
     BUOH_SALUD_S3_ACCESS_KEY_ID: local.s3.accessKeyId,
     BUOH_SALUD_S3_BUCKET: local.s3.bucket,
     BUOH_SALUD_S3_ENDPOINT: local.s3.endpoint,
@@ -261,6 +261,25 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     expect(await sqlStateAs(POSTGRES_ROLES.agent, passwords.agent, reports)).toBeNull();
   });
 
+  it('operations_reports es append-only: UPDATE, DELETE y TRUNCATE fallan con 23001, también como buoh_dueno, su dueño', async () => {
+    const before = await reportsOf(LOG_1);
+    expect(before.length).toBeGreaterThan(0);
+    for (const statement of [
+      `UPDATE ${LOG_1}.operations_reports SET status = 'failed'`,
+      `DELETE FROM ${LOG_1}.operations_reports`,
+      `TRUNCATE ${LOG_1}.operations_reports`,
+    ]) {
+      expect(
+        await sqlStateAs(
+          RENDER_USER,
+          passwords.render,
+          `SET ROLE ${POSTGRES_ROLES.owner}; ${statement}`,
+        ),
+      ).toBe('23001');
+    }
+    expect(await reportsOf(LOG_1)).toEqual(before);
+  });
+
   it('sin nada que cambiar, no crea otro log ni pone contraseñas, y solo guarda el informe de la salud', async () => {
     const run = await operations();
     expect(run.exitCode).toBe(0);
@@ -268,6 +287,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       failures: [],
       migrated: [],
       passwords_set: [],
+      passwords_unchecked: [],
       prepared: null,
     });
     expect((await reportsOf(LOG_1)).map((item) => item.step)).toEqual([
@@ -311,9 +331,48 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     ]);
   });
 
+  it('con las 4 conexiones de buoh_agente abiertas, su contraseña no se puede comprobar (53300): no se pone ni es un fallo, y una rotada se aplica igual', async () => {
+    const agent = createPool({
+      ...local.postgres,
+      database: DATABASE,
+      password: passwords.agent,
+      schema: 'public',
+      user: POSTGRES_ROLES.agent,
+    });
+    const held = await Promise.all([1, 2, 3, 4].map(() => agent.connect()));
+    try {
+      const run = await operations();
+      expect(run.alerts).toEqual([]);
+      expect(run.forwarded).toEqual([]);
+      expect(run.exitCode).toBe(0);
+      expect(run.steps[0]?.['report']).toEqual({
+        failures: [],
+        migrated: [],
+        passwords_set: [],
+        passwords_unchecked: [POSTGRES_ROLES.agent],
+        prepared: null,
+      });
+
+      // PostgreSQL rechaza una contraseña mala (28P01) antes de mirar el límite del rol.
+      const rotated = secret();
+      const rotation = await operations(operationsEnvironment({ agent: rotated }));
+      expect(rotation.exitCode).toBe(0);
+      expect(rotation.steps[0]?.['report']).toMatchObject({
+        passwords_set: [POSTGRES_ROLES.agent],
+        passwords_unchecked: [],
+      });
+      passwords.agent = rotated;
+    } finally {
+      for (const client of held) {
+        client.release();
+      }
+      await agent.end();
+    }
+  });
+
   it('una contraseña nueva de un rol, como tras una rotación, se aplica antes de la salud, que ya la usa', async () => {
     const rotated = secret();
-    const run = await operations(operationsEnvironment(rotated));
+    const run = await operations(operationsEnvironment({ health: rotated }));
     expect(run.exitCode).toBe(0);
     expect(run.forwarded).toEqual([]);
     expect(run.steps[0]?.['report']).toMatchObject({ passwords_set: ['buoh_salud'] });

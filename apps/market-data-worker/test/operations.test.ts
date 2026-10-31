@@ -1,11 +1,13 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { type HealthReport } from '@buoh/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
+  CHILD_OUTPUT_LIMIT_BYTES,
   ConfigError,
   healthEnvironment,
   loadOperationsConfig,
@@ -16,9 +18,12 @@ import {
   operationsCommand,
   runNodeScript,
   runOperations,
+  WORKER_NODE_FLAGS,
+  workerChildScript,
   type CaptureLog,
   type ChildResult,
   type LogLocation,
+  type LoginCheck,
   type OperationalAlert,
   type OperationsReportRow,
   type OwnerDatabase,
@@ -233,9 +238,9 @@ function fakeDatabase(state: {
         reports.push({ log: target.number, row });
       });
     },
-    canLogin: (role) => {
+    checkLogin: (role) => {
       calls.push(`login:${role}`);
-      return answer('canLogin', () => state.loggedIn.has(role));
+      return answer('checkLogin', () => (state.loggedIn.has(role) ? 'accepted' : 'rejected'));
     },
     close: () => {
       calls.push('close');
@@ -364,6 +369,7 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
           failures: [],
           migrated: [{ applied: ['0001_x.sql', '0006_y.sql'], log: 1 }],
           passwords_set: ['buoh_ingesta', 'buoh_salud', 'buoh_agente'],
+          passwords_unchecked: [],
           prepared: 1,
         },
         run_id: uuid(1),
@@ -427,7 +433,13 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
     ]);
     expect(result.status).toBe('completed');
     expect(lines[0]).toMatchObject({
-      report: { failures: [], migrated: [], passwords_set: [], prepared: null },
+      report: {
+        failures: [],
+        migrated: [],
+        passwords_set: [],
+        passwords_unchecked: [],
+        prepared: null,
+      },
       status: 'completed',
     });
   });
@@ -512,6 +524,7 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
           failures: [{ action: 'ensure_roles', reason: 'ECONNREFUSED' }],
           migrated: [],
           passwords_set: [],
+          passwords_unchecked: [],
           prepared: null,
         },
         status: 'failed',
@@ -535,8 +548,8 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
 
   it('una contraseña que no se puede comprobar es un fallo de ese rol: las de los demás se ponen igual', async () => {
     const db = fakeDatabase({ loggedIn: new Set(), logs: [log(1)] });
-    const failing = db.database.canLogin.bind(db.database);
-    db.database.canLogin = (role, password) =>
+    const failing = db.database.checkLogin.bind(db.database);
+    db.database.checkLogin = (role, password) =>
       role === 'buoh_salud' ? Promise.reject(coded('57P03')) : failing(role, password);
     const { lines } = await run(db, fakeChildren());
 
@@ -551,6 +564,31 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
       },
       status: 'failed',
     });
+  });
+
+  it('sin conexiones libres para comprobarla, como con las 4 de buoh_agente abiertas, la contraseña no se pone ni es un fallo: queda en passwords_unchecked', async () => {
+    const db = fakeDatabase({
+      loggedIn: new Set(['buoh_ingesta', 'buoh_salud']),
+      logs: [log(1)],
+    });
+    const checking = db.database.checkLogin.bind(db.database);
+    db.database.checkLogin = (role, password) =>
+      role === 'buoh_agente' ? Promise.resolve<LoginCheck>('unchecked') : checking(role, password);
+    const { alerts, lines, result } = await run(db, fakeChildren());
+
+    expect(db.calls.filter((call) => call.startsWith('password:'))).toEqual([]);
+    expect(lines[0]).toMatchObject({
+      report: {
+        failures: [],
+        passwords_set: [],
+        passwords_unchecked: ['buoh_agente'],
+      },
+      status: 'completed',
+    });
+    expect(alerts).toEqual([]);
+    expect(result.status).toBe('completed');
+    // No cambió nada: el informe del paso 1 no se guarda.
+    expect(db.reports.map((item) => item.row.step)).toEqual(['health']);
   });
 });
 
@@ -765,6 +803,48 @@ describe('runNodeScript: un proceso aparte con su entorno y su plazo', () => {
       timeoutMs: 200,
     });
     expect(result).toEqual({ exitCode: null, stderr: '', stdout: '', timedOut: true });
+  });
+
+  it('de stdout y de stderr guarda como mucho 1 MiB de cada uno', async () => {
+    const path = script(
+      'grande.mjs',
+      'const text = "x".repeat(1536 * 1024); process.stdout.write(text); process.stderr.write(text);',
+    );
+    const result = await runNodeScript({
+      args: [],
+      env: {},
+      nodeFlags: [],
+      script: path,
+      timeoutMs: 30_000,
+    });
+    expect(CHILD_OUTPUT_LIMIT_BYTES).toBe(1024 * 1024);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toHaveLength(CHILD_OUTPUT_LIMIT_BYTES);
+    expect(result.stderr).toHaveLength(CHILD_OUTPUT_LIMIT_BYTES);
+  });
+});
+
+describe('workerChildScript: el proceso de cada comando del worker (ADR-0018 §11)', () => {
+  const env = { BUOH_POSTGRES_USER: 'buoh_salud' };
+
+  it('data:health corre su CLI con WORKER_NODE_FLAGS, 60 s de plazo, sus argumentos y el entorno dado', () => {
+    expect(workerChildScript('health', ['--json', '--log', '1'], env)).toEqual({
+      args: ['--json', '--log', '1'],
+      env,
+      nodeFlags: WORKER_NODE_FLAGS,
+      script: fileURLToPath(new URL('../src/cli/health.js', import.meta.url)),
+      timeoutMs: 60_000,
+    });
+  });
+
+  it('db:migrate corre su CLI con WORKER_NODE_FLAGS y 120 s de plazo', () => {
+    expect(workerChildScript('migrate', [], env)).toEqual({
+      args: [],
+      env,
+      nodeFlags: WORKER_NODE_FLAGS,
+      script: fileURLToPath(new URL('../src/cli/migrate.js', import.meta.url)),
+      timeoutMs: 120_000,
+    });
   });
 });
 

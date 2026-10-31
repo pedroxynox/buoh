@@ -132,18 +132,26 @@ async function migrateLog(
  * Paso 1 (ADR-0018 §11): crea y ajusta los roles; aplica las migraciones pendientes a cada log que
  * existe, cada uno con `db:migrate` en un proceso aparte, y le da los privilegios; prepara el log
  * siguiente, o el log 1 si no hay ninguno (`nextLogToPrepare`); y pone la contraseña a cada rol de
- * ejecución que no inicia sesión con la suya (§8). Sin los roles no sigue. Si falla otra acción,
- * sigue con las demás, y el paso termina `failed` con todas en `failures`.
+ * ejecución que no inicia sesión con la suya (§8). Una que no se puede comprobar porque no hay
+ * conexiones libres queda en `passwords_unchecked`, sin fallo. Sin los roles no sigue. Si falla otra
+ * acción, sigue con las demás, y el paso termina `failed` con todas en `failures`.
  */
 async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
   const { database } = input;
   const failures: Report[] = [];
   const migrated: Report[] = [];
   const passwordsSet: string[] = [];
+  const passwordsUnchecked: string[] = [];
   let prepared: number | null = null;
   const outcome = (): StepOutcome => ({
     log: null,
-    report: { failures, migrated, passwords_set: passwordsSet, prepared },
+    report: {
+      failures,
+      migrated,
+      passwords_set: passwordsSet,
+      passwords_unchecked: passwordsUnchecked,
+      prepared,
+    },
     status: failures.length === 0 ? 'completed' : 'failed',
     store:
       failures.length > 0 || migrated.length > 0 || prepared !== null || passwordsSet.length > 0,
@@ -190,9 +198,13 @@ async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
   for (const role of LOGIN_ROLES) {
     const password = input.config.passwords[role];
     try {
-      if (!(await database.canLogin(role, password))) {
+      const login = await database.checkLogin(role, password);
+      if (login === 'rejected') {
         await database.setRolePassword(role, password);
         passwordsSet.push(role);
+      } else if (login === 'unchecked') {
+        // Sin conexiones libres no se sabe si vale: la ejecución siguiente la vuelve a comprobar.
+        passwordsUnchecked.push(role);
       }
     } catch (error) {
       failures.push({ action: 'password', reason: failureReason(error), role });

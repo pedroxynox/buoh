@@ -86,14 +86,24 @@ export function runNodeScript(input: {
 }
 
 /**
- * `data:health` (`dist/cli/health.js`) o `db:migrate` (`dist/cli/migrate.js`) en un proceso aparte,
- * con los tamaños de V8 de los procesos del worker (`WORKER_NODE_FLAGS`, ADR-0018 §3) y su plazo.
+ * Cómo corre `runWorkerChild` un comando: `data:health` (`dist/cli/health.js`) o `db:migrate`
+ * (`dist/cli/migrate.js`), con los tamaños de V8 de los procesos del worker (`WORKER_NODE_FLAGS`,
+ * ADR-0018 §3), su plazo, sus argumentos y el entorno dado.
  */
-export const runWorkerChild: RunChild = (child, args, env) =>
-  runNodeScript({
+export function workerChildScript(
+  child: WorkerChild,
+  args: readonly string[],
+  env: Readonly<Record<string, string>>,
+): Parameters<typeof runNodeScript>[0] {
+  return {
     args,
     env,
     nodeFlags: WORKER_NODE_FLAGS,
     script: fileURLToPath(new URL(`../cli/${child}.js`, import.meta.url)),
     timeoutMs: CHILD_TIMEOUT_MS[child],
-  });
+  };
+}
+
+/** `data:health` o `db:migrate` en un proceso aparte (`workerChildScript`). */
+export const runWorkerChild: RunChild = (child, args, env) =>
+  runNodeScript(workerChildScript(child, args, env));

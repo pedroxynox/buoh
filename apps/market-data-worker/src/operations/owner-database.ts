@@ -16,6 +16,18 @@ import { type OperationsConfig } from './config.js';
 
 /** Contraseña rechazada (`invalid_password`): el rol no puede iniciar sesión con ella. */
 const INVALID_PASSWORD = '28P01';
+/**
+ * Sin conexiones libres (`too_many_connections`): las del rol, como las 4 de `buoh_agente`, las de
+ * la base o las del servidor. PostgreSQL comprueba las del rol después de aceptar la contraseña, y
+ * las del servidor antes, así que este código no dice si la contraseña vale.
+ */
+const TOO_MANY_CONNECTIONS = '53300';
+
+/**
+ * Lo que dijo PostgreSQL de la contraseña de un rol: la aceptó, la rechazó (`28P01`) o no se pudo
+ * comprobar porque no había conexiones libres (`53300`).
+ */
+export type LoginCheck = 'accepted' | 'rejected' | 'unchecked';
 
 /** El plazo de cada conexión del servicio a PostgreSQL. */
 export const OPERATIONS_CONNECTION_TIMEOUT_MS = 5_000;
@@ -48,10 +60,12 @@ export interface OwnerDatabase {
   /** Crea el esquema del log como `buoh_dueno`, si no existe. */
   createLogSchema(log: LogLocation): Promise<void>;
   /**
-   * Si el rol inicia sesión con esa contraseña: `false` si PostgreSQL la rechaza (`28P01`).
-   * Cualquier otro error, como un PostgreSQL que no responde, la rechaza con él.
+   * Si el rol inicia sesión con esa contraseña: `accepted`, `rejected` si PostgreSQL la rechaza
+   * (`28P01`), o `unchecked` si no hay conexiones libres (`53300`), como con las 4 de `buoh_agente`
+   * abiertas. La conexión de la comprobación cuenta en el límite del rol mientras dura. Cualquier
+   * otro error, como un PostgreSQL que no responde, la rechaza con él.
    */
-  canLogin(role: LoginRole, password: string): Promise<boolean>;
+  checkLogin(role: LoginRole, password: string): Promise<LoginCheck>;
   /** Pone la contraseña del rol con su verificador SCRAM (`setRolePassword`). */
   setRolePassword(role: LoginRole, password: string): Promise<void>;
   /** Añade el informe a la tabla `operations_reports` del log. */
@@ -118,7 +132,7 @@ export function openOwnerDatabase(
           ],
         );
       }),
-    canLogin: async (role, password) => {
+    checkLogin: async (role, password) => {
       const client = new pg.Client({
         ...postgresSslOption(config.owner.sslMode),
         connectionTimeoutMillis: OPERATIONS_CONNECTION_TIMEOUT_MS,
@@ -132,14 +146,18 @@ export function openOwnerDatabase(
       try {
         await client.connect();
       } catch (error) {
-        if ((error as { code?: unknown } | null)?.code === INVALID_PASSWORD) {
-          return false;
+        const code = (error as { code?: unknown } | null)?.code;
+        if (code === INVALID_PASSWORD) {
+          return 'rejected';
+        }
+        if (code === TOO_MANY_CONNECTIONS) {
+          return 'unchecked';
         }
         throw error;
       } finally {
         await client.end().catch(() => undefined);
       }
-      return true;
+      return 'accepted';
     },
     close: () => pool.end(),
     createLogSchema: (log) =>
