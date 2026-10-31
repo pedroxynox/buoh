@@ -1,6 +1,6 @@
 # Estado del código
 
-Radiografía del repositorio el 2026-10-25 (commit `869ba4e`; la fila del sitio se actualizó el 2026-10-26, y las del worker y de `scripts/`, el 2026-10-29), para que otra persona o una IA entienda qué hay, cómo se conecta y dónde se repite lógica. Es un documento de análisis: no decide nada ni autoriza trabajo. El estado del proyecto lo manda [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md), y lo que falta está en la [especificación de pendientes](../plan/especificacion-de-pendientes.md).
+Radiografía del repositorio el 2026-10-25 (commit `869ba4e`; la fila del sitio se actualizó el 2026-10-26, y las del worker y de `scripts/`, por última vez el 2026-10-31), para que otra persona o una IA entienda qué hay, cómo se conecta y dónde se repite lógica. Es un documento de análisis: no decide nada ni autoriza trabajo. El estado del proyecto lo manda [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md), y lo que falta está en la [especificación de pendientes](../plan/especificacion-de-pendientes.md).
 
 ## 1. Qué hay
 
@@ -15,7 +15,7 @@ Radiografía del repositorio el 2026-10-25 (commit `869ba4e`; la fila del sitio 
 | `apps/site` | Sitio oficial estático; `render.yaml` lo define para Render, sin indexar. | design-system | [Sitio oficial](../diseno/sitio-oficial.md), ADR-0008, ADR-0013 |
 | `apps/mobile` | Prototipo Expo con cinco pestañas. | design-system (solo la entrada raíz), prototype-data | ADR-0009 |
 | `apps/desktop` | Ventana Tauri 2 que muestra `apps/web/out`, con su instalador de Windows. | web (para compilar) | ADR-0010 |
-| `scripts/` | Guardia documental (`check-doc-impact.mjs`), comprobación del runtime, envoltorios de `data:replay`, `data:smoke` y `data:health`, y la prueba de `render.yaml`. | — | CONTRIBUTING.md |
+| `scripts/` | Guardia documental (`check-doc-impact.mjs`), comprobación del runtime, envoltorios de `data:replay`, `data:smoke` y `data:health`, las pruebas de `render.yaml` y de `render-datos.yaml`, el Blueprint del sistema de datos (ADR-0018 §2), y los scripts de evidencia (`scripts/evidencia-*`), que no son comandos del producto. | — | CONTRIBUTING.md |
 
 ```mermaid
 graph BT

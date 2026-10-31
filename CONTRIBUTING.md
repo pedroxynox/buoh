@@ -47,7 +47,7 @@ El [plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md) (§6) autoriza
 - `packages/strategy-sdk/` (F2.6): modelo de estrategia, indicadores y evaluador puros.
 - `apps/signal-engine/` (F2.9): motor de señales `shadow`.
 
-También amplía `apps/market-data-worker`, `packages/domain`, `packages/contracts`, `apps/web`, `render.yaml` y `test-vectors/`. Cada directorio nuevo entra en `docs/impact-map.json` en el PR que lo crea (`F2-GOV-001`). Desde F2.1, la guardia también pide revisar los [contratos de dominio](docs/arquitectura/contratos-de-dominio.md) o ADR-0004 al tocar `packages/domain/**`.
+También amplía `apps/market-data-worker`, `packages/domain`, `packages/contracts`, `apps/web` y `test-vectors/`, y añade `render-datos.yaml`, el Blueprint del sistema de datos, aparte de `render.yaml`, que sigue siendo solo el sitio ([ADR-0018](docs/arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §2). Cada directorio nuevo entra en `docs/impact-map.json` en el PR que lo crea (`F2-GOV-001`). Desde F2.1, la guardia también pide revisar los [contratos de dominio](docs/arquitectura/contratos-de-dominio.md) o ADR-0004 al tocar `packages/domain/**`. Desde F2.2, pide revisar la [guía de despliegue en Render](docs/operacion/despliegue-en-render.md), el [runbook de ingesta](docs/operacion/runbook-ingesta-de-datos.md) o ADR-0018 al tocar `render-datos.yaml` o su prueba.
 
 ## Organización autorizada para la línea visual V1
 
