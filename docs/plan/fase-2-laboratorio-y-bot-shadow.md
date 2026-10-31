@@ -50,7 +50,7 @@ Decisiones de la dirección técnica que cumplen todas las ADR y todos los incre
 7. **TypeScript.** El evaluador, el backtest y la estadística de la fase son TypeScript, para que la réplica use el mismo código que el bot. ADR-0001 (decisión 3) y ADR-0003 limitan Python a la investigación por lotes, pero no la exigen: Python entra cuando una ADR demuestre una necesidad que TypeScript no cubra.
 8. **Presupuesto.** Todo cabe en el presupuesto aprobado (§11). Lo que lo suba necesita antes el visto bueno del propietario.
 9. **Un solo entorno desplegado.** No hay `staging` en la Fase 2, porque no cabe en el presupuesto: todo corre en `production`, y el motor, con `execution_mode = shadow`. La preproducción de la arquitectura objetivo describe el destino.
-10. **Evidencia de producción.** El agente no tiene acceso a Render ni a Cloudflare (ADR-0016 §3). Las cifras de producción que pide la evidencia las calcula buoh en producción, sin secretos ni precios, y llegan al repositorio por el canal que fije la ADR de despliegue, por ejemplo una página de evidencia de la web que abre el propietario o los paneles que copia con los pasos del runbook. Dar al agente un acceso de solo lectura a producción es una decisión de seguridad del propietario (§12).
+10. **Evidencia de producción.** Hasta el despliegue, el agente no tiene acceso a Render ni a Cloudflare (ADR-0016 §3). Las cifras de producción que pide la evidencia las calcula buoh en producción, sin secretos ni precios, y llegan al repositorio por el canal que fije la ADR de despliegue, por ejemplo una página de evidencia de la web que abre el propietario o los paneles que copia con los pasos del runbook. El 2026-10-31 el propietario decidió darle acceso a producción, también total (§12): el agente usa el mínimo que cada tarea necesita, por defecto solo lectura, y la ADR de despliegue fija cómo le llega, sin pasar credenciales por el chat ni por Git.
 
 ## 5. Definition of Ready
 
@@ -425,9 +425,9 @@ Pueden sumarse, si sus ADR los eligen y el propietario los aprueba:
 | Decisión | Materia | Se pide en |
 |---|---|---|
 | Servidor propio para el motor `shadow`, unos 7 USD más al mes | dinero | decidida el 2026-10-29: sí (§11) |
-| Región de Render y de R2, que luego no se puede cambiar | producto y dinero | F2.2 |
-| Retención y tamaño del disco, si suben el presupuesto | dinero | F2.2 |
-| Si el agente recibe un acceso de solo lectura a producción, o si la evidencia llega solo por el propietario (§4, punto 10) | seguridad | F2.2 |
+| Región de Render y de R2, que luego no se puede cambiar | producto y dinero | F2.2: el agente recomienda Virginia (EE. UU. este), con la indicación de ubicación `enam` para R2, y la pregunta antes de la ADR (`PROJECT_STATUS.md`) |
+| Retención y tamaño del disco, si suben el presupuesto | dinero | delegada el 2026-10-31 en la dirección técnica, sin subir el presupuesto: la fija la ADR de despliegue |
+| Si el agente recibe un acceso de solo lectura a producción, o si la evidencia llega solo por el propietario (§4, punto 10) | seguridad | decidida el 2026-10-31: acceso, también total; el agente usa el mínimo que necesite cada tarea (§4, punto 10) |
 | Cómo inicia sesión el propietario | seguridad | F2.3 |
 | Qué idiomas tiene el producto, para la preferencia de idioma del catálogo | producto | F2.4 |
 | Qué tipo de operación representan las posiciones hipotéticas, dentro de lo que ofrece Deriv para R_100 | producto | antes de abrir la ADR del modelo de estrategia (§8, punto 5) |
