@@ -35,7 +35,9 @@ export type LoginRole = (typeof LOGIN_ROLES)[number];
 export const AGENT_CONNECTION_LIMIT = 4;
 /**
  * Plazos de `buoh_agente`: una consulta suya no le quita a la captura los 0,1 CPU de Basic-256mb
- * más de 30 s, ni deja una transacción abierta más de un minuto.
+ * más de 30 s, ni deja una transacción abierta más de un minuto. Son los valores por defecto de sus
+ * sesiones (`ALTER ROLE … SET`), y una sesión suya podría cambiarlos con `SET`: el servidor solo
+ * impone el límite de conexiones. El cliente del agente no los cambia.
  */
 export const AGENT_STATEMENT_TIMEOUT = '30s';
 export const AGENT_IDLE_IN_TRANSACTION_TIMEOUT = '60s';
@@ -112,26 +114,43 @@ async function roleExists(client: Client, role: string): Promise<boolean> {
   return rows[0]?.exists === true;
 }
 
+/** Los atributos de cada rol (ADR-0018 §8): si inicia sesión y si crea roles. */
+const ROLE_ATTRIBUTES = {
+  [POSTGRES_ROLES.agent]: 'LOGIN NOCREATEROLE',
+  [POSTGRES_ROLES.health]: 'LOGIN NOCREATEROLE',
+  [POSTGRES_ROLES.ingest]: 'LOGIN NOCREATEROLE',
+  [POSTGRES_ROLES.owner]: 'NOLOGIN CREATEROLE',
+  [POSTGRES_ROLES.reader]: 'NOLOGIN NOCREATEROLE',
+} as const;
+
+/** Crea `role` con sus atributos o, si ya existe, se los vuelve a fijar. */
+async function ensureRole(client: Client, role: keyof typeof ROLE_ATTRIBUTES): Promise<void> {
+  const verb = (await roleExists(client, role)) ? 'ALTER' : 'CREATE';
+  await client.query(`${verb} ROLE ${ident(role)} ${ROLE_ATTRIBUTES[role]}`);
+}
+
 /**
- * Crea los roles que falten y ajusta sus atributos (ADR-0018 §8), en una transacción, con el usuario
- * del cliente, que necesita `CREATEROLE`: el usuario por defecto de Render, o el superusuario de los
- * servicios locales. Es idempotente.
+ * Crea los roles que falten y fija los atributos de todos (ADR-0018 §8), en una transacción, con el
+ * usuario del cliente, que necesita `CREATEROLE`: el usuario por defecto de Render, o el
+ * superusuario de los servicios locales. Es idempotente.
  *
- * 1. `buoh_dueno`, si falta, sin inicio de sesión y con `CREATEROLE`, y la pertenencia del usuario a
- *    él con `SET`, para poder actuar como él. Un usuario de una rotación ya la recibió, con
+ * 1. `buoh_dueno`, sin inicio de sesión y con `CREATEROLE`, y la pertenencia del usuario a él con
+ *    `SET`, para poder actuar como él. Un usuario de una rotación ya la recibió, con
  *    `ADMIN OPTION`, del anterior.
  * 2. El privilegio `CREATE` de la base para `buoh_dueno`, si no lo tiene, para que cree los esquemas
  *    de los logs. Solo puede darlo el dueño de la base.
  * 3. Como `buoh_dueno` (`SET LOCAL ROLE`), para que los administre él, los roles de ejecución:
- *    `buoh_lectura`, `buoh_ingesta`, `buoh_salud` y `buoh_agente`, con sus pertenencias, y los
- *    límites de `buoh_agente`. Sin contraseña: la pone `setRolePassword`.
+ *    `buoh_lectura`, sin inicio de sesión, y `buoh_ingesta`, `buoh_salud` y `buoh_agente`, con él,
+ *    ninguno con `CREATEROLE`; sus pertenencias, y los límites de `buoh_agente`. Sin contraseña: la
+ *    pone `setRolePassword`.
+ *
+ * Un rol que ya existía vuelve a tener esos atributos (`ALTER ROLE`). Los que solo puede cambiar un
+ * superusuario, como `SUPERUSER` o `BYPASSRLS`, no se tocan.
  */
 export async function ensureRuntimeRoles(client: Client): Promise<void> {
   await inTransaction(client, async () => {
     const owner = ident(POSTGRES_ROLES.owner);
-    if (!(await roleExists(client, POSTGRES_ROLES.owner))) {
-      await client.query(`CREATE ROLE ${owner} NOLOGIN CREATEROLE`);
-    }
+    await ensureRole(client, POSTGRES_ROLES.owner);
     const { rows: member } = await client.query<{ can_set: boolean }>(
       "SELECT pg_has_role(current_user, $1, 'SET') AS can_set",
       [POSTGRES_ROLES.owner],
@@ -151,13 +170,8 @@ export async function ensureRuntimeRoles(client: Client): Promise<void> {
     }
     await client.query(`SET LOCAL ROLE ${owner}`);
     const reader = ident(POSTGRES_ROLES.reader);
-    if (!(await roleExists(client, POSTGRES_ROLES.reader))) {
-      await client.query(`CREATE ROLE ${reader} NOLOGIN`);
-    }
-    for (const role of LOGIN_ROLES) {
-      if (!(await roleExists(client, role))) {
-        await client.query(`CREATE ROLE ${ident(role)} LOGIN`);
-      }
+    for (const role of [POSTGRES_ROLES.reader, ...LOGIN_ROLES]) {
+      await ensureRole(client, role);
     }
     for (const role of [POSTGRES_ROLES.health, POSTGRES_ROLES.agent]) {
       await client.query(`GRANT ${reader} TO ${ident(role)}`);

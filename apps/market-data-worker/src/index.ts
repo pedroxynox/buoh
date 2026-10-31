@@ -2,13 +2,14 @@ export {
   ConfigError,
   DEFAULT_POSTGRES_SCHEMA,
   DEFAULT_S3_BUCKET,
+  isDeployedEnvironment,
   loadConfig,
   POSTGRES_IDENTIFIER,
   POSTGRES_SSL_MODES,
   type PostgresSslMode,
   type WorkerConfig,
 } from './config.js';
-export { migrateCommand, type MigrateCommandDeps } from './migrate-command.js';
+export { migrateCommand, type MigrateCommandDeps, type MigratePool } from './migrate-command.js';
 export {
   createStorageEncoder,
   decodeObject,

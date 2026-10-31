@@ -119,6 +119,10 @@ export async function migrate(
   }
   const migrations = await loadMigrations();
   const client = await pool.connect();
+  // Mientras el cliente está fuera del pool, un corte de la conexión emite `error` en él, y sin
+  // oyente tumbaría el proceso. La consulta en curso, o la siguiente, falla con ese error.
+  const ignoreConnectionError = (): void => undefined;
+  client.on('error', ignoreConnectionError);
   const applied: string[] = [];
   try {
     await client.query('BEGIN');
@@ -175,6 +179,7 @@ export async function migrate(
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;
   } finally {
+    client.off('error', ignoreConnectionError);
     client.release();
   }
   return { applied, current: migrations.map((migration) => migration.name) };

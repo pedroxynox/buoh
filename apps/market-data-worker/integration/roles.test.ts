@@ -228,6 +228,38 @@ describe('db:migrate con el rol dueño (F2-ROLE-001)', () => {
     expect(rows.length).toBeGreaterThan(INGEST_WRITE_TABLES.length);
     expect(new Set(rows.map((row) => row.owner))).toEqual(new Set([POSTGRES_ROLES.owner]));
   });
+
+  it('sus errores contra PostgreSQL salen saneados con salida 1: un usuario que no es miembro del rol dueño (42501) y una contraseña mala (28P01)', async () => {
+    const cases = [
+      [POSTGRES_ROLES.ingest, passwords.ingest, '42501'],
+      [RENDER_USER, randomBytes(32).toString('base64'), '28P01'],
+    ] as const;
+    for (const [user, password, reason] of cases) {
+      const result = await migrateCommand(
+        { ...roleEnvironment(user, password), BUOH_POSTGRES_OWNER_ROLE: POSTGRES_ROLES.owner },
+        { createPool: (postgres) => createPool(postgres), migrate },
+      );
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(result.line)).toEqual({
+        code: 'MIGRATION_FAILED',
+        reason,
+        status: 'failed',
+      });
+      // Ni el mensaje de PostgreSQL ni lo que lleva: el usuario, la contraseña, el servidor, el rol
+      // o la base.
+      for (const secret of [
+        user,
+        password,
+        config.postgres.host,
+        POSTGRES_ROLES.owner,
+        DATABASE,
+        'permission denied',
+        'authentication failed',
+      ]) {
+        expect(result.line).not.toContain(secret);
+      }
+    }
+  });
 });
 
 describe('buoh_ingesta solo lee e inserta (F2-ROLE-001)', () => {
@@ -423,7 +455,7 @@ describe('BUOH_POSTGRES_SSLMODE contra un servidor sin TLS (ADR-0018 §9)', () =
 });
 
 describe('dos rotaciones de la credencial dueña (ADR-0018 §8)', () => {
-  it('cada usuario nuevo recibe buoh_dueno con ADMIN OPTION del anterior, y el último migra, ajusta roles y contraseñas', async () => {
+  it('cada usuario nuevo recibe buoh_dueno con ADMIN OPTION del anterior, y el último migra, vuelve a fijar los atributos cambiados a mano y ajusta privilegios y contraseñas', async () => {
     const server = ready(platform);
     // Render crea cada usuario nuevo como el primero.
     for (const [index, user] of ROTATED.entries()) {
@@ -441,11 +473,30 @@ describe('dos rotaciones de la credencial dueña (ADR-0018 §8)', () => {
     } finally {
       await first.end();
     }
+    // Atributos cambiados a mano, que ensureRuntimeRoles vuelve a fijar.
+    await server.query(`ALTER ROLE ${POSTGRES_ROLES.owner} LOGIN`);
+    await server.query(`ALTER ROLE ${POSTGRES_ROLES.reader} LOGIN`);
+    await server.query(`ALTER ROLE ${POSTGRES_ROLES.ingest} CREATEROLE`);
     const pool = createPool(roleConfig(ROTATED[1], passwords.rotated[1] ?? '').postgres);
     const client = await pool.connect();
     const renewed = randomBytes(32).toString('base64');
     try {
       await ensureRuntimeRoles(client);
+      const { rows: attributes } = await server.query<{
+        rolcanlogin: boolean;
+        rolcreaterole: boolean;
+        rolname: string;
+      }>(
+        'SELECT rolname, rolcanlogin, rolcreaterole FROM pg_roles WHERE rolname = ANY($1) ORDER BY rolname',
+        [[POSTGRES_ROLES.owner, POSTGRES_ROLES.reader, ...LOGIN_ROLES]],
+      );
+      expect(attributes).toEqual([
+        { rolcanlogin: true, rolcreaterole: false, rolname: POSTGRES_ROLES.agent },
+        { rolcanlogin: false, rolcreaterole: true, rolname: POSTGRES_ROLES.owner },
+        { rolcanlogin: true, rolcreaterole: false, rolname: POSTGRES_ROLES.ingest },
+        { rolcanlogin: false, rolcreaterole: false, rolname: POSTGRES_ROLES.reader },
+        { rolcanlogin: true, rolcreaterole: false, rolname: POSTGRES_ROLES.health },
+      ]);
       expect(await migrate(pool, { ownerRole: POSTGRES_ROLES.owner })).toMatchObject({
         applied: [],
       });

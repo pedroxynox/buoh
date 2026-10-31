@@ -157,7 +157,7 @@ describe('grantLogPrivileges', () => {
 });
 
 describe('ensureRuntimeRoles', () => {
-  it('crea buoh_dueno y, como buoh_dueno, los roles de ejecución con los límites de buoh_agente', async () => {
+  it('crea buoh_dueno y, como buoh_dueno, los roles de ejecución con sus atributos y los límites de buoh_agente', async () => {
     const { client, queries } = fakeClient((text) => {
       if (text.includes('pg_roles')) {
         return { rows: [{ exists: false }] };
@@ -181,10 +181,10 @@ describe('ensureRuntimeRoles', () => {
       'GRANT "buoh_dueno" TO CURRENT_USER WITH SET TRUE',
       'GRANT CREATE ON DATABASE "buoh" TO "buoh_dueno"',
       'SET LOCAL ROLE "buoh_dueno"',
-      'CREATE ROLE "buoh_lectura" NOLOGIN',
-      'CREATE ROLE "buoh_ingesta" LOGIN',
-      'CREATE ROLE "buoh_salud" LOGIN',
-      'CREATE ROLE "buoh_agente" LOGIN',
+      'CREATE ROLE "buoh_lectura" NOLOGIN NOCREATEROLE',
+      'CREATE ROLE "buoh_ingesta" LOGIN NOCREATEROLE',
+      'CREATE ROLE "buoh_salud" LOGIN NOCREATEROLE',
+      'CREATE ROLE "buoh_agente" LOGIN NOCREATEROLE',
       'GRANT "buoh_lectura" TO "buoh_salud"',
       'GRANT "buoh_lectura" TO "buoh_agente"',
       `ALTER ROLE "buoh_agente" CONNECTION LIMIT ${String(AGENT_CONNECTION_LIMIT)}`,
@@ -194,7 +194,7 @@ describe('ensureRuntimeRoles', () => {
     ]);
   });
 
-  it('con los roles ya creados, la pertenencia y el privilegio de la base, no los repite', async () => {
+  it('con los roles ya creados, la pertenencia y el privilegio de la base, no los repite y vuelve a fijar los atributos de cada rol', async () => {
     const { client, queries } = fakeClient((text) => {
       if (text.includes('pg_roles')) {
         return { rows: [{ exists: true }] };
@@ -208,8 +208,21 @@ describe('ensureRuntimeRoles', () => {
       return { rows: [] };
     });
     await ensureRuntimeRoles(client);
-    expect(queries.some((text) => text.startsWith('CREATE ROLE'))).toBe(false);
-    expect(queries).not.toContain('GRANT "buoh_dueno" TO CURRENT_USER WITH SET TRUE');
-    expect(queries.some((text) => text.startsWith('GRANT CREATE ON DATABASE'))).toBe(false);
+    const ddl = queries.filter((text) => !text.startsWith('SELECT'));
+    expect(ddl).toEqual([
+      'BEGIN',
+      'ALTER ROLE "buoh_dueno" NOLOGIN CREATEROLE',
+      'SET LOCAL ROLE "buoh_dueno"',
+      'ALTER ROLE "buoh_lectura" NOLOGIN NOCREATEROLE',
+      'ALTER ROLE "buoh_ingesta" LOGIN NOCREATEROLE',
+      'ALTER ROLE "buoh_salud" LOGIN NOCREATEROLE',
+      'ALTER ROLE "buoh_agente" LOGIN NOCREATEROLE',
+      'GRANT "buoh_lectura" TO "buoh_salud"',
+      'GRANT "buoh_lectura" TO "buoh_agente"',
+      `ALTER ROLE "buoh_agente" CONNECTION LIMIT ${String(AGENT_CONNECTION_LIMIT)}`,
+      'ALTER ROLE "buoh_agente" SET statement_timeout = \'30s\'',
+      'ALTER ROLE "buoh_agente" SET idle_in_transaction_session_timeout = \'60s\'',
+      'COMMIT',
+    ]);
   });
 });

@@ -1,3 +1,5 @@
+import { EventEmitter } from 'node:events';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -21,10 +23,19 @@ const ENV = {
   BUOH_S3_SECRET_ACCESS_KEY: 'secreto-sintético',
 };
 
-/** Las piezas del comando, con un pool que anota si se cerró y un `migrate` dado. */
+/**
+ * Las piezas del comando, con un pool que anota si se cerró y quién escucha sus errores, y un
+ * `migrate` dado.
+ */
 function deps(run: MigrateCommandDeps['migrate']) {
-  const seen: { ended: boolean; options: unknown; postgres: WorkerConfig['postgres'] | null } = {
+  const seen: {
+    ended: boolean;
+    errorListeners: ((error: Error) => void)[];
+    options: unknown;
+    postgres: WorkerConfig['postgres'] | null;
+  } = {
     ended: false,
+    errorListeners: [],
     options: null,
     postgres: null,
   };
@@ -36,6 +47,9 @@ function deps(run: MigrateCommandDeps['migrate']) {
         end: () => {
           seen.ended = true;
           return Promise.resolve();
+        },
+        on: (_event: 'error', listener: (error: Error) => void) => {
+          seen.errorListeners.push(listener);
         },
       };
     },
@@ -93,6 +107,65 @@ describe('migrateCommand', () => {
     }
   });
 
+  it('en production y staging exige BUOH_POSTGRES_OWNER_ROLE, para que las tablas no sean del usuario de la conexión', async () => {
+    for (const environment of ['production', 'staging']) {
+      const deployed = {
+        ...ENV,
+        BUOH_DEPLOYMENT_ENVIRONMENT: environment,
+        BUOH_POSTGRES_SSLMODE: 'require',
+      };
+      const missing = deps(() => Promise.reject(new Error('no se llama')));
+      const result = await migrateCommand(deployed, missing.deps);
+      expect(result.exitCode).toBe(2);
+      expect(JSON.parse(result.line)).toEqual({
+        code: 'ConfigError',
+        message: 'Configuración inválida o ausente: BUOH_POSTGRES_OWNER_ROLE.',
+        status: 'failed',
+      });
+      expect(missing.seen.postgres).toBeNull();
+      const present = deps(() => Promise.resolve({ applied: [], current: [] }));
+      const migrated = await migrateCommand(
+        { ...deployed, BUOH_POSTGRES_OWNER_ROLE: 'buoh_dueno' },
+        present.deps,
+      );
+      expect(migrated.exitCode).toBe(0);
+      expect(present.seen.options).toEqual({ ownerRole: 'buoh_dueno' });
+    }
+  });
+
+  it('BUOH_POSTGRES_OWNER_ROLE inválida se nombra junto con las demás variables rechazadas', async () => {
+    const { deps: d, seen } = deps(() => Promise.reject(new Error('no se llama')));
+    const result = await migrateCommand(
+      { ...ENV, BUOH_POSTGRES_OWNER_ROLE: 'Dueño; DROP', BUOH_POSTGRES_PASSWORD: undefined },
+      d,
+    );
+    expect(result.exitCode).toBe(2);
+    expect(JSON.parse(result.line)).toEqual({
+      code: 'ConfigError',
+      message:
+        'Configuración inválida o ausente: BUOH_POSTGRES_OWNER_ROLE, BUOH_POSTGRES_PASSWORD.',
+      status: 'failed',
+    });
+    expect(seen.postgres).toBeNull();
+  });
+
+  it('escucha error en el pool: el corte de una conexión inactiva no tumba el proceso, y sale la línea', async () => {
+    const { deps: d, seen } = deps(() => {
+      for (const listener of seen.errorListeners) {
+        listener(new Error('Connection terminated unexpectedly'));
+      }
+      return Promise.reject(serverError('57P01'));
+    });
+    const result = await migrateCommand(ENV, d);
+    expect(seen.errorListeners).toHaveLength(1);
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.line)).toEqual({
+      code: 'MIGRATION_FAILED',
+      reason: '57P01',
+      status: 'failed',
+    });
+  });
+
   it('PostgreSQL que no responde o rechaza una migración: salida 1, MIGRATION_FAILED con el código y, si la rechazó, el archivo; nunca el mensaje', async () => {
     const unavailable = deps(() => Promise.reject(serverError('ECONNREFUSED')));
     const refused = await migrateCommand(ENV, unavailable.deps);
@@ -142,14 +215,14 @@ describe('migrate con ownerRole', () => {
   /** Un pool cuyo cliente anota cada consulta y responde sin filas. */
   function recordingPool(fail?: (text: string) => Error | undefined) {
     const queries: string[] = [];
-    const client = {
+    const client = Object.assign(new EventEmitter(), {
       query: (text: string) => {
         queries.push(text);
         const error = fail?.(text);
         return error === undefined ? Promise.resolve({ rows: [] }) : Promise.reject(error);
       },
       release: () => undefined,
-    };
+    });
     return { pool: { connect: () => Promise.resolve(client) } as never, queries };
   }
 
@@ -164,6 +237,31 @@ describe('migrate con ownerRole', () => {
     expect(queries[3]).toMatch(/^CREATE TABLE IF NOT EXISTS buoh_schema_migrations/u);
     expect(queries.at(-1)).toBe('COMMIT');
     expect(result.applied).toEqual(result.current);
+  });
+
+  it('un corte de la conexión durante la transacción no tumba el proceso: migrate falla con ese error y, al soltar el cliente, deja de escucharlo', async () => {
+    const lost = new Error('Connection terminated unexpectedly');
+    const queries: string[] = [];
+    const client = Object.assign(new EventEmitter(), {
+      query: (text: string) => {
+        queries.push(text);
+        if (!text.startsWith('CREATE TABLE IF')) {
+          return Promise.resolve({ rows: [] });
+        }
+        // Como pg: el socket avisa con `error` en el cliente, fuera de la consulta, y la consulta
+        // en curso falla con ese error.
+        return new Promise((_resolve, reject) => {
+          setImmediate(() => {
+            client.emit('error', lost);
+            reject(lost);
+          });
+        });
+      },
+      release: () => undefined,
+    });
+    await expect(migrate({ connect: () => Promise.resolve(client) } as never)).rejects.toBe(lost);
+    expect(client.listenerCount('error')).toBe(0);
+    expect(queries.at(-1)).toBe('ROLLBACK');
   });
 
   it('rechaza un ownerRole que no es un nombre de minúsculas, cifras y _, sin abrir la conexión', async () => {

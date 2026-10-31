@@ -36,6 +36,11 @@ const DEPLOYED_ENVIRONMENTS: ReadonlySet<string> = new Set<DeploymentEnvironment
   'staging',
 ]);
 
+/** Si el valor de `BUOH_DEPLOYMENT_ENVIRONMENT` es un entorno desplegado: `production` o `staging`. */
+export function isDeployedEnvironment(environment: string | undefined): boolean {
+  return DEPLOYED_ENVIRONMENTS.has(environment ?? '');
+}
+
 const environmentSchema = z.object({
   BUOH_DEPLOYMENT_ENVIRONMENT: deploymentEnvironmentSchema,
   BUOH_POSTGRES_DB: nonEmpty.default('buoh'),
@@ -98,7 +103,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): W
   const rejected = new Set(
     parsed.success ? [] : parsed.error.issues.map((issue) => String(issue.path[0])),
   );
-  const deployed = DEPLOYED_ENVIRONMENTS.has(env['BUOH_DEPLOYMENT_ENVIRONMENT'] ?? '');
+  const deployed = isDeployedEnvironment(env['BUOH_DEPLOYMENT_ENVIRONMENT']);
   const sslMode = env['BUOH_POSTGRES_SSLMODE'];
   if (deployed && (sslMode === undefined || sslMode === 'disable')) {
     rejected.add('BUOH_POSTGRES_SSLMODE');
