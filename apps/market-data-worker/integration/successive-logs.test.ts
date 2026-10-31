@@ -238,6 +238,9 @@ function local(production: WorkerConfig): WorkerConfig {
   return { ...production, postgres: { ...production.postgres, sslMode: 'disable' } };
 }
 
+/** Los esquemas con los que `data:health` abrió sus almacenes, en orden. */
+const observedSchemas: string[] = [];
+
 /** `data:health` en `production` con el rol de lectura, a la hora `now`. */
 function productionHealth(now: string) {
   return healthCommand(
@@ -255,7 +258,10 @@ function productionHealth(now: string) {
         locateActiveLog(local(production), { now: () => now, source: DERIV_SOURCE }),
       nextId: () => uuid((sequence += 1)),
       now: () => now,
-      openStores: (located) => openHealthStores(local(located)),
+      openStores: (located) => {
+        observedSchemas.push(located.postgres.schema);
+        return openHealthStores(local(located));
+      },
       scheduler: clock.scheduler,
     },
   );
@@ -265,10 +271,10 @@ describe('la búsqueda del log activo (ADR-0018 §6)', () => {
   it('lee los esquemas de log en orden, con la última escritura de cada uno, e ignora los demás nombres', async () => {
     const logs = await listCaptureLogs(ready(admin), DERIV_SOURCE);
     expect(logs).toEqual([
-      { lastWriteUtc: OLD_HEARTBEAT, location: logAt(0) },
-      { lastWriteUtc: await lastWriteOf(logAt(1).schema), location: logAt(1) },
-      { lastWriteUtc: null, location: logAt(2) },
-      { lastWriteUtc: null, location: logAt(3) },
+      { lastWriteUtc: OLD_HEARTBEAT, location: logAt(0), readable: true },
+      { lastWriteUtc: await lastWriteOf(logAt(1).schema), location: logAt(1), readable: true },
+      { lastWriteUtc: null, location: logAt(2), readable: true },
+      { lastWriteUtc: null, location: logAt(3), readable: false },
     ]);
   });
 
@@ -352,11 +358,13 @@ describe('los objetos de cada log, bajo su prefijo en el mismo bucket (ADR-0018 
 
 describe('data:health en production (ADR-0018 §6 y §11)', () => {
   it('con el rol de lectura, observa el log activo, el 2, con su esquema y su prefijo: el tick de la captura y la regla 4', async () => {
+    observedSchemas.length = 0;
     const result = await productionHealth(await lastWriteOf(logAt(1).schema));
     const { rows } = await ready(admin).query<{ received: string }>(
       `SELECT event_time_utc AS received FROM ${logAt(1).schema}.source_event_index
         WHERE kind = 'raw_source_frame' ORDER BY segment_index DESC, position DESC LIMIT 1`,
     );
+    expect(observedSchemas).toEqual([logAt(1).schema]);
     expect(rows).toHaveLength(1);
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toBeNull();
@@ -369,10 +377,9 @@ describe('data:health en production (ADR-0018 §6 y §11)', () => {
   });
 
   it('cuando el log 2 vence, observa el preparado, el 3, vacío', async () => {
-    const expired = new Date(
-      Date.parse(await lastWriteOf(logAt(1).schema)) + LOG_RETENTION_MS,
-    ).toISOString();
-    const result = await productionHealth(expired);
+    observedSchemas.length = 0;
+    const result = await productionHealth(await expiredLastWrite());
+    expect(observedSchemas).toEqual([logAt(2).schema]);
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toBeNull();
     expect(JSON.parse(result.stdout ?? 'null')).toMatchObject({
@@ -381,13 +388,24 @@ describe('data:health en production (ADR-0018 §6 y §11)', () => {
     });
   });
 
-  it('sin ningún log, la regla 2 con log_not_prepared', async () => {
-    for (const log of LOGS) {
+  it('sin log preparado, la regla 2 con log_not_prepared, sin abrir los almacenes: con solo un log que se prepara, sin tablas ni privilegios, y sin ningún log', async () => {
+    observedSchemas.length = 0;
+    await ready(admin).query(`DROP SCHEMA ${logAt(2).schema} CASCADE`);
+    const preparing = await productionHealth(await expiredLastWrite());
+    for (const log of LOGS.filter((item) => item.number !== 3)) {
       await ready(admin).query(`DROP SCHEMA ${log.schema} CASCADE`);
     }
-    const result = await productionHealth(START);
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toBe('{"event":"data_health_failed","reason":"log_not_prepared"}');
-    expect(JSON.parse(result.stdout ?? 'null')).toMatchObject({ service_health: 'failed' });
+    const none = await productionHealth(START);
+    for (const result of [preparing, none]) {
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toBe('{"event":"data_health_failed","reason":"log_not_prepared"}');
+      expect(JSON.parse(result.stdout ?? 'null')).toMatchObject({ service_health: 'failed' });
+    }
+    expect(observedSchemas).toEqual([]);
   });
 });
+
+/** La hora en que vence el log 2: 30 días después de su última escritura. El 1 ya venció. */
+async function expiredLastWrite(): Promise<string> {
+  return new Date(Date.parse(await lastWriteOf(logAt(1).schema)) + LOG_RETENTION_MS).toISOString();
+}

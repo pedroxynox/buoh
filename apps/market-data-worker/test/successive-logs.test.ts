@@ -24,10 +24,18 @@ const NOW = '2026-04-01T00:00:00.000Z';
 const before = (ms: number): string => new Date(Date.parse(NOW) - ms).toISOString();
 const DAY = 24 * 60 * 60 * 1000;
 
-/** El log `number`, con su última escritura o sin ninguna. */
+/** El log `number`, legible, con su última escritura o sin ninguna. */
 const log = (number: number, lastWriteUtc: string | null = null): CaptureLog => ({
   lastWriteUtc,
   location: logLocation(number),
+  readable: true,
+});
+
+/** El log `number` mientras se prepara: sin las tablas o sin los privilegios del rol. */
+const unreadable = (number: number): CaptureLog => ({
+  lastWriteUtc: null,
+  location: logLocation(number),
+  readable: false,
 });
 
 describe('logLocation y logNumberOf (ADR-0018 §6, «Nombres»)', () => {
@@ -109,6 +117,14 @@ describe('selectActiveLog (ADR-0018 §6, «Log activo»)', () => {
     expect(selectActiveLog([log(1, before(30 * DAY)), log(2)], NOW)?.number).toBe(2);
   });
 
+  it('un log que todavía se prepara, sin tablas o sin privilegios, no es el preparado: sin otro, no hay log activo', () => {
+    expect(selectActiveLog([unreadable(1)], NOW)).toBeNull();
+    expect(selectActiveLog([log(1, before(31 * DAY)), unreadable(2)], NOW)).toBeNull();
+    expect(selectActiveLog([unreadable(2), log(3)], NOW)?.number).toBe(3);
+    // Con un log escrito, el que se prepara detrás no cambia nada.
+    expect(selectActiveLog([log(1, before(DAY)), unreadable(2)], NOW)?.number).toBe(1);
+  });
+
   it('el límite de 30 días decide entre el log escrito y el preparado', () => {
     expect(selectActiveLog([log(1, before(30 * DAY - 1)), log(2)], NOW)?.number).toBe(1);
     expect(selectActiveLog([log(1, before(30 * DAY)), log(2)], NOW)?.number).toBe(2);
@@ -161,9 +177,9 @@ describe('listCaptureLogs (ADR-0018 §6)', () => {
       return { rows: [{ event: null, heartbeat: null }] };
     });
     expect(await listCaptureLogs(pool, 'deriv_options')).toEqual([
-      { lastWriteUtc: '2026-03-01T10:00:15.000Z', location: logLocation(1) },
-      { lastWriteUtc: '2026-03-08T10:00:20.000Z', location: logLocation(2) },
-      { lastWriteUtc: null, location: logLocation(3) },
+      { lastWriteUtc: '2026-03-01T10:00:15.000Z', location: logLocation(1), readable: true },
+      { lastWriteUtc: '2026-03-08T10:00:20.000Z', location: logLocation(2), readable: true },
+      { lastWriteUtc: null, location: logLocation(3), readable: true },
     ]);
     const reads = queries.slice(1);
     expect(reads.map((query) => query.values)).toEqual([
@@ -193,13 +209,13 @@ describe('listCaptureLogs (ADR-0018 §6)', () => {
     );
   });
 
-  it('un esquema sin tablas (42P01) o que el rol todavía no puede leer (42501) es un log sin escrituras; otro error rechaza la lectura', async () => {
+  it('un esquema sin tablas (42P01) o que el rol todavía no puede leer (42501) es un log no legible, sin escrituras; otro error rechaza la lectura', async () => {
     for (const code of ['42P01', '42501']) {
       const { pool } = fakePool((text) =>
         text.includes('pg_namespace') ? { rows: [{ name: 'buoh_log_000004' }] } : coded(code),
       );
       expect(await listCaptureLogs(pool, 'deriv_options')).toEqual([
-        { lastWriteUtc: null, location: logLocation(4) },
+        { lastWriteUtc: null, location: logLocation(4), readable: false },
       ]);
     }
     for (const code of ['ECONNREFUSED', '57P01']) {

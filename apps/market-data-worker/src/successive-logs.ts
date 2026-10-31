@@ -58,10 +58,15 @@ export interface CaptureLog {
   readonly location: LogLocation;
   /**
    * La hora UTC de su última escritura de la fuente, la más tardía entre la del último evento del
-   * índice y la del último latido, o `null` si no tiene ninguna: un log preparado, o uno que el rol
-   * todavía no puede leer.
+   * índice y la del último latido, o `null` si no tiene ninguna o no se pudo leer.
    */
   readonly lastWriteUtc: string | null;
+  /**
+   * Si se pudo leer. Un esquema sin las tablas (`42P01`) o que el rol todavía no puede leer
+   * (`42501`), como mientras `buoh-operaciones` lo prepara, no cuenta como escrito ni como
+   * preparado (ADR-0018 §6, «Preparación»: el esquema, sus migraciones y sus privilegios).
+   */
+  readonly readable: boolean;
 }
 
 /** Si el log venció (ADR-0018 §7): su última escritura tiene 30 días o más. Uno sin escrituras, no. */
@@ -73,16 +78,17 @@ export function isLogExpired(log: CaptureLog, now: string): boolean {
 
 /**
  * El log activo (ADR-0018 §6): sin contar los vencidos, el de mayor número con alguna escritura,
- * o, si no hay ninguno así, el preparado de menor número. `null` si no queda ninguno.
+ * o, si no hay ninguno así, el preparado de menor número: uno que se pudo leer y no tiene
+ * escrituras. `null` si no queda ninguno.
  */
 export function selectActiveLog(logs: readonly CaptureLog[], now: string): LogLocation | null {
   const live = logs.filter((log) => !isLogExpired(log, now));
-  const written = live.filter((log) => log.lastWriteUtc !== null);
-  const numbers = (written.length > 0 ? written : live).map((log) => log.location.number);
-  if (numbers.length === 0) {
-    return null;
+  const written = live.filter((log) => log.lastWriteUtc !== null).map((log) => log.location.number);
+  if (written.length > 0) {
+    return logLocation(Math.max(...written));
   }
-  return logLocation(written.length > 0 ? Math.max(...numbers) : Math.min(...numbers));
+  const prepared = live.filter((log) => log.readable).map((log) => log.location.number);
+  return prepared.length > 0 ? logLocation(Math.min(...prepared)) : null;
 }
 
 /** La más tardía de dos horas UTC, o `null` si no hay ninguna. */
@@ -96,9 +102,10 @@ function latest(a: string | null, b: string | null): string | null {
 /**
  * Los logs que existen, en orden, con la última escritura de `source` en cada uno (ADR-0018 §6):
  * los esquemas con nombre de log de `pg_namespace` y, de cada uno, el último evento del índice
- * (por su posición, con la clave primaria) y el último latido (por su orden de escritura). Un
- * esquema sin las tablas (`42P01`) o que el rol de la conexión todavía no puede leer (`42501`) es
- * un log que se está preparando: no tiene escrituras. Cualquier otro error rechaza la lectura.
+ * (por su posición, con la clave primaria) y el último latido (por su orden de escritura, sin
+ * índice: recorre los latidos del log). Un esquema sin las tablas (`42P01`) o que el rol de la
+ * conexión todavía no puede leer (`42501`) es un log que se está preparando: queda como no legible
+ * (`readable: false`), sin escrituras. Cualquier otro error rechaza la lectura.
  */
 export async function listCaptureLogs(
   pool: Pick<Pool, 'query'>,
@@ -114,17 +121,25 @@ export async function listCaptureLogs(
   const logs: CaptureLog[] = [];
   for (const number of numbers) {
     const location = logLocation(number);
-    logs.push({ lastWriteUtc: await lastWriteOf(pool, location.schema, source), location });
+    const lastWrite = await lastWriteOf(pool, location.schema, source);
+    logs.push(
+      lastWrite === UNREADABLE
+        ? { lastWriteUtc: null, location, readable: false }
+        : { lastWriteUtc: lastWrite, location, readable: true },
+    );
   }
   return logs;
 }
 
-/** La última escritura de `source` en el esquema de un log, o `null`. */
+/** El esquema de un log que todavía no se puede leer: sin las tablas o sin los privilegios. */
+const UNREADABLE = Symbol('unreadable');
+
+/** La última escritura de `source` en el esquema de un log, `null`, o `UNREADABLE`. */
 async function lastWriteOf(
   pool: Pick<Pool, 'query'>,
   schema: string,
   source: string,
-): Promise<string | null> {
+): Promise<string | null | typeof UNREADABLE> {
   try {
     // El nombre del esquema pasó por `LOG_SCHEMA`: solo minúsculas, cifras y `_`.
     const { rows } = await pool.query<{ event: string | null; heartbeat: string | null }>(
@@ -139,7 +154,7 @@ async function lastWriteOf(
   } catch (error) {
     const code = (error as { code?: unknown } | null)?.code;
     if (code === UNDEFINED_TABLE || code === INSUFFICIENT_PRIVILEGE) {
-      return null;
+      return UNREADABLE;
     }
     throw error;
   }
