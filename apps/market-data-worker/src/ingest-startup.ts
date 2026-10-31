@@ -67,18 +67,23 @@ export type StartupWaitResult =
   | { readonly lock: SessionLock; readonly log: LogLocation; readonly status: 'ready' }
   | { readonly status: 'stopped'; readonly waiting: StartupWaitReason | null };
 
-/** Lo que dio una comprobación de la credencial, el log y sus migraciones. */
+/** Lo que dio una comprobación de la credencial, el log y sus migraciones, o una parada. */
 type PreparedCheck =
   | { readonly log: LogLocation }
-  | { readonly detail: string | null; readonly reason: StartupWaitReason };
+  | { readonly detail: string | null; readonly reason: StartupWaitReason }
+  | { readonly stopped: true };
 
 /**
  * La credencial, el log y sus migraciones, en ese orden (ADR-0018 §4). La primera lectura del log
  * activo es la que prueba la credencial: si PostgreSQL la rechaza o no responde, o si falla
  * cualquier lectura, el motivo es `postgres_unavailable`, con el código o el nombre del error
- * (`failureReason`), nunca su mensaje.
+ * (`failureReason`), nunca su mensaje. Si llegó la parada mientras buscaba el log, no lee las
+ * migraciones.
  */
-async function checkPrepared(reads: StartupWaitInput['reads']): Promise<PreparedCheck> {
+async function checkPrepared(
+  reads: StartupWaitInput['reads'],
+  stopped: () => boolean,
+): Promise<PreparedCheck> {
   let log: LogLocation | null;
   try {
     log = await reads.locateLog();
@@ -87,6 +92,9 @@ async function checkPrepared(reads: StartupWaitInput['reads']): Promise<Prepared
   }
   if (log === null) {
     return { detail: null, reason: 'log_not_prepared' };
+  }
+  if (stopped()) {
+    return { stopped: true };
   }
   let pending: readonly string[];
   try {
@@ -167,7 +175,11 @@ class StartupWait {
         return this.#stoppedResult();
       }
       if (prepared === null) {
-        const check = await checkPrepared(reads);
+        const check = await checkPrepared(reads, () => this.#stopRequested());
+        if ('stopped' in check) {
+          // La vuelta siguiente devuelve la parada.
+          continue;
+        }
         if ('reason' in check) {
           this.#waiting(check.reason, check.detail);
           await this.#pause(STARTUP_RETRY_MS);
@@ -193,6 +205,11 @@ class StartupWait {
         this.#waiting('source_lock_taken', null);
         await this.#pause(STARTUP_LOCK_RETRY_MS);
         continue;
+      }
+      // Una parada mientras lo tomaba: lo suelta enseguida, sin leer más, para el escritor siguiente.
+      if (this.#stopRequested()) {
+        await lock.release();
+        return this.#stoppedResult();
       }
       // Con el bloqueo, solo este proceso escribe, así que el log activo ya no cambia. Si cambió
       // mientras esperaba, por ejemplo porque el escritor anterior pasó al log siguiente (§6), se

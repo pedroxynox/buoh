@@ -1,3 +1,4 @@
+import { DeleteObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 import { type Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -65,6 +66,8 @@ const environment = {
   BUOH_S3_BUCKET: 'buoh-captura',
 };
 const fixture = syntheticSchemaArchive();
+/** La clave del esquema de fuente que guarda la sesión, sin el prefijo del log. */
+const SOURCE_SCHEMA_KEY = contentKey(fixture.expected.entries_sha256['ticks_response.schema.json']);
 const clock = new ManualClock(START);
 let sequence = 0;
 /** El superusuario en la base por defecto: crea y borra la base de la prueba. */
@@ -109,6 +112,34 @@ async function dropDatabase(server: Pool): Promise<void> {
   await server.query(`DROP DATABASE IF EXISTS ${DATABASE} WITH (FORCE)`);
 }
 
+/**
+ * Borra los objetos que dejó una pasada anterior bajo el prefijo del log de la prueba, que solo usa
+ * esta prueba: así lo que hay bajo él al terminar lo escribió esta pasada.
+ */
+async function clearLogPrefix(config: WorkerConfig): Promise<void> {
+  const client = new S3Client({
+    credentials: {
+      accessKeyId: config.s3.accessKeyId,
+      secretAccessKey: config.s3.secretAccessKey,
+    },
+    endpoint: config.s3.endpoint,
+    forcePathStyle: true,
+    region: config.s3.region,
+  });
+  try {
+    const listed = await client.send(
+      new ListObjectsV2Command({ Bucket: TEST_BUCKET, Prefix: LOG.prefix }),
+    );
+    for (const object of listed.Contents ?? []) {
+      if (object.Key !== undefined) {
+        await client.send(new DeleteObjectCommand({ Bucket: TEST_BUCKET, Key: object.Key }));
+      }
+    }
+  } finally {
+    client.destroy();
+  }
+}
+
 /** Las filas de una tabla del log de la prueba. */
 async function rowsOf(table: string): Promise<number> {
   const { rows } = await ready(admin).query<{ n: string }>(
@@ -130,6 +161,7 @@ beforeAll(async () => {
     BUOH_POSTGRES_DB: DATABASE,
   });
   admin = createPool({ ...localConfig.postgres, schema: 'public' });
+  await clearLogPrefix(local(localConfig));
 });
 
 afterAll(async () => {
@@ -235,6 +267,14 @@ describe('ingest en production (ADR-0018 §4)', () => {
         for (const table of ['source_event_index', 'ingestion_heartbeats', 'ingestion_cursors']) {
           expect(await rowsOf(table)).toBe(0);
         }
+        const root = S3ObjectStore.fromConfig(local(localConfig).s3);
+        try {
+          await expect(root.get(`${LOG.prefix}${SOURCE_SCHEMA_KEY}`, 64)).rejects.toMatchObject({
+            reason: 'not_found',
+          });
+        } finally {
+          root.destroy();
+        }
       } finally {
         await other.release();
       }
@@ -276,13 +316,12 @@ describe('ingest en production (ADR-0018 §4)', () => {
     // El esquema de fuente quedó bajo el prefijo del log.
     const root = S3ObjectStore.fromConfig(local(localConfig).s3);
     try {
-      const key = contentKey(fixture.expected.entries_sha256['ticks_response.schema.json']);
-      expect(await root.get(`${LOG.prefix}${key}`, 16 * 1024 * 1024)).toEqual(
+      expect(await root.get(`${LOG.prefix}${SOURCE_SCHEMA_KEY}`, 16 * 1024 * 1024)).toEqual(
         fixture.entries['ticks_response.schema.json'],
       );
-      await expect(root.get(`${logLocation(102).prefix}${key}`, 64)).rejects.toBeInstanceOf(
-        ObjectReadError,
-      );
+      await expect(
+        root.get(`${logLocation(102).prefix}${SOURCE_SCHEMA_KEY}`, 64),
+      ).rejects.toBeInstanceOf(ObjectReadError);
     } finally {
       root.destroy();
     }

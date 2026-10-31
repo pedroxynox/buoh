@@ -28,8 +28,10 @@ afterEach(() => {
 /** Lo que ven las lecturas; la prueba lo cambia mientras espera. */
 interface ReadsState {
   locate: LogLocation | null | Error;
-  /** El log activo que da la lectura hecha con el bloqueo tomado, si no es el de `locate`. */
-  locateUnderLock?: LogLocation | null;
+  /** Lo que da la lectura del log hecha con el bloqueo tomado, si no es lo de `locate`. */
+  locateUnderLock?: LogLocation | null | Error;
+  /** Se llama al empezar cada lectura del log, con su número desde 1. */
+  onLocate?: (call: number) => void;
   pending: readonly string[] | Error;
 }
 
@@ -49,6 +51,7 @@ function waitHarness(locks: readonly LockAnswer[] = []) {
   };
   let result: StartupWaitResult | null = null;
   let rejection: unknown = null;
+  let locates = 0;
   const run = () => {
     const promise = waitForProductionStart({
       alert: (payload) => alerts.push(payload),
@@ -57,13 +60,12 @@ function waitHarness(locks: readonly LockAnswer[] = []) {
       reads: {
         locateLog: () => {
           timeline.push('locate');
+          locates += 1;
+          state.onLocate?.(locates);
           const held = provider.locks.some((lock) => lock.held && !lock.released);
-          if (held && state.locateUnderLock !== undefined) {
-            return Promise.resolve(state.locateUnderLock);
-          }
-          return state.locate instanceof Error
-            ? Promise.reject(state.locate)
-            : Promise.resolve(state.locate);
+          const answer =
+            held && state.locateUnderLock !== undefined ? state.locateUnderLock : state.locate;
+          return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
         },
         pendingMigrations: (log) => {
           timeline.push(`pending:${String(log.number)}`);
@@ -207,6 +209,26 @@ describe('waitForProductionStart: lo que espera, en orden (ADR-0018 §4)', () =>
     expect(wait.alerts).toEqual([]);
   });
 
+  it('si PostgreSQL no responde al volver a buscar el log con el bloqueo tomado, lo suelta: postgres_unavailable con el código, y a los 30 s otra vez', async () => {
+    const wait = waitHarness(['lock', 'lock']);
+    wait.state.locateUnderLock = coded('ETIMEDOUT');
+    void wait.run();
+    await settle();
+    expect(wait.timeline).toEqual(['locate', 'pending:1', 'acquire:1', 'locate', 'release:1']);
+    expect(wait.alerts).toEqual([
+      { detail: 'ETIMEDOUT', event: 'ingest_waiting', reason: 'postgres_unavailable' },
+    ]);
+    expect(wait.clock.pendingDelays()).toEqual([STARTUP_RETRY_MS]);
+    delete wait.state.locateUnderLock;
+    await wait.clock.advance(STARTUP_RETRY_MS);
+    expect(wait.timeline.slice(5)).toEqual(['locate', 'pending:1', 'acquire:2', 'locate']);
+    expect(wait.result()).toEqual({
+      lock: wait.provider.lock(2),
+      log: logLocation(1),
+      status: 'ready',
+    });
+  });
+
   it('un bloqueo que se perdió antes de terminar la espera se suelta: postgres_unavailable con source_lock_lost, y a los 30 s otra vez', async () => {
     const wait = waitHarness(['lost', 'lock']);
     void wait.run();
@@ -278,29 +300,52 @@ describe('waitForProductionStart: la parada', () => {
     expect(wait.signal.listening).toBe(false);
   });
 
-  it('una señal mientras lee termina esa comprobación y la para antes de tomar el bloqueo, con waiting null si todavía no esperaba nada', async () => {
+  it('una señal mientras busca el log la para sin leer las migraciones ni tomar el bloqueo, con waiting null si todavía no esperaba nada', async () => {
     const wait = waitHarness(['lock']);
     const done = wait.run();
     // La primera lectura ya empezó y todavía no contestó.
     wait.raise();
     await done;
     expect(wait.result()).toEqual({ status: 'stopped', waiting: null });
-    expect(wait.timeline).toEqual(['locate', 'pending:1']);
+    expect(wait.timeline).toEqual(['locate']);
     expect(wait.provider.locks).toEqual([]);
   });
 
-  it('una señal mientras busca el log con el bloqueo tomado suelta el bloqueo y la para', async () => {
+  it('una señal mientras toma el bloqueo lo suelta enseguida, sin volver a buscar el log', async () => {
     const wait = waitHarness(['lock']);
     void wait.run();
-    // La señal llega cuando ya tomó el bloqueo: antes de que termine la lectura con él.
+    // La señal llega mientras toma el bloqueo, antes de que conteste.
     wait.provider.onAcquire = () => {
       queueMicrotask(() => {
         wait.raise();
       });
     };
     await settle();
-    expect(wait.timeline).toEqual(['locate', 'pending:1', 'acquire:1', 'locate', 'release:1']);
+    expect(wait.timeline).toEqual(['locate', 'pending:1', 'acquire:1', 'release:1']);
     expect(wait.result()).toEqual({ status: 'stopped', waiting: null });
+  });
+
+  it('una señal mientras vuelve a buscar el log con el bloqueo tomado lo suelta y la para', async () => {
+    const wait = waitHarness(['taken', 'lock']);
+    // La segunda lectura del log es la que se hace con el bloqueo.
+    wait.state.onLocate = (call) => {
+      if (call === 2) {
+        wait.raise();
+      }
+    };
+    void wait.run();
+    await settle();
+    await wait.clock.advance(STARTUP_LOCK_RETRY_MS);
+    expect(wait.timeline).toEqual([
+      'locate',
+      'pending:1',
+      'acquire:taken',
+      'acquire:1',
+      'locate',
+      'release:1',
+    ]);
+    expect(wait.result()).toEqual({ status: 'stopped', waiting: 'source_lock_taken' });
+    expect(wait.clock.pendingDelays()).toEqual([]);
   });
 });
 
