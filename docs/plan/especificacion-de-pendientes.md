@@ -122,7 +122,7 @@ Tipos de pendiente:
 
 Comprobado en el repositorio:
 
-- la guardia documental no tiene regla para `packages/domain/**` (F1.2, pendiente 3). El plan de Fase 2 la añade en F2.1 (`F2-GOV-001`);
+- la guardia documental no tenía regla para `packages/domain/**` (F1.2, pendiente 3): la añadió F2.1 (`F2-GOV-001`, PR #49);
 - `qualityProfileSchema` está repetido (F1.2, pendiente 4; aquí D-14).
 
 ## 2. Línea visual V1

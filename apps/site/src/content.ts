@@ -25,7 +25,7 @@ export const TAGLINE = 'Observa con calma. Decide con evidencia.';
  * Entrega siguiente de PROJECT_STATUS.md para la que se escribió el texto sobre lo que existe hoy.
  * Una prueba falla cuando cambia, para obligar a revisar el sitio.
  */
-export const WRITTEN_FOR_NEXT_DELIVERY = 'F2.1';
+export const WRITTEN_FOR_NEXT_DELIVERY = 'F2.2';
 
 /** Aviso corto que va en el pie de todas las páginas. */
 export const RISK_SHORT =

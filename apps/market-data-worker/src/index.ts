@@ -21,6 +21,7 @@ export {
 } from './errors.js';
 export { loadSyntheticFixture, type FixtureScenario, type SyntheticFixture } from './fixture.js';
 export { createUuidV7Generator } from './ids.js';
+export { WORKER_NODE_FLAGS } from './node-flags.js';
 export {
   buildRawSourceFrame,
   RawFirstIngestor,
