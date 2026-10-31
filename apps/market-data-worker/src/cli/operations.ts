@@ -7,6 +7,7 @@ import { runWorkerChild } from '../operations/child.js';
 import { openOwnerDatabase } from '../operations/owner-database.js';
 import { operationsCommand } from '../operations/run.js';
 import { openLogObjects } from '../operations/verification.js';
+import { realScheduler } from './scheduler.js';
 
 /**
  * `buoh-operaciones` (ADR-0018 §11): una ejecución del cron job de Render, cada 5 minutos. Crea y
@@ -27,6 +28,7 @@ const { exitCode, lines } = await operationsCommand(process.env, {
   openDatabase: (config) => openOwnerDatabase(config, { source: DERIV_SOURCE }),
   openObjects: (config, log) => openLogObjects(config.operationsObjects, log),
   runChild: runWorkerChild,
+  scheduler: realScheduler,
 });
 for (const line of lines) {
   process.stdout.write(`${line}\n`);

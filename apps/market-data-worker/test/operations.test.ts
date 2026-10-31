@@ -38,7 +38,9 @@ import {
   type RunChild,
   type SpaceMeasure,
 } from '../src/index.js';
+import { type Scheduler } from '../src/deriv/ports.js';
 import { uuid } from './support/connection-harness.js';
+import { flush, ManualClock } from './support/deriv-fixtures.js';
 
 // `buoh-operaciones` (ADR-0018 §11) sin servicios: una base falsa, procesos y objetos falsos, IDs y
 // reloj inyectados. Los vectores salen de §6, §7, §8 y §11: el orden de los pasos, el entorno
@@ -73,6 +75,9 @@ const ENV = {
 };
 const CONFIG = loadOperationsConfig(ENV);
 const NOW = '2026-03-02T10:00:00.000Z';
+
+/** Un temporizador que nunca vence: los plazos de la verificación no cuentan en esas pruebas. */
+const IDLE_SCHEDULER: Scheduler = { schedule: () => () => undefined };
 
 /** El informe sin observación de `data:health`: sin log ni escritor vivo. */
 const REPORT: HealthReport = {
@@ -405,33 +410,53 @@ function fakeObjects(
     readonly fail?: (key: string) => unknown;
     /** Se llama en cada lectura, antes de responder: por ejemplo, para que el reloj avance. */
     readonly onGet?: () => void;
+    /**
+     * Cada lectura queda pendiente, como un cuerpo que se detiene, hasta que se cierran los objetos:
+     * entonces rechaza, como el cliente S3 al destruir sus conexiones.
+     */
+    readonly stall?: boolean;
     readonly stored?: Readonly<Record<string, Uint8Array>>;
   } = {},
 ) {
   const calls: string[] = [];
   const stored = options.stored ?? {};
-  const objects = (location: LogLocation): LogObjects => ({
-    close: () => {
-      calls.push(`close:${location.prefix}`);
-    },
-    get: (key, maxBytes) => {
-      const full = `${location.prefix}${key}`;
-      calls.push(`get:${full}:${String(maxBytes)}`);
-      options.onGet?.();
-      const error = options.fail?.(full);
-      if (error !== undefined) {
-        return Promise.reject(error instanceof Error ? error : new Error('fallo sintético'));
-      }
-      const bytes = stored[full];
-      if (bytes === undefined) {
-        return Promise.reject(new ObjectReadError('not_found', full));
-      }
-      if (bytes.byteLength > maxBytes) {
-        return Promise.reject(new ObjectReadError('too_large', full));
-      }
-      return Promise.resolve(bytes);
-    },
-  });
+  const objects = (location: LogLocation): LogObjects => {
+    const stalled: ((error: Error) => void)[] = [];
+    return {
+      close: () => {
+        calls.push(`close:${location.prefix}`);
+        for (const reject of stalled.splice(0)) {
+          reject(new Error('socket destruido'));
+        }
+      },
+      get: (key, maxBytes) => {
+        const full = `${location.prefix}${key}`;
+        calls.push(`get:${full}:${String(maxBytes)}`);
+        if (options.stall === true) {
+          return new Promise<Uint8Array>((_resolve, reject) => {
+            stalled.push(reject);
+          });
+        }
+        return storedObject(full, maxBytes);
+      },
+    };
+  };
+  /** La respuesta de una lectura con los objetos guardados. */
+  const storedObject = (full: string, maxBytes: number): Promise<Uint8Array> => {
+    options.onGet?.();
+    const error = options.fail?.(full);
+    if (error !== undefined) {
+      return Promise.reject(error instanceof Error ? error : new Error('fallo sintético'));
+    }
+    const bytes = stored[full];
+    if (bytes === undefined) {
+      return Promise.reject(new ObjectReadError('not_found', full));
+    }
+    if (bytes.byteLength > maxBytes) {
+      return Promise.reject(new ObjectReadError('too_large', full));
+    }
+    return Promise.resolve(bytes);
+  };
   return { calls, objects };
 }
 
@@ -439,7 +464,11 @@ function fakeObjects(
 async function run(
   db: ReturnType<typeof fakeDatabase>,
   children: ReturnType<typeof fakeChildren>,
-  options: { readonly now?: () => string; readonly objects?: ReturnType<typeof fakeObjects> } = {},
+  options: {
+    readonly now?: () => string;
+    readonly objects?: ReturnType<typeof fakeObjects>;
+    readonly scheduler?: Scheduler;
+  } = {},
 ) {
   const alerts: Parameters<OperationalAlert>[0][] = [];
   const forwarded: string[] = [];
@@ -453,6 +482,7 @@ async function run(
     now: options.now ?? (() => NOW),
     objects: (options.objects ?? fakeObjects()).objects,
     runChild: children.runChild,
+    scheduler: options.scheduler ?? IDLE_SCHEDULER,
   });
   return {
     alerts,
@@ -1148,6 +1178,61 @@ describe('runOperations: la verificación por partes (ADR-0018 §11, paso 4)', (
       status: 'failed',
     });
   });
+
+  it('una lectura que no termina, como un cuerpo que se detiene, se corta al vencer el plazo: cierra los objetos del log, falla con deadline_exceeded y la ejecución sigue', async () => {
+    const stalled = segment(120);
+    const db = ready({ 2: [stalled.row, segmentRow(408)] });
+    const clock = new ManualClock(NOW);
+    const objects = fakeObjects({ stall: true });
+    const running = run(db, fakeChildren(), {
+      now: clock.now,
+      objects,
+      scheduler: clock.scheduler,
+    });
+    for (let i = 0; i < 100 && !objects.calls.some((call) => call.startsWith('get:')); i += 1) {
+      await flush();
+    }
+    expect(clock.pendingDelays()).toEqual([VERIFICATION_DEADLINE_MS]);
+    await clock.advance(VERIFICATION_DEADLINE_MS);
+    const { alerts, lines, result } = await running;
+
+    // Se cierra una sola vez, y la lectura que rechaza después de cerrar no deja nada sin capturar.
+    expect(objects.calls).toEqual([
+      `get:${segmentKey(2, stalled.row)}:${String(stalled.row.object_size_bytes)}`,
+      'close:logs/000002/',
+    ]);
+    expect(verificationLine(lines)).toMatchObject({
+      report: {
+        due: 2,
+        log: 2,
+        mismatched: [],
+        read: 0,
+        reason: 'deadline_exceeded',
+        segment_index: 120,
+        slot: 120,
+      },
+      status: 'failed',
+    });
+    expect(alerts).toEqual([
+      { event: 'operations_step_failed', reason: 'deadline_exceeded', step: 'verification' },
+    ]);
+    expect(lines.find((line) => line['step'] === 'space')).toMatchObject({ status: 'completed' });
+    expect(result.status).toBe('failed');
+  });
+
+  it('una lectura que termina a tiempo cancela su plazo', async () => {
+    const first = segment(120);
+    const db = ready({ 2: [first.row] });
+    const clock = new ManualClock(NOW);
+    const objects = fakeObjects({ stored: { [segmentKey(2, first.row)]: first.physical } });
+    const { lines } = await run(db, fakeChildren(), {
+      now: clock.now,
+      objects,
+      scheduler: clock.scheduler,
+    });
+    expect(verificationLine(lines)).toMatchObject({ report: { read: 1 }, status: 'completed' });
+    expect(clock.pendingDelays()).toEqual([]);
+  });
 });
 
 describe('runOperations: el espacio, una vez al día (ADR-0018 §11, paso 5, y §7)', () => {
@@ -1242,6 +1327,7 @@ describe('operationsCommand', () => {
           return fakeObjects().objects(location);
         },
         runChild: fakeChildren().runChild,
+        scheduler: IDLE_SCHEDULER,
       },
     );
     expect(result).toEqual({
@@ -1276,6 +1362,7 @@ describe('operationsCommand', () => {
         openDatabase: () => db.database,
         openObjects: (_config, location) => fakeObjects().objects(location),
         runChild: fakeChildren().runChild,
+        scheduler: IDLE_SCHEDULER,
       });
       expect(result.exitCode).toBe(exitCode);
       expect(db.calls.at(-1)).toBe('close');
@@ -1301,6 +1388,7 @@ describe('operationsCommand', () => {
         return fakeObjects().objects(location);
       },
       runChild: fakeChildren().runChild,
+      scheduler: IDLE_SCHEDULER,
     });
     expect(opened).toEqual([{ log: 'logs/000001/', objects: CONFIG.operationsObjects }]);
   });

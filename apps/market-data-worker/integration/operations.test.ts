@@ -10,6 +10,7 @@ import {
   healthCommand,
   LOGIN_ROLES,
   loadConfig,
+  loadOperationsConfig,
   locateActiveLog,
   logLocation,
   migrate,
@@ -155,6 +156,7 @@ async function operations(env = operationsEnvironment()) {
       openOwnerDatabase({ ...config, owner: plain(config.owner) }, { source: DERIV_SOURCE }),
     openObjects: (config, location) => openLogObjects(config.operationsObjects, location),
     runChild: inProcess,
+    scheduler: clock.scheduler,
   });
   const lines = result.lines.map((line) => JSON.parse(line) as Record<string, unknown>);
   const step = (name: string) => lines.find((line) => line['step'] === name);
@@ -403,6 +405,46 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
         client.release();
       }
       await agent.end();
+    }
+  });
+
+  it('los segmentos que tocan en una ejecución son los de índice i con i mod 288 igual a ella, de la fuente del servicio, en orden', async () => {
+    // Una copia de la tabla en un esquema que no es de un log, para que ninguna ejecución la vea.
+    const schema = 'buoh_integration_ops_modulo';
+    await ready(admin).query(`CREATE SCHEMA ${schema} AUTHORIZATION ${POSTGRES_ROLES.owner}`);
+    await ready(admin).query(
+      `CREATE TABLE ${schema}.closed_source_segments
+         (LIKE ${LOG_1}.closed_source_segments INCLUDING ALL)`,
+    );
+    await ready(admin).query(
+      `ALTER TABLE ${schema}.closed_source_segments OWNER TO ${POSTGRES_ROLES.owner}`,
+    );
+    await ready(admin).query(
+      `INSERT INTO ${schema}.closed_source_segments
+         (source, segment_index, event_count, raw_frame_count, byte_count, logical_content_sha256,
+          object_bytes_sha256, object_size_bytes, compression, close_reason,
+          segment_policy_version, first_event_time_utc, last_event_time_utc)
+       SELECT source, i, 1, 0, 10, repeat('a', 64), repeat('b', 64), 10, 'none', 'window',
+              '1.0.0', '2026-03-02T00:00:00.000Z', '2026-03-02T00:00:00.000Z'
+         FROM (VALUES ($1, 0), ($1, 287), ($1, 288), ($1, 289), ($1, 576), ('synthetic', 0))
+              AS rows (source, i)`,
+      [DERIV_SOURCE],
+    );
+    const config = loadOperationsConfig(operationsEnvironment());
+    const database = openOwnerDatabase(
+      { ...config, owner: plain(config.owner) },
+      { source: DERIV_SOURCE },
+    );
+    try {
+      const location = { number: 999_999, prefix: 'logs/999999/', schema };
+      const indexes = async (slot: number) =>
+        (await database.listSegmentsDue(location, slot)).map((row) => row.segment_index);
+      expect(await indexes(0)).toEqual([0, 288, 576]);
+      expect(await indexes(1)).toEqual([289]);
+      expect(await indexes(287)).toEqual([287]);
+      expect(await indexes(2)).toEqual([]);
+    } finally {
+      await database.close();
     }
   });
 

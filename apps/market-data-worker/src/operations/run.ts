@@ -1,6 +1,7 @@
 import { healthReportSchema, type HealthReport, type JsonValue } from '@buoh/contracts';
 
 import { ConfigError } from '../config.js';
+import { type Scheduler } from '../deriv/ports.js';
 import { type OperationalAlert } from '../operational/registry.js';
 import { LOGIN_ROLES } from '../postgres/roles.js';
 import { failureReason } from '../source-log/source-event-log.js';
@@ -53,7 +54,10 @@ interface StepOutcome {
 }
 
 export interface OperationsInput {
-  /** Recibe cada alerta saneada: `operations_step_failed` y `operations_report_unavailable`. */
+  /**
+   * Recibe cada alerta saneada: `operations_step_failed`, `operations_report_unavailable` y
+   * `operations_segment_mismatch`.
+   */
   readonly alert: OperationalAlert;
   readonly config: OperationsConfig;
   readonly database: OwnerDatabase;
@@ -66,6 +70,8 @@ export interface OperationsInput {
   /** Los objetos de un log con el token `operaciones`: `openLogObjects` en el servicio. */
   readonly objects: (log: LogLocation) => LogObjects;
   readonly runChild: RunChild;
+  /** El temporizador del plazo de la verificación. */
+  readonly scheduler: Scheduler;
 }
 
 /** Lo que dejó una ejecución: su ID, cómo terminó y una línea JSON por paso y otra al final. */
@@ -378,12 +384,20 @@ async function verification(input: OperationsInput, startedAt: string): Promise<
     const objects = input.objects(log);
     try {
       for (const segment of segments) {
-        if (Date.parse(input.now()) - startedMs >= VERIFICATION_DEADLINE_MS) {
+        const remaining = VERIFICATION_DEADLINE_MS - (Date.parse(input.now()) - startedMs);
+        if (remaining <= 0) {
           return outcome({ reason: 'deadline_exceeded' });
         }
-        let mismatch: string | null;
+        let checked: { readonly mismatch: string | null } | null;
         try {
-          mismatch = await verifySegment(objects, segment);
+          // Una lectura cuyo cuerpo se detiene no tiene otro plazo: el cliente S3 solo acota la
+          // conexión y la espera de las cabeceras. Si vence, el `finally` cierra los objetos, y
+          // con ellos sus conexiones, lo que corta la lectura.
+          checked = await withinDeadline(
+            input.scheduler,
+            remaining,
+            verifySegment(objects, segment).then((mismatch) => ({ mismatch })),
+          );
         } catch (error) {
           return outcome({
             log: log.number,
@@ -391,6 +405,14 @@ async function verification(input: OperationsInput, startedAt: string): Promise<
             segment_index: segment.segment_index,
           });
         }
+        if (checked === null) {
+          return outcome({
+            log: log.number,
+            reason: 'deadline_exceeded',
+            segment_index: segment.segment_index,
+          });
+        }
+        const { mismatch } = checked;
         read += 1;
         if (mismatch !== null) {
           mismatched.push({
@@ -411,6 +433,38 @@ async function verification(input: OperationsInput, startedAt: string): Promise<
     }
   }
   return outcome();
+}
+
+/**
+ * `work`, o `null` si no termina en `ms`. Una vez vencido, lo que dé `work` después se ignora,
+ * también si rechaza; cortarlo es cosa de quien llama.
+ */
+function withinDeadline<T>(scheduler: Scheduler, ms: number, work: Promise<T>): Promise<T | null> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cancel = scheduler.schedule(ms, () => {
+      if (!settled) {
+        settled = true;
+        resolve(null);
+      }
+    });
+    work.then(
+      (value) => {
+        if (!settled) {
+          settled = true;
+          cancel();
+          resolve(value);
+        }
+      },
+      (error: unknown) => {
+        if (!settled) {
+          settled = true;
+          cancel();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      },
+    );
+  });
 }
 
 /**

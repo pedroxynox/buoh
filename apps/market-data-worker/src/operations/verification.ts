@@ -102,8 +102,9 @@ export async function verifySegment(
 
 /**
  * Los objetos del log con el token de la verificación, bajo el prefijo del log, con los plazos de
- * cada conexión y cada petición de `data:health` (5000 ms y 10 000 ms): sin ellos, un
- * almacenamiento que acepta la conexión y no contesta dejaría la ejecución sin terminar.
+ * cada conexión y de la espera de las cabeceras de `data:health` (5000 ms y 10 000 ms). La lectura
+ * del cuerpo no tiene plazo en el cliente: la acota el de la verificación, que al vencer cierra el
+ * cliente (`close`), y con él sus conexiones.
  */
 export function openLogObjects(
   objects: Omit<WorkerConfig['s3'], 'keyPrefix'>,
