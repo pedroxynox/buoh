@@ -6,13 +6,15 @@ import { stderrAlert } from '../operational/registry.js';
 import { runWorkerChild } from '../operations/child.js';
 import { openOwnerDatabase } from '../operations/owner-database.js';
 import { operationsCommand } from '../operations/run.js';
+import { openLogObjects } from '../operations/verification.js';
 
 /**
  * `buoh-operaciones` (ADR-0018 §11): una ejecución del cron job de Render, cada 5 minutos. Crea y
  * ajusta los roles, migra los logs, les da los privilegios y prepara el siguiente, pone las
- * contraseñas de los roles de ejecución, y corre `data:health` sobre el log activo, con su informe
- * guardado en ese log. Escribe en stdout una línea JSON por paso y otra al final; en stderr, las
- * alertas saneadas, también las de sus procesos. Salida 0: todo terminó; 1: un paso falló; 2:
+ * contraseñas de los roles de ejecución, corre `data:health` sobre el log activo, con su informe
+ * guardado en ese log, vuelve a leer los segmentos cerrados que le tocan y, una vez al día, mide el
+ * espacio. Escribe en stdout una línea JSON por paso y otra al final; en stderr, las alertas
+ * saneadas, también las de sus procesos. Salida 0: todo terminó; 1: un paso falló; 2:
  * configuración inválida.
  */
 const { exitCode, lines } = await operationsCommand(process.env, {
@@ -23,6 +25,7 @@ const { exitCode, lines } = await operationsCommand(process.env, {
   nextId: createUuidV7Generator({ now: () => Date.now(), randomBytes }),
   now: () => new Date().toISOString(),
   openDatabase: (config) => openOwnerDatabase(config, { source: DERIV_SOURCE }),
+  openObjects: (config, log) => openLogObjects(config.operationsObjects, log),
   runChild: runWorkerChild,
 });
 for (const line of lines) {

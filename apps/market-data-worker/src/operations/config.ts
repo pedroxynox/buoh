@@ -10,6 +10,7 @@ import { MIN_ROLE_PASSWORD_LENGTH, POSTGRES_ROLES, type LoginRole } from '../pos
 
 const nonEmpty = z.string().min(1);
 const port = z.coerce.number().int().min(1).max(65_535);
+const bucket = z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u);
 /** Una contraseña de un rol de ejecución: ASCII imprimible sin espacios, de 16 caracteres o más. */
 const rolePassword = z
   .string()
@@ -33,10 +34,16 @@ const operationsEnvironmentSchema = z.object({
   BUOH_SALUD_POSTGRES_PASSWORD: rolePassword,
   /** El token `salud` de R2, de solo lectura, para el proceso de `data:health` (§10). */
   BUOH_SALUD_S3_ACCESS_KEY_ID: nonEmpty,
-  BUOH_SALUD_S3_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u),
+  BUOH_SALUD_S3_BUCKET: bucket,
   BUOH_SALUD_S3_ENDPOINT: z.url(),
   BUOH_SALUD_S3_REGION: nonEmpty,
   BUOH_SALUD_S3_SECRET_ACCESS_KEY: nonEmpty,
+  /** El token `operaciones` de R2, el del propio servicio: la verificación por partes (§10). */
+  BUOH_OPERACIONES_S3_ACCESS_KEY_ID: nonEmpty,
+  BUOH_OPERACIONES_S3_BUCKET: bucket,
+  BUOH_OPERACIONES_S3_ENDPOINT: z.url(),
+  BUOH_OPERACIONES_S3_REGION: nonEmpty,
+  BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY: nonEmpty,
 });
 
 /** Las variables que el worker lee y que el servicio no tiene (ADR-0018 §11). */
@@ -49,6 +56,11 @@ export interface OperationsConfig {
   readonly passwords: Readonly<Record<LoginRole, string>>;
   /** El almacenamiento de objetos con el token `salud`, sin prefijo: lo pone `data:health`. */
   readonly healthObjects: Omit<WorkerConfig['s3'], 'keyPrefix'>;
+  /**
+   * El almacenamiento de objetos con el token `operaciones`, sin prefijo: la verificación por partes
+   * lee cada log bajo el suyo.
+   */
+  readonly operationsObjects: Omit<WorkerConfig['s3'], 'keyPrefix'>;
 }
 
 /**
@@ -80,6 +92,13 @@ export function loadOperationsConfig(
       endpoint: value.BUOH_SALUD_S3_ENDPOINT,
       region: value.BUOH_SALUD_S3_REGION,
       secretAccessKey: value.BUOH_SALUD_S3_SECRET_ACCESS_KEY,
+    },
+    operationsObjects: {
+      accessKeyId: value.BUOH_OPERACIONES_S3_ACCESS_KEY_ID,
+      bucket: value.BUOH_OPERACIONES_S3_BUCKET,
+      endpoint: value.BUOH_OPERACIONES_S3_ENDPOINT,
+      region: value.BUOH_OPERACIONES_S3_REGION,
+      secretAccessKey: value.BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY,
     },
     owner: {
       database: value.BUOH_DUENO_POSTGRES_DB,
