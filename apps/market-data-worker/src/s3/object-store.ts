@@ -14,6 +14,23 @@ function statusOf(error: unknown): number | undefined {
   return error instanceof S3ServiceException ? error.$metadata.httpStatusCode : undefined;
 }
 
+/**
+ * El código con el que R2 rechaza, con 409, escribir o borrar una clave que protege una regla de
+ * bloqueo del bucket. R2 comprueba la regla antes que `If-None-Match`, así que una clave protegida
+ * que ya existe responde así en lugar de 412, y el objeto no cambia (ADR-0018 §10). El SDK lo deja
+ * en `name`.
+ */
+const OBJECT_LOCKED = 'ObjectLockedByBucketPolicy';
+
+/** Si la escritura condicional falló porque la clave ya existe: 412, o el 409 de la regla de bloqueo. */
+function keyExists(error: unknown): boolean {
+  const status = statusOf(error);
+  return (
+    status === 412 ||
+    (status === 409 && error instanceof S3ServiceException && error.name === OBJECT_LOCKED)
+  );
+}
+
 async function readCapped(
   body: AsyncIterable<Uint8Array>,
   maxBytes: number,
@@ -119,8 +136,10 @@ export class S3ObjectStore implements ObjectStore {
       );
       return 'created';
     } catch (error) {
-      // 412: la clave ya existe; el llamador verifica sus bytes antes de confiar en ella.
-      if (statusOf(error) === 412) {
+      // La clave ya existe, sin regla de bloqueo (412) o con ella (409 `ObjectLockedByBucketPolicy`):
+      // el objeto no cambió, y el llamador verifica sus bytes antes de confiar en ella. Cualquier
+      // otro 409, como uno por escrituras simultáneas en la misma clave, sigue siendo un error.
+      if (keyExists(error)) {
         return 'exists';
       }
       throw error;
