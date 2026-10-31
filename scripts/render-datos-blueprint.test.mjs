@@ -391,8 +391,14 @@ test('ninguna contraseña, token ni endpoint de la cuenta lleva su valor en el a
       }
     }
   }
-  // Tampoco fuera de las variables: el archivo no menciona ninguna dirección de R2.
-  assert.doesNotMatch(read('render-datos.yaml'), /r2\.cloudflarestorage\.com/);
+  // Tampoco fuera de las variables, ni en los comentarios, que el lector salta: ninguna dirección de
+  // R2, nada con forma de ID de cuenta o clave de R2 (32 o 64 cifras hexadecimales), de valor de
+  // `generateValue` (base64 de 256 bits) ni de URL de PostgreSQL con usuario y contraseña.
+  const text = read('render-datos.yaml');
+  assert.doesNotMatch(text, /r2\.cloudflarestorage\.com/);
+  assert.doesNotMatch(text, /[0-9a-f]{32}/i);
+  assert.doesNotMatch(text, /[A-Za-z0-9+/]{43}=/);
+  assert.doesNotMatch(text, /postgres(?:ql)?:\/\/[^\s/@]+:[^\s/@]+@/i);
 });
 
 test('el lector rechaza lo que no entiende, con su línea', () => {

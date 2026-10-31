@@ -607,7 +607,7 @@ Desde el PR 2 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-producc
 - **Privilegios.** `grantLogPrivileges` da los del esquema de un log. `buoh_lectura` recibe el uso del esquema y `SELECT` en todas sus tablas. `buoh_ingesta` recibe el uso del esquema, `SELECT` e `INSERT` en las tablas de `0002` en adelante, `SELECT` en `buoh_schema_migrations` y el uso de las secuencias, y nada en las tablas de datasets de `0001` ni en `operations_reports` (`0006`), que solo escribe `buoh-operaciones`. Si el esquema tiene una tabla que no está en ninguna de sus listas, para sin dar ninguno (`UnclassifiedTableError`): la migración que la crea decide sus privilegios en el mismo PR.
 - **Contraseñas.** `setRolePassword` pone la de un rol de ejecución con el verificador SCRAM-SHA-256 calculado en el cliente, así que la contraseña no viaja ni queda en claro en el servidor.
 - Las tres funciones son idempotentes y trabajan en una transacción.
-- **Rotación de la credencial dueña.** El usuario de antes da `buoh_dueno` al nuevo con `ADMIN OPTION` y `SET`. En PostgreSQL 18, `DROP ROLE` de un usuario que dio esa pertenencia falla con `2BP01` mientras exista, y la prueba de los roles lo comprueba. Render nunca borra el usuario original de la base, solo le quita el inicio de sesión ([credenciales de Render Postgres](https://render.com/docs/postgresql-credentials)), así que la primera rotación no choca con eso, pero las siguientes sí pueden chocar. Cómo da Render sus privilegios al usuario nuevo se comprueba con la base creada, y el PR que lo registre fija el orden de los pasos (ver «Producción (F2.2)», «Rotar credenciales»).
+- **Rotación de la credencial dueña.** El usuario de antes da `buoh_dueno` al nuevo con `ADMIN OPTION` y `SET`. En PostgreSQL 18, `DROP ROLE` de un usuario que dio esa pertenencia falla con `2BP01` mientras exista, y la prueba de los roles lo comprueba. Render nunca borra el usuario original de la base, solo le quita el inicio de sesión ([credenciales de Render Postgres](https://render.com/docs/postgresql-credentials)), así que la primera rotación no choca con eso, pero las siguientes sí pueden chocar. Cómo da Render sus privilegios al usuario nuevo se comprueba con la base creada, y el PR 7b de ADR-0018 §16 fija el orden de los pasos (ver «Producción (F2.2)», «Rotar credenciales»).
 
 ## Logs sucesivos de producción (F2.2)
 
@@ -685,13 +685,13 @@ Cada informe se guarda además, como `buoh_dueno`, en la tabla `operations_repor
 
 ## Producción (F2.2)
 
-Los pasos para poner en producción el sistema de datos de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) llegan en dos PR (§16, PR 6): el 6a trajo las comprobaciones previas de R2, y el 6b, el Blueprint `render-datos.yaml` y los pasos para preparar, desplegar, parar, recuperar, rotar credenciales y borrar. Qué define el Blueprint está en [despliegue en Render](despliegue-en-render.md) («Qué define `render-datos.yaml`»). Todavía no hay nada desplegado. Nada de esta sección cuesta dinero salvo «Desplegar», y ninguna credencial pasa por el chat ni por Git.
+Los pasos para poner en producción el sistema de datos de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) llegan en dos PR (§16, PR 6): el 6a trajo las comprobaciones previas de R2, y el 6b, el Blueprint `render-datos.yaml` y los pasos para preparar, desplegar, parar, recuperar, rotar credenciales y borrar. Qué define el Blueprint está en [despliegue en Render](despliegue-en-render.md) («Qué define `render-datos.yaml`»). Todavía no hay nada desplegado. Nada de esta sección cuesta dinero salvo que se diga, y ninguna credencial pasa por el chat ni por Git.
 
-El orden es: las comprobaciones previas de R2, «Preparar», «Desplegar» y «Acceso del agente». «Preparar» espera a que estén fusionados los PR 6c y 7 de §16.
+El orden es: las comprobaciones previas de R2, con el PR 6c de §16 fusionado, que suma una cuarta, para hacerlas todas de una vez (ver «Preparar»); «Preparar», con el PR 7 fusionado; «Desplegar»; y «Acceso del agente».
 
 ### Comprobaciones previas de R2
 
-Antes de crear el bucket de la captura, `buoh-captura`, se comprueba en un bucket de prueba, `buoh-prueba`, que R2 hace lo que el log necesita (ADR-0018 §10; ADR-0016 §4): que no sobrescribe un objeto que ya existe, que un objeto se lee enseguida tal como se escribió y que el cliente del worker escribe y lee sin las sumas de comprobación que R2 no admite. Las hace `scripts/evidencia-f2-2/comprobar-r2.mjs`, que no es un comando del producto: usa el `S3ObjectStore` y el `writeVerified` del worker compilado, como el log. Su resultado, saneado, lo registra el PR 7 de §16.
+Antes de crear el bucket de la captura, `buoh-captura`, se comprueba en un bucket de prueba, `buoh-prueba`, que R2 hace lo que el log necesita (ADR-0018 §10; ADR-0016 §4): que no sobrescribe un objeto que ya existe, que un objeto se lee enseguida tal como se escribió y que el cliente del worker escribe y lee sin las sumas de comprobación que R2 no admite. Las hace `scripts/evidencia-f2-2/comprobar-r2.mjs`, que no es un comando del producto: usa el `S3ObjectStore` y el `writeVerified` del worker compilado, como el log. Su resultado, saneado, lo registra el PR 7 de §16. Se hacen con el PR 6c fusionado, que suma una cuarta con una regla de bloqueo en `buoh-prueba` (ADR-0018 §10), para no tener que volver a crear el bucket y el token.
 
 **El propietario, en Cloudflare** ([dash.cloudflare.com](https://dash.cloudflare.com)):
 
@@ -784,7 +784,7 @@ Si un servicio sale con `ConfigError` (salida 2), la línea nombra la variable m
 Para leer producción (ADR-0018 §12 y §13), el agente usa el rol `buoh_agente` y el token `agente`, los dos de solo lectura, con secretos de Kiro de nombres propios, que ninguna prueba ni comando local lee por error. **El propietario:**
 
 1. En Cloudflare, crea el token `agente`: **Object Read only**, solo para `buoh-captura`, con **TTL** *Forever*.
-2. En Render, copia la contraseña de `buoh_agente` (en `buoh-operaciones`, **Environment**, `BUOH_AGENTE_POSTGRES_PASSWORD`) y el **Hostname** de la base (en `buoh-postgres`, **Info**), que empieza por `dpg-`. El servidor externo es ese nombre seguido de `.virginia-postgres.render.com`, el que aparece entre `@` y `/buoh` en **External Database URL**. No copies esa URL entera: lleva la contraseña de `buoh`, la credencial dueña, que el agente nunca recibe (ADR-0018 §12).
+2. En Render, copia la contraseña de `buoh_agente` (en `buoh-operaciones`, **Environment**, `BUOH_AGENTE_POSTGRES_PASSWORD`) y el **Hostname** de la base (en `buoh-postgres`, **Info**), que empieza por `dpg-`. El servidor externo es ese nombre seguido de `.virginia-postgres.render.com`, el que aparece justo después de `@` en **External Database URL**, hasta el `:` del puerto o la `/`. No copies esa URL entera: lleva la contraseña de `buoh`, la credencial dueña, que el agente nunca recibe (ADR-0018 §12).
 3. En Kiro Web, en **Settings → Sandbox → Secrets**, guarda cinco secretos: `BUOH_AGENTE_POSTGRES_HOST`, con el servidor externo; `BUOH_AGENTE_POSTGRES_PASSWORD`; `BUOH_AGENTE_S3_ENDPOINT`, con el endpoint; y `BUOH_AGENTE_S3_ACCESS_KEY_ID` y `BUOH_AGENTE_S3_SECRET_ACCESS_KEY`, con el token `agente`. Nunca en el chat ni en Git.
 
 **El agente** solo los pasa al comando que los necesita, con los nombres que lee el worker y en un subshell, y nunca los muestra. Para `data:health`, desde la raíz del repositorio:
@@ -804,7 +804,7 @@ Para leer producción (ADR-0018 §12 y §13), el agente usa el rol `buoh_agente`
 )
 ```
 
-La conexión externa siempre va cifrada. Usa `require` hasta que se compruebe, con la base creada, si su certificado se valida con las autoridades de Node: si se valida, el PR que lo registre cambia aquí `require` por `verify-full` (ADR-0018 §9). `buoh_agente` tiene 4 conexiones como mucho (ver «Roles y cifrado de PostgreSQL (F2.2)»).
+La conexión externa siempre va cifrada. Usa `require` hasta que se compruebe, con la base creada, si su certificado se valida con las autoridades de Node: si se valida, el PR 7b de ADR-0018 §16 cambia aquí `require` por `verify-full` (§9). `buoh_agente` tiene 4 conexiones como mucho (ver «Roles y cifrado de PostgreSQL (F2.2)»).
 
 ### Parar
 
@@ -814,10 +814,10 @@ La conexión externa siempre va cifrada. Usa `require` hasta que se compruebe, c
 
 ### Recuperar
 
-- **Un despliegue malo:** en la página del servicio, en la lista de despliegues, elige el último bueno y pulsa **Rollback**. Render apaga entonces los despliegues automáticos de ese servicio: cuando el arreglo esté en `main`, se vuelven a encender en **Settings → Auto-Deploy → After CI Checks Pass**. Volver atrás no deshace una migración, y no hace falta: las de los logs solo añaden, y el código anterior sigue funcionando con ellas (ADR-0018 §5).
+- **Un despliegue malo:** en la página del servicio, en la lista de despliegues, elige el último bueno y pulsa **Rollback**. Render apaga entonces los despliegues automáticos de ese servicio: cuando el arreglo esté en `main`, se vuelven a encender en **Settings → Auto-Deploy → After CI Checks Pass**. Mientras tanto, no pulses **Manual Sync** en el Blueprint: vuelve a aplicar `render-datos.yaml` entero, con los despliegues automáticos encendidos. Volver atrás no deshace una migración, y no hace falta: las de los logs solo añaden, y el código anterior sigue funcionando con ellas (ADR-0018 §5).
 - **Un servicio que arranca una y otra vez:** Render vuelve a arrancar el proceso que termina con error (ADR-0018 §3), y sus **Logs** dicen por qué. `ConfigError` nombra la variable mal puesta. Lo demás, como `log_not_derivable`, se lo pasa el propietario al agente.
 - **Lo urgente:** `operations_segment_mismatch`, porque un log perdió o cambió un objeto (ver «Operaciones (`buoh-operaciones`)», «Alertas»); `ingest_waiting` durante más de 10 minutos fuera de un despliegue; y, desde el PR 8, `log_cut_blocked`. El agente ve la salud y lo que encuentra `buoh-operaciones` en los informes guardados del log. Las alertas de `ingest` solo están en los **Logs** de Render.
-- **La base llena:** Render la suspende cuando llena su disco, y los umbrales de ADR-0018 §7 están para avisar antes. Para volver: en **Info**, **Resume Database**, y enseguida, en **Plan**, **Storage**, **Edit**, poner 5 GB y **Save**. Cuesta 1,50 USD al mes en lugar de 0,30 y no se puede reducir, así que antes necesita el visto bueno del propietario (plan §12). Ese mismo día, el agente abre el PR que pone `diskSizeGB: 5` en `render-datos.yaml`, para que el Blueprint diga lo mismo que la base.
+- **La base llena:** Render la suspende cuando llena su disco, y los umbrales de ADR-0018 §7 están para avisar antes. Para volver: en **Info**, **Resume Database**, y enseguida, en **Plan**, **Storage**, **Edit**, poner 5 GB y **Save**. Cuesta 1,50 USD al mes en lugar de 0,30 y no se puede reducir, así que antes necesita el visto bueno del propietario (plan §12). Ese mismo día, el agente abre el PR que pone `diskSizeGB: 5` en `render-datos.yaml`, para que el Blueprint diga lo mismo que la base. Hasta que se fusione, no pulses **Manual Sync**: pediría el disco de 1 GB del archivo, que Render no puede reducir.
 - **Volver a un momento anterior de la base:** Render guarda los últimos 3 días en el plan Hobby (ADR-0018 §7). En **Recovery**, **Restore Database** crea otra base con el estado de ese momento, sin tocar la original y con su misma lista de IPs. Es otra base de pago mientras exista. Qué hacer con ella, como leer lo que se perdió o usarla en lugar de `buoh-postgres`, que cambia el Blueprint, lo decide el propietario con el agente.
 
 ### Rotar credenciales
@@ -832,17 +832,17 @@ Se rotan si una pudo filtrarse o si el agente lo pide (ADR-0018 §12). Ninguna p
 
 El token `agente` se rota igual, con sus dos secretos de Kiro en lugar de las variables de Render.
 
-**La contraseña de un rol de ejecución** (`buoh_ingesta`, `buoh_salud` o `buoh_agente`). Render solo genera un valor nuevo (`generateValue`) cuando la variable no existe:
+**La contraseña de un rol de ejecución** (`buoh_ingesta`, `buoh_salud` o `buoh_agente`). Render solo genera un valor nuevo (`generateValue`) cuando la variable no existe. La **Manual Sync** del paso 2 aplica `render-datos.yaml` entero y deshace lo que se cambió en el panel, como un **Rollback**, el disco ampliado o la base cerrada tras una filtración: si el panel no coincide con el archivo, primero se fusiona el PR que los alinea.
 
 1. En el servicio que la tiene, en **Environment**, borra la variable y guarda con **Save only**: `BUOH_POSTGRES_PASSWORD`, de `buoh-ingesta`, para `buoh_ingesta`, y `BUOH_SALUD_POSTGRES_PASSWORD` o `BUOH_AGENTE_POSTGRES_PASSWORD`, de `buoh-operaciones`, para los otros dos.
 2. En la página del Blueprint `buoh-datos`, pulsa **Manual Sync**. Render vuelve a crear la variable con un valor nuevo y despliega el servicio. Las variables que toman su valor de otro servicio (`fromService`), como `BUOH_INGESTA_POSTGRES_PASSWORD` de `buoh-operaciones`, se actualizan en cada sincronización.
 3. En su ejecución siguiente, `buoh-operaciones` le pone la contraseña nueva al rol (`passwords_set`, en la línea de `roles_and_logs`). Con `buoh_ingesta`, la instancia nueva de `ingest` espera mientras tanto con `postgres_unavailable` (ADR-0018 §4), y la captura puede parar unos minutos. Si a los 10 minutos sigue esperando, `buoh-operaciones` todavía tiene el valor viejo: otra **Manual Sync** lo arregla.
 4. Con `buoh_agente`, el propietario copia la contraseña nueva a su secreto de Kiro.
 
-**La credencial dueña** (`buoh`, el usuario por defecto de Render) todavía no tiene pasos: no la rotes. En una rotación, Render crea otro usuario, que necesita la pertenencia a `buoh_dueno` con `ADMIN OPTION`, y solo puede dársela el anterior (ver «Roles y cifrado de PostgreSQL (F2.2)»). Cómo da Render sus privilegios al usuario nuevo se comprueba con la base creada, y el PR que lo registre pone aquí los pasos (ADR-0018 §8). Si se filtra antes:
+**La credencial dueña** (`buoh`, el usuario por defecto de Render) todavía no tiene pasos: no la rotes. En una rotación, Render crea otro usuario, que necesita la pertenencia a `buoh_dueno` con `ADMIN OPTION`, y solo puede dársela el anterior (ver «Roles y cifrado de PostgreSQL (F2.2)»). Cómo da Render sus privilegios al usuario nuevo se comprueba con la base creada, y el PR 7b de ADR-0018 §16 pone aquí los pasos (§8). Si se filtra antes:
 
 1. En `buoh-postgres`, en **Info**, sección **Networking**, quita `0.0.0.0/0` y guarda. La base deja de aceptar conexiones de fuera de Render, así que la credencial solo sirve desde sus servicios. El agente pierde también su acceso.
-2. Avísale al agente. Prepara el PR que pone `ipAllowList: []` en `render-datos.yaml`, para que una sincronización del Blueprint no vuelva a abrir la base, y los pasos de la rotación.
+2. Avísale al agente. Prepara el PR que pone `ipAllowList: []` en `render-datos.yaml`, para que una sincronización del Blueprint no vuelva a abrir la base, y los pasos de la rotación. Hasta que se fusione, no pulses **Manual Sync** ni rotes las contraseñas de los roles: la sincronización volvería a abrir la base.
 
 ### Borrar
 
@@ -850,7 +850,7 @@ Borra todo lo de producción, por ejemplo si Deriv termina la relación (ADR-001
 
 1. En Cloudflare, en `buoh-captura`, en **Settings**, tarjeta **Bucket lock rules**: junto a la regla `logs-30-dias`, pulsa **...** y **Delete**. Con la regla puesta, Cloudflare no deja vaciar el bucket.
 2. En Render, desconecta el Blueprint `buoh-datos`, desde su página. Sus recursos siguen, pero Render ya no los vuelve a crear cuando se borran.
-3. Borra `buoh-ingesta` y `buoh-operaciones`, al final de su **Settings**, y después `buoh-postgres`, al final de su **Info** (**Delete Database**). Render no guarda copias de una base borrada: lo de PostgreSQL desaparece en ese momento.
+3. Borra `buoh-ingesta` y `buoh-operaciones`, al final de su **Settings**, y después `buoh-postgres` y cualquier base creada con **Restore Database** («Recuperar»), que también tiene datos de Deriv, al final de su **Info** (**Delete Database**). Render no guarda copias de una base borrada: lo de PostgreSQL desaparece en ese momento.
 4. En Cloudflare, en `buoh-captura`, **Settings**, **Empty Bucket**, y después borra el bucket. Borra también los tokens `ingesta`, `operaciones`, `salud` y `agente`.
 5. En Kiro, borra los secretos `BUOH_AGENTE_*`.
 6. Avísale al agente, que registra el borrado en un PR.
