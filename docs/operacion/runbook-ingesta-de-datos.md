@@ -701,7 +701,7 @@ Antes de crear el bucket de la captura, `buoh-captura`, se comprueba en un bucke
    - permiso: **Object Read & Write**, solo para el bucket `buoh-prueba` (**Apply to specific buckets only**);
    - **TTL**: 1 día, para que venza solo aunque se olvide borrarlo.
 
-   Al crearlo, Cloudflare muestra una vez el **Access Key ID** y el **Secret Access Key**, y el endpoint de la cuenta, `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
+   Al crearlo, Cloudflare muestra el **Access Key ID** y el **Secret Access Key**, este solo esa vez. El endpoint es `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, con el **Account ID** que muestra el panel de Cloudflare: solo esa dirección, sin el nombre del bucket ni nada detrás.
 5. En Kiro Web, en **Settings → Sandbox → Secrets**, guarda tres secretos con esos valores: `BUOH_PRUEBA_S3_ENDPOINT`, `BUOH_PRUEBA_S3_ACCESS_KEY_ID` y `BUOH_PRUEBA_S3_SECRET_ACCESS_KEY`. Llegan al sandbox del agente como variables de entorno. Nunca en el chat ni en Git.
 6. Le dice al agente que ya están. Si el agente no los ve en la sesión abierta, se abre una nueva.
 
@@ -711,17 +711,23 @@ Antes de crear el bucket de la captura, `buoh-captura`, se comprueba en un bucke
 node scripts/evidencia-f2-2/comprobar-r2.mjs
 ```
 
-Lee solo esas variables y, opcionales, `BUOH_PRUEBA_S3_BUCKET`, que solo admite `buoh-prueba`, y `BUOH_PRUEBA_S3_REGION`, `auto` por defecto. Con otro bucket, sin claves o con un endpoint `http:` que no es local, sale con 2 y una línea `ConfigError` que nombra las variables, nunca sus valores, sin conectar. Escribe sus objetos bajo un prefijo nuevo, `comprobaciones/<id>/`, y al terminar los borra. Comprueba, en orden:
+Lee solo esas variables y, opcionales, `BUOH_PRUEBA_S3_BUCKET`, que solo admite `buoh-prueba`, y `BUOH_PRUEBA_S3_REGION`, `auto` por defecto. El endpoint tiene que ser el de una cuenta de R2 sin jurisdicción (`https://` y 32 cifras hexadecimales `.r2.cloudflarestorage.com`) o, para un ensayo local, `http://127.0.0.1` o `http://localhost`, y nunca lleva ruta, consulta ni usuario: así ninguna petición va a otro bucket, aunque el token lo permitiera, y las claves no viajan sin cifrar. Con otro bucket, otro endpoint o sin claves, sale con 2 y una línea `ConfigError` que nombra las variables, nunca sus valores, sin conectar. Escribe sus objetos bajo un prefijo nuevo, `comprobaciones/<id>/`, con el cliente del worker y sus plazos de `data:health` (5 s por conexión y 10 s hasta las cabeceras), y al terminar los borra. Comprueba, en orden:
 
 1. `sin_sobrescribir`: con un objeto ya escrito, `writeVerified` con otros bytes en la misma clave recibe 412 (`putIfAbsent` da `exists`), falla al releerlos (`object_verification_failed`), y el objeto sigue con los suyos;
 2. `lectura_tras_escritura`: un objeto recién escrito se lee enseguida con los mismos bytes, y `HeadObject` da su tamaño;
 3. `sumas_de_comprobacion`: un objeto de 1 MiB se escribe y se lee igual, con el cliente del worker, que solo calcula y valida sumas de comprobación cuando la operación las exige (`WHEN_REQUIRED`).
 
-Escribe una sola línea JSON con el bucket, cada comprobación con `pass`, o `fail` y su motivo (un código, como `second_write_not_rejected`, nunca un mensaje), y `status`. No lleva el endpoint, que tiene el ID de la cuenta, ni las claves. Sale con 0 si pasan las tres y con 1 si alguna falla. Si alguna falla, no se crea `buoh-captura`: el diseño del log supone las tres (ADR-0016 §4), y el agente se lo presenta al propietario.
+Si las tres no terminan en 60 s, cierra el cliente del worker, lo que corta una lectura detenida, y las que faltan fallan con `deadline_exceeded`; lo escrito se borra igual, con su propio cliente.
 
-**Al terminar, el propietario** borra el token `prueba` en **Manage API tokens**, borra el bucket `buoh-prueba` (vacío, porque el script borra lo suyo; si quedara algo, se vacía antes) y borra los tres secretos de Kiro (ADR-0018 §12).
+Escribe una sola línea JSON con `endpoint` (`r2` o `local`, para que el PR 7 muestre que corrió contra R2, sin la dirección, que tiene el ID de la cuenta), `bucket`, `started_at_utc`, cada comprobación con `pass`, o `fail` y su motivo (un código, como `second_write_not_rejected`, nunca un mensaje), `cleanup` (`complete`, o `incomplete` si algún borrado falló) y `status`. Nunca lleva las claves. Sale con 0 si pasan las tres y con 1 si alguna falla. Si alguna falla, no se crea `buoh-captura`: el diseño del log supone las tres (ADR-0016 §4), y el agente se lo presenta al propietario.
 
-El 2026-10-31, contra el SeaweedFS de «Entorno local y replay», con un bucket `buoh-prueba` creado para el ensayo, las tres pasaron y no quedó ningún objeto; con un servidor S3 falso que sobrescribe, `sin_sobrescribir` falló con `second_write_not_rejected` y la salida fue 1.
+**Al terminar, el propietario**:
+
+1. borra el token `prueba`, en el mismo sitio donde lo creó (**R2 Object Storage**, **Account Details**, **Manage** junto a **API Tokens**);
+2. borra el bucket `buoh-prueba`. El script borra lo suyo; si su línea dice `cleanup: incomplete`, o si queda algún objeto, antes se vacía en **Settings → Empty Bucket**;
+3. borra los tres secretos de Kiro (ADR-0018 §12).
+
+El 2026-10-31, contra el SeaweedFS de «Entorno local y replay», con un bucket `buoh-prueba` creado para el ensayo, las tres pasaron, con `endpoint: local` y `cleanup: complete`, y no quedó ningún objeto. Con servidores S3 falsos locales: uno que sobrescribe hizo fallar `sin_sobrescribir` con `second_write_not_rejected` (salida 1); uno que rechaza los borrados dio `cleanup: incomplete`; uno que detiene una lectura hizo fallar `sumas_de_comprobacion` con `deadline_exceeded` y el script borró lo suyo; y un endpoint con ruta, como `…/buoh-captura`, dio `ConfigError` sin conectar.
 
 ## Reporte y evidencia
 
