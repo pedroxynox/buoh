@@ -17,7 +17,8 @@ import { realScheduler } from './scheduler.js';
  */
 const now = (): string => new Date().toISOString();
 const { exitCode, stderr, stdout } = await healthCommand(process.argv.slice(2), process.env, {
-  locateLog: (config) => locateActiveLog(config, { now, source: DERIV_SOURCE }),
+  locateLog: (config, requested) =>
+    locateActiveLog(config, { now, number: requested, source: DERIV_SOURCE }),
   nextId: createUuidV7Generator({ now: () => Date.now(), randomBytes }),
   now,
   openStores: (config) => openHealthStores(config),

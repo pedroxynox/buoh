@@ -12,7 +12,7 @@ import { sourceLockHolder } from './postgres/source-lock.js';
 import { PostgresSourceLogStore } from './postgres/source-log-store.js';
 import { S3ObjectStore } from './s3/object-store.js';
 import { failureReason } from './source-log/source-event-log.js';
-import { findActiveLog, type LogLocation } from './successive-logs.js';
+import { findActiveLog, readCaptureLog, type LogLocation } from './successive-logs.js';
 
 export interface OpenStoresOptions {
   /** Alerta saneada, en stderr por defecto. */
@@ -140,16 +140,19 @@ export function openStartupReads(
 }
 
 /**
- * El log activo de `source` en `production` (ADR-0018 §6), para `data:health`: abre un pool propio
- * con los plazos de `openHealthStores` y la credencial de la configuración, busca el log
- * (`findActiveLog`) sin escribir nada y lo cierra. Si PostgreSQL cierra una conexión libre del
- * pool, deja la alerta `postgres_connection_lost`, como `openStores`. Rechaza con el error de la
- * lectura si PostgreSQL no responde.
+ * El log que observa `data:health` en `production` (ADR-0018 §6): el log activo de `source`, o,
+ * con `number`, ese log si existe y se puede leer (`--log`; ADR-0018 §11), vencido o no. Abre un
+ * pool propio con los plazos de `openHealthStores` y la credencial de la configuración, busca el log
+ * (`findActiveLog` o `readCaptureLog`) sin escribir nada y lo cierra. Si PostgreSQL cierra una
+ * conexión libre del pool, deja la alerta `postgres_connection_lost`, como `openStores`. Rechaza
+ * con el error de la lectura si PostgreSQL no responde.
  */
 export async function locateActiveLog(
   config: WorkerConfig,
   input: Pick<OpenStoresOptions, 'alert'> & {
     readonly now: () => string;
+    /** El log pedido, o `null` o sin él para el log activo. */
+    readonly number?: number | null;
     readonly source: string;
   },
 ): Promise<LogLocation | null> {
@@ -162,7 +165,11 @@ export async function locateActiveLog(
     alert({ event: 'postgres_connection_lost', reason: failureReason(error) });
   });
   try {
-    return await findActiveLog(pool, { now: input.now, source: input.source });
+    if (input.number === undefined || input.number === null) {
+      return await findActiveLog(pool, { now: input.now, source: input.source });
+    }
+    const log = await readCaptureLog(pool, { number: input.number, source: input.source });
+    return log?.readable === true ? log.location : null;
   } finally {
     await pool.end();
   }

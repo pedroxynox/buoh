@@ -3,8 +3,9 @@ import { type Pool } from 'pg';
 import {
   ConfigError,
   isDeployedEnvironment,
-  loadConfig,
+  loadPostgresConfig,
   POSTGRES_IDENTIFIER,
+  type PostgresWorkerConfig,
   type WorkerConfig,
 } from './config.js';
 import {
@@ -36,7 +37,10 @@ export interface MigrateCommandDeps {
  * pendientes del esquema de `BUOH_POSTGRES_SCHEMA`, con las credenciales de `BUOH_POSTGRES_*`. En
  * producción son las del rol dueño, separadas de las de ejecución, y `BUOH_POSTGRES_OWNER_ROLE`
  * nombra el rol del que son las tablas (`buoh_dueno`). En `production` y `staging` es obligatoria:
- * sin ella, las tablas serían del usuario de la conexión, que cambia en cada rotación.
+ * sin ella, las tablas serían del usuario de la conexión, que cambia en cada rotación. Solo lee las
+ * variables del entorno y de PostgreSQL (`loadPostgresConfig`): no usa el almacenamiento de
+ * objetos, y `buoh-operaciones` lo arranca con un entorno que solo lleva la credencial dueña
+ * (ADR-0018 §11).
  *
  * Devuelve una sola línea JSON saneada, como `ingest`: nunca el mensaje de un error, que puede
  * llevar el rol, la base o el host, sino su código o su nombre (`failureReason`).
@@ -52,9 +56,9 @@ export async function migrateCommand(
   deps: MigrateCommandDeps,
 ): Promise<{ readonly exitCode: 0 | 1 | 2; readonly line: string }> {
   const rejected = new Set<string>();
-  let config: WorkerConfig | null = null;
+  let config: PostgresWorkerConfig | null = null;
   try {
-    config = loadConfig(env);
+    config = loadPostgresConfig(env);
   } catch (error) {
     if (!(error instanceof ConfigError)) {
       throw error;

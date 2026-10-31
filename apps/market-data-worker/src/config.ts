@@ -41,7 +41,8 @@ export function isDeployedEnvironment(environment: string | undefined): boolean 
   return DEPLOYED_ENVIRONMENTS.has(environment ?? '');
 }
 
-const environmentSchema = z.object({
+/** Las variables del entorno y de PostgreSQL, las únicas que lee `db:migrate` (`loadPostgresConfig`). */
+const postgresEnvironmentSchema = z.object({
   BUOH_DEPLOYMENT_ENVIRONMENT: deploymentEnvironmentSchema,
   BUOH_POSTGRES_DB: nonEmpty.default('buoh'),
   BUOH_POSTGRES_HOST: nonEmpty.default('127.0.0.1'),
@@ -51,6 +52,9 @@ const environmentSchema = z.object({
   /** Esquema PostgreSQL; las pruebas de integración usan uno propio. */
   BUOH_POSTGRES_SCHEMA: z.string().regex(POSTGRES_IDENTIFIER).default(DEFAULT_POSTGRES_SCHEMA),
   BUOH_POSTGRES_USER: nonEmpty.default('buoh'),
+});
+
+const environmentSchema = postgresEnvironmentSchema.extend({
   BUOH_S3_ACCESS_KEY_ID: nonEmpty,
   BUOH_S3_BUCKET: z
     .string()
@@ -104,7 +108,44 @@ export class ConfigError extends Error {
  * configuración. Fuera de un despliegue, por defecto es `disable`, la de los servicios locales.
  */
 export function loadConfig(env: Readonly<Record<string, string | undefined>>): WorkerConfig {
-  const parsed = environmentSchema.safeParse(env);
+  const value = parseEnvironment(environmentSchema, env);
+  return {
+    ...postgresConfigOf(value),
+    s3: {
+      accessKeyId: value.BUOH_S3_ACCESS_KEY_ID,
+      bucket: value.BUOH_S3_BUCKET,
+      endpoint: value.BUOH_S3_ENDPOINT,
+      keyPrefix: '',
+      region: value.BUOH_S3_REGION,
+      secretAccessKey: value.BUOH_S3_SECRET_ACCESS_KEY,
+    },
+  };
+}
+
+/** La configuración del entorno y de PostgreSQL, sin el almacenamiento de objetos. */
+export type PostgresWorkerConfig = Pick<WorkerConfig, 'environment' | 'postgres'>;
+
+/**
+ * Lee solo las variables del entorno y de PostgreSQL de `env`, con las mismas reglas que
+ * `loadConfig`, también la de `BUOH_POSTGRES_SSLMODE`: la de `db:migrate`, que no usa el
+ * almacenamiento de objetos. Así `buoh-operaciones` le da un entorno con solo la credencial dueña
+ * (ADR-0018 §11).
+ */
+export function loadPostgresConfig(
+  env: Readonly<Record<string, string | undefined>>,
+): PostgresWorkerConfig {
+  return postgresConfigOf(parseEnvironment(postgresEnvironmentSchema, env));
+}
+
+/**
+ * `env` validado con `schema`, o `ConfigError` con los nombres de todas las variables rechazadas,
+ * también `BUOH_POSTGRES_SSLMODE` en un despliegue sin cifrado.
+ */
+function parseEnvironment<T extends z.ZodType>(
+  schema: T,
+  env: Readonly<Record<string, string | undefined>>,
+): z.infer<T> {
+  const parsed = schema.safeParse(env);
   const rejected = new Set(
     parsed.success ? [] : parsed.error.issues.map((issue) => String(issue.path[0])),
   );
@@ -116,7 +157,10 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): W
   if (!parsed.success || rejected.size > 0) {
     throw new ConfigError([...rejected].sort());
   }
-  const value = parsed.data;
+  return parsed.data;
+}
+
+function postgresConfigOf(value: z.infer<typeof postgresEnvironmentSchema>): PostgresWorkerConfig {
   return {
     environment: value.BUOH_DEPLOYMENT_ENVIRONMENT,
     postgres: {
@@ -127,14 +171,6 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): W
       schema: value.BUOH_POSTGRES_SCHEMA,
       sslMode: value.BUOH_POSTGRES_SSLMODE ?? 'disable',
       user: value.BUOH_POSTGRES_USER,
-    },
-    s3: {
-      accessKeyId: value.BUOH_S3_ACCESS_KEY_ID,
-      bucket: value.BUOH_S3_BUCKET,
-      endpoint: value.BUOH_S3_ENDPOINT,
-      keyPrefix: '',
-      region: value.BUOH_S3_REGION,
-      secretAccessKey: value.BUOH_S3_SECRET_ACCESS_KEY,
     },
   };
 }

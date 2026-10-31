@@ -46,8 +46,8 @@ export const AGENT_IDLE_IN_TRANSACTION_TIMEOUT = '60s';
 export const MIGRATIONS_TABLE = 'buoh_schema_migrations';
 
 /**
- * Las tablas del log en las que `ingest` lee e inserta: las de las migraciones `0002` a `0005`
- * (ADR-0018 §8).
+ * Las tablas del log en las que `ingest` lee e inserta: las de las migraciones `0002` en adelante,
+ * salvo la de informes de `buoh-operaciones` (ADR-0018 §8).
  */
 export const INGEST_WRITE_TABLES = [
   'source_event_index',
@@ -63,12 +63,14 @@ export const INGEST_WRITE_TABLES = [
 
 /**
  * Las tablas de un log que `buoh_ingesta` no toca: las de datasets de `0001`, que no viven en un
- * log de producción (ADR-0018 §7).
+ * log de producción (ADR-0018 §7), y la de informes de `buoh-operaciones` (`0006`, §11), que solo
+ * escribe ese servicio como `buoh_dueno`.
  */
 export const INGEST_DENIED_TABLES = [
   'datasets',
   'published_manifest_records',
   'dataset_quality_incidents',
+  'operations_reports',
 ] as const;
 
 /** Una tabla de un log que no está en ninguna de las listas: hay que decidir sus privilegios. */

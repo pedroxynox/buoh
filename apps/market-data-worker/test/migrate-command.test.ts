@@ -90,6 +90,22 @@ describe('migrateCommand', () => {
     expect(seen.options).toEqual({ ownerRole: 'buoh_dueno' });
   });
 
+  it('no necesita las variables del almacenamiento de objetos: con solo las de PostgreSQL, migra (ADR-0018 §11)', async () => {
+    const { deps: d, seen } = deps(() => Promise.resolve({ applied: [], current: [] }));
+    const result = await migrateCommand(
+      {
+        BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+        BUOH_POSTGRES_OWNER_ROLE: 'buoh_dueno',
+        BUOH_POSTGRES_PASSWORD: SECRET,
+        BUOH_POSTGRES_SCHEMA: 'buoh_log_000001',
+        BUOH_POSTGRES_SSLMODE: 'require',
+      },
+      d,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(seen.postgres).toMatchObject({ schema: 'buoh_log_000001', sslMode: 'require' });
+  });
+
   it('una configuración inválida es la salida 2, con los nombres de las variables y sin abrir el pool', async () => {
     for (const env of [
       { ...ENV, BUOH_POSTGRES_PASSWORD: undefined },

@@ -102,10 +102,10 @@ function latest(a: string | null, b: string | null): string | null {
 /**
  * Los logs que existen, en orden, con la última escritura de `source` en cada uno (ADR-0018 §6):
  * los esquemas con nombre de log de `pg_namespace` y, de cada uno, el último evento del índice
- * (por su posición, con la clave primaria) y el último latido (por su orden de escritura, sin
- * índice: recorre los latidos del log). Un esquema sin las tablas (`42P01`) o que el rol de la
- * conexión todavía no puede leer (`42501`) es un log que se está preparando: queda como no legible
- * (`readable: false`), sin escrituras. Cualquier otro error rechaza la lectura.
+ * (por su posición, con la clave primaria) y el último latido (por su orden de escritura, con el
+ * índice `(source, write_order)` de la `0006`). Un esquema sin las tablas (`42P01`) o que el rol
+ * de la conexión todavía no puede leer (`42501`) es un log que se está preparando: queda como no
+ * legible (`readable: false`), sin escrituras. Cualquier otro error rechaza la lectura.
  */
 export async function listCaptureLogs(
   pool: Pick<Pool, 'query'>,
@@ -129,6 +129,28 @@ export async function listCaptureLogs(
     );
   }
   return logs;
+}
+
+/**
+ * El log `number`, con la última escritura de `source`, si su esquema existe; `null` si no. Lee
+ * solo ese log, como `listCaptureLogs` lee cada uno.
+ */
+export async function readCaptureLog(
+  pool: Pick<Pool, 'query'>,
+  input: { readonly number: number; readonly source: string },
+): Promise<CaptureLog | null> {
+  const location = logLocation(input.number);
+  const { rows } = await pool.query<{ name: string }>(
+    'SELECT nspname AS name FROM pg_namespace WHERE nspname = $1',
+    [location.schema],
+  );
+  if (rows.length === 0) {
+    return null;
+  }
+  const lastWrite = await lastWriteOf(pool, location.schema, input.source);
+  return lastWrite === UNREADABLE
+    ? { lastWriteUtc: null, location, readable: false }
+    : { lastWriteUtc: lastWrite, location, readable: true };
 }
 
 /** El esquema de un log que todavía no se puede leer: sin las tablas o sin los privilegios. */

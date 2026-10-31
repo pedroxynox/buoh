@@ -241,10 +241,10 @@ function local(production: WorkerConfig): WorkerConfig {
 /** Los esquemas con los que `data:health` abrió sus almacenes, en orden. */
 const observedSchemas: string[] = [];
 
-/** `data:health` en `production` con el rol de lectura, a la hora `now`. */
-function productionHealth(now: string) {
+/** `data:health` en `production` con el rol de lectura, a la hora `now`, y con `--log` si se pide. */
+function productionHealth(now: string, log: number | null = null) {
   return healthCommand(
-    ['--', '--json', '--symbol', SYMBOL],
+    ['--', '--json', '--symbol', SYMBOL, ...(log === null ? [] : ['--log', String(log)])],
     {
       ...environment,
       BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
@@ -254,8 +254,12 @@ function productionHealth(now: string) {
     },
     {
       expected: fixture.expected,
-      locateLog: (production) =>
-        locateActiveLog(local(production), { now: () => now, source: DERIV_SOURCE }),
+      locateLog: (production, requested) =>
+        locateActiveLog(local(production), {
+          now: () => now,
+          number: requested,
+          source: DERIV_SOURCE,
+        }),
       nextId: () => uuid((sequence += 1)),
       now: () => now,
       openStores: (located) => {
@@ -374,6 +378,20 @@ describe('data:health en production (ADR-0018 §6 y §11)', () => {
       open_condition_types: [],
       service_health: 'paused',
     });
+  });
+
+  it('con --log, observa ese log en lugar del activo, también uno vencido; uno que no existe o que el rol no puede leer da log_not_prepared, sin abrir los almacenes (ADR-0018 §11)', async () => {
+    observedSchemas.length = 0;
+    const now = await lastWriteOf(logAt(1).schema);
+    const expired = await productionHealth(now, 1);
+    expect(observedSchemas).toEqual([logAt(0).schema]);
+    expect(expired.stderr).toBeNull();
+    for (const number of [logAt(3).number, 999]) {
+      const result = await productionHealth(now, number);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toBe('{"event":"data_health_failed","reason":"log_not_prepared"}');
+    }
+    expect(observedSchemas).toEqual([logAt(0).schema]);
   });
 
   it('cuando el log 2 vence, observa el preparado, el 3, vacío', async () => {
