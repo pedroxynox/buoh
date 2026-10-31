@@ -1116,7 +1116,14 @@ describe('runOperations: la verificación por partes (ADR-0018 §11, paso 4)', (
       code: 'ETIMEDOUT',
     });
     const objects = fakeObjects({ fail: () => timeout });
-    const { alerts, lines, result } = await run(db, fakeChildren(), { objects });
+    const clock = new ManualClock(NOW);
+    const { alerts, lines, result } = await run(db, fakeChildren(), {
+      now: clock.now,
+      objects,
+      scheduler: clock.scheduler,
+    });
+    // El plazo de la lectura que falló se cancela: un temporizador vivo retendría el proceso.
+    expect(clock.pendingDelays()).toEqual([]);
 
     expect(objects.calls).toEqual([
       `get:${segmentKey(2, first.row)}:${String(first.row.object_size_bytes)}`,
@@ -1166,11 +1173,20 @@ describe('runOperations: la verificación por partes (ADR-0018 §11, paso 4)', (
       },
       stored: Object.fromEntries(segments.map((item) => [segmentKey(2, item.row), item.physical])),
     });
+    const delays: number[] = [];
     const { lines } = await run(db, fakeChildren(), {
       now: () => new Date(time).toISOString(),
       objects,
+      scheduler: {
+        schedule: (ms) => {
+          delays.push(ms);
+          return () => undefined;
+        },
+      },
     });
 
+    // Cada lectura tiene lo que queda de los 60 s: 60 s la primera, 20 s la segunda.
+    expect(delays).toEqual([VERIFICATION_DEADLINE_MS, VERIFICATION_DEADLINE_MS - 40_000]);
     expect(objects.calls.filter((call) => call.startsWith('get:'))).toHaveLength(2);
     expect(objects.calls.at(-1)).toBe('close:logs/000002/');
     expect(verificationLine(lines)).toMatchObject({
