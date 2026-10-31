@@ -78,7 +78,7 @@ Un despliegue que falla no cambia lo publicado: Render sigue sirviendo el últim
 
 ## Costo
 
-El sitio es gratis en el plan Hobby. El sistema de datos cuesta unos 16 USD al mes desde que el propietario crea su Blueprint, y cada despliegue suyo compila dos servicios (ADR-0018 §14). Los dos cuentan contra lo incluido: 5 GB de tráfico de salida y 500 minutos de compilación al mes. Si se agota el tráfico y no hay tarjeta, Render suspende los servicios gratuitos el resto del mes. Si se agotan los minutos de compilación, deja de compilar y el sitio sigue con lo último publicado. Con tarjeta registrada, Render cobra el exceso: 0,15 USD por GB y 5 USD por cada 1000 minutos.
+El sitio es gratis en el plan Hobby. El sistema de datos cuesta unos 19 USD al mes desde que el propietario crea su Blueprint, y cada despliegue suyo compila dos servicios (ADR-0018 §14). Los dos cuentan contra lo incluido: 5 GB de tráfico de salida y 500 minutos de compilación al mes. Si se agota el tráfico y no hay tarjeta, Render suspende los servicios gratuitos el resto del mes. Si se agotan los minutos de compilación, deja de compilar y el sitio sigue con lo último publicado. Con tarjeta registrada, Render cobra el exceso: 0,15 USD por GB y 5 USD por cada 1000 minutos.
 
 ## Pendiente
 
