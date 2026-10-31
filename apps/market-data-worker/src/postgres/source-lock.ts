@@ -4,6 +4,7 @@ import pg from 'pg';
 
 import { type WorkerConfig } from '../config.js';
 import { type SourceLogStore } from '../source-log/ports.js';
+import { postgresSslOption } from './metadata-store.js';
 
 /** Código del error de una escritura del log sin el bloqueo de su fuente. */
 export const SOURCE_LOCK_LOST = 'source_lock_lost';
@@ -86,6 +87,7 @@ export class SourceLock {
   }): Promise<SourceLock | null> {
     const key = sourceLockKey(input.source);
     const client = new pg.Client({
+      ...postgresSslOption(input.postgres.sslMode),
       connectionTimeoutMillis: SOURCE_LOCK_QUERY_TIMEOUT_MS,
       database: input.postgres.database,
       host: input.postgres.host,

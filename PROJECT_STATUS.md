@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 36
-updated_at_utc: "2026-10-31T04:20:00.000Z"
+status_version: 37
+updated_at_utc: "2026-10-31T05:46:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -48,7 +48,7 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 
 **`F2.2` — Sistema de datos en producción.**
 
-La ADR de despliegue es [ADR-0018](docs/arquitectura/adr/0018-sistema-de-datos-en-produccion.md) (plan de Fase 2, §8, punto 2). Fija la región, el Blueprint propio del sistema de datos (`render-datos.yaml`), las reglas de `ingest` en `production`, los logs sucesivos con un corte semanal, la retención de 30 días, los roles de PostgreSQL, el cifrado, los tokens de R2 y sus comprobaciones, el cron job de operaciones con `data:health` cada 5 minutos, las credenciales, la evidencia y el costo. Su implementación (`F2-DEPLOY-001`, `F2-ROLE-001` y `F2-RETENTION-001`) sigue la secuencia de nueve PR de su §16. El siguiente es el PR 2: los roles de PostgreSQL y el cifrado de la conexión.
+La ADR de despliegue es [ADR-0018](docs/arquitectura/adr/0018-sistema-de-datos-en-produccion.md) (plan de Fase 2, §8, punto 2). Fija la región, el Blueprint propio del sistema de datos (`render-datos.yaml`), las reglas de `ingest` en `production`, los logs sucesivos con un corte semanal, la retención de 30 días, los roles de PostgreSQL, el cifrado, los tokens de R2 y sus comprobaciones, el cron job de operaciones con `data:health` cada 5 minutos, las credenciales, la evidencia y el costo. Su implementación (`F2-DEPLOY-001`, `F2-ROLE-001` y `F2-RETENTION-001`) sigue la secuencia de nueve PR de su §16. El PR 2 trae los roles de PostgreSQL, el cifrado de la conexión (`BUOH_POSTGRES_SSLMODE`) y `db:migrate` con sus errores saneados, con las pruebas de `F2-ROLE-001` (runbook, «Roles y cifrado de PostgreSQL (F2.2)»). El siguiente es el PR 3: los logs sucesivos en el worker, con el prefijo de los objetos, el log activo y `data:health` en `production`.
 
 Punto de partida: la condición «Memoria» de ADR-0016 §4 se cumple. Con un log de 7 días, `ingest` llegó como mucho a 124 MiB y `data:health` a 118 MiB, con los tamaños de V8 con los que arrancan (`WORKER_NODE_FLAGS`; «Evidencia de F2.1»), así que el worker Standard no hace falta (plan §12). Los comandos de Render los arrancan con esos tamaños (ADR-0017 §9 y ADR-0018 §3). Las decisiones de F2.2 del plan §12 están todas tomadas («Decisiones vigentes relevantes»).
 
@@ -167,7 +167,7 @@ Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la li
 1. Si la conexión cae durante el `COMMIT` de una publicación, se informa "no se confirmó" aunque pudo confirmarse.
 2. Publicar no aplica los límites de lectura del replay. `normalized_ticks` y `quality_incidents` son un único artefacto que crece con el dataset. Resolver antes de publicar datasets live largos.
 3. Los nombres de `PublicationStep` no coinciden con `PersistenceStage`; los fallos de publicación todavía no entran en el registro operativo.
-4. El worker usa un único rol PostgreSQL dueño de las tablas. Antes de desplegar (ADR-0006) hace falta un rol de ejecución que solo pueda insertar y leer.
+4. El worker usa un único rol PostgreSQL dueño de las tablas. Antes de desplegar (ADR-0006) hace falta un rol de ejecución que solo pueda insertar y leer. Desde el PR 2 de [ADR-0018](docs/arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16, el worker trae los roles de producción y sus privilegios: `buoh_ingesta` solo lee e inserta (`F2-ROLE-001`). Queda resuelto cuando `buoh-operaciones`, que llega con el PR 5, los cree en producción, al empezar la captura (PR 7).
 5. SeaweedFS `mini` arranca componentes internos que no se usan (Iceberg, Lance, servidor de administración).
 
 El antiguo pendiente 6 (un solo escritor por fuente) quedó resuelto en F1.5 con `ingest` (PR #38), el primer proceso que escribe el log de forma continua: escribe con el log protegido por el bloqueo (`openLockedSourceLog`), vuelve a tomar el bloqueo antes de reconectar si lo perdió y termina con `source_lock_taken` si lo tiene otro proceso ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §3, «Bloqueo»). F1.4b lo había resuelto en parte: el transporte entrega una llamada a la vez, y `fixture:publish` toma antes el bloqueo de su fuente, que nota una sesión perdida en unos 10 s (ADR-0012 §9).

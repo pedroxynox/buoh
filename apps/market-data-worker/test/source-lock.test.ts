@@ -223,6 +223,7 @@ describe('PostgresSessionLockProvider', () => {
     password: 'sintético',
     port: 5432,
     schema: 'buoh_test',
+    sslMode: 'disable',
     user: 'buoh',
   };
 
