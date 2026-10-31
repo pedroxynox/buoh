@@ -4,11 +4,13 @@ import {
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
+  S3Client,
   S3ServiceException,
 } from '@aws-sdk/client-s3';
 import { describe, expect, it } from 'vitest';
 
 import {
+  failureReason,
   loadConfig,
   logLocation,
   ObjectReadError,
@@ -16,6 +18,7 @@ import {
   openStores,
   S3ObjectStore,
   withLog,
+  writeVerified,
 } from '../src/index.js';
 
 // El prefijo de las claves de `S3ObjectStore` (ADR-0018 §6): los objetos de un log de producción
@@ -106,6 +109,119 @@ describe('S3ObjectStore con prefijo de claves', () => {
     expect(new S3ObjectStore(client, 'buoh-captura', 'logs/000001/').keyPrefix).toBe(
       'logs/000001/',
     );
+  });
+});
+
+/** Una respuesta HTTP sintética, como la que el manejador del SDK le pasa a su deserializador. */
+interface FakeResponse {
+  readonly body?: Uint8Array;
+  readonly headers?: Record<string, string>;
+  readonly statusCode: number;
+}
+
+/** El cuerpo XML de un error de S3 o de R2, con su código. */
+const errorResponse = (statusCode: number, code: string): FakeResponse => ({
+  body: new TextEncoder().encode(
+    `<?xml version="1.0" encoding="UTF-8"?><Error><Code>${code}</Code><Message>sintético</Message></Error>`,
+  ),
+  headers: { 'content-type': 'application/xml' },
+  statusCode,
+});
+
+/**
+ * Un `S3ObjectStore` con el cliente real del SDK y un manejador HTTP falso, que responde por el método
+ * de cada petición: así cada respuesta, también la de error, pasa por el deserializador del SDK, como
+ * las de R2. Sin red: ninguna petición sale del proceso.
+ */
+function storeAnswering(answer: (method: string) => FakeResponse): {
+  readonly methods: string[];
+  readonly store: S3ObjectStore;
+} {
+  const methods: string[] = [];
+  const client = new S3Client({
+    credentials: { accessKeyId: 'clave-sintética', secretAccessKey: 'secreto-sintético' },
+    endpoint: 'http://r2-sintetico.invalid',
+    forcePathStyle: true,
+    maxAttempts: 1,
+    region: 'auto',
+    requestHandler: {
+      destroy: () => undefined,
+      handle: (request: { method: string }) => {
+        methods.push(request.method);
+        const { body, headers = {}, statusCode } = answer(request.method);
+        return Promise.resolve({
+          response: { body: Readable.from(body === undefined ? [] : [body]), headers, statusCode },
+        });
+      },
+      httpHandlerConfigs: () => ({}),
+      updateHttpClientConfig: () => undefined,
+    } as never,
+  });
+  return { methods, store: new S3ObjectStore(client, 'buoh-captura', 'logs/000001/') };
+}
+
+describe('putIfAbsent con una clave que ya existe (ADR-0018 §10)', () => {
+  const bytes = new Uint8Array([1, 2, 3]);
+
+  it('412: la clave ya existe', async () => {
+    const { store } = storeAnswering(() => errorResponse(412, 'PreconditionFailed'));
+    expect(await store.putIfAbsent('sha256/abc', bytes, 'application/json')).toBe('exists');
+  });
+
+  it('409 ObjectLockedByBucketPolicy: la clave ya existe y la protege una regla de bloqueo de R2', async () => {
+    const { store } = storeAnswering(() => errorResponse(409, 'ObjectLockedByBucketPolicy'));
+    expect(await store.putIfAbsent('sha256/abc', bytes, 'application/json')).toBe('exists');
+  });
+
+  it('cualquier otro 409, u otro estado con ese código, sigue siendo un error', async () => {
+    for (const [status, code] of [
+      [409, 'ConditionalRequestConflict'],
+      [409, 'OperationAborted'],
+      [403, 'ObjectLockedByBucketPolicy'],
+      [403, 'AccessDenied'],
+      [500, 'InternalError'],
+    ] as const) {
+      const { store } = storeAnswering(() => errorResponse(status, code));
+      await expect(store.putIfAbsent('sha256/abc', bytes, 'application/json')).rejects.toSatisfy(
+        (error: unknown) =>
+          error instanceof S3ServiceException &&
+          error.$metadata.httpStatusCode === status &&
+          error.name === code,
+      );
+    }
+  });
+
+  it('con la regla de bloqueo, writeVerified acepta los mismos bytes y rechaza otros, como con 412', async () => {
+    // Como al guardar otra vez el esquema de fuente al empezar una sesión del mismo log: R2 rechaza
+    // la escritura con 409 y la relectura decide.
+    const stored = new Uint8Array([7, 8, 9]);
+    const answer = (method: string): FakeResponse =>
+      method === 'PUT'
+        ? errorResponse(409, 'ObjectLockedByBucketPolicy')
+        : method === 'HEAD'
+          ? { headers: { 'content-length': String(stored.byteLength) }, statusCode: 200 }
+          : {
+              body: stored,
+              headers: { 'content-length': String(stored.byteLength) },
+              statusCode: 200,
+            };
+    const same = storeAnswering(answer);
+    await expect(
+      writeVerified(same.store, 'sha256/abc', stored, 'application/json'),
+    ).resolves.toBeUndefined();
+    expect(same.methods).toEqual(['PUT', 'HEAD', 'GET']);
+
+    const other = storeAnswering(answer);
+    const rejected = await writeVerified(
+      other.store,
+      'sha256/abc',
+      new Uint8Array([1, 2, 3]),
+      'application/json',
+    ).then(
+      () => null,
+      (error: unknown) => failureReason(error),
+    );
+    expect(rejected).toBe('object_verification_failed');
   });
 });
 
