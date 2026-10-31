@@ -1,6 +1,6 @@
 # ADR-0017: Punto de control de la derivación en vivo
 
-- **Estado:** Aceptada
+- **Estado:** Aceptada; la verificación periódica de §4 y el corte entre logs de §7 los decide [ADR-0018](0018-sistema-de-datos-en-produccion.md)
 - **Fecha:** 2026-10-30
 - **Ámbito:** Fase 2, incremento F2.1 (`F2-CHECKPOINT-001` y `F2-GOV-001` del [plan de Fase 2](../../plan/fase-2-laboratorio-y-bot-shadow.md))
 - **Decisores:** Dirección técnica de buoh. El plan de la Fase 2 no pide al propietario ninguna decisión para F2.1 (§12).

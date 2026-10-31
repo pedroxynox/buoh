@@ -2,7 +2,7 @@
 
 ## Alcance
 
-`render.yaml` solo define el sitio oficial (`apps/site`), como sitio estático gratuito ([ADR-0013](../arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). La API, el worker y PostgreSQL todavía no están en `render.yaml`: llegarán con los incrementos del [plan de Fase 2](../plan/fase-2-laboratorio-y-bot-shadow.md), el sistema de datos en F2.2, la API con la web en F2.3 y el motor de señales `shadow` en F2.9. El propietario ya decidió los proveedores y el presupuesto ([ADR-0016](../arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)), y el almacenamiento de objetos irá en Cloudflare R2, fuera de Render y de `render.yaml`.
+`render.yaml` solo define el sitio oficial (`apps/site`), como sitio estático gratuito ([ADR-0013](../arquitectura/adr/0013-publicacion-del-sitio-en-render.md)). La API, el worker y PostgreSQL no estarán en `render.yaml`, sino en un Blueprint aparte, `render-datos.yaml` ([ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §2), que llega con los incrementos del [plan de Fase 2](../plan/fase-2-laboratorio-y-bot-shadow.md): el sistema de datos en F2.2, la API con la web en F2.3 y el motor de señales `shadow` en F2.9. Así, fusionar esos cambios no crea ni cobra nada hasta que el propietario crea ese Blueprint con los pasos de F2.2. El propietario ya decidió los proveedores, el presupuesto y la región ([ADR-0016](../arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md) y ADR-0018), y el almacenamiento de objetos irá en Cloudflare R2, fuera de Render y de sus Blueprints.
 
 ## Qué define `render.yaml`
 
