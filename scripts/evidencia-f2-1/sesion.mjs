@@ -10,7 +10,7 @@
 // (`checkIngestConfig`), los almacenes de `openStores`, las migraciones comprobadas sin aplicar
 // nada, el bloqueo de PostgreSQL, el log protegido por él, el cursor y el latido, el esquema de
 // fuente guardado, el punto de control de cada segmento cerrado (`writeLiveCheckpoints`), el
-// temporizador y el reloj reales e IDs UUIDv7. `medir-memoria.mjs` lo arranca con los límites de V8
+// temporizador y el reloj reales e IDs UUIDv7. `medir-memoria.mjs` lo arranca con los tamaños de V8
 // del script `ingest` (`WORKER_NODE_FLAGS`). Cambia cuatro cosas, que no tocan lo que se mide:
 //
 // - la retención es de 8 días, porque las 23 horas de `ingest` no dejan arrancar con un log de 7 días

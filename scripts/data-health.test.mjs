@@ -40,7 +40,7 @@ test('sin --json no abre ningún almacén: salida 2, stdout vacío y el error de
   assert.match(error.message, /--json/u);
 });
 
-test('corre la CLI de salud con los límites de V8 de los procesos del worker (ADR-0017 §9)', async () => {
+test('corre la CLI de salud con los tamaños de V8 de los procesos del worker (ADR-0017 §9)', async () => {
   const { WORKER_NODE_FLAGS } = await import(
     pathToFileURL(join(root, 'apps', 'market-data-worker', 'dist', 'node-flags.js')).href
   );

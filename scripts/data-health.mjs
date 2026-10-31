@@ -1,5 +1,5 @@
 // `pnpm run data:health -- --json [--symbol R_100]` (runbook, «Salud de datos»; ADR-0015 §8).
-// Compila el worker y ejecuta su CLI de salud, con los límites de V8 de los procesos del worker
+// Compila el worker y ejecuta su CLI de salud, con los tamaños de V8 de los procesos del worker
 // que leen el log (`WORKER_NODE_FLAGS`, ADR-0017 §9). Los mensajes de la compilación van a stderr, para
 // que stdout lleve solo la línea JSON del informe. El emulador de shell de pnpm no respeta `1>&2`
 // (ADR-0003), así que la redirección se hace aquí y funciona igual en Linux, macOS y Windows.
@@ -53,7 +53,7 @@ const build = await run(
 if (interrupted !== null || build.signal !== null || build.code !== 0) {
   finish(build);
 } else {
-  // Con los límites de V8 de los procesos del worker que leen el log (ADR-0017 §9).
+  // Con los tamaños de V8 de los procesos del worker que leen el log (ADR-0017 §9).
   const { WORKER_NODE_FLAGS } = await import(
     pathToFileURL(join(root, 'apps', 'market-data-worker', 'dist', 'node-flags.js')).href
   );

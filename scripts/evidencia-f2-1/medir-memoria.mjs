@@ -26,13 +26,15 @@
 //
 // Los tres últimos se repiten `--repeticiones` veces, y cuenta el mayor. `data:health` es el comando
 // de siempre (`apps/market-data-worker/dist/cli/health.js`), con `rss-al-salir.mjs` cargado con
-// `--import`. Cada proceso corre con los límites de V8 de `ingest` y `data:health`
+// `--import`. Cada proceso corre con los tamaños de V8 de `ingest` y `data:health`
 // (`WORKER_NODE_FLAGS`). Cifras en MiB de 1 048 576 bytes, como en ADR-0016 («Medición»). Comprueba los
 // criterios de ADR-0017 §9: con el log largo, el máximo de `ingest` al arrancar (2 y 3) y durante la
 // reconexión con hueco (4), y el de `data:health` (1 y 5), no superan en más de un 10 % los del log
-// base, y quedan por debajo de 200 MiB (`ingest`) y de 160 MiB (`data:health`).
+// base, y quedan por debajo de 200 MiB (`ingest`) y de 160 MiB (`data:health`). Solo da por buena una
+// ejecución que termina como debe: `data:health` en `paused`, sin alertas, y cada sesión `completed`,
+// sin alertas.
 //
-// Escribir 7 días lleva unos 40 minutos en local. Con `--minutos`, deja de escribir pasado ese tiempo
+// Escribir 7 días lleva unos 35 minutos en local. Con `--minutos`, deja de escribir pasado ese tiempo
 // y sale con 3: otra ejecución con el mismo `--estado` sigue donde quedó, porque los eventos son
 // reproducibles. Con `--parar-tras-escribir`, también sale con 3 al terminar de escribir, y mide la
 // ejecución siguiente. El archivo de estado guarda los nombres, las horas y lo ya medido, nunca
@@ -206,7 +208,7 @@ async function loadArchive() {
 }
 
 /**
- * Corre un proceso hijo de Node, con los límites de V8 del worker y ese entorno, y da su salida, sus
+ * Corre un proceso hijo de Node, con los tamaños de V8 del worker y ese entorno, y da su salida, sus
  * líneas JSON y lo que tardó.
  */
 function runChild(args, env) {
@@ -349,12 +351,20 @@ function evaluate() {
       passed: longMib < ceiling && baseMib < ceiling && growth <= MAX_GROWTH,
     };
   });
+  // Lo esperado en este montaje: `data:health` da `paused` por la regla 4, porque ninguna captura
+  // tiene el bloqueo, sin ninguna alerta, también ninguna de una reconstrucción cortada por su plazo;
+  // cada sesión termina `completed`, sin alertas.
   const runsOk = state.logs.every((item) =>
     Object.entries(item.measurements).every(([name, runs]) =>
       runs.every((run) =>
         name.startsWith('health')
-          ? run.service_health !== null && run.peak_mib !== null
-          : run.exit === 0 && run.end?.status === 'completed',
+          ? run.exit === 1 &&
+            run.service_health === 'paused' &&
+            run.alerts.length === 0 &&
+            run.peak_mib !== null
+          : run.exit === 0 &&
+            run.end?.status === 'completed' &&
+            Object.keys(run.alerts ?? {}).length === 0,
       ),
     ),
   );

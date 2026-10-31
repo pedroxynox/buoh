@@ -18,7 +18,7 @@
     "build": "tsc -p tsconfig.build.json",
     "db:migrate": "node dist/cli/migrate.js",
     "fixture:publish": "node dist/cli/publish-fixture.js",
-    "ingest": "node --max-semi-space-size=16 --max-old-space-size=192 dist/cli/ingest.js",
+    "ingest": "node --max-semi-space-size=1 --max-old-space-size=256 dist/cli/ingest.js",
     "replay": "node dist/cli/replay.js",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
