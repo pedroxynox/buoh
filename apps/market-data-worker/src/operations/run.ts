@@ -1,10 +1,12 @@
 import { healthReportSchema, type HealthReport, type JsonValue } from '@buoh/contracts';
 
 import { ConfigError } from '../config.js';
+import { type Scheduler } from '../deriv/ports.js';
 import { type OperationalAlert } from '../operational/registry.js';
 import { LOGIN_ROLES } from '../postgres/roles.js';
 import { failureReason } from '../source-log/source-event-log.js';
 import {
+  isLogExpired,
   logLocation,
   MAX_LOG_NUMBER,
   selectActiveLog,
@@ -19,14 +21,21 @@ import {
   type OperationsConfig,
 } from './config.js';
 import { type OwnerDatabase, type OperationsReportRow } from './owner-database.js';
+import {
+  VERIFICATION_DEADLINE_MS,
+  verificationSlot,
+  verifySegment,
+  type DueSegment,
+  type LogObjects,
+} from './verification.js';
 
 // Una ejecución de `buoh-operaciones` (ADR-0018 §11): los pasos en orden, cada uno con su informe.
 // Un paso que falla deja su alerta saneada y su informe, si PostgreSQL responde, y no impide los
-// siguientes. Este PR trae los dos primeros: los roles y los logs, y la salud. La retención, la
-// verificación por partes y el espacio llegan con los PR siguientes de §16.
+// siguientes. Están los roles y los logs, la salud, la verificación por partes y el espacio; la
+// retención, el paso 3, llega con el PR 8 de §16.
 
 /** Los pasos de una ejecución, en orden. */
-export const OPERATIONS_STEPS = ['roles_and_logs', 'health'] as const;
+export const OPERATIONS_STEPS = ['roles_and_logs', 'health', 'verification', 'space'] as const;
 export type OperationsStep = (typeof OPERATIONS_STEPS)[number];
 
 /** Un informe: solo códigos, nombres, números y horas, nunca un mensaje de error ni un precio. */
@@ -45,7 +54,10 @@ interface StepOutcome {
 }
 
 export interface OperationsInput {
-  /** Recibe cada alerta saneada: `operations_step_failed` y `operations_report_unavailable`. */
+  /**
+   * Recibe cada alerta saneada: `operations_step_failed`, `operations_report_unavailable` y
+   * `operations_segment_mismatch`.
+   */
   readonly alert: OperationalAlert;
   readonly config: OperationsConfig;
   readonly database: OwnerDatabase;
@@ -55,7 +67,11 @@ export interface OperationsInput {
   readonly nextId: () => string;
   /** La hora UTC con milisegundos (`toISOString()`). */
   readonly now: () => string;
+  /** Los objetos de un log con el token `operaciones`: `openLogObjects` en el servicio. */
+  readonly objects: (log: LogLocation) => LogObjects;
   readonly runChild: RunChild;
+  /** El temporizador del plazo de la verificación. */
+  readonly scheduler: Scheduler;
 }
 
 /** Lo que dejó una ejecución: su ID, cómo terminó y una línea JSON por paso y otra al final. */
@@ -324,13 +340,179 @@ function failedHealth(log: LogLocation | null, fields: Report): StepOutcome {
 }
 
 /**
+ * Paso 4 (ADR-0018 §11): la verificación por partes, la periódica de ADR-0017 §4. Toma la ejecución
+ * del día de la hora de inicio (`verificationSlot`) y, de cada log que se puede leer y no ha vencido,
+ * los segmentos cerrados que le tocan, todos antes de leer ningún objeto. Después vuelve a leer sus
+ * objetos con el token `operaciones` y compara sus hashes (`verifySegment`). Cada segmento que no
+ * coincide va al informe y deja la alerta `operations_segment_mismatch`: es un resultado, no un fallo
+ * del paso. Sí lo son que PostgreSQL o el almacenamiento no respondan y que no termine en
+ * `VERIFICATION_DEADLINE_MS`; lo que queda espera a su ejecución del día siguiente. El informe se
+ * guarda en cada ejecución, en el log activo.
+ */
+async function verification(input: OperationsInput, startedAt: string): Promise<StepOutcome> {
+  const slot = verificationSlot(startedAt);
+  const startedMs = Date.parse(input.now());
+  const mismatched: Report[] = [];
+  let due: number | null = null;
+  let read = 0;
+  const outcome = (fields: Report = {}): StepOutcome => ({
+    log: null,
+    report: { due, mismatched, read, slot, ...fields },
+    status: 'reason' in fields ? 'failed' : 'completed',
+    store: true,
+  });
+  const work: { readonly log: LogLocation; readonly segments: DueSegment[] }[] = [];
+  try {
+    const logs = await input.database.listLogs();
+    const now = input.now();
+    for (const log of logs) {
+      if (log.readable && !isLogExpired(log, now)) {
+        work.push({
+          log: log.location,
+          segments: await input.database.listSegmentsDue(log.location, slot),
+        });
+      }
+    }
+  } catch (error) {
+    return outcome({ reason: failureReason(error) });
+  }
+  due = work.reduce((sum, item) => sum + item.segments.length, 0);
+  for (const { log, segments } of work) {
+    if (segments.length === 0) {
+      continue;
+    }
+    const objects = input.objects(log);
+    try {
+      for (const segment of segments) {
+        const remaining = VERIFICATION_DEADLINE_MS - (Date.parse(input.now()) - startedMs);
+        if (remaining <= 0) {
+          return outcome({ reason: 'deadline_exceeded' });
+        }
+        let checked: { readonly mismatch: string | null } | null;
+        try {
+          // Una lectura cuyo cuerpo se detiene no tiene otro plazo: el cliente S3 solo acota la
+          // conexión y la espera de las cabeceras. Si vence, el `finally` cierra los objetos, y
+          // con ellos sus conexiones, lo que corta la lectura.
+          checked = await withinDeadline(
+            input.scheduler,
+            remaining,
+            verifySegment(objects, segment).then((mismatch) => ({ mismatch })),
+          );
+        } catch (error) {
+          return outcome({
+            log: log.number,
+            reason: failureReason(error),
+            segment_index: segment.segment_index,
+          });
+        }
+        if (checked === null) {
+          return outcome({
+            log: log.number,
+            reason: 'deadline_exceeded',
+            segment_index: segment.segment_index,
+          });
+        }
+        const { mismatch } = checked;
+        read += 1;
+        if (mismatch !== null) {
+          mismatched.push({
+            log: log.number,
+            reason: mismatch,
+            segment_index: segment.segment_index,
+          });
+          input.alert({
+            event: 'operations_segment_mismatch',
+            log: String(log.number),
+            reason: mismatch,
+            segment_index: String(segment.segment_index),
+          });
+        }
+      }
+    } finally {
+      objects.close();
+    }
+  }
+  return outcome();
+}
+
+/**
+ * `work`, o `null` si no termina en `ms`. Una vez vencido, lo que dé `work` después se ignora,
+ * también si rechaza; cortarlo es cosa de quien llama.
+ */
+function withinDeadline<T>(scheduler: Scheduler, ms: number, work: Promise<T>): Promise<T | null> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cancel = scheduler.schedule(ms, () => {
+      if (!settled) {
+        settled = true;
+        resolve(null);
+      }
+    });
+    work.then(
+      (value) => {
+        if (!settled) {
+          settled = true;
+          cancel();
+          resolve(value);
+        }
+      },
+      (error: unknown) => {
+        if (!settled) {
+          settled = true;
+          cancel();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      },
+    );
+  });
+}
+
+/**
+ * Paso 5 (ADR-0018 §11 y §7): una vez al día UTC, el espacio de la base y el de cada log en
+ * PostgreSQL (`measureSpace`), con su informe en el log activo. Mide si el log activo todavía no
+ * tiene un informe `completed` de este paso de ese día, así que una medida que falla se vuelve a
+ * intentar en la ejecución siguiente; si ya lo tiene, el paso termina sin medir ni guardar nada. El
+ * espacio de R2 lo copia el propietario del panel de Cloudflare (§13).
+ */
+async function space(input: OperationsInput): Promise<StepOutcome> {
+  try {
+    const now = input.now();
+    const active = selectActiveLog(await input.database.listLogs(), now);
+    if (active !== null) {
+      const last = await input.database.lastCompletedReport(active, 'space');
+      if (last !== null && last.slice(0, 10) === now.slice(0, 10)) {
+        return {
+          log: active,
+          report: { last_measured_at_utc: last, measured: false },
+          status: 'completed',
+          store: false,
+        };
+      }
+    }
+    const measure = await input.database.measureSpace();
+    return {
+      log: active,
+      report: {
+        database_bytes: measure.database_bytes,
+        logs: measure.logs.map((item) => ({ bytes: item.bytes, log: item.log })),
+        measured: true,
+      },
+      status: 'completed',
+      store: true,
+    };
+  } catch (error) {
+    return { log: null, report: { reason: failureReason(error) }, status: 'failed', store: true };
+  }
+}
+
+/**
  * Una ejecución de `buoh-operaciones` (ADR-0018 §11), con la configuración ya cargada: los pasos en
  * orden. Cada uno deja una línea JSON en stdout (`operations_step`), y uno que falla, además, la
  * alerta `operations_step_failed` con el primer motivo. El informe de cada paso se guarda en la
- * tabla `operations_reports` de su log (el de la salud) o del log activo después del paso 1, salvo
- * el del paso 1 cuando no cambió nada. Si no se puede guardar, deja la alerta
- * `operations_report_unavailable` y la ejecución termina `failed`. La última línea
- * (`operations_run`) dice cómo terminó.
+ * tabla `operations_reports` de su log (el de la salud) o del log activo después del paso, salvo
+ * el del paso 1 cuando no cambió nada y el del espacio cuando ya se midió ese día. Si no se puede
+ * guardar, deja la alerta `operations_report_unavailable` y la ejecución termina `failed`. La
+ * última línea (`operations_run`) dice cómo terminó.
  */
 export async function runOperations(input: OperationsInput): Promise<OperationsRun> {
   const runId = input.nextId();
@@ -340,6 +522,8 @@ export async function runOperations(input: OperationsInput): Promise<OperationsR
   const steps: Record<OperationsStep, () => Promise<StepOutcome>> = {
     health: () => health(input),
     roles_and_logs: () => rolesAndLogs(input),
+    space: () => space(input),
+    verification: () => verification(input, startedAt),
   };
   for (const step of OPERATIONS_STEPS) {
     let outcome: StepOutcome;
@@ -436,9 +620,14 @@ async function storeReport(
 }
 
 /** Lo que necesita `operationsCommand` además del entorno. */
-export interface OperationsDependencies extends Omit<OperationsInput, 'config' | 'database'> {
+export interface OperationsDependencies extends Omit<
+  OperationsInput,
+  'config' | 'database' | 'objects'
+> {
   /** Abre la base con la credencial dueña de la configuración: `openOwnerDatabase`. */
   readonly openDatabase: (config: OperationsConfig) => OwnerDatabase;
+  /** Abre los objetos de un log con el token `operaciones` de la configuración: `openLogObjects`. */
+  readonly openObjects: (config: OperationsConfig, log: LogLocation) => LogObjects;
 }
 
 /**
@@ -464,10 +653,15 @@ export async function operationsCommand(
     }
     throw error;
   }
-  const { openDatabase, ...ports } = dependencies;
+  const { openDatabase, openObjects, ...ports } = dependencies;
   const database = openDatabase(config);
   try {
-    const run = await runOperations({ ...ports, config, database });
+    const run = await runOperations({
+      ...ports,
+      config,
+      database,
+      objects: (log) => openObjects(config, log),
+    });
     return { exitCode: run.status === 'completed' ? 0 : 1, lines: run.lines };
   } catch (error) {
     return {

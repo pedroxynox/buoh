@@ -266,6 +266,7 @@ export {
   type LoginCheck,
   type OperationsReportRow,
   type OwnerDatabase,
+  type SpaceMeasure,
 } from './operations/owner-database.js';
 export {
   nextLogToPrepare,
@@ -277,6 +278,16 @@ export {
   type OperationsRun,
   type OperationsStep,
 } from './operations/run.js';
+export {
+  openLogObjects,
+  VERIFICATION_DEADLINE_MS,
+  VERIFICATION_SLOTS,
+  verificationSlot,
+  verifySegment,
+  type DueSegment,
+  type LogObjects,
+  type SegmentMismatch,
+} from './operations/verification.js';
 export {
   findActiveLog,
   isLogExpired,
