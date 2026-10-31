@@ -22,6 +22,7 @@ import {
 } from '../src/index.js';
 import { START, uuid } from '../test/support/connection-harness.js';
 import { ManualClock, syntheticSchemaArchive } from '../test/support/deriv-fixtures.js';
+import { closePool } from '../test/support/pools.js';
 
 /**
  * `buoh-operaciones` (ADR-0018 §11) contra PostgreSQL y S3-compatible locales, con
@@ -196,7 +197,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await admin?.end();
+  // Con sus conexiones ya cerradas: `DROP DATABASE … WITH (FORCE)` terminaría las que se cierran.
+  await closePool(admin);
   if (platform !== undefined) {
     await dropDatabaseAndRoles(platform);
     await platform.end();

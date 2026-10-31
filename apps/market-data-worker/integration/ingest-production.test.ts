@@ -31,6 +31,7 @@ import {
   ManualClock,
   syntheticSchemaArchive,
 } from '../test/support/deriv-fixtures.js';
+import { closePool } from '../test/support/pools.js';
 
 /**
  * `ingest` en `production` (ADR-0018 §4) contra PostgreSQL y S3-compatible locales, con
@@ -166,7 +167,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   stopCommand?.();
-  await admin?.end();
+  // Con sus conexiones ya cerradas: `DROP DATABASE … WITH (FORCE)` terminaría las que se cierran.
+  await closePool(admin);
   if (platform !== undefined) {
     await dropDatabase(platform);
     await platform.end();

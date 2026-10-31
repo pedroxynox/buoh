@@ -34,6 +34,7 @@ import {
   ManualClock,
   syntheticSchemaArchive,
 } from '../test/support/deriv-fixtures.js';
+import { closePool } from '../test/support/pools.js';
 import { heartbeatOf } from '../test/support/status-store-rules.js';
 
 /**
@@ -226,7 +227,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await admin?.end();
+  // Con sus conexiones ya cerradas: `DROP DATABASE … WITH (FORCE)` terminaría las que se cierran.
+  await closePool(admin);
   if (platform !== undefined) {
     await dropDatabaseAndRole(platform);
     await platform.end();
