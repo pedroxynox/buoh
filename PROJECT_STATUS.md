@@ -1,12 +1,12 @@
 ---
 schema_version: "1.0.0"
-status_version: 33
-updated_at_utc: "2026-10-30T00:39:13.000Z"
+status_version: 34
+updated_at_utc: "2026-10-31T02:42:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
-next_delivery: "F2.1"
-next_requirements: ["F2-CHECKPOINT-001", "F2-GOV-001"]
+next_delivery: "F2.2"
+next_requirements: ["F2-DEPLOY-001", "F2-ROLE-001", "F2-RETENTION-001"]
 plan: "docs/plan/fase-2-laboratorio-y-bot-shadow.md"
 parallel_plans: []
 ---
@@ -23,6 +23,7 @@ Transformar una hipótesis en una estrategia viva, explicable y no ejecutora, pa
 
 - La Fase 1 terminó el 2026-10-29 y cumplió su puerta de salida: la evidencia está en el [documento de la puerta de salida](docs/operacion/evidencia-puerta-fase-1.md) y en «Evidencia de F1.5», más abajo. Ese día el propietario decidió hacer antes la Fase 2 que la Fase 1B («Decisiones vigentes relevantes»).
 - El [plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md) fija sus requisitos `F2-*`, el corte de implementación (`apps/api`, `packages/strategy-sdk` y `apps/signal-engine`, cada uno con su incremento), las ADR que van antes del código y su orden, y el presupuesto. Primero lleva el sistema de datos a un servidor (F2.1 y F2.2), para que la captura acumule datos mientras avanza lo demás.
+- F2.1 entregó el punto de control de la derivación en vivo ([ADR-0017](docs/arquitectura/adr/0017-punto-de-control-de-la-derivacion-en-vivo.md), PR #48 a #50, #52 y #54 y el de su evidencia): `ingest` lo escribe al cerrar cada segmento, y el arranque, la reparación de cierres, la vigilancia de huecos y `data:health` parten del último válido, sin leer el log entero. Con un log de 7 días, su memoria queda a menos de un 8 % de la de un día y por debajo de los techos de ADR-0017 §9 («Evidencia de F2.1»).
 - La fundación de producto, arquitectura, seguridad y operación está aprobada.
 - F1.1 proporciona monorepo reproducible, contratos runtime, JSON Schema generado, vectores verificables y guardia documental.
 - F1.2 proporciona `packages/domain`: adaptador sintético, normalización, reglas de calidad 1.0.0, construcción de publicación y salud, todo puro y determinista.
@@ -45,13 +46,13 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 
 ## Siguiente tarea autorizada
 
-**`F2.1` — Punto de control.**
+**`F2.2` — Sistema de datos en producción.**
 
-Primero, la ADR del punto de control (plan de Fase 2, §8, punto 1). Después, su implementación: el arranque de `ingest`, la reparación de cierres antes de cada reconexión, la vigilancia de huecos y `data:health` dejan de leer y derivar el log durable entero, y parten del último punto de control (`F2-CHECKPOINT-001`). El mismo incremento añade `packages/domain/**` al mapa de impacto (`F2-GOV-001`, pendiente 3 de F1.2).
+Primero, la ADR de despliegue (plan de Fase 2, §8, punto 2): las condiciones de [ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md) §4 que quedan después del punto de control, como los roles, la retención, las reglas de `ingest` en producción, las comprobaciones de R2, dónde y cada cuánto corre `data:health`, las credenciales y la región. Después, su implementación (`F2-DEPLOY-001`, `F2-ROLE-001` y `F2-RETENTION-001`).
 
-Punto de partida: con 17,8 horas de log, `ingest` llegó a 358 MB y `data:health` a 317 MB, y el worker Starter tiene 512 MB ([ADR-0016](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md), «Medición»). Por eso el punto de control va antes del despliegue (F2.2), también para una captura de un solo día. Los demás puntos de partida de la fase están en el plan §3.
+Punto de partida: la condición «Memoria» de ADR-0016 §4 se cumple. Con un log de 7 días, `ingest` llegó como mucho a 124 MiB y `data:health` a 118 MiB, con los tamaños de V8 con los que arrancan (`WORKER_NODE_FLAGS`; «Evidencia de F2.1»), así que el worker Standard no hace falta (plan §12). El despliegue tiene que arrancarlos con esos tamaños (ADR-0017 §9). Antes de abrir la ADR, el agente pide al propietario las decisiones de F2.2 del plan §12: la región, la retención y el disco si suben el presupuesto, y el acceso del agente a producción («Decisiones pendientes»).
 
-F2.1 se prueba sin red, sin secretos y sin servicios de pago. No despliega nada, ni crea señales, conexión de cuentas o ejecución `demo` o `real`.
+No se crea ni se paga nada hasta que esté listo el PR de despliegue, que le da al propietario los pasos exactos (ADR-0016 §3).
 
 ## Evidencia de F1.1
 
@@ -141,6 +142,15 @@ Reconexión sin ocultar huecos (`F1-RECONNECT-001`) y salud machine-readable (`F
 - `pnpm run test:integration` (77 en total): la migración `0004`, el cursor y el latido, el bloqueo de PostgreSQL, `ingest` y `data:health` contra PostgreSQL 18 y almacenamiento S3-compatible.
 - Los nueve ensayos de ADR-0015 §12, el 2026-10-29, contra el canal público de Deriv y un PostgreSQL y un almacenamiento desechables: todos pasan, y cada punto de la Definition of Done del plan §9 tiene su evidencia ([evidencia de la puerta de salida de Fase 1](docs/operacion/evidencia-puerta-fase-1.md)). La primera pasada encontró que la historia real trae `"pip_size":2.0`, que la recuperación rechazaba; #40 lo corrigió y los ensayos se repitieron.
 
+## Evidencia de F2.1
+
+Punto de control de la derivación en vivo (`F2-CHECKPOINT-001`) y guardia documental de `packages/domain` (`F2-GOV-001`), en la secuencia de seis PR de [ADR-0017](docs/arquitectura/adr/0017-punto-de-control-de-la-derivacion-en-vivo.md) §11 (#48 a #50, #52, #54 y el de la evidencia).
+
+- Equivalencia sin red, reloj real ni azar: en cada límite de segmento cerrado de los vectores v1, de los logs sintéticos escritos a mano, de 300 logs aleatorios y de los logs que no se derivan, el pliegue del dominio da lo mismo que `deriveMarketData`, y en el worker, el arranque, la reparación de cierres, la vigilancia de huecos y `evaluateDataHealth` dan desde el punto de control lo mismo que con el log entero. Los vectores v1 se reproducen byte a byte. Pruebas offline: dominio 157 y worker 807 en total.
+- `pnpm run test:integration` (92 en total): la tabla de la migración `0005`, la escritura de `ingest` al cerrar cada segmento, los lectores de la sesión y `data:health`, que no lee los objetos anteriores a su punto de control ni aplica dos veces un segmento recién cerrado, contra PostgreSQL 18 y almacenamiento S3-compatible.
+- Memoria, el 2026-10-31, con logs sintéticos de un día (45 122 eventos) y de 7 (315 842) ([evidencia de memoria de F2.1](docs/operacion/evidencia-memoria-f2-1.md)). Máximos con el log de 7 días: `ingest`, 124 MiB al arrancar reconstruyendo los puntos de control, 113 MiB al arrancar con ellos y 118 MiB durante una reconexión con hueco; `data:health`, 118 MiB sin punto de control y 87 MiB con él. Todos a menos de un 8 % de los de un día y por debajo de los techos de 200 MiB y 160 MiB. `ingest` y `data:health` arrancan con los tamaños de V8 que Node elige con 512 MiB (`WORKER_NODE_FLAGS`): en el sandbox, donde Node ve 31 GiB, sin ellos la reconstrucción sin punto de control llegaba a 296 MiB con un día de log.
+- La guardia documental tiene una regla para `packages/domain/**` desde el PR #49.
+
 ## Pendientes registrados de F1.4a
 
 Detectados en la revisión semántica del PR #8; ninguno bloqueó F1.5:
@@ -171,9 +181,10 @@ Detectados en la revisión semántica del PR #5:
 El antiguo pendiente 1 (atribución de símbolo y mensajes que no son ticks) quedó resuelto en F1.4a.
 
 2. Cuando la salud está en `recovering` por continuidad pendiente, el `HealthReport` no muestra la causa: `open_condition_types` queda vacío.
-3. `docs/impact-map.json` no tiene regla para `packages/domain/**`.
 4. `qualityProfileSchema` está duplicado entre `packages/domain` y `packages/contracts/src/vector-integrity.ts`.
 5. `typecheck` y `lint` resuelven `@buoh/contracts` con `paths` al código fuente; vitest usa `dist`. Ejecutar `pnpm run test`, no vitest directo. `apps/market-data-worker` sigue el mismo patrón.
+
+El antiguo pendiente 3 (el mapa de impacto sin regla para `packages/domain/**`) quedó resuelto en F2.1 (`F2-GOV-001`, PR #49).
 
 El antiguo pendiente 6 quedó resuelto en F1.5 ([ADR-0015](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §4, «Orden»): el `HistoryRecoveryResult` pasa por la misma cola que los frames, y la sesión lo pide 2000 ms después del primer tick durable posterior al cierre, así que siempre queda después de él. Los puntos 3, 5 y 6 de la puerta de salida volvieron así a `healthy`.
 
