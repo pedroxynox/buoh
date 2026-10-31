@@ -43,7 +43,7 @@ El máximo de `data:health` es el de su proceso, con `getrusage`, como en ADR-00
 
 Las cifras van en MiB de 1 048 576 bytes, como las cuenta `/proc`. El script solo da por buena una ejecución que termina como debe: `data:health` en `paused`, sin alertas, y cada sesión `completed`, sin alertas.
 
-Una medición se cortó a mitad: la reconexión de la primera ronda con el log de 7 días, porque se interrumpió el comando que la corría. Se repitió, después de una sesión de arranque sin medir que reparó el cierre que había dejado la sesión cortada (`close_not_recorded`) y recuperó su hueco. Las demás no se repitieron.
+Una medición se cortó a mitad: la reconexión de la primera ronda con el log de 7 días, porque se interrumpió el comando que la corría. El script exige empezar con un estado nuevo después de un corte, pero eso obliga a escribir otra vez los logs. En su lugar, se quitó a mano la marca `started` de esa medición en el archivo de estado, se anotó el corte (`cut_and_redone`) y se repitió solo esa medición. Antes, una sesión de arranque sin medir reparó el cierre que había dejado la sesión cortada (`close_not_recorded`): terminó `completed`, sin alertas, y recuperó su hueco `complete`, con 493 ticks. Las demás mediciones no se repitieron.
 
 ## Resultado
 
@@ -81,7 +81,7 @@ Con el log de un día, en este sandbox:
 
 Una primera versión de este PR fijaba 16 y 192 MiB. Con un límite de 512 MiB visible, esos tamaños subían el máximo entre 13 y 28 MiB, porque Node habría elegido unos menores. Por eso se fijan los que elige Node.
 
-Con los puntos de control válidos, el máximo apenas depende de los tamaños. La memoria que el proceso guarda viva no crece con el log. Un diagnóstico local, fuera de Git, plegó el log de un día forzando la recolección cada 50 segmentos, y la memoria de V8 en uso se quedó en unos 22 MiB.
+Con los puntos de control válidos, los tamaños también mueven el máximo, aunque menos: con un día, al pasar de 16 y 192 MiB a 1 y 256 MiB, bajó entre 9 y 20 MiB. La memoria que el proceso guarda viva no crece con el log. Un diagnóstico local, fuera de Git, plegó el log de un día forzando la recolección cada 50 segmentos, y la memoria de V8 en uso se quedó en unos 22 MiB.
 
 Las opciones solo cuentan si el proceso arranca con ellas:
 
