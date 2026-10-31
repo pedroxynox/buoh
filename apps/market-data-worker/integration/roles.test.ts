@@ -36,7 +36,7 @@ import {
   ManualClock,
   syntheticSchemaArchive,
 } from '../test/support/deriv-fixtures.js';
-import { closePool } from '../test/support/pools.js';
+import { waitForNoSessions } from '../test/support/databases.js';
 
 /**
  * Los roles de PostgreSQL de producción (ADR-0018 §8 y §9, `F2-ROLE-001`) contra PostgreSQL y
@@ -158,10 +158,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   renderClient?.release();
-  // Con sus conexiones ya cerradas: `DROP DATABASE … WITH (FORCE)` terminaría las que se cierran.
-  await closePool(renderPool);
-  await closePool(admin);
+  await renderPool?.end();
+  await admin?.end();
   if (platform !== undefined) {
+    // Sin sesiones: `DROP DATABASE … WITH (FORCE)` terminaría las que todavía se cierran.
+    await waitForNoSessions(platform, DATABASE);
     await dropTestDatabaseAndRoles(platform);
     await platform.end();
   }

@@ -31,7 +31,7 @@ import {
   ManualClock,
   syntheticSchemaArchive,
 } from '../test/support/deriv-fixtures.js';
-import { closePool } from '../test/support/pools.js';
+import { waitForNoSessions } from '../test/support/databases.js';
 
 /**
  * `ingest` en `production` (ADR-0018 §4) contra PostgreSQL y S3-compatible locales, con
@@ -167,9 +167,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   stopCommand?.();
-  // Con sus conexiones ya cerradas: `DROP DATABASE … WITH (FORCE)` terminaría las que se cierran.
-  await closePool(admin);
+  await admin?.end();
   if (platform !== undefined) {
+    // Sin sesiones: `DROP DATABASE … WITH (FORCE)` terminaría las que todavía se cierran.
+    await waitForNoSessions(platform, DATABASE);
     await dropDatabase(platform);
     await platform.end();
   }
