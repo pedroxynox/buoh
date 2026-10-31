@@ -212,6 +212,7 @@ export {
   HEALTH_CLOSE_DEADLINE_MS,
   HEALTH_DEADLINE_MS,
   healthCommand,
+  LOG_NOT_PREPARED,
   type HealthCommandResult,
   type HealthCommandStores,
   type HealthDependencies,
@@ -220,8 +221,24 @@ export { HEALTH_USAGE, parseHealthArgs, type HealthOptions } from './health-args
 export {
   HEALTH_CONNECTION_TIMEOUT_MS,
   HEALTH_REQUEST_TIMEOUT_MS,
+  locateActiveLog,
   openHealthStores,
   openStores,
   type OpenStoresOptions,
 } from './runtime.js';
 export { S3ObjectStore } from './s3/object-store.js';
+export {
+  findActiveLog,
+  isLogExpired,
+  listCaptureLogs,
+  LOG_NUMBER_DIGITS,
+  LOG_RETENTION_MS,
+  logLocation,
+  logNumberOf,
+  MAX_LOG_NUMBER,
+  productionLogConfigErrors,
+  selectActiveLog,
+  withLog,
+  type CaptureLog,
+  type LogLocation,
+} from './successive-logs.js';

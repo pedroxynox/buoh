@@ -47,14 +47,30 @@ export interface S3Timeouts {
   readonly requestTimeout: number;
 }
 
-/** Adaptador S3-compatible (SeaweedFS en local; Cloudflare R2 en producción, ADR-0016). */
+/** Un prefijo de claves: vacío, o segmentos de minúsculas, cifras, `_` y `-`, cada uno con su `/`. */
+const KEY_PREFIX = /^(?:[a-z0-9][a-z0-9_-]*\/)*$/u;
+
+/**
+ * Adaptador S3-compatible (SeaweedFS en local; Cloudflare R2 en producción, ADR-0016). Con
+ * `keyPrefix`, cada clave que recibe vive en el bucket bajo ese prefijo, como los objetos de un log
+ * de producción bajo `logs/<n>/` (ADR-0018 §6): quien lo usa sigue pidiendo `sha256/<hash>`, y las
+ * filas del log no cambian.
+ */
 export class S3ObjectStore implements ObjectStore {
   readonly bucket: string;
+  /** El prefijo de las claves en el bucket; vacío sin prefijo. */
+  readonly keyPrefix: string;
   readonly #client: S3Client;
 
-  constructor(client: S3Client, bucket: string) {
+  constructor(client: S3Client, bucket: string, keyPrefix = '') {
+    if (!KEY_PREFIX.test(keyPrefix)) {
+      throw new TypeError(
+        'El prefijo de las claves son segmentos de minúsculas, cifras, _ y -, cada uno con su /.',
+      );
+    }
     this.#client = client;
     this.bucket = bucket;
+    this.keyPrefix = keyPrefix;
   }
 
   /**
@@ -81,6 +97,7 @@ export class S3ObjectStore implements ObjectStore {
         responseChecksumValidation: 'WHEN_REQUIRED',
       }),
       config.bucket,
+      config.keyPrefix,
     );
   }
 
@@ -97,7 +114,7 @@ export class S3ObjectStore implements ObjectStore {
           ContentLength: bytes.byteLength,
           ContentType: contentType,
           IfNoneMatch: '*',
-          Key: key,
+          Key: this.keyPrefix + key,
         }),
       );
       return 'created';
@@ -111,21 +128,22 @@ export class S3ObjectStore implements ObjectStore {
   }
 
   async get(key: string, maxBytes: number): Promise<Uint8Array> {
+    const stored = this.keyPrefix + key;
     try {
       const head = await this.#client.send(
-        new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
+        new HeadObjectCommand({ Bucket: this.bucket, Key: stored }),
       );
       if ((head.ContentLength ?? 0) > maxBytes) {
-        throw new ObjectReadError('too_large', key);
+        throw new ObjectReadError('too_large', stored);
       }
       const object = await this.#client.send(
-        new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+        new GetObjectCommand({ Bucket: this.bucket, Key: stored }),
       );
       const body = object.Body as AsyncIterable<Uint8Array> | undefined;
-      return body === undefined ? new Uint8Array() : await readCapped(body, maxBytes, key);
+      return body === undefined ? new Uint8Array() : await readCapped(body, maxBytes, stored);
     } catch (error) {
       if (statusOf(error) === 404) {
-        throw new ObjectReadError('not_found', key);
+        throw new ObjectReadError('not_found', stored);
       }
       throw error;
     }

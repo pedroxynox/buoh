@@ -8,6 +8,8 @@ import {
   HEALTH_DEADLINE_MS,
   HEALTH_USAGE,
   healthCommand,
+  LOG_NOT_PREPARED,
+  logLocation,
   OperationalRegistry,
   SourceEventLog,
   type HealthCommandStores,
@@ -141,6 +143,8 @@ async function commandHarness(options: CommandOptions = {}) {
   );
   await OperationalRegistry.open({ source: DERIV_SOURCE, store: operational });
   const opened: WorkerConfig[] = [];
+  /** La configuración de cada búsqueda del log activo, que solo se hace en `production`. */
+  const located: WorkerConfig[] = [];
   let closed = 0;
   /** El temporizador del plazo total y del cierre: el tiempo solo avanza con `advance`. */
   const clock = new ManualClock(NOW);
@@ -161,6 +165,11 @@ async function commandHarness(options: CommandOptions = {}) {
   let sequence = 0;
   const deps = (overrides: Partial<HealthCommandStores> = {}): HealthDependencies => ({
     expected: FIXTURE.expected,
+    // El log activo de `production`: el 2, como si el 1 ya hubiera terminado.
+    locateLog: (config) => {
+      located.push(config);
+      return Promise.resolve(logLocation(2));
+    },
     nextId: () => uuid(7000 + (sequence += 1)),
     now: () => NOW,
     openStores: (config) => {
@@ -195,6 +204,7 @@ async function commandHarness(options: CommandOptions = {}) {
     closed: () => closed,
     contents,
     deps,
+    located,
     objects,
     opened,
     sourceLog,
@@ -592,5 +602,135 @@ describe('healthCommand: un error inesperado', () => {
     expect(reportOf(result.stdout)).toEqual(unobserved('failed'));
     expect(result.stderr).toBe('{"event":"data_health_failed","reason":"unexpected_error"}');
     expect(run.closed()).toBe(1);
+  });
+});
+
+/** Las variables de `production`: con el cifrado obligatorio y sin `BUOH_POSTGRES_SCHEMA`. */
+const PRODUCTION_ENV = {
+  ...ENV,
+  BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+  BUOH_POSTGRES_SCHEMA: undefined,
+  BUOH_POSTGRES_SSLMODE: 'require',
+};
+
+describe('healthCommand en production: el log activo (ADR-0018 §6)', () => {
+  it('busca el log activo con la configuración y abre los almacenes con su esquema y el prefijo de sus objetos, y nada más cambia', async () => {
+    const run = await commandHarness();
+    const result = await healthCommand(ARGS, PRODUCTION_ENV, run.deps());
+
+    expect(result.exitCode).toBe(0);
+    expect(reportOf(result.stdout)).toMatchObject({ service_health: 'healthy' });
+    expect(run.located).toHaveLength(1);
+    const [located] = run.located;
+    expect(located?.environment).toBe('production');
+    expect(run.opened).toHaveLength(1);
+    const [config] = run.opened;
+    expect(config?.postgres.schema).toBe('buoh_log_000002');
+    expect(config?.s3.keyPrefix).toBe('logs/000002/');
+    expect({
+      ...config,
+      postgres: { ...config?.postgres, schema: located?.postgres.schema },
+      s3: { ...config?.s3, keyPrefix: located?.s3.keyPrefix },
+    }).toEqual(located);
+    expect(run.closed()).toBe(1);
+  });
+
+  it('sin log activo, la regla 2: el informe failed con la alerta log_not_prepared y salida 1, sin abrir ningún almacén', async () => {
+    const run = await commandHarness();
+    const result = await healthCommand(ARGS, PRODUCTION_ENV, {
+      ...run.deps(),
+      locateLog: () => Promise.resolve(null),
+    });
+
+    expect(LOG_NOT_PREPARED).toBe('log_not_prepared');
+    expect(result.exitCode).toBe(1);
+    expect(reportOf(result.stdout)).toEqual(unobserved('failed'));
+    expect(result.stderr).toBe('{"event":"data_health_failed","reason":"log_not_prepared"}');
+    expect(run.opened).toEqual([]);
+  });
+
+  it('si PostgreSQL no responde a la búsqueda, la regla 3 con el código del error y nunca su mensaje, sin abrir ningún almacén', async () => {
+    const run = await commandHarness();
+    const unavailable = Object.assign(
+      new Error('connect ECONNREFUSED db.interno.invalid:5432 rol_sintetico base_sintetica'),
+      { code: 'ECONNREFUSED' },
+    );
+    const result = await healthCommand(ARGS, PRODUCTION_ENV, {
+      ...run.deps(),
+      locateLog: () => Promise.reject(unavailable),
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(reportOf(result.stdout)).toEqual(unobserved('paused'));
+    expect(result.stderr).toBe(
+      '{"event":"data_health_storage_unavailable","reason":"ECONNREFUSED"}',
+    );
+    expect(`${result.stdout ?? ''}${result.stderr ?? ''}`).not.toMatch(
+      /db\.interno|rol_sintetico|base_sintetica/u,
+    );
+    expect(run.opened).toEqual([]);
+  });
+
+  it('una búsqueda que no termina en el plazo total da deadline_exceeded, y si termina después no abre ningún almacén', async () => {
+    const run = await commandHarness();
+    let finish: (log: ReturnType<typeof logLocation>) => void = () => undefined;
+    const pending = healthCommand(ARGS, PRODUCTION_ENV, {
+      ...run.deps(),
+      locateLog: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    });
+
+    await run.clock.advance(HEALTH_DEADLINE_MS);
+    const result = await pending;
+    expect(result.exitCode).toBe(1);
+    expect(reportOf(result.stdout)).toEqual(unobserved('paused'));
+    expect(result.stderr).toBe(
+      '{"event":"data_health_storage_unavailable","reason":"deadline_exceeded"}',
+    );
+    finish(logLocation(2));
+    await new Promise((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(run.opened).toEqual([]);
+    expect(run.closed()).toBe(0);
+  });
+
+  it('BUOH_POSTGRES_SCHEMA no se admite: salida 2 con un ConfigError que la nombra junto con las demás variables rechazadas, sin buscar ni abrir nada', async () => {
+    const run = await commandHarness();
+    const result = await healthCommand(
+      ARGS,
+      {
+        ...PRODUCTION_ENV,
+        BUOH_POSTGRES_SCHEMA: 'buoh_log_000001',
+        BUOH_POSTGRES_SSLMODE: undefined,
+      },
+      run.deps(),
+    );
+
+    expect(result).toMatchObject({ exitCode: 2, stdout: null });
+    expect(JSON.parse(result.stderr ?? '')).toEqual({
+      code: 'ConfigError',
+      message: 'Configuración inválida o ausente: BUOH_POSTGRES_SCHEMA, BUOH_POSTGRES_SSLMODE.',
+      status: 'failed',
+    });
+    expect(run.located).toEqual([]);
+    expect(run.opened).toEqual([]);
+  });
+
+  it('fuera de production no busca el log: el esquema de BUOH_POSTGRES_SCHEMA, sin prefijo', async () => {
+    for (const env of [
+      ENV,
+      { ...ENV, BUOH_DEPLOYMENT_ENVIRONMENT: 'test' },
+      { ...ENV, BUOH_DEPLOYMENT_ENVIRONMENT: 'staging', BUOH_POSTGRES_SSLMODE: 'require' },
+    ]) {
+      const run = await commandHarness();
+      await healthCommand(ARGS, env, run.deps());
+      expect(run.located).toEqual([]);
+      expect(run.opened.map((config) => [config.postgres.schema, config.s3.keyPrefix])).toEqual([
+        ['buoh_captura', ''],
+      ]);
+    }
   });
 });

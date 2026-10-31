@@ -4,6 +4,8 @@ import { DERIV_SOURCE } from '../deriv/profile.js';
 import { type ExpectedSchemaArchive } from '../deriv/schema-archive.js';
 import { parseHealthArgs } from '../health-args.js';
 import { UsageError } from '../replay-args.js';
+import { failureReason } from '../source-log/source-event-log.js';
+import { productionLogConfigErrors, withLog, type LogLocation } from '../successive-logs.js';
 import { evaluateDataHealth, type HealthEvaluation } from './evaluate.js';
 import { observeDataHealth, type HealthObservationProgress, type HealthStores } from './observe.js';
 
@@ -21,13 +23,23 @@ export interface HealthDependencies {
   /** La hora UTC con milisegundos (`toISOString()`). */
   readonly now: () => string;
   /**
+   * En `production`, busca el log activo de la fuente con esa configuración, ya comprobada
+   * (ADR-0018 §6), o `null` si no hay ninguno: `locateActiveLog` en `data:health`. Fuera de
+   * `production` no se llama.
+   */
+  readonly locateLog: (config: WorkerConfig) => Promise<LogLocation | null>;
+  /**
    * Abre las lecturas con esa configuración, ya comprobada: `openHealthStores` en `data:health`,
-   * sobre `openStores` y su pool.
+   * sobre `openStores` y su pool. En `production`, con el esquema y el prefijo del log activo
+   * (`withLog`).
    */
   readonly openStores: (config: WorkerConfig) => HealthCommandStores;
   /** El temporizador del plazo total y del cierre; en `data:health`, el real. */
   readonly scheduler: Scheduler;
 }
+
+/** El motivo de la regla 2 en `production` cuando no hay ningún log activo (ADR-0018 §6). */
+export const LOG_NOT_PREPARED = 'log_not_prepared';
 
 /**
  * El plazo total de la observación y la evaluación, en milisegundos. Si no terminan antes, el
@@ -90,18 +102,59 @@ function withinDeadline<T>(
   });
 }
 
-/** Observa la fuente con los almacenes ya abiertos y evalúa lo observado. */
-async function observeAndEvaluate(
+/**
+ * Los almacenes que abrió el comando y si ya terminó. Al terminar, el comando cierra los que hay;
+ * una búsqueda del log que acaba después ya no abre ninguno, porque nadie lo cerraría.
+ */
+interface OpenedStores {
+  done: boolean;
+  stores: HealthCommandStores | null;
+}
+
+/**
+ * Busca el log en `production` (ADR-0018 §6), abre los almacenes, observa la fuente y evalúa lo
+ * observado. En `production`, sin log activo es la regla 2 con `log_not_prepared`, y una búsqueda
+ * que PostgreSQL rechaza o no contesta, la regla 3 con su motivo saneado, sin abrir nada.
+ */
+async function locateAndObserve(
   dependencies: HealthDependencies,
-  stores: HealthCommandStores,
-  input: {
-    readonly environment: WorkerConfig['environment'];
-    readonly progress: HealthObservationProgress;
-    readonly symbol: string;
-  },
+  config: WorkerConfig,
+  opened: OpenedStores,
+  input: { readonly progress: HealthObservationProgress; readonly symbol: string },
 ): Promise<HealthEvaluation> {
+  let target = config;
+  if (config.environment === 'production') {
+    let log: LogLocation | null;
+    try {
+      log = await dependencies.locateLog(config);
+    } catch (error) {
+      return evaluateDataHealth({
+        reason: failureReason(error),
+        source: DERIV_SOURCE,
+        status: 'storage_unavailable',
+      });
+    }
+    if (log === null) {
+      return evaluateDataHealth({
+        reason: LOG_NOT_PREPARED,
+        source: DERIV_SOURCE,
+        status: 'incompatible',
+      });
+    }
+    if (opened.done) {
+      // El plazo total ya respondió por el comando: lo que se devuelva aquí no lo lee nadie.
+      return evaluateDataHealth({
+        reason: DEADLINE_EXCEEDED,
+        source: DERIV_SOURCE,
+        status: 'storage_unavailable',
+      });
+    }
+    target = withLog(config, log);
+  }
+  const stores = dependencies.openStores(target);
+  opened.stores = stores;
   const observation = await observeDataHealth({
-    environment: input.environment,
+    environment: config.environment,
     ...(dependencies.expected === undefined ? {} : { expected: dependencies.expected }),
     nextId: dependencies.nextId,
     now: dependencies.now,
@@ -113,6 +166,35 @@ async function observeAndEvaluate(
 }
 
 /**
+ * La configuración de `data:health`: la de `loadConfig` y, en `production`, sin
+ * `BUOH_POSTGRES_SCHEMA`, porque el esquema sale del log activo (ADR-0018 §6). Lanza un solo
+ * `ConfigError` con todas las variables rechazadas.
+ */
+function loadHealthConfig(env: Readonly<Record<string, string | undefined>>): WorkerConfig {
+  const rejected = new Set<string>();
+  let config: WorkerConfig | null = null;
+  try {
+    config = loadConfig(env);
+  } catch (error) {
+    if (!(error instanceof ConfigError)) {
+      throw error;
+    }
+    for (const variable of error.variables) {
+      rejected.add(variable);
+    }
+  }
+  if (env['BUOH_DEPLOYMENT_ENVIRONMENT'] === 'production') {
+    for (const variable of productionLogConfigErrors(env)) {
+      rejected.add(variable);
+    }
+  }
+  if (config === null || rejected.size > 0) {
+    throw new ConfigError([...rejected].sort());
+  }
+  return config;
+}
+
+/**
  * `pnpm run data:health -- --json [--symbol R_100]` completo, sin efectos propios (ADR-0015 §8):
  * interpreta los argumentos, carga la configuración, abre las lecturas, observa la fuente sin tomar
  * el bloqueo ni escribir nada, la evalúa y devuelve las líneas de stdout y stderr y el código de
@@ -121,7 +203,9 @@ async function observeAndEvaluate(
  *
  * - Argumentos o variables de entorno inválidos (`UsageError`, `ConfigError`, regla 1): salida 2,
  *   nada en stdout y en stderr una línea con `code` y el mensaje, que solo nombra variables, sin
- *   abrir nada.
+ *   abrir nada. En `production`, `BUOH_POSTGRES_SCHEMA` también es inválida.
+ * - En `production`, observa el log activo (ADR-0018 §6): lo busca dentro del plazo total y abre
+ *   los almacenes con su esquema y su prefijo. Sin log activo, la regla 2 con `log_not_prepared`.
  * - Si no, stdout lleva el `HealthReport` y stderr la alerta saneada de las reglas 2 y 3, si la hay.
  *   Un error de programación da el informe `failed` con la alerta `unexpected_error`.
  * - Si la observación y la evaluación no terminan en `HEALTH_DEADLINE_MS`, el informe es el de la
@@ -138,7 +222,7 @@ export async function healthCommand(
   let config: WorkerConfig;
   try {
     ({ symbol } = parseHealthArgs(argv));
-    config = loadConfig(env);
+    config = loadHealthConfig(env);
   } catch (error) {
     if (error instanceof UsageError || error instanceof ConfigError) {
       return {
@@ -151,18 +235,13 @@ export async function healthCommand(
   }
   const { scheduler } = dependencies;
   const progress: HealthObservationProgress = { alerts: [], rebuilding: false };
-  let stores: HealthCommandStores | null = null;
+  const opened: OpenedStores = { done: false, stores: null };
   let evaluation: HealthEvaluation;
   try {
-    stores = dependencies.openStores(config);
     evaluation = await withinDeadline(
       scheduler,
       HEALTH_DEADLINE_MS,
-      observeAndEvaluate(dependencies, stores, {
-        environment: config.environment,
-        progress,
-        symbol,
-      }),
+      locateAndObserve(dependencies, config, opened, { progress, symbol }),
       () =>
         evaluateDataHealth(
           progress.rebuilding
@@ -177,8 +256,14 @@ export async function healthCommand(
       status: 'incompatible',
     });
   } finally {
-    if (stores !== null) {
-      await withinDeadline(scheduler, HEALTH_CLOSE_DEADLINE_MS, stores.close(), () => undefined);
+    opened.done = true;
+    if (opened.stores !== null) {
+      await withinDeadline(
+        scheduler,
+        HEALTH_CLOSE_DEADLINE_MS,
+        opened.stores.close(),
+        () => undefined,
+      );
     }
   }
   // Las alertas que ya había al terminar, también si el plazo cortó la observación.
