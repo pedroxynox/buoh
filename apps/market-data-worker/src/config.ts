@@ -77,6 +77,11 @@ export interface WorkerConfig {
     readonly accessKeyId: string;
     readonly bucket: string;
     readonly endpoint: string;
+    /**
+     * El prefijo de las claves del log en el bucket: vacío en la configuración, y el del log
+     * activo en `production` (`logs/<n>/`, `withLog`; ADR-0018 §6).
+     */
+    readonly keyPrefix: string;
     readonly region: string;
     readonly secretAccessKey: string;
   };
@@ -127,6 +132,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): W
       accessKeyId: value.BUOH_S3_ACCESS_KEY_ID,
       bucket: value.BUOH_S3_BUCKET,
       endpoint: value.BUOH_S3_ENDPOINT,
+      keyPrefix: '',
       region: value.BUOH_S3_REGION,
       secretAccessKey: value.BUOH_S3_SECRET_ACCESS_KEY,
     },

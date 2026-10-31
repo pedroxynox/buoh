@@ -186,6 +186,8 @@ async function health(
     { ...environment, BUOH_POSTGRES_SCHEMA: schema, ...options.env },
     {
       expected: options.expected ?? fixture.expected,
+      // El entorno es test: no busca un log de producción.
+      locateLog: () => Promise.reject(new Error('Solo en production.')),
       nextId: () => uuid((sequence += 1)),
       now: clock.now,
       openStores: (opened) => (options.wrap ?? ((real) => real))(openHealthStores(opened)),

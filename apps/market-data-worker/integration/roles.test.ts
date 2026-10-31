@@ -398,6 +398,8 @@ describe('buoh_salud solo lee (F2-ROLE-001)', () => {
       },
       {
         expected: fixture.expected,
+        // El entorno es test: no busca un log de producción.
+        locateLog: () => Promise.reject(new Error('Solo en production.')),
         nextId: () => uuid((sequence += 1)),
         now: clock.now,
         openStores: (opened) => openHealthStores(opened),

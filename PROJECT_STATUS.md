@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 37
-updated_at_utc: "2026-10-31T05:46:00.000Z"
+status_version: 38
+updated_at_utc: "2026-10-31T09:42:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -48,7 +48,7 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 
 **`F2.2` — Sistema de datos en producción.**
 
-La ADR de despliegue es [ADR-0018](docs/arquitectura/adr/0018-sistema-de-datos-en-produccion.md) (plan de Fase 2, §8, punto 2). Fija la región, el Blueprint propio del sistema de datos (`render-datos.yaml`), las reglas de `ingest` en `production`, los logs sucesivos con un corte semanal, la retención de 30 días, los roles de PostgreSQL, el cifrado, los tokens de R2 y sus comprobaciones, el cron job de operaciones con `data:health` cada 5 minutos, las credenciales, la evidencia y el costo. Su implementación (`F2-DEPLOY-001`, `F2-ROLE-001` y `F2-RETENTION-001`) sigue la secuencia de nueve PR de su §16. El PR 2 trae los roles de PostgreSQL, el cifrado de la conexión (`BUOH_POSTGRES_SSLMODE`) y `db:migrate` con sus errores saneados, con las pruebas de `F2-ROLE-001` (runbook, «Roles y cifrado de PostgreSQL (F2.2)»). El siguiente es el PR 3: los logs sucesivos en el worker, con el prefijo de los objetos, el log activo y `data:health` en `production`.
+La ADR de despliegue es [ADR-0018](docs/arquitectura/adr/0018-sistema-de-datos-en-produccion.md) (plan de Fase 2, §8, punto 2). Fija la región, el Blueprint propio del sistema de datos (`render-datos.yaml`), las reglas de `ingest` en `production`, los logs sucesivos con un corte semanal, la retención de 30 días, los roles de PostgreSQL, el cifrado, los tokens de R2 y sus comprobaciones, el cron job de operaciones con `data:health` cada 5 minutos, las credenciales, la evidencia y el costo. Su implementación (`F2-DEPLOY-001`, `F2-ROLE-001` y `F2-RETENTION-001`) sigue la secuencia de nueve PR de su §16. El PR 2 trae los roles de PostgreSQL, el cifrado de la conexión (`BUOH_POSTGRES_SSLMODE`) y `db:migrate` con sus errores saneados, con las pruebas de `F2-ROLE-001` (runbook, «Roles y cifrado de PostgreSQL (F2.2)»). El PR 3 trae los logs sucesivos en el worker: el esquema y el prefijo de cada log, el log activo y `data:health` en `production` (runbook, «Logs sucesivos de producción (F2.2)»). El siguiente es el PR 4: `ingest` en `production`, con las esperas del arranque (ADR-0018 §4).
 
 Punto de partida: la condición «Memoria» de ADR-0016 §4 se cumple. Con un log de 7 días, `ingest` llegó como mucho a 124 MiB y `data:health` a 118 MiB, con los tamaños de V8 con los que arrancan (`WORKER_NODE_FLAGS`; «Evidencia de F2.1»), así que el worker Standard no hace falta (plan §12). Los comandos de Render los arrancan con esos tamaños (ADR-0017 §9 y ADR-0018 §3). Las decisiones de F2.2 del plan §12 están todas tomadas («Decisiones vigentes relevantes»).
 

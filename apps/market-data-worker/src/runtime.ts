@@ -11,6 +11,7 @@ import { sourceLockHolder } from './postgres/source-lock.js';
 import { PostgresSourceLogStore } from './postgres/source-log-store.js';
 import { S3ObjectStore } from './s3/object-store.js';
 import { failureReason } from './source-log/source-event-log.js';
+import { findActiveLog, type LogLocation } from './successive-logs.js';
 
 export interface OpenStoresOptions {
   /** Alerta saneada, en stderr por defecto. */
@@ -104,4 +105,33 @@ export function openHealthStores(
     pendingMigrations: () => pendingMigrations(stores.pool),
     sourceLog: stores.sourceLog,
   };
+}
+
+/**
+ * El log activo de `source` en `production` (ADR-0018 §6), para `data:health`: abre un pool propio
+ * con los plazos de `openHealthStores` y la credencial de la configuración, busca el log
+ * (`findActiveLog`) sin escribir nada y lo cierra. Si PostgreSQL cierra una conexión libre del
+ * pool, deja la alerta `postgres_connection_lost`, como `openStores`. Rechaza con el error de la
+ * lectura si PostgreSQL no responde.
+ */
+export async function locateActiveLog(
+  config: WorkerConfig,
+  input: Pick<OpenStoresOptions, 'alert'> & {
+    readonly now: () => string;
+    readonly source: string;
+  },
+): Promise<LogLocation | null> {
+  const alert = input.alert ?? stderrAlert;
+  const pool = createPool(config.postgres, {
+    connectionTimeoutMillis: HEALTH_CONNECTION_TIMEOUT_MS,
+    query_timeout: HEALTH_REQUEST_TIMEOUT_MS,
+  });
+  pool.on('error', (error) => {
+    alert({ event: 'postgres_connection_lost', reason: failureReason(error) });
+  });
+  try {
+    return await findActiveLog(pool, { now: input.now, source: input.source });
+  } finally {
+    await pool.end();
+  }
 }

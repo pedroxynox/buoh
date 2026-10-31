@@ -24,6 +24,7 @@ dataset_id ─ replayDataset ─▶ verify-only: record, documento, hashes físi
 - Puertos: `ObjectStore`, `MetadataStore`, `SourceLogStore` y `OperationalStore`. Adaptadores reales: `S3ObjectStore` y los `Postgres*Store`.
 - `migrations/` contiene SQL append-only; `db:migrate` las aplica y rechaza migraciones aplicadas que cambiaron. Desde F2.2 escribe una línea JSON saneada y, con `BUOH_POSTGRES_OWNER_ROLE`, obligatoria en `production` y `staging`, migra como el rol dueño ([runbook](../../docs/operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13)).
 - Desde F2.2, `BUOH_POSTGRES_SSLMODE` (`disable`, `require` o `verify-full`) cifra la conexión a PostgreSQL, y es obligatoria en `production` y `staging`. `src/postgres/roles.ts` crea los roles de producción y les da sus privilegios ([ADR-0018](../../docs/arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §8 y §9; [runbook](../../docs/operacion/runbook-ingesta-de-datos.md#roles-y-cifrado-de-postgresql-f22)).
+- Desde F2.2, `src/successive-logs.ts` da el esquema `buoh_log_<n>` y el prefijo `logs/<n>/` de cada log de producción y busca el log activo, y `S3ObjectStore` guarda y lee bajo el prefijo de la configuración (`keyPrefix`). En `production`, `data:health` observa el log activo (ADR-0018 §6; [runbook](../../docs/operacion/runbook-ingesta-de-datos.md#logs-sucesivos-de-producción-f22)).
 - `driveSyntheticStimuli` entrega los estímulos del vector al ingestor real, como un transporte.
 
 ## Comandos
