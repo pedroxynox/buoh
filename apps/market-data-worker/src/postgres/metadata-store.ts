@@ -35,9 +35,31 @@ export interface PoolTimeouts {
   readonly query_timeout: number;
 }
 
+/**
+ * La opción `ssl` de `pg` para un modo de `BUOH_POSTGRES_SSLMODE` (ADR-0018 §9). `disable` no
+ * cifra (`false`), `require` cifra sin verificar el certificado (`rejectUnauthorized: false`), y
+ * `verify-full` verifica la autoridad y el nombre del servidor (`true`, las comprobaciones por
+ * defecto de Node). Con `require` o `verify-full`, `pg` falla si el servidor no admite TLS, en lugar
+ * de conectar sin cifrar. La opción siempre va explícita: sin ella, `pg` leería `PGSSLMODE`, y el
+ * cifrado dependería de otra variable.
+ */
+export function postgresSslOption(mode: WorkerConfig['postgres']['sslMode']): {
+  readonly ssl: boolean | { readonly rejectUnauthorized: false };
+} {
+  switch (mode) {
+    case 'disable':
+      return { ssl: false };
+    case 'require':
+      return { ssl: { rejectUnauthorized: false } };
+    case 'verify-full':
+      return { ssl: true };
+  }
+}
+
 export function createPool(config: WorkerConfig['postgres'], timeouts?: PoolTimeouts): pg.Pool {
   return new pg.Pool({
     ...timeouts,
+    ...postgresSslOption(config.sslMode),
     database: config.database,
     host: config.host,
     max: 4,

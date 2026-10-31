@@ -73,12 +73,17 @@ describe('checkIngestConfig (ADR-0015 §7)', () => {
     expect(rejected({ ...BASE, BUOH_DEPLOYMENT_ENVIRONMENT: 'test' })).toEqual([]);
   });
 
+  // En un despliegue, loadConfig exige además BUOH_POSTGRES_SSLMODE (ADR-0018 §9).
   it.each(['staging', 'production'])(
     'rechaza BUOH_DEPLOYMENT_ENVIRONMENT %s: desplegar no está autorizado en Fase 1 (ADR-0006)',
     (environment) => {
-      expect(rejected({ ...BASE, BUOH_DEPLOYMENT_ENVIRONMENT: environment })).toEqual([
-        'BUOH_DEPLOYMENT_ENVIRONMENT',
-      ]);
+      expect(
+        rejected({
+          ...BASE,
+          BUOH_DEPLOYMENT_ENVIRONMENT: environment,
+          BUOH_POSTGRES_SSLMODE: 'require',
+        }),
+      ).toEqual(['BUOH_DEPLOYMENT_ENVIRONMENT']);
     },
   );
 
@@ -100,6 +105,7 @@ describe('checkIngestConfig (ADR-0015 §7)', () => {
       BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
       BUOH_POSTGRES_HOST: 'db.interno.invalid',
       BUOH_POSTGRES_SCHEMA: undefined,
+      BUOH_POSTGRES_SSLMODE: 'require',
       BUOH_S3_BUCKET: undefined,
       BUOH_S3_ENDPOINT: 'https://objetos.interno.invalid',
     };

@@ -3,8 +3,12 @@ export {
   DEFAULT_POSTGRES_SCHEMA,
   DEFAULT_S3_BUCKET,
   loadConfig,
+  POSTGRES_IDENTIFIER,
+  POSTGRES_SSL_MODES,
+  type PostgresSslMode,
   type WorkerConfig,
 } from './config.js';
+export { migrateCommand, type MigrateCommandDeps } from './migrate-command.js';
 export {
   createStorageEncoder,
   decodeObject,
@@ -107,8 +111,32 @@ export {
 export { driveSyntheticStimuli, type SyntheticDriverHooks } from './synthetic-driver.js';
 export { contentKey, keyFromUri, manifestKey, objectUri } from './object-keys.js';
 export { type CommitPublicationInput, type MetadataStore, type ObjectStore } from './ports.js';
-export { migrate, pendingMigrations } from './postgres/migrate.js';
-export { createPool, PostgresMetadataStore } from './postgres/metadata-store.js';
+export {
+  migrate,
+  MigrationApplyError,
+  MigrationIntegrityError,
+  pendingMigrations,
+  type MigrateOptions,
+} from './postgres/migrate.js';
+export { createPool, PostgresMetadataStore, postgresSslOption } from './postgres/metadata-store.js';
+export {
+  AGENT_CONNECTION_LIMIT,
+  AGENT_IDLE_IN_TRANSACTION_TIMEOUT,
+  AGENT_STATEMENT_TIMEOUT,
+  ensureRuntimeRoles,
+  grantLogPrivileges,
+  INGEST_DENIED_TABLES,
+  INGEST_WRITE_TABLES,
+  LOGIN_ROLES,
+  MIGRATIONS_TABLE,
+  MIN_ROLE_PASSWORD_LENGTH,
+  POSTGRES_ROLES,
+  SCRAM_ITERATIONS,
+  scramSha256Verifier,
+  setRolePassword,
+  UnclassifiedTableError,
+  type LoginRole,
+} from './postgres/roles.js';
 export { publishDataset, type PublishDatasetInput } from './publication.js';
 export {
   MAX_MANIFEST_DOCUMENT_BYTES,

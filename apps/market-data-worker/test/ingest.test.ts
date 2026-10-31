@@ -278,8 +278,9 @@ describe('ingestCommand: argumentos y configuración', () => {
     ['el esquema por defecto', { BUOH_POSTGRES_SCHEMA: undefined }, ['BUOH_POSTGRES_SCHEMA']],
     ['el bucket por defecto', { BUOH_S3_BUCKET: 'buoh-local' }, ['BUOH_S3_BUCKET']],
     [
+      // Con el cifrado que exige loadConfig en un despliegue (ADR-0018 §9).
       'el entorno production',
-      { BUOH_DEPLOYMENT_ENVIRONMENT: 'production' },
+      { BUOH_DEPLOYMENT_ENVIRONMENT: 'production', BUOH_POSTGRES_SSLMODE: 'require' },
       ['BUOH_DEPLOYMENT_ENVIRONMENT'],
     ],
   ])(
