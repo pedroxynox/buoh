@@ -88,7 +88,7 @@ apps/signal-engine/      # F2.9: motor de señales shadow
 - `packages/domain`: la derivación desde un punto de control y la vista de los datos en el instante de cada decisión.
 - `packages/contracts`: los contratos de la fase (punto de control, estrategia, backtest, evaluación, señal, posición hipotética y auditoría), con su JSON Schema generado.
 - `apps/web`: pantallas con datos reales, que sustituyen sección a sección los datos ficticios.
-- `render.yaml` y su prueba: los servicios del sistema de datos, de la API y del motor.
+- `render-datos.yaml`, un Blueprint de Render aparte de `render.yaml`, que sigue siendo solo el sitio, y su prueba: los servicios del sistema de datos, de la API y del motor ([ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §2).
 - `test-vectors/`: vectores sintéticos de estrategia, backtest y réplica.
 
 La API y el motor necesitan leer el log y los datasets con el código del worker. La ADR de la API y las cuentas (§8) decide si lo importan de `@buoh/market-data-worker` o si ese código pasa a un paquete propio. Si es un paquete, su PR lo añade a este corte.
@@ -126,7 +126,7 @@ El arranque de `ingest`, la reparación de cierres antes de cada reconexión, la
 
 - la ADR de despliegue sustituye en `production` las reglas de ADR-0015 §7 que rechazan `staging` y `production` y paran a las 23 horas, con su prueba, su comentario y el runbook, y dice qué queda de ellas en `development` y `test`;
 - antes de crear el bucket de producción, las tres comprobaciones de ADR-0016 §4 (412 con `If-None-Match: *`, lectura justo después de escribir y sumas de comprobación en `WHEN_REQUIRED`) pasan contra un bucket de prueba de R2, y el PR registra el resultado;
-- `render.yaml` describe los servicios, y su prueba los fija. La región elegida queda registrada, y las credenciales solo existen como variables `BUOH_*` de cada servicio;
+- el Blueprint del sistema de datos (`render-datos.yaml`, ADR-0018 §2) describe los servicios, y su prueba los fija. La región elegida queda registrada, y las credenciales solo existen como variables `BUOH_*` de cada servicio;
 - cada proceso tiene su token de R2, limitado al bucket de su entorno y a lo que hace: `ingest` y, si es otro, el proceso que publica datasets (`F2-DATASET-001`) leen y escriben, y `data:health`, la API y el motor solo leen. La ADR fija el cifrado de la conexión a PostgreSQL, y una prueba comprueba que el worker lo aplica; la API y el motor lo comprueban en su incremento;
 - la ADR fija dónde y cada cuánto corre `data:health`, con su costo en R2 calculado, y si una parada programada, como un despliegue, recupera su historia, algo que ADR-0015 §10 dejó para el plan de alojamiento;
 - evidencia de 7 días seguidos de captura en producción, por el canal de §4, punto 10. `data:health` da `healthy` salvo en episodios registrados con su causa. La memoria máxima medida en Render no pasa de 256 MB, la mitad del Starter. Las operaciones de R2 y el tráfico de salida medidos caben en el presupuesto de §11;
@@ -341,7 +341,7 @@ Es la primera mitad del criterio de salida del roadmap: cada decisión del motor
 Cada ADR es un PR propio, con su revisión semántica, y se fusiona antes del primer PR de código que gobierna. Cada una fija la secuencia de PR de su incremento, como ADR-0015 §13. Este es su orden:
 
 1. **Punto de control** (F2.1): qué resume, dónde se guarda, cómo se liga a los segmentos cerrados y a las versiones, cómo se demuestra la equivalencia con la derivación completa y cómo lo usan los cuatro lectores. Dice también cómo sigue valiendo si la retención parte la captura en logs sucesivos (`F2-RETENTION-001`). Diseña la derivación para que la vista de cada instante de decisión (§4, punto 2) pueda reutilizarla.
-2. **Despliegue del sistema de datos** (F2.2): las condiciones de ADR-0016 §4 que quedan después del punto de control. Son los roles, la retención, las reglas de `ingest` en producción, las comprobaciones de R2, dónde y cada cuánto corre `data:health`, las credenciales y la región. Decide también el cifrado de la conexión a PostgreSQL, `render.yaml`, la historia tras una parada programada, qué pasa si dos instancias se solapan durante un despliegue, cómo se mide el tráfico de salida y cómo llega al repositorio la evidencia de producción (§4, punto 10).
+2. **Despliegue del sistema de datos** (F2.2): las condiciones de ADR-0016 §4 que quedan después del punto de control. Son los roles, la retención, las reglas de `ingest` en producción, las comprobaciones de R2, dónde y cada cuánto corre `data:health`, las credenciales y la región. Decide también el cifrado de la conexión a PostgreSQL, el Blueprint de Render (`render-datos.yaml`, [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md)), la historia tras una parada programada, qué pasa si dos instancias se solapan durante un despliegue, cómo se mide el tráfico de salida y cómo llega al repositorio la evidencia de producción (§4, punto 10).
 3. **API y cuentas** (F2.3): el método de inicio de sesión, las sesiones, las cuentas sin registro público, los espacios personales, la auditoría, los contratos y su OpenAPI, cómo se sirve la web y sus roles y tokens de lectura. Decide también cómo se aíslan los backtests y cómo comparten la API y el motor el código de lectura de datos (§6).
 4. **Datasets vivos** (F2.5): los umbrales, el perfil de publicación, la cadencia y el tamaño, las partes y los límites al publicar, los ticks de la historia y la lectura por partes. Se escribe con 7 días de captura en producción.
 5. **Modelo de estrategia** (F2.6).
@@ -406,18 +406,18 @@ Un ensayo en vivo o en producción nunca sustituye una prueba sin red, porque la
 |---|---|---|
 | Render Postgres Basic-256mb, con 1 GB de disco | F2.2 | 6,30 USD |
 | Background worker Starter para `ingest` | F2.2 | 7 USD |
+| Cron job de Render para las operaciones del sistema de datos (ADR-0018 §11) | F2.2 | 1 USD, el mínimo |
 | Cloudflare R2 | F2.2 | de 1 a 2 USD |
 | Servicio web Starter para la API y la web | F2.3 | 7 USD |
 | Background worker Starter para el motor `shadow` | F2.9 | 7 USD |
 
-En total, unos 29 USD al mes. Las cuatro primeras filas son los unos 22 USD que aprobó el propietario (ADR-0016 §2). El servidor del motor lo aprobó el 2026-10-29 («1. Si, un servidor pequeño para el bot»), y se compra con F2.9. Los backtests corren dentro del servicio de la API, sin costo aparte. Los precios son los que comprobó ADR-0016 y se confirman al comprar.
+En total, unos 30 USD al mes. La base, el worker de `ingest`, R2 y la API son los unos 22 USD que aprobó el propietario (ADR-0016 §2). El cron job lo aprobó el 2026-10-31 («la respuesta nro 2, apruebo 1 usd mas»), y el servidor del motor el 2026-10-29 («1. Si, un servidor pequeño para el bot»), que se compra con F2.9. Los backtests corren dentro del servicio de la API, sin costo aparte. Los precios son los que comprobó ADR-0016 y se confirman al comprar.
 
-La línea de R2 es la estimación de ADR-0016 para la captura y `data:health`. No incluye las lecturas de la API y del motor ni el tráfico de salida de Render, que no se han medido: F2.2, F2.3 y F2.9 los miden. Si lo medido no cabe en este presupuesto, se presenta al propietario antes de seguir (§4, punto 8).
+La línea de R2 es la estimación de ADR-0016 para la captura y `data:health`, que ADR-0018 §14 afina en unos 1,60 USD. No incluye las lecturas de la API y del motor. El tráfico de salida de Render tampoco está medido: ADR-0018 §13 lo estima en unos 0,30 USD al mes por encima de lo incluido, y F2.2, F2.3 y F2.9 lo miden. Si lo medido no cabe en este presupuesto, se presenta al propietario antes de seguir (§4, punto 8).
 
 Pueden sumarse, si sus ADR los eligen y el propietario los aprueba:
 
 - el disco de PostgreSQL de 5 GB, 1,50 USD en lugar de 0,30, cuando la retención lo pida;
-- un cron job para `data:health`, desde 1 USD;
 - el worker Standard, unos 18 USD más, si el punto de control no basta (ADR-0016, «Consecuencias»).
 
 ## 12. Decisiones del propietario durante la fase
@@ -425,9 +425,10 @@ Pueden sumarse, si sus ADR los eligen y el propietario los aprueba:
 | Decisión | Materia | Se pide en |
 |---|---|---|
 | Servidor propio para el motor `shadow`, unos 7 USD más al mes | dinero | decidida el 2026-10-29: sí (§11) |
-| Región de Render y de R2, que luego no se puede cambiar | producto y dinero | F2.2: el agente recomienda Virginia (EE. UU. este), con la indicación de ubicación `enam` para R2, y la pregunta antes de la ADR (`PROJECT_STATUS.md`) |
-| Retención y tamaño del disco, si suben el presupuesto | dinero | delegada el 2026-10-31 en la dirección técnica, sin subir el presupuesto: la fija la ADR de despliegue |
-| Si el agente recibe un acceso de solo lectura a producción, o si la evidencia llega solo por el propietario (§4, punto 10) | seguridad | decidida el 2026-10-31: acceso, también total; el agente usa el mínimo que necesite cada tarea (§4, punto 10) |
+| Región de Render y de R2, que luego no se puede cambiar | producto y dinero | decidida el 2026-10-31: Virginia (EE. UU. este), con la indicación de ubicación `enam` para R2 (ADR-0018 §1) |
+| Retención y tamaño del disco, si suben el presupuesto | dinero | delegada el 2026-10-31 en la dirección técnica, sin subir el presupuesto. Como los términos de Deriv solo permiten tener sus datos en caché 24 horas, el propietario decidió ese día: 30 días igualmente (ADR-0018 §7) |
+| Si el agente recibe un acceso de solo lectura a producción, o si la evidencia llega solo por el propietario (§4, punto 10) | seguridad | decidida el 2026-10-31: acceso, también total; el agente usa el mínimo que necesite cada tarea (§4, punto 10), y la base de datos queda abierta a internet (ADR-0018 §9 y §12) |
+| Un cron job de Render para las operaciones del sistema de datos, unos 1 USD más al mes | dinero | decidida el 2026-10-31: sí (§11 y ADR-0018 §11) |
 | Cómo inicia sesión el propietario | seguridad | F2.3 |
 | Qué idiomas tiene el producto, para la preferencia de idioma del catálogo | producto | F2.4 |
 | Qué tipo de operación representan las posiciones hipotéticas, dentro de lo que ofrece Deriv para R_100 | producto | antes de abrir la ADR del modelo de estrategia (§8, punto 5) |

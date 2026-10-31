@@ -1,6 +1,6 @@
 # ADR-0006: Alojamiento productivo en Render
 
-- **Estado:** Aceptada; complementada por [ADR-0013](0013-publicacion-del-sitio-en-render.md) (publicación del sitio oficial) y por [ADR-0016](0016-alojamiento-del-sistema-de-datos.md) (alojamiento del worker y almacenamiento de objetos)
+- **Estado:** Aceptada; complementada por [ADR-0013](0013-publicacion-del-sitio-en-render.md) (publicación del sitio oficial), por [ADR-0016](0016-alojamiento-del-sistema-de-datos.md) (alojamiento del worker y almacenamiento de objetos) y por [ADR-0018](0018-sistema-de-datos-en-produccion.md) (región y despliegue del sistema de datos)
 - **Fecha:** 2026-10-23
 - **Ámbito:** Despliegue posterior a Fase 1
 - **Decisores:** Propietario de buoh

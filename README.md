@@ -101,6 +101,7 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 - [ADR-0015: reconexión, recuperación de historia y salud (F1.5)](docs/arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md)
 - [ADR-0016: alojamiento del sistema de datos en Render y Cloudflare R2](docs/arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)
 - [ADR-0017: punto de control de la derivación en vivo (F2.1)](docs/arquitectura/adr/0017-punto-de-control-de-la-derivacion-en-vivo.md)
+- [ADR-0018: sistema de datos en producción (F2.2)](docs/arquitectura/adr/0018-sistema-de-datos-en-produccion.md)
 - [Plan de la línea visual V1](docs/plan/linea-visual-v1.md)
 - [Guía de marca](docs/diseno/marca-buoh.md)
 - [Concepto de interfaz](docs/diseno/concepto-de-interfaz.md)

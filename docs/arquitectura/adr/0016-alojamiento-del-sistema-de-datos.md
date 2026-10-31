@@ -1,6 +1,6 @@
 # ADR-0016: Alojamiento del sistema de datos en Render y Cloudflare R2
 
-- **Estado:** Aceptada; la condición «Memoria» de §4 la diseña [ADR-0017](0017-punto-de-control-de-la-derivacion-en-vivo.md)
+- **Estado:** Aceptada; la condición «Memoria» de §4 la diseña [ADR-0017](0017-punto-de-control-de-la-derivacion-en-vivo.md), y las demás condiciones de §4 las decide [ADR-0018](0018-sistema-de-datos-en-produccion.md), que suma a §2 un cron job de unos 1 USD al mes
 - **Fecha:** 2026-10-29
 - **Ámbito:** despliegue del sistema de datos (`market-data-worker`, PostgreSQL y almacenamiento de objetos) en la Fase 2. Complementa [ADR-0006](0006-alojamiento-en-render.md): decide dos de sus pendientes.
 - **Decisores:** Propietario de buoh (proveedores y presupuesto), a propuesta de la dirección técnica (planes y medición).
