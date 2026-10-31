@@ -2,7 +2,7 @@ import { ConfigError, loadConfig, type WorkerConfig } from '../config.js';
 import { type Scheduler } from '../deriv/ports.js';
 import { DERIV_SOURCE } from '../deriv/profile.js';
 import { type ExpectedSchemaArchive } from '../deriv/schema-archive.js';
-import { parseHealthArgs } from '../health-args.js';
+import { HEALTH_USAGE, parseHealthArgs } from '../health-args.js';
 import { UsageError } from '../replay-args.js';
 import { failureReason } from '../source-log/source-event-log.js';
 import { productionLogConfigErrors, withLog, type LogLocation } from '../successive-logs.js';
@@ -23,11 +23,15 @@ export interface HealthDependencies {
   /** La hora UTC con milisegundos (`toISOString()`). */
   readonly now: () => string;
   /**
-   * En `production`, busca el log activo de la fuente con esa configuración, ya comprobada
-   * (ADR-0018 §6), o `null` si no hay ninguno: `locateActiveLog` en `data:health`. Fuera de
-   * `production` no se llama.
+   * En `production`, busca con esa configuración, ya comprobada, el log que observa (ADR-0018 §6):
+   * el log `requested` de `--log` si existe y se puede leer, o el log activo de la fuente sin él;
+   * `null` si no hay ninguno. En `data:health`, `locateActiveLog`. Fuera de `production` no se
+   * llama.
    */
-  readonly locateLog: (config: WorkerConfig) => Promise<LogLocation | null>;
+  readonly locateLog: (
+    config: WorkerConfig,
+    requested: number | null,
+  ) => Promise<LogLocation | null>;
   /**
    * Abre las lecturas con esa configuración, ya comprobada: `openHealthStores` en `data:health`,
    * sobre `openStores` y su pool. En `production`, con el esquema y el prefijo del log activo
@@ -120,13 +124,17 @@ async function locateAndObserve(
   dependencies: HealthDependencies,
   config: WorkerConfig,
   opened: OpenedStores,
-  input: { readonly progress: HealthObservationProgress; readonly symbol: string },
+  input: {
+    readonly log: number | null;
+    readonly progress: HealthObservationProgress;
+    readonly symbol: string;
+  },
 ): Promise<HealthEvaluation> {
   let target = config;
   if (config.environment === 'production') {
     let log: LogLocation | null;
     try {
-      log = await dependencies.locateLog(config);
+      log = await dependencies.locateLog(config, input.log);
     } catch (error) {
       return evaluateDataHealth({
         reason: failureReason(error),
@@ -204,8 +212,10 @@ function loadHealthConfig(env: Readonly<Record<string, string | undefined>>): Wo
  * - Argumentos o variables de entorno inválidos (`UsageError`, `ConfigError`, regla 1): salida 2,
  *   nada en stdout y en stderr una línea con `code` y el mensaje, que solo nombra variables, sin
  *   abrir nada. En `production`, `BUOH_POSTGRES_SCHEMA` también es inválida.
- * - En `production`, observa el log activo (ADR-0018 §6): lo busca dentro del plazo total y abre
- *   los almacenes con su esquema y su prefijo. Sin log activo, la regla 2 con `log_not_prepared`.
+ * - En `production`, observa el log activo (ADR-0018 §6), o el de `--log`: lo busca dentro del
+ *   plazo total y abre los almacenes con su esquema y su prefijo. Sin log activo, o si el pedido no
+ *   existe o todavía no se puede leer, la regla 2 con `log_not_prepared`. Fuera de `production`,
+ *   `--log` es un error de uso.
  * - Si no, stdout lleva el `HealthReport` y stderr la alerta saneada de las reglas 2 y 3, si la hay.
  *   Un error de programación da el informe `failed` con la alerta `unexpected_error`.
  * - Si la observación y la evaluación no terminan en `HEALTH_DEADLINE_MS`, el informe es el de la
@@ -219,10 +229,16 @@ export async function healthCommand(
   dependencies: HealthDependencies,
 ): Promise<HealthCommandResult> {
   let symbol: string;
+  let log: number | null;
   let config: WorkerConfig;
   try {
-    ({ symbol } = parseHealthArgs(argv));
+    ({ log, symbol } = parseHealthArgs(argv));
     config = loadHealthConfig(env);
+    if (log !== null && config.environment !== 'production') {
+      throw new UsageError(
+        `--log solo vale en production, donde la captura es una sucesión de logs. ${HEALTH_USAGE}`,
+      );
+    }
   } catch (error) {
     if (error instanceof UsageError || error instanceof ConfigError) {
       return {
@@ -241,7 +257,7 @@ export async function healthCommand(
     evaluation = await withinDeadline(
       scheduler,
       HEALTH_DEADLINE_MS,
-      locateAndObserve(dependencies, config, opened, { progress, symbol }),
+      locateAndObserve(dependencies, config, opened, { log, progress, symbol }),
       () =>
         evaluateDataHealth(
           progress.rebuilding

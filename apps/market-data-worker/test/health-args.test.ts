@@ -15,10 +15,29 @@ describe('parseHealthArgs', () => {
   });
 
   it('usa R_100 por defecto, tolera el separador -- que reenvía pnpm y admite otro símbolo', () => {
-    expect(parseHealthArgs(['--json'])).toEqual({ symbol: 'R_100' });
-    expect(parseHealthArgs(['--', '--json'])).toEqual({ symbol: 'R_100' });
-    expect(parseHealthArgs(['--json', '--symbol', '1HZ100V'])).toEqual({ symbol: '1HZ100V' });
-    expect(parseHealthArgs(['--symbol', 'R_50', '--json'])).toEqual({ symbol: 'R_50' });
+    expect(parseHealthArgs(['--json'])).toEqual({ log: null, symbol: 'R_100' });
+    expect(parseHealthArgs(['--', '--json'])).toEqual({ log: null, symbol: 'R_100' });
+    expect(parseHealthArgs(['--json', '--symbol', '1HZ100V'])).toEqual({
+      log: null,
+      symbol: '1HZ100V',
+    });
+    expect(parseHealthArgs(['--symbol', 'R_50', '--json'])).toEqual({ log: null, symbol: 'R_50' });
+  });
+
+  it('--log da el número de un log de producción, de 1 a 999 999 (ADR-0018 §6 y §11)', () => {
+    expect(parseHealthArgs(['--json', '--log', '1'])).toEqual({ log: 1, symbol: 'R_100' });
+    expect(parseHealthArgs(['--', '--json', '--log', '999999', '--symbol', 'R_50'])).toEqual({
+      log: 999_999,
+      symbol: 'R_50',
+    });
+  });
+
+  it('un número de log que no es un entero de 1 a 999 999 sin ceros delante es un error de uso, con el uso', () => {
+    for (const value of ['0', '-1', '1000000', '01', '1.5', 'abc', '', ' 1']) {
+      expect(() => parseHealthArgs(['--json', '--log', value])).toThrow(UsageError);
+      expect(() => parseHealthArgs(['--json', '--log', value])).toThrow(HEALTH_USAGE);
+    }
+    expect(() => parseHealthArgs(['--json', '--log'])).toThrow(UsageError);
   });
 
   it('el símbolo sigue la regla del smoke: rechaza lo que nunca es un código', () => {

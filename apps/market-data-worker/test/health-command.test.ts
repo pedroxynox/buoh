@@ -145,6 +145,8 @@ async function commandHarness(options: CommandOptions = {}) {
   const opened: WorkerConfig[] = [];
   /** La configuración de cada búsqueda del log activo, que solo se hace en `production`. */
   const located: WorkerConfig[] = [];
+  /** El log pedido con `--log` en cada búsqueda, o `null`. */
+  const requests: (number | null)[] = [];
   let closed = 0;
   /** El temporizador del plazo total y del cierre: el tiempo solo avanza con `advance`. */
   const clock = new ManualClock(NOW);
@@ -165,10 +167,11 @@ async function commandHarness(options: CommandOptions = {}) {
   let sequence = 0;
   const deps = (overrides: Partial<HealthCommandStores> = {}): HealthDependencies => ({
     expected: FIXTURE.expected,
-    // El log activo de `production`: el 2, como si el 1 ya hubiera terminado.
-    locateLog: (config) => {
+    // El log activo de `production`: el 2, como si el 1 ya hubiera terminado. Con `--log`, el pedido.
+    locateLog: (config, requested) => {
       located.push(config);
-      return Promise.resolve(logLocation(2));
+      requests.push(requested);
+      return Promise.resolve(logLocation(requested ?? 2));
     },
     nextId: () => uuid(7000 + (sequence += 1)),
     now: () => NOW,
@@ -207,6 +210,7 @@ async function commandHarness(options: CommandOptions = {}) {
     located,
     objects,
     opened,
+    requests,
     sourceLog,
     status,
     stores,
@@ -715,6 +719,30 @@ describe('healthCommand en production: el log activo (ADR-0018 §6)', () => {
       message: 'Configuración inválida o ausente: BUOH_POSTGRES_SCHEMA, BUOH_POSTGRES_SSLMODE.',
       status: 'failed',
     });
+    expect(run.located).toEqual([]);
+    expect(run.opened).toEqual([]);
+  });
+
+  it('con --log, busca ese log en lugar del activo y lo observa con su esquema y su prefijo (ADR-0018 §11)', async () => {
+    const run = await commandHarness();
+    const result = await healthCommand([...ARGS, '--log', '1'], PRODUCTION_ENV, run.deps());
+
+    expect(result.exitCode).toBe(0);
+    expect(run.requests).toEqual([1]);
+    expect(run.opened.map((config) => [config.postgres.schema, config.s3.keyPrefix])).toEqual([
+      ['buoh_log_000001', 'logs/000001/'],
+    ]);
+  });
+
+  it('fuera de production, --log es un error de uso: salida 2, sin buscar ni abrir nada', async () => {
+    const run = await commandHarness();
+    const result = await healthCommand([...ARGS, '--log', '1'], ENV, run.deps());
+
+    expect(result).toMatchObject({ exitCode: 2, stdout: null });
+    const line = JSON.parse(result.stderr ?? '') as Record<string, unknown>;
+    expect(line).toMatchObject({ code: 'UsageError', status: 'failed' });
+    expect(line['message']).toContain('--log');
+    expect(line['message']).toContain(HEALTH_USAGE);
     expect(run.located).toEqual([]);
     expect(run.opened).toEqual([]);
   });

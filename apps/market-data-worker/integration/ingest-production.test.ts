@@ -225,7 +225,7 @@ describe('ingest en production (ADR-0018 §4)', () => {
     await eventually(() => waiting('log_not_prepared').length === 1);
     expect(clock.pendingDelays()).toEqual([STARTUP_RETRY_MS]);
 
-    // 2. El log con las migraciones 0001 a 0004: falta la 0005.
+    // 2. El log con las migraciones 0001 a 0004: faltan la 0005 y la 0006.
     const logPool = createPool({ ...localConfig.postgres, schema: LOG.schema });
     try {
       await ready(admin).query(`CREATE SCHEMA ${LOG.schema}`);
@@ -246,7 +246,7 @@ describe('ingest en production (ADR-0018 §4)', () => {
         '0005_punto_de_control_en_vivo.sql',
       );
 
-      // 3. Otro proceso tiene el bloqueo y se aplica la 0005: source_lock_taken, cada segundo.
+      // 3. Otro proceso tiene el bloqueo y se aplican las que faltan: source_lock_taken, cada segundo.
       const other = await SourceLock.acquire({
         postgres: localConfig.postgres,
         source: DERIV_SOURCE,
@@ -255,7 +255,10 @@ describe('ingest en production (ADR-0018 §4)', () => {
         throw new TypeError('No se tomó el bloqueo.');
       }
       try {
-        expect((await migrate(logPool)).applied).toEqual(['0005_punto_de_control_en_vivo.sql']);
+        expect((await migrate(logPool)).applied).toEqual([
+          '0005_punto_de_control_en_vivo.sql',
+          '0006_informes_de_operaciones.sql',
+        ]);
         await clock.advance(STARTUP_RETRY_MS);
         await eventually(() => waiting('source_lock_taken').length === 1);
         expect(clock.pendingDelays()).toEqual([STARTUP_LOCK_RETRY_MS]);

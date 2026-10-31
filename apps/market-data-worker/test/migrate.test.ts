@@ -12,6 +12,7 @@ const ALL = [
   '0003_catalogo_y_respuestas_pedidas.sql',
   '0004_cursor_y_latido.sql',
   '0005_punto_de_control_en_vivo.sql',
+  '0006_informes_de_operaciones.sql',
 ];
 
 /** Un pool que responde cada consulta con `answer` y anota su texto. */
@@ -40,18 +41,20 @@ describe('pendingMigrations', () => {
   });
 
   it('le faltan, en orden, las que la tabla no tiene', async () => {
-    expect(await pendingMigrations(fakePool(applied(...ALL.slice(0, 4))).pool)).toEqual([
-      '0005_punto_de_control_en_vivo.sql',
+    expect(await pendingMigrations(fakePool(applied(...ALL.slice(0, 5))).pool)).toEqual([
+      '0006_informes_de_operaciones.sql',
     ]);
     expect(await pendingMigrations(fakePool(applied(...ALL.slice(0, 3))).pool)).toEqual([
       '0004_cursor_y_latido.sql',
       '0005_punto_de_control_en_vivo.sql',
+      '0006_informes_de_operaciones.sql',
     ]);
     expect(await pendingMigrations(fakePool(applied(ALL[1] ?? '')).pool)).toEqual([
       '0001_publicaciones.sql',
       '0003_catalogo_y_respuestas_pedidas.sql',
       '0004_cursor_y_latido.sql',
       '0005_punto_de_control_en_vivo.sql',
+      '0006_informes_de_operaciones.sql',
     ]);
   });
 

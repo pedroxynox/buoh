@@ -4,9 +4,11 @@ export {
   DEFAULT_S3_BUCKET,
   isDeployedEnvironment,
   loadConfig,
+  loadPostgresConfig,
   POSTGRES_IDENTIFIER,
   POSTGRES_SSL_MODES,
   type PostgresSslMode,
+  type PostgresWorkerConfig,
   type WorkerConfig,
 } from './config.js';
 export { migrateCommand, type MigrateCommandDeps, type MigratePool } from './migrate-command.js';
@@ -242,6 +244,40 @@ export {
 } from './runtime.js';
 export { S3ObjectStore } from './s3/object-store.js';
 export {
+  CHILD_OUTPUT_LIMIT_BYTES,
+  CHILD_TIMEOUT_MS,
+  runNodeScript,
+  runWorkerChild,
+  workerChildScript,
+  type ChildResult,
+  type RunChild,
+  type WorkerChild,
+} from './operations/child.js';
+export {
+  healthEnvironment,
+  loadOperationsConfig,
+  migrateEnvironment,
+  type OperationsConfig,
+} from './operations/config.js';
+export {
+  OPERATIONS_CONNECTION_TIMEOUT_MS,
+  OPERATIONS_QUERY_TIMEOUT_MS,
+  openOwnerDatabase,
+  type LoginCheck,
+  type OperationsReportRow,
+  type OwnerDatabase,
+} from './operations/owner-database.js';
+export {
+  nextLogToPrepare,
+  OPERATIONS_STEPS,
+  operationsCommand,
+  runOperations,
+  type OperationsDependencies,
+  type OperationsInput,
+  type OperationsRun,
+  type OperationsStep,
+} from './operations/run.js';
+export {
   findActiveLog,
   isLogExpired,
   listCaptureLogs,
@@ -251,6 +287,7 @@ export {
   logNumberOf,
   MAX_LOG_NUMBER,
   productionLogConfigErrors,
+  readCaptureLog,
   selectActiveLog,
   withLog,
   type CaptureLog,

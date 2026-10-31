@@ -218,9 +218,9 @@ describe('el usuario por defecto de Render prepara la base (ADR-0018 §8)', () =
 });
 
 describe('db:migrate con el rol dueño (F2-ROLE-001)', () => {
-  it('aplica las cinco migraciones como buoh_dueno: el esquema y cada tabla son suyos', async () => {
+  it('aplica las seis migraciones como buoh_dueno: el esquema y cada tabla son suyos', async () => {
     expect(migrateLine).toMatchObject({ exitCode: 0, status: 'migrated' });
-    expect(migrateLine['applied']).toHaveLength(5);
+    expect(migrateLine['applied']).toHaveLength(6);
     const { rows } = await ready(admin).query<{ owner: string }>(
       `SELECT tableowner AS owner FROM pg_tables WHERE schemaname = $1
        UNION ALL
@@ -453,7 +453,7 @@ describe('la espera del arranque de ingest en production con buoh_ingesta (ADR-0
       schema: log.schema,
     });
     try {
-      expect((await migrate(owner, { ownerRole: POSTGRES_ROLES.owner })).applied).toHaveLength(5);
+      expect((await migrate(owner, { ownerRole: POSTGRES_ROLES.owner })).applied).toHaveLength(6);
     } finally {
       await owner.end();
     }

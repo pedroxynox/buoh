@@ -115,6 +115,7 @@ describe('integración PostgreSQL + S3-compatible local', () => {
       '0003_catalogo_y_respuestas_pedidas.sql',
       '0004_cursor_y_latido.sql',
       '0005_punto_de_control_en_vivo.sql',
+      '0006_informes_de_operaciones.sql',
     ]);
     expect((await migrate(stores.pool)).applied).toEqual([]);
   });

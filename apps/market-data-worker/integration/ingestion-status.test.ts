@@ -82,13 +82,14 @@ afterAll(async () => {
 });
 
 describe('migración 0004', () => {
-  it('se aplica después de las tres anteriores, y antes de la 0005', () => {
+  it('se aplica después de las tres anteriores, y antes de la 0005 y la 0006', () => {
     expect(applied).toEqual([
       '0001_publicaciones.sql',
       '0002_log_raw_first.sql',
       '0003_catalogo_y_respuestas_pedidas.sql',
       '0004_cursor_y_latido.sql',
       '0005_punto_de_control_en_vivo.sql',
+      '0006_informes_de_operaciones.sql',
     ]);
   });
 });
