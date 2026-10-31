@@ -16,10 +16,12 @@ import {
   INGEST_WRITE_TABLES,
   loadConfig,
   LOGIN_ROLES,
+  logLocation,
   migrate,
   migrateCommand,
   openHealthStores,
   openLockedSourceLog,
+  openStartupReads,
   openStores,
   POSTGRES_ROLES,
   PostgresSessionLockProvider,
@@ -433,6 +435,38 @@ describe('buoh_salud solo lee (F2-ROLE-001)', () => {
       expect(await sqlState(pool, 'DELETE FROM source_event_index WHERE false')).toBe('42501');
     } finally {
       await pool.end();
+    }
+  });
+});
+
+describe('la espera del arranque de ingest en production con buoh_ingesta (ADR-0018 §4 y §8)', () => {
+  it('con un log preparado como en producción, encuentra el log activo y lee sus migraciones sin un rechazo por permisos', async () => {
+    // Como buoh-operaciones: el esquema del log 1 es de buoh_dueno, con sus migraciones y sus
+    // privilegios.
+    const log = logLocation(1);
+    const client = ready(renderClient);
+    await client.query(`SET ROLE ${POSTGRES_ROLES.owner}`);
+    await client.query(`CREATE SCHEMA ${log.schema}`);
+    await client.query('RESET ROLE');
+    const owner = createPool({
+      ...roleConfig(RENDER_USER, passwords.render).postgres,
+      schema: log.schema,
+    });
+    try {
+      expect((await migrate(owner, { ownerRole: POSTGRES_ROLES.owner })).applied).toHaveLength(5);
+    } finally {
+      await owner.end();
+    }
+    await grantLogPrivileges(client, log.schema);
+    const reads = openStartupReads(roleConfig(POSTGRES_ROLES.ingest, passwords.ingest), {
+      now: () => START,
+      source: DERIV_SOURCE,
+    });
+    try {
+      expect(await reads.locateLog()).toEqual(log);
+      expect(await reads.pendingMigrations(log)).toEqual([]);
+    } finally {
+      await reads.close();
     }
   });
 });
