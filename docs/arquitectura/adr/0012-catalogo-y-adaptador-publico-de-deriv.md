@@ -5,7 +5,7 @@
 - **Ámbito:** Fase 1, entrega F1.4b (`F1-CATALOG-001`, `F1-SOURCE-001` y `pnpm run data:smoke`)
 - **Decisores:** Dirección técnica de buoh, dentro de las decisiones del propietario para F1.4b registradas en `PROJECT_STATUS.md`
 - **Complementa:** [ADR-0003](0003-lenguajes-y-limites.md) (bibliotecas de la fuente Deriv), [ADR-0004](0004-pipeline-y-reproduccion-de-datos-fase-1.md) §2, §6, §7, §12 y §13, [ADR-0005](0005-persistencia-local-y-formato-fisico-f1-3.md) y [ADR-0007](0007-varias-fuentes-y-metatrader-5.md) §2. No cambia el alcance ni la puerta de salida de Fase 1.
-- **Complementada por:** [ADR-0015](0015-reconexion-recuperacion-y-salud-f1-5.md) (F1.5): conector `deriv-options-ws-1.1.0` con `ticks_history` (§1 y §5), la respuesta de historia como respuesta pedida (§6), reconexión con el bloqueo por fuente (§9), el smoke de reconexión (§10) y, en §8, la derivación del estado vivo con el perfil de medición, que sigue sin publicar
+- **Complementada por:** [ADR-0015](0015-reconexion-recuperacion-y-salud-f1-5.md) (F1.5): conector `deriv-options-ws-1.1.0` con `ticks_history` (§1 y §5), la respuesta de historia como respuesta pedida (§6), reconexión con el bloqueo por fuente (§9), el smoke de reconexión (§10) y, en §8, la derivación del estado vivo con el perfil de medición, que sigue sin publicar; y por [ADR-0018](0018-sistema-de-datos-en-produccion.md), con la que en `production` una segunda instancia espera el bloqueo de §9 en lugar de terminar
 
 ## Contexto
 

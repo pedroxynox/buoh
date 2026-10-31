@@ -1,6 +1,6 @@
 # ADR-0015: Reconexión, recuperación de historia y salud del worker (F1.5)
 
-- **Estado:** Aceptada; §3, §4, §5 y §8 complementadas por [ADR-0017](0017-punto-de-control-de-la-derivacion-en-vivo.md) (los lectores en vivo parten de un punto de control), que también sustituye, para el estado vivo, la frase de «Relación con ADR-0005» según la cual se vuelve a derivar entero, sin calidad incremental y sin guardar lo derivado; §7 sustituida en `production` por [ADR-0018](0018-sistema-de-datos-en-produccion.md) (sistema de datos en producción), que también decide lo que §10 dejaba para el plan de alojamiento
+- **Estado:** Aceptada; §3, §4, §5 y §8 complementadas por [ADR-0017](0017-punto-de-control-de-la-derivacion-en-vivo.md) (los lectores en vivo parten de un punto de control), que también sustituye, para el estado vivo, la frase de «Relación con ADR-0005» según la cual se vuelve a derivar entero, sin calidad incremental y sin guardar lo derivado; §7 sustituida en `production` por [ADR-0018](0018-sistema-de-datos-en-produccion.md) (sistema de datos en producción), que también cambia allí el fallo de §3 al arrancar con el bloqueo tomado por una espera y decide lo que §10 dejaba para el plan de alojamiento
 - **Fecha:** 2026-10-27
 - **Ámbito:** Fase 1, entrega F1.5 (`F1-RECONNECT-001`, `F1-HEALTH-001` y la puerta de salida de Fase 1)
 - **Decisores:** Dirección técnica de buoh, dentro de las decisiones del propietario registradas en `PROJECT_STATUS.md` (umbrales live sin inventar y datos live sin publicar)
