@@ -108,6 +108,7 @@ export {
   LogPersistenceError,
   LogReadError,
   SourceEventLog,
+  writeVerified,
   type LogStage,
   type OpenSourceEventLogInput,
 } from './source-log/source-event-log.js';
