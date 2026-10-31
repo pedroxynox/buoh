@@ -18,24 +18,33 @@
 // peticiones es siempre `buoh-prueba`, y las claves no viajan sin cifrar.
 //
 // Cada ejecución escribe bajo un prefijo nuevo, `comprobaciones/<id>/`, y al terminar borra lo que
-// escribió. Con el cliente del worker (`S3ObjectStore.fromConfig`: sumas de comprobación solo cuando
-// hacen falta, `WHEN_REQUIRED`, un solo intento y los plazos de `data:health`, 5 s por conexión y
-// 10 s hasta las cabeceras), comprueba en orden:
+// escribió. La cuarta comprobación escribe bajo `bloqueo/<id>/`, que protege una regla de bloqueo de
+// un día que el propietario pone en `buoh-prueba` sobre `bloqueo/` (desde el PR 6c de ADR-0018 §16).
+// Con el cliente del worker (`S3ObjectStore.fromConfig`: sumas de comprobación solo cuando hacen
+// falta, `WHEN_REQUIRED`, un solo intento y los plazos de `data:health`, 5 s por conexión y 10 s
+// hasta las cabeceras), comprueba en orden:
 //
 // 1. `sin_sobrescribir`: con un objeto ya escrito, `writeVerified` con otros bytes en la misma clave
 //    recibe 412 (`putIfAbsent` da `exists`), falla al releerlos, y el objeto sigue con los suyos;
 // 2. `lectura_tras_escritura`: un objeto recién escrito se lee enseguida con los mismos bytes, y
 //    `HeadObject` da su tamaño;
-// 3. `sumas_de_comprobacion`: un objeto de 1 MiB de bytes aleatorios se escribe y se lee igual.
+// 3. `sumas_de_comprobacion`: un objeto de 1 MiB de bytes aleatorios se escribe y se lee igual;
+// 4. `con_bloqueo`: con un objeto ya escrito bajo la regla, R2 responde a otra escritura condicional
+//    en esa clave con 409 `ObjectLockedByBucketPolicy` (con 412, la regla no está:
+//    `lock_rule_missing`); `writeVerified` acepta los mismos bytes, como al guardar otra vez el
+//    esquema de fuente, y rechaza otros; R2 también rechaza borrarlo con 409, y el objeto sigue con
+//    sus bytes.
 //
-// Si las tres no terminan en 60 s, cierra el cliente del worker, que corta una lectura detenida, y
-// las que faltan fallan con `deadline_exceeded`; borra igual lo escrito, con su propio cliente.
+// Si las cuatro no terminan en 60 s, cierra los clientes del worker, lo que corta una lectura
+// detenida, y las que faltan fallan con `deadline_exceeded`; borra igual lo escrito, con su propio
+// cliente. El objeto de la cuarta no se puede borrar mientras la regla lo proteja.
 //
 // stdout lleva una sola línea JSON saneada: `endpoint` (`r2` o `local`, nunca la dirección, que tiene
 // el ID de la cuenta), `bucket`, `started_at_utc`, cada comprobación con `pass` o `fail` (y su motivo,
-// un código, nunca un mensaje), `cleanup` (`complete`, o `incomplete` si algún borrado falló) y
-// `status`. Nunca lleva las claves. Salida 0 si pasan las tres, 1 si alguna falla y 2 con variables
-// inválidas, sin abrir ninguna conexión.
+// un código, nunca un mensaje), `cleanup` (`complete`, o `incomplete` si algún borrado de
+// `comprobaciones/<id>/` falló), `locked_left` (los objetos de `bloqueo/<id>/` que no se pudieron
+// borrar: 1 con la regla puesta) y `status`. Nunca lleva las claves. Salida 0 si pasan las cuatro, 1
+// si alguna falla y 2 con variables inválidas, sin abrir ninguna conexión.
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 
@@ -48,11 +57,15 @@ import {
 const requireFromWorker = createRequire(
   new URL('../../apps/market-data-worker/package.json', import.meta.url),
 );
-const { DeleteObjectCommand, HeadObjectCommand, S3Client } =
+const { DeleteObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } =
   requireFromWorker('@aws-sdk/client-s3');
 
 /** El único bucket en el que escribe: el de prueba de ADR-0018 §10. */
 const TEST_BUCKET = 'buoh-prueba';
+/** El prefijo de la regla de bloqueo de prueba, que pone el propietario (runbook). */
+const LOCK_PREFIX = 'bloqueo/';
+/** El código con el que R2 rechaza, con 409, cambiar o borrar una clave protegida por la regla. */
+const LOCK_CODE = 'ObjectLockedByBucketPolicy';
 /** El endpoint de una cuenta de R2 sin jurisdicción: el ID de la cuenta son 32 cifras hex. */
 const R2_HOST = /^[0-9a-f]{32}\.r2\.cloudflarestorage\.com$/u;
 /** Los plazos de cada conexión y de la espera de las cabeceras, los de `data:health`. */
@@ -124,16 +137,29 @@ function testConfig(env) {
 
 const sameBytes = (left, right) => Buffer.from(left).equals(Buffer.from(right));
 
+/** Si un error del SDK es el rechazo de la regla de bloqueo: 409 con `ObjectLockedByBucketPolicy`. */
+const isLocked = (error) => error?.$metadata?.httpStatusCode === 409 && error?.name === LOCK_CODE;
+
+/** Lo que dio una petición que debía fallar: `null` si no falló, o su error. */
+const rejectionOf = (promise) =>
+  promise.then(
+    () => null,
+    (error) => error,
+  );
+
 /**
- * Las tres comprobaciones de ADR-0018 §10, con el almacén y el cliente bajo `prefix`. Al terminar,
- * de cualquier forma, borra lo escrito con `client` y dice si lo borró todo.
+ * Las cuatro comprobaciones de ADR-0018 §10, con los almacenes y el cliente bajo `prefix` y, la
+ * cuarta, bajo `lockPrefix`. Al terminar, de cualquier forma, borra lo escrito con `client`, y dice
+ * si lo borró todo y cuántos objetos de la regla quedan.
  */
-async function runChecks({ client, config, prefix, store }) {
+async function runChecks({ client, config, lockPrefix, lockStore, prefix, store }) {
   const written = [];
+  const lockedWritten = [];
   let expired = false;
   const timer = setTimeout(() => {
     expired = true;
     store.destroy();
+    lockStore.destroy();
   }, DEADLINE_MS);
   /** Corre una comprobación: `pass`, o `fail` con el motivo saneado de lo que la hizo fallar. */
   const check = async (name, work) => {
@@ -153,6 +179,7 @@ async function runChecks({ client, config, prefix, store }) {
   };
   const checks = [];
   let cleanup = 'complete';
+  let lockedLeft = 0;
   try {
     checks.push(
       await check('sin_sobrescribir', async () => {
@@ -209,21 +236,96 @@ async function runChecks({ client, config, prefix, store }) {
         return sameBytes(read, bytes) ? null : 'read_mismatch';
       }),
     );
+    checks.push(
+      await check('con_bloqueo', async () => {
+        const original = randomBytes(64);
+        lockedWritten.push('objeto');
+        if (
+          (await lockStore.putIfAbsent('objeto', original, 'application/octet-stream')) !==
+          'created'
+        ) {
+          return 'first_write_not_created';
+        }
+        // La respuesta de R2 tal cual, sin el worker de por medio.
+        const rewrite = await rejectionOf(
+          client.send(
+            new PutObjectCommand({
+              Body: randomBytes(64),
+              Bucket: config.bucket,
+              IfNoneMatch: '*',
+              Key: `${lockPrefix}objeto`,
+            }),
+          ),
+        );
+        if (rewrite === null) {
+          return 'second_write_not_rejected';
+        }
+        if (!isLocked(rewrite)) {
+          return rewrite.$metadata?.httpStatusCode === 412
+            ? 'lock_rule_missing'
+            : failureReason(rewrite);
+        }
+        // Los mismos bytes cuentan como escritos, como al guardar otra vez el esquema de fuente.
+        const same = await writeVerified(
+          lockStore,
+          'objeto',
+          original,
+          'application/octet-stream',
+        ).then(
+          () => 'accepted',
+          (error) => failureReason(error),
+        );
+        if (same !== 'accepted') {
+          return `same_bytes_${same}`;
+        }
+        const other = await writeVerified(
+          lockStore,
+          'objeto',
+          randomBytes(64),
+          'application/octet-stream',
+        ).then(
+          () => 'accepted',
+          (error) => failureReason(error),
+        );
+        if (other !== 'object_verification_failed') {
+          return `other_bytes_${other}`;
+        }
+        // Con un token de escritura, como uno filtrado, borrarlo también se rechaza.
+        const deletion = await rejectionOf(
+          client.send(
+            new DeleteObjectCommand({ Bucket: config.bucket, Key: `${lockPrefix}objeto` }),
+          ),
+        );
+        if (deletion === null) {
+          return 'delete_not_blocked';
+        }
+        if (!isLocked(deletion)) {
+          return failureReason(deletion);
+        }
+        const kept = await lockStore.get('objeto', original.byteLength);
+        return sameBytes(kept, original) ? null : 'object_changed';
+      }),
+    );
   } finally {
     clearTimeout(timer);
+    const remove = (key) =>
+      client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key })).then(
+        () => true,
+        () => false,
+      );
     for (const key of written) {
-      const deleted = await client
-        .send(new DeleteObjectCommand({ Bucket: config.bucket, Key: `${prefix}${key}` }))
-        .then(
-          () => true,
-          () => false,
-        );
-      if (!deleted) {
+      if (!(await remove(`${prefix}${key}`))) {
         cleanup = 'incomplete';
       }
     }
+    // Con la regla puesta, R2 no deja borrarlo: lo vacía el propietario al quitar la regla.
+    for (const key of lockedWritten) {
+      if (!(await remove(`${lockPrefix}${key}`))) {
+        lockedLeft += 1;
+      }
+    }
   }
-  return { checks, cleanup };
+  return { checks, cleanup, lockedLeft };
 }
 
 async function main() {
@@ -236,8 +338,11 @@ async function main() {
     return;
   }
   const { config, kind } = loaded;
-  const prefix = `comprobaciones/${randomUUID()}/`;
+  const id = randomUUID();
+  const prefix = `comprobaciones/${id}/`;
+  const lockPrefix = `${LOCK_PREFIX}${id}/`;
   const store = S3ObjectStore.fromConfig({ ...config, keyPrefix: prefix }, TIMEOUTS);
+  const lockStore = S3ObjectStore.fromConfig({ ...config, keyPrefix: lockPrefix }, TIMEOUTS);
   const client = new S3Client({
     credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
     endpoint: config.endpoint,
@@ -250,7 +355,14 @@ async function main() {
   });
   try {
     const startedAt = new Date().toISOString();
-    const { checks, cleanup } = await runChecks({ client, config, prefix, store });
+    const { checks, cleanup, lockedLeft } = await runChecks({
+      client,
+      config,
+      lockPrefix,
+      lockStore,
+      prefix,
+      store,
+    });
     const status = checks.every((item) => item.status === 'pass') ? 'passed' : 'failed';
     process.stdout.write(
       `${JSON.stringify({
@@ -258,6 +370,7 @@ async function main() {
         checks,
         cleanup,
         endpoint: kind,
+        locked_left: lockedLeft,
         started_at_utc: startedAt,
         status,
       })}\n`,
@@ -265,6 +378,7 @@ async function main() {
     process.exitCode = status === 'passed' ? 0 : 1;
   } finally {
     store.destroy();
+    lockStore.destroy();
     client.destroy();
   }
 }
