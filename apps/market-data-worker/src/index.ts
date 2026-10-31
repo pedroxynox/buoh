@@ -190,12 +190,25 @@ export {
   ingestCommand,
   ingestExitCode,
   runIngest,
+  WAIT_STOPPED,
   type IngestDependencies,
   type IngestInput,
   type IngestRecovery,
   type IngestReport,
   type IngestStores,
 } from './ingest.js';
+export {
+  HandedOverLockProvider,
+  STARTUP_ALERT_INTERVAL_MS,
+  STARTUP_LOCK_RETRY_MS,
+  STARTUP_RETRY_MS,
+  STARTUP_WAIT_REASONS,
+  waitForProductionStart,
+  type StartupReads,
+  type StartupWaitInput,
+  type StartupWaitReason,
+  type StartupWaitResult,
+} from './ingest-startup.js';
 export {
   evaluateDataHealth,
   type HealthAlert,
@@ -222,6 +235,7 @@ export {
   HEALTH_CONNECTION_TIMEOUT_MS,
   HEALTH_REQUEST_TIMEOUT_MS,
   locateActiveLog,
+  openStartupReads,
   openHealthStores,
   openStores,
   type OpenStoresOptions,

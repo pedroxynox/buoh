@@ -1,5 +1,6 @@
 import { type WorkerConfig } from './config.js';
 import { type HealthCommandStores } from './health/command.js';
+import { type StartupReads } from './ingest-startup.js';
 import { stderrAlert, type OperationalAlert } from './operational/registry.js';
 import { PostgresCatalogStore } from './postgres/catalog-store.js';
 import { PostgresIngestionStatusStore } from './postgres/ingestion-status-store.js';
@@ -104,6 +105,37 @@ export function openHealthStores(
     operational: stores.operational,
     pendingMigrations: () => pendingMigrations(stores.pool),
     sourceLog: stores.sourceLog,
+  };
+}
+
+/**
+ * Las lecturas de la espera del arranque de `ingest` en `production` (ADR-0018 §4), sobre un pool
+ * propio con la credencial de la configuración y los mismos plazos de cada conexión y de cada
+ * consulta que `data:health`, para que un PostgreSQL que acepta la conexión y no contesta no deje
+ * la espera parada: el log activo de `source` (`findActiveLog`) y las migraciones que le faltan
+ * (`pendingMigrations` con su esquema). Ninguna escribe nada. Si PostgreSQL cierra una conexión
+ * libre del pool, deja la alerta `postgres_connection_lost`, como `openStores`. `close` libera las
+ * conexiones.
+ */
+export function openStartupReads(
+  config: WorkerConfig,
+  input: Pick<OpenStoresOptions, 'alert'> & {
+    readonly now: () => string;
+    readonly source: string;
+  },
+): StartupReads {
+  const alert = input.alert ?? stderrAlert;
+  const pool = createPool(config.postgres, {
+    connectionTimeoutMillis: HEALTH_CONNECTION_TIMEOUT_MS,
+    query_timeout: HEALTH_REQUEST_TIMEOUT_MS,
+  });
+  pool.on('error', (error) => {
+    alert({ event: 'postgres_connection_lost', reason: failureReason(error) });
+  });
+  return {
+    close: () => pool.end(),
+    locateLog: () => findActiveLog(pool, { now: input.now, source: input.source }),
+    pendingMigrations: (log) => pendingMigrations(pool, log.schema),
   };
 }
 

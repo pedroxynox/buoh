@@ -43,6 +43,7 @@ import { parseArgs } from 'node:util';
 import {
   checkIngestConfig,
   createUuidV7Generator,
+  IngestConfigError,
   loadConfig,
   openLockedSourceLog,
   OperationalRegistry,
@@ -99,7 +100,12 @@ try {
 let config;
 try {
   config = loadConfig(process.env);
-  checkIngestConfig(config);
+  checkIngestConfig(config, process.env);
+  // La medición es local: en `production`, `ingest` captura en el log activo (ADR-0018 §4), y este
+  // script, en el esquema de la configuración.
+  if (config.environment === 'production') {
+    throw new IngestConfigError(['BUOH_DEPLOYMENT_ENVIRONMENT']);
+  }
 } catch (error) {
   // `ConfigError` e `IngestConfigError` nombran las variables, nunca sus valores.
   fail(2, { code: error.name, message: error.message });

@@ -84,16 +84,26 @@ const UNDEFINED_TABLE = '42P01';
 /**
  * Las migraciones del worker que el esquema del pool todavía no tiene, en orden, sin aplicar nada:
  * las que faltan en `buoh_schema_migrations`, o todas si esa tabla no existe. La usa `ingest`, que
- * no arranca sin ellas (runbook, «Captura viva continua»). Cualquier otro error de la consulta, como
- * un PostgreSQL que no responde, la rechaza con él.
+ * no arranca sin ellas (runbook, «Captura viva continua»). Con `schema`, mira la tabla de ese
+ * esquema en lugar de la del `search_path` del pool, como la espera del arranque en `production`
+ * con el esquema del log activo (ADR-0018 §4). Cualquier otro error de la consulta, como un
+ * PostgreSQL que no responde, la rechaza con él.
  */
-export async function pendingMigrations(pool: Pick<Pool, 'query'>): Promise<string[]> {
+export async function pendingMigrations(
+  pool: Pick<Pool, 'query'>,
+  schema?: string,
+): Promise<string[]> {
+  if (schema !== undefined && !POSTGRES_IDENTIFIER.test(schema)) {
+    throw new TypeError('El esquema debe ser un nombre de minúsculas, cifras y _.');
+  }
   const migrations = await loadMigrations();
+  const table =
+    schema === undefined
+      ? 'buoh_schema_migrations'
+      : `${pg.escapeIdentifier(schema)}.buoh_schema_migrations`;
   let applied: ReadonlySet<string>;
   try {
-    const { rows } = await pool.query<{ name: string }>(
-      'SELECT name FROM buoh_schema_migrations ORDER BY name',
-    );
+    const { rows } = await pool.query<{ name: string }>(`SELECT name FROM ${table} ORDER BY name`);
     applied = new Set(rows.map((row) => row.name));
   } catch (error) {
     if ((error as { code?: unknown }).code !== UNDEFINED_TABLE) {

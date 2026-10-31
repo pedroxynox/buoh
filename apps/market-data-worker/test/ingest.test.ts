@@ -7,9 +7,13 @@ import {
   INGEST_RETENTION_MS,
   ingestCommand,
   lockedSourceLogStore,
+  logLocation,
   SourceEventLog,
+  STARTUP_RETRY_MS,
+  WAIT_STOPPED,
   type IngestDependencies,
   type IngestStores,
+  type LogLocation,
   type OperationalAlert,
   type WorkerConfig,
 } from '../src/index.js';
@@ -96,6 +100,16 @@ function logSince(firstAt: string): SourceEvent[] {
   ];
 }
 
+/**
+ * Lo que ven las lecturas de la espera del arranque en `production` (ADR-0018 §4): el log activo,
+ * las migraciones que le faltan y el cierre de sus conexiones. La prueba lo cambia mientras espera.
+ */
+interface StartupState {
+  closing: Promise<void>;
+  locate: LogLocation | null | Error;
+  pending: readonly string[];
+}
+
 interface IngestHarnessOptions {
   /** Source events que el log ya tiene, de ejecuciones anteriores. */
   readonly events?: readonly SourceEvent[];
@@ -152,6 +166,8 @@ async function ingestHarness(options: IngestHarnessOptions = {}) {
     handler: null,
     listening: false,
   };
+  // En production, el log 2 está preparado y tiene todas sus migraciones.
+  const startup: StartupState = { closing: Promise.resolve(), locate: logLocation(2), pending: [] };
   const deps: IngestDependencies = {
     alert: (payload) => alerts.push(payload),
     connect: (input) => {
@@ -178,6 +194,26 @@ async function ingestHarness(options: IngestHarnessOptions = {}) {
           source: input.source,
         }),
       }),
+    openStartupReads: (config) => {
+      configs.push(config);
+      timeline.push('reads');
+      return {
+        close: () => {
+          timeline.push('reads:close');
+          return startup.closing;
+        },
+        locateLog: () => {
+          timeline.push('locate');
+          return startup.locate instanceof Error
+            ? Promise.reject(startup.locate)
+            : Promise.resolve(startup.locate);
+        },
+        pendingMigrations: (log) => {
+          timeline.push(`pending:${log.schema}`);
+          return Promise.resolve(startup.pending);
+        },
+      };
+    },
     openStores: (config) => {
       configs.push(config);
       timeline.push('open');
@@ -216,10 +252,12 @@ async function ingestHarness(options: IngestHarnessOptions = {}) {
     configs,
     deps,
     fixture,
+    provider,
     raise,
     signal,
     socket,
     sockets,
+    startup,
     stores,
     timeline,
   };
@@ -279,9 +317,25 @@ describe('ingestCommand: argumentos y configuración', () => {
     ['el bucket por defecto', { BUOH_S3_BUCKET: 'buoh-local' }, ['BUOH_S3_BUCKET']],
     [
       // Con el cifrado que exige loadConfig en un despliegue (ADR-0018 §9).
-      'el entorno production',
-      { BUOH_DEPLOYMENT_ENVIRONMENT: 'production', BUOH_POSTGRES_SSLMODE: 'require' },
+      'el entorno staging',
+      { BUOH_DEPLOYMENT_ENVIRONMENT: 'staging', BUOH_POSTGRES_SSLMODE: 'require' },
       ['BUOH_DEPLOYMENT_ENVIRONMENT'],
+    ],
+    [
+      // En production, el esquema sale del log activo (ADR-0018 §4).
+      'BUOH_POSTGRES_SCHEMA en production',
+      { BUOH_DEPLOYMENT_ENVIRONMENT: 'production', BUOH_POSTGRES_SSLMODE: 'require' },
+      ['BUOH_POSTGRES_SCHEMA'],
+    ],
+    [
+      'el bucket por defecto en production',
+      {
+        BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+        BUOH_POSTGRES_SCHEMA: undefined,
+        BUOH_POSTGRES_SSLMODE: 'require',
+        BUOH_S3_BUCKET: undefined,
+      },
+      ['BUOH_S3_BUCKET'],
     ],
   ])(
     'con %s da salida 2 y una línea IngestConfigError con las variables, sin abrir nada',
@@ -545,5 +599,218 @@ describe('ingestCommand: la captura', () => {
       line: '{"code":"UNEXPECTED","message":"RangeError","status":"failed"}',
     });
     expect(run.timeline.at(-1)).toBe('close');
+  });
+});
+
+/**
+ * Las variables de `production` (ADR-0018 §4): con el cifrado que exige loadConfig (§9), el bucket
+ * de la captura y sin `BUOH_POSTGRES_SCHEMA`.
+ */
+const PRODUCTION_ENV = {
+  ...ENV,
+  BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+  BUOH_POSTGRES_SCHEMA: undefined,
+  BUOH_POSTGRES_SSLMODE: 'require',
+};
+
+/** Corre `ingestCommand` en production y deja correr la espera y el arranque de la sesión. */
+async function startProduction(run: Awaited<ReturnType<typeof ingestHarness>>) {
+  const started = await start(run, undefined, PRODUCTION_ENV);
+  await settle();
+  await settle();
+  return started;
+}
+
+/** Una conexión que se suscribe y recibe un tick, y después la parada pedida. */
+async function captureAndStop(run: Awaited<ReturnType<typeof ingestHarness>>) {
+  run.socket(1).open();
+  await settle();
+  run.socket(1).text(derivMessages.catalog(1));
+  await settle();
+  run.socket(1).text(derivMessages.tick(2, START_EPOCH, '100.25'));
+  await settle();
+  run.raise();
+  run.socket(1).text(derivMessages.forgetAll(3));
+}
+
+describe('ingestCommand en production (ADR-0018 §4)', () => {
+  it('con el log activo preparado y el bloqueo libre, captura en el esquema y el prefijo de ese log con el bloqueo que tomó la espera, sin pedir otro', async () => {
+    const run = await ingestHarness();
+    const { command } = await startProduction(run);
+    expect(run.timeline).toEqual([
+      'reads',
+      'locate',
+      'pending:buoh_log_000002',
+      'acquire:1',
+      'locate',
+      'reads:close',
+      'open',
+      'connect:1',
+    ]);
+    // El bloqueo y la espera, con la configuración; los almacenes, con la del log 2.
+    expect(
+      run.configs.map((config) => [config.postgres.schema, config.s3.keyPrefix, config.s3.bucket]),
+    ).toEqual([
+      ['public', '', 'buoh-captura'],
+      ['public', '', 'buoh-captura'],
+      ['buoh_log_000002', 'logs/000002/', 'buoh-captura'],
+    ]);
+    await captureAndStop(run);
+
+    const { exitCode, line } = await command;
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(line)).toMatchObject({
+      end: { status: 'completed' },
+      status: 'completed',
+      stopped_for_retention: false,
+    });
+    expect(run.timeline.slice(-3)).toEqual(['connect:1', 'release:1', 'close']);
+    // Los latidos de la sesión llevan el PID del bloqueo de la espera.
+    expect(
+      new Set(run.stores.ingestionStatus.heartbeats.map((item) => item.pg_backend_pid)),
+    ).toEqual(new Set([run.provider.lock(1).backendPid]));
+    expect(run.alerts).toEqual([]);
+  });
+
+  it('no comprueba retention_expired: con el evento más antiguo del log de hace 23 horas, conecta', async () => {
+    const run = await ingestHarness({ events: logSince('2026-03-01T11:00:00.000Z') });
+    const { command } = await startProduction(run);
+    expect(run.timeline.at(-1)).toBe('connect:1');
+    await captureAndStop(run);
+
+    const { exitCode, line } = await command;
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(line)).toMatchObject({ status: 'completed', stopped_for_retention: false });
+  });
+
+  it('no para a las 23 horas: con el evento más antiguo de hace 23 horas menos 1 ms, sigue capturando al cumplirlas', async () => {
+    const run = await ingestHarness({ events: logSince('2026-03-01T11:00:00.001Z') });
+    const { command } = await startProduction(run);
+    expect(run.timeline.at(-1)).toBe('connect:1');
+    await run.clock.advance(1);
+    await settle();
+    expect(forgetAll(run.socket(1))).toEqual([]);
+    await captureAndStop(run);
+
+    const { exitCode, line } = await command;
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(line)).toMatchObject({ status: 'completed', stopped_for_retention: false });
+  });
+
+  it('sin log preparado, espera sin abrir los almacenes ni escribir nada, con la alerta ingest_waiting; a los 30 s vuelve a mirar y, con el log, captura en él', async () => {
+    const run = await ingestHarness();
+    run.startup.locate = null;
+    const { command } = await startProduction(run);
+    expect(run.timeline).toEqual(['reads', 'locate']);
+    expect(run.alerts).toEqual([
+      { detail: null, event: 'ingest_waiting', reason: 'log_not_prepared' },
+    ]);
+    expect(run.clock.pendingDelays()).toEqual([STARTUP_RETRY_MS]);
+    expect(run.stores.objects.objects.size).toBe(0);
+    expect(run.stores.ingestionStatus.heartbeats).toEqual([]);
+
+    run.startup.locate = logLocation(1);
+    await run.clock.advance(STARTUP_RETRY_MS - 1);
+    expect(run.timeline).toEqual(['reads', 'locate']);
+    await run.clock.advance(1);
+    await settle();
+    await settle();
+    expect(run.timeline).toEqual([
+      'reads',
+      'locate',
+      'locate',
+      'pending:buoh_log_000001',
+      'acquire:1',
+      'locate',
+      'reads:close',
+      'open',
+      'connect:1',
+    ]);
+    expect(run.configs.at(-1)?.postgres.schema).toBe('buoh_log_000001');
+    await captureAndStop(run);
+    expect((await command).exitCode).toBe(0);
+  });
+
+  it('una señal durante la espera la para: salida 0, status stopped con WAIT_STOPPED y el motivo, sin abrir los almacenes ni tomar el bloqueo', async () => {
+    const run = await ingestHarness();
+    run.startup.locate = null;
+    const { command } = await startProduction(run);
+    run.raise();
+
+    expect(await command).toEqual({
+      exitCode: 0,
+      line: JSON.stringify({ code: WAIT_STOPPED, status: 'stopped', waiting: 'log_not_prepared' }),
+    });
+    expect(run.timeline).toEqual(['reads', 'locate', 'reads:close']);
+    expect(run.clock.pendingDelays()).toEqual([]);
+    expect(run.signal.listening).toBe(false);
+  });
+
+  it('una señal entre la espera y la sesión no se pierde: la sesión para sin conectar y el bloqueo de la espera se suelta', async () => {
+    const run = await ingestHarness();
+    let closed: () => void = () => undefined;
+    run.startup.closing = new Promise((resolve) => {
+      closed = resolve;
+    });
+    const { command } = await startProduction(run);
+    expect(run.timeline.at(-1)).toBe('reads:close');
+    run.raise();
+    closed();
+
+    const { exitCode, line } = await command;
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(line)).toMatchObject({ connections: [], status: 'completed' });
+    expect(run.timeline).toEqual([
+      'reads',
+      'locate',
+      'pending:buoh_log_000002',
+      'acquire:1',
+      'locate',
+      'reads:close',
+      'open',
+      'close',
+      'release:1',
+    ]);
+    expect(run.sockets).toEqual([]);
+  });
+
+  it('si pierde el bloqueo mientras captura y lo tiene otro proceso, termina failed con source_lock_taken: salida 1', async () => {
+    const run = await ingestHarness({ locks: ['lock', 'taken'] });
+    const { command } = await startProduction(run);
+    run.socket(1).open();
+    await settle();
+    run.socket(1).text(derivMessages.catalog(1));
+    await settle();
+    run.provider.lock(1).lose();
+    run.socket(1).text(derivMessages.tick(2, START_EPOCH, '100.25'));
+    await settle();
+    await run.clock.advance(500);
+
+    const { exitCode, line } = await command;
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(line)).toMatchObject({
+      end: { detail: null, reason: 'source_lock_taken', status: 'failed' },
+      status: 'failed',
+    });
+    expect(run.timeline.slice(-4)).toEqual(['connect:1', 'release:1', 'acquire:taken', 'close']);
+  });
+
+  it('sin BUOH_POSTGRES_SSLMODE, ConfigError con salida 2 que la nombra, sin abrir nada', async () => {
+    const run = await ingestHarness();
+    const result = await ingestCommand(
+      ['--live'],
+      { ...PRODUCTION_ENV, BUOH_POSTGRES_SSLMODE: undefined },
+      run.deps,
+    );
+
+    expect(result).toEqual({
+      exitCode: 2,
+      line: JSON.stringify({
+        code: 'ConfigError',
+        message: 'Configuración inválida o ausente: BUOH_POSTGRES_SSLMODE.',
+        status: 'failed',
+      }),
+    });
+    expect(run.timeline).toEqual([]);
   });
 });

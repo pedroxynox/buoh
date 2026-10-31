@@ -57,7 +57,7 @@ const BASE = {
 /** Las variables que `checkIngestConfig` rechaza con `env`, o `[]` si la admite. */
 function rejected(env: Readonly<Record<string, string | undefined>>): readonly string[] {
   try {
-    checkIngestConfig(loadConfig(env));
+    checkIngestConfig(loadConfig(env), env);
     return [];
   } catch (error) {
     if (error instanceof IngestConfigError) {
@@ -67,25 +67,50 @@ function rejected(env: Readonly<Record<string, string | undefined>>): readonly s
   }
 }
 
-describe('checkIngestConfig (ADR-0015 §7)', () => {
+/**
+ * Las variables de `production` (ADR-0018 §4): con el cifrado que exige loadConfig en un despliegue
+ * (§9), el bucket de la captura y sin `BUOH_POSTGRES_SCHEMA`.
+ */
+const PRODUCTION = {
+  ...BASE,
+  BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+  BUOH_POSTGRES_SCHEMA: undefined,
+  BUOH_POSTGRES_SSLMODE: 'require',
+};
+
+describe('checkIngestConfig (ADR-0015 §7 y ADR-0018 §4)', () => {
   it('admite development y test con un esquema y un bucket propios', () => {
     expect(rejected(BASE)).toEqual([]);
     expect(rejected({ ...BASE, BUOH_DEPLOYMENT_ENVIRONMENT: 'test' })).toEqual([]);
   });
 
-  // En un despliegue, loadConfig exige además BUOH_POSTGRES_SSLMODE (ADR-0018 §9).
-  it.each(['staging', 'production'])(
-    'rechaza BUOH_DEPLOYMENT_ENVIRONMENT %s: desplegar no está autorizado en Fase 1 (ADR-0006)',
-    (environment) => {
-      expect(
-        rejected({
-          ...BASE,
-          BUOH_DEPLOYMENT_ENVIRONMENT: environment,
-          BUOH_POSTGRES_SSLMODE: 'require',
-        }),
-      ).toEqual(['BUOH_DEPLOYMENT_ENVIRONMENT']);
-    },
-  );
+  it('admite production con el bucket de la captura y sin BUOH_POSTGRES_SCHEMA: el esquema sale del log activo', () => {
+    expect(rejected(PRODUCTION)).toEqual([]);
+    expect(rejected({ ...PRODUCTION, BUOH_POSTGRES_SSLMODE: 'verify-full' })).toEqual([]);
+  });
+
+  it('en production rechaza BUOH_POSTGRES_SCHEMA, con cualquier valor, también el de un log', () => {
+    for (const schema of ['buoh_log_000001', 'buoh_captura', 'public']) {
+      expect(rejected({ ...PRODUCTION, BUOH_POSTGRES_SCHEMA: schema })).toEqual([
+        'BUOH_POSTGRES_SCHEMA',
+      ]);
+    }
+  });
+
+  it('en production rechaza el bucket buoh-local, también sin la variable', () => {
+    expect(rejected({ ...PRODUCTION, BUOH_S3_BUCKET: 'buoh-local' })).toEqual(['BUOH_S3_BUCKET']);
+    expect(rejected({ ...PRODUCTION, BUOH_S3_BUCKET: undefined })).toEqual(['BUOH_S3_BUCKET']);
+  });
+
+  it('rechaza BUOH_DEPLOYMENT_ENVIRONMENT staging: no existe en la Fase 2', () => {
+    expect(
+      rejected({
+        ...BASE,
+        BUOH_DEPLOYMENT_ENVIRONMENT: 'staging',
+        BUOH_POSTGRES_SSLMODE: 'require',
+      }),
+    ).toEqual(['BUOH_DEPLOYMENT_ENVIRONMENT']);
+  });
 
   it('rechaza el esquema public, también sin la variable, porque es su valor por defecto', () => {
     expect(rejected({ ...BASE, BUOH_POSTGRES_SCHEMA: 'public' })).toEqual(['BUOH_POSTGRES_SCHEMA']);
@@ -102,7 +127,7 @@ describe('checkIngestConfig (ADR-0015 §7)', () => {
   it('nombra todas las variables rechazadas, en orden, y su mensaje solo lleva sus nombres, nunca un valor', () => {
     const env = {
       ...BASE,
-      BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+      BUOH_DEPLOYMENT_ENVIRONMENT: 'staging',
       BUOH_POSTGRES_HOST: 'db.interno.invalid',
       BUOH_POSTGRES_SCHEMA: undefined,
       BUOH_POSTGRES_SSLMODE: 'require',
@@ -111,7 +136,7 @@ describe('checkIngestConfig (ADR-0015 §7)', () => {
     };
     let error: unknown = null;
     try {
-      checkIngestConfig(loadConfig(env));
+      checkIngestConfig(loadConfig(env), env);
     } catch (caught) {
       error = caught;
     }
@@ -127,6 +152,7 @@ describe('checkIngestConfig (ADR-0015 §7)', () => {
       expect(message).toContain(variable);
     }
     for (const value of [
+      'staging',
       'production',
       'public',
       'buoh-local',
