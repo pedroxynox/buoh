@@ -36,6 +36,7 @@ import {
   ManualClock,
   syntheticSchemaArchive,
 } from '../test/support/deriv-fixtures.js';
+import { waitForNoSessions } from '../test/support/databases.js';
 
 /**
  * Los roles de PostgreSQL de producción (ADR-0018 §8 y §9, `F2-ROLE-001`) contra PostgreSQL y
@@ -160,6 +161,8 @@ afterAll(async () => {
   await renderPool?.end();
   await admin?.end();
   if (platform !== undefined) {
+    // Sin sesiones: `DROP DATABASE … WITH (FORCE)` terminaría las que todavía se cierran.
+    await waitForNoSessions(platform, DATABASE);
     await dropTestDatabaseAndRoles(platform);
     await platform.end();
   }

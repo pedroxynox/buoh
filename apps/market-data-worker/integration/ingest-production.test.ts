@@ -31,6 +31,7 @@ import {
   ManualClock,
   syntheticSchemaArchive,
 } from '../test/support/deriv-fixtures.js';
+import { waitForNoSessions } from '../test/support/databases.js';
 
 /**
  * `ingest` en `production` (ADR-0018 §4) contra PostgreSQL y S3-compatible locales, con
@@ -168,6 +169,8 @@ afterAll(async () => {
   stopCommand?.();
   await admin?.end();
   if (platform !== undefined) {
+    // Sin sesiones: `DROP DATABASE … WITH (FORCE)` terminaría las que todavía se cierran.
+    await waitForNoSessions(platform, DATABASE);
     await dropDatabase(platform);
     await platform.end();
   }

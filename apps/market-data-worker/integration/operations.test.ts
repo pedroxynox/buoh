@@ -22,6 +22,7 @@ import {
 } from '../src/index.js';
 import { START, uuid } from '../test/support/connection-harness.js';
 import { ManualClock, syntheticSchemaArchive } from '../test/support/deriv-fixtures.js';
+import { waitForNoSessions } from '../test/support/databases.js';
 
 /**
  * `buoh-operaciones` (ADR-0018 §11) contra PostgreSQL y S3-compatible locales, con
@@ -198,6 +199,8 @@ beforeAll(async () => {
 afterAll(async () => {
   await admin?.end();
   if (platform !== undefined) {
+    // Sin sesiones: `DROP DATABASE … WITH (FORCE)` terminaría las que todavía se cierran.
+    await waitForNoSessions(platform, DATABASE);
     await dropDatabaseAndRoles(platform);
     await platform.end();
   }

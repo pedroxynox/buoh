@@ -34,6 +34,7 @@ import {
   ManualClock,
   syntheticSchemaArchive,
 } from '../test/support/deriv-fixtures.js';
+import { waitForNoSessions } from '../test/support/databases.js';
 import { heartbeatOf } from '../test/support/status-store-rules.js';
 
 /**
@@ -228,6 +229,8 @@ beforeAll(async () => {
 afterAll(async () => {
   await admin?.end();
   if (platform !== undefined) {
+    // Sin sesiones: `DROP DATABASE … WITH (FORCE)` terminaría las que todavía se cierran.
+    await waitForNoSessions(platform, DATABASE);
     await dropDatabaseAndRole(platform);
     await platform.end();
   }
