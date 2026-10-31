@@ -67,6 +67,16 @@
       ]
     },
     {
+      "id": "render-datos",
+      "description": "El Blueprint del sistema de datos debe seguir su ADR, su guía de despliegue y los pasos de producción del runbook.",
+      "includes": ["render-datos.yaml", "scripts/render-datos-blueprint.*"],
+      "requires_any": [
+        "docs/operacion/despliegue-en-render.md",
+        "docs/operacion/runbook-ingesta-de-datos.md",
+        "docs/arquitectura/adr/0018-sistema-de-datos-en-produccion.md"
+      ]
+    },
+    {
       "id": "test-vectors",
       "description": "Cambiar el oráculo requiere justificar el contrato o la decisión.",
       "includes": ["test-vectors/**"],

@@ -1,0 +1,189 @@
+# Blueprint del sistema de datos de producción (ADR-0018 §2; pasos en
+# docs/operacion/runbook-ingesta-de-datos.md, «Producción (F2.2)», y en
+# docs/operacion/despliegue-en-render.md).
+#
+# Ningún Blueprint lee este archivo hasta que el propietario crea uno a mano con «Blueprint Path»
+# render-datos.yaml: fusionar un cambio aquí no crea ni cobra nada (ADR-0016 §3). Entonces Render
+# pide cada valor `sync: false`. render.yaml sigue con solo el sitio.
+#
+# Los planes usan los nombres de Render desde el 2026-08-26, con el mismo precio que los
+# anteriores: 0.1c-256mb es el Basic-256mb de la base, y 0.5c-512mb, el Starter de los servicios.
+databases:
+  - name: buoh-postgres
+    plan: 0.1c-256mb
+    diskSizeGB: 1
+    # Apagado: subiría el presupuesto sin el visto bueno del propietario (ADR-0018 §2).
+    storageAutoscalingEnabled: false
+    region: virginia
+    postgresMajorVersion: '18'
+    databaseName: buoh
+    user: buoh
+    # Abierta a internet, como decidió el propietario (ADR-0018 §9): la protegen el cifrado, las
+    # contraseñas generadas y los roles mínimos. Cerrarla es dejar esta lista vacía.
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: abierta a internet (ADR-0018 §9)
+
+services:
+  - type: worker
+    name: buoh-ingesta
+    runtime: node
+    plan: 0.5c-512mb
+    region: virginia
+    # Una sola instancia: una segunda esperaría el bloqueo de la fuente sin fin (ADR-0018 §2).
+    numInstances: 1
+    # Node 24.22.0 sale de .node-version. pnpm 12.14.0 se fija aquí, igual que packageManager. Se
+    # instalan el worker, sus paquetes y las herramientas de la raíz, no las demás apps.
+    buildCommand: >-
+      npx --yes pnpm@12.14.0 install --frozen-lockfile --filter "@buoh/market-data-worker..." &&
+      npx --yes pnpm@12.14.0 --filter "@buoh/market-data-worker..." run build
+    # Node directamente, sin pnpm de por medio, para que el SIGTERM de Render llegue a ingest, con
+    # los tamaños de V8 de WORKER_NODE_FLAGS delante (ADR-0018 §3).
+    startCommand: node --max-semi-space-size=1 --max-old-space-size=256 apps/market-data-worker/dist/cli/ingest.js --live --symbol R_100
+    # El minuto que el runbook da a la parada antes de SIGKILL.
+    maxShutdownDelaySeconds: 60
+    # Solo despliega un commit de main cuyos checks de CI pasaron.
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - apps/market-data-worker/**
+        - packages/contracts/**
+        - packages/domain/**
+        - package.json
+        - pnpm-lock.yaml
+        - pnpm-workspace.yaml
+        - .npmrc
+        - .node-version
+        - tsconfig.base.json
+        - render-datos.yaml
+      ignoredPaths:
+        - apps/market-data-worker/test/**
+        - apps/market-data-worker/integration/**
+        - packages/contracts/test/**
+        - packages/domain/test/**
+        - '**/*.md'
+    envVars:
+      - key: BUOH_DEPLOYMENT_ENVIRONMENT
+        value: production
+      - key: BUOH_POSTGRES_HOST
+        fromDatabase:
+          name: buoh-postgres
+          property: host
+      - key: BUOH_POSTGRES_PORT
+        fromDatabase:
+          name: buoh-postgres
+          property: port
+      - key: BUOH_POSTGRES_DB
+        fromDatabase:
+          name: buoh-postgres
+          property: database
+      - key: BUOH_POSTGRES_USER
+        value: buoh_ingesta
+      # La contraseña de buoh_ingesta: la genera Render, y buoh-operaciones la pone al rol (§8).
+      - key: BUOH_POSTGRES_PASSWORD
+        generateValue: true
+      # Dirección interna, con un certificado autofirmado: cifrado sin verificarlo (ADR-0018 §9).
+      - key: BUOH_POSTGRES_SSLMODE
+        value: require
+      # Token ingesta de R2 (ADR-0018 §10): el endpoint lleva el ID de la cuenta.
+      - key: BUOH_S3_ENDPOINT
+        sync: false
+      - key: BUOH_S3_REGION
+        value: auto
+      - key: BUOH_S3_BUCKET
+        value: buoh-captura
+      - key: BUOH_S3_ACCESS_KEY_ID
+        sync: false
+      - key: BUOH_S3_SECRET_ACCESS_KEY
+        sync: false
+
+  - type: cron
+    name: buoh-operaciones
+    runtime: node
+    plan: 0.5c-512mb
+    region: virginia
+    # Cada 5 minutos, en UTC, una ejecución a la vez (ADR-0018 §11).
+    schedule: '*/5 * * * *'
+    buildCommand: >-
+      npx --yes pnpm@12.14.0 install --frozen-lockfile --filter "@buoh/market-data-worker..." &&
+      npx --yes pnpm@12.14.0 --filter "@buoh/market-data-worker..." run build
+    startCommand: node --max-semi-space-size=1 --max-old-space-size=256 apps/market-data-worker/dist/cli/operations.js
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - apps/market-data-worker/**
+        - packages/contracts/**
+        - packages/domain/**
+        - package.json
+        - pnpm-lock.yaml
+        - pnpm-workspace.yaml
+        - .npmrc
+        - .node-version
+        - tsconfig.base.json
+        - render-datos.yaml
+      ignoredPaths:
+        - apps/market-data-worker/test/**
+        - apps/market-data-worker/integration/**
+        - packages/contracts/test/**
+        - packages/domain/test/**
+        - '**/*.md'
+    # Ninguna variable BUOH_POSTGRES_* ni BUOH_S3_*: el servicio no las admite, y solo se las da, con
+    # sus valores, a los procesos de db:migrate y data:health (ADR-0018 §11).
+    envVars:
+      - key: BUOH_DEPLOYMENT_ENVIRONMENT
+        value: production
+      # La credencial dueña: el usuario por defecto de Render, miembro de buoh_dueno (§8).
+      - key: BUOH_DUENO_POSTGRES_HOST
+        fromDatabase:
+          name: buoh-postgres
+          property: host
+      - key: BUOH_DUENO_POSTGRES_PORT
+        fromDatabase:
+          name: buoh-postgres
+          property: port
+      - key: BUOH_DUENO_POSTGRES_DB
+        fromDatabase:
+          name: buoh-postgres
+          property: database
+      - key: BUOH_DUENO_POSTGRES_USER
+        fromDatabase:
+          name: buoh-postgres
+          property: user
+      - key: BUOH_DUENO_POSTGRES_PASSWORD
+        fromDatabase:
+          name: buoh-postgres
+          property: password
+      - key: BUOH_DUENO_POSTGRES_SSLMODE
+        value: require
+      # Las contraseñas de los roles de ejecución (§8): la de buoh_ingesta, la de su servicio.
+      - key: BUOH_INGESTA_POSTGRES_PASSWORD
+        fromService:
+          type: worker
+          name: buoh-ingesta
+          envVarKey: BUOH_POSTGRES_PASSWORD
+      - key: BUOH_SALUD_POSTGRES_PASSWORD
+        generateValue: true
+      - key: BUOH_AGENTE_POSTGRES_PASSWORD
+        generateValue: true
+      # Token salud de R2, de solo lectura, para el proceso de data:health (ADR-0018 §10).
+      - key: BUOH_SALUD_S3_ENDPOINT
+        sync: false
+      - key: BUOH_SALUD_S3_REGION
+        value: auto
+      - key: BUOH_SALUD_S3_BUCKET
+        value: buoh-captura
+      - key: BUOH_SALUD_S3_ACCESS_KEY_ID
+        sync: false
+      - key: BUOH_SALUD_S3_SECRET_ACCESS_KEY
+        sync: false
+      # Token operaciones de R2, el del propio servicio: la verificación por partes (§10).
+      - key: BUOH_OPERACIONES_S3_ENDPOINT
+        sync: false
+      - key: BUOH_OPERACIONES_S3_REGION
+        value: auto
+      - key: BUOH_OPERACIONES_S3_BUCKET
+        value: buoh-captura
+      - key: BUOH_OPERACIONES_S3_ACCESS_KEY_ID
+        sync: false
+      - key: BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY
+        sync: false

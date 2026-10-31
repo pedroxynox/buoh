@@ -98,6 +98,7 @@ test('fija las reglas productivas y sus rutas críticas', () => {
       'market-data-worker',
       'infrastructure',
       'render',
+      'render-datos',
       'test-vectors',
       'design-system',
       'web-clients',
@@ -126,6 +127,13 @@ test('fija las reglas productivas y sus rutas críticas', () => {
     ['render.yaml', 'docs/operacion/despliegue-en-render.md'],
     ['render.yaml', 'docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md'],
     ['scripts/render-blueprint.test.mjs', 'docs/operacion/despliegue-en-render.md'],
+    ['render-datos.yaml', 'docs/operacion/despliegue-en-render.md'],
+    ['render-datos.yaml', 'docs/operacion/runbook-ingesta-de-datos.md'],
+    ['render-datos.yaml', 'docs/arquitectura/adr/0018-sistema-de-datos-en-produccion.md'],
+    [
+      'scripts/render-datos-blueprint.test.mjs',
+      'docs/arquitectura/adr/0018-sistema-de-datos-en-produccion.md',
+    ],
     ['test-vectors/market-data/v1/manifest.json', 'docs/arquitectura/contratos-de-dominio.md'],
     ['packages/design-system/src/tokens.ts', 'docs/diseno/marca-buoh.md'],
     ['apps/web/app/page.tsx', 'docs/diseno/concepto-de-interfaz.md'],
@@ -153,10 +161,13 @@ test('fija las reglas productivas y sus rutas críticas', () => {
     assert.equal(satisfied.violations.length, 0, changed);
   }
 
-  // Las reglas de infraestructura local y de Render no se cubren con la fuente de la otra.
+  // Las reglas de infraestructura local y de Render no se cubren con la fuente de la otra, ni
+  // las de los dos Blueprints con la ADR del otro.
   for (const [changed, documentation] of [
     ['infra/compose.yaml', 'docs/operacion/despliegue-en-render.md'],
     ['render.yaml', 'docs/operacion/runbook-ingesta-de-datos.md'],
+    ['render.yaml', 'docs/arquitectura/adr/0018-sistema-de-datos-en-produccion.md'],
+    ['render-datos.yaml', 'docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md'],
   ]) {
     const unrelated = evaluateDocumentationImpact([changed, documentation], actualMap);
     assert.equal(unrelated.violations.length, 1, `${changed} con ${documentation}`);

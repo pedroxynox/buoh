@@ -302,7 +302,7 @@ Una salida distinta de 0 sin línea JSON significa que falló la compilación o 
 
 ### Captura viva continua (`ingest`)
 
-Desde el PR 5 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13 (§7), `pnpm --filter @buoh/market-data-worker run ingest -- --live [--symbol R_100]` ejecuta la sesión de ingesta (ver «Adaptador público de Deriv», «Sesión de ingesta») sobre PostgreSQL y el almacenamiento de objetos. Es un script del paquete, como `db:migrate` y `fixture:publish`, fuera del contrato de comandos raíz del plan §5, y corre `apps/market-data-worker/dist/cli/ingest.js`, desde el PR 6 de [ADR-0017](../arquitectura/adr/0017-punto-de-control-de-la-derivacion-en-vivo.md) §11 con los tamaños de V8 de `WORKER_NODE_FLAGS` (`--max-semi-space-size=1` y `--max-old-space-size=256`; ver «Memoria»). Es la primera vez que buoh guarda datos reales fuera de la memoria (ADR-0004 §13): la captura para sola a las 23 horas y se borra entera, esquema y bucket, antes de las 24. Nada se publica. Fuera de `production`, corre en el equipo donde están los servicios. Desde el PR 4 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16 también sabe correr en `production`, con otras reglas (ver «En `production`», abajo), pero todavía no hay nada desplegado: los pasos llegan con el PR de despliegue.
+Desde el PR 5 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13 (§7), `pnpm --filter @buoh/market-data-worker run ingest -- --live [--symbol R_100]` ejecuta la sesión de ingesta (ver «Adaptador público de Deriv», «Sesión de ingesta») sobre PostgreSQL y el almacenamiento de objetos. Es un script del paquete, como `db:migrate` y `fixture:publish`, fuera del contrato de comandos raíz del plan §5, y corre `apps/market-data-worker/dist/cli/ingest.js`, desde el PR 6 de [ADR-0017](../arquitectura/adr/0017-punto-de-control-de-la-derivacion-en-vivo.md) §11 con los tamaños de V8 de `WORKER_NODE_FLAGS` (`--max-semi-space-size=1` y `--max-old-space-size=256`; ver «Memoria»). Es la primera vez que buoh guarda datos reales fuera de la memoria (ADR-0004 §13): la captura para sola a las 23 horas y se borra entera, esquema y bucket, antes de las 24. Nada se publica. Fuera de `production`, corre en el equipo donde están los servicios. Desde el PR 4 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16 también sabe correr en `production`, con otras reglas (ver «En `production`», abajo), pero todavía no hay nada desplegado: los pasos están en «Producción (F2.2)».
 
 Antes de abrir ningún almacén o conexión, comprueba los argumentos y la configuración (`apps/market-data-worker/src/ingest-args.ts`):
 
@@ -595,7 +595,7 @@ Desde el PR 5 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-producc
 
 ## Roles y cifrado de PostgreSQL (F2.2)
 
-Desde el PR 2 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16, el worker trae los roles de producción (§8) y el cifrado de la conexión (§9). Todavía no hay nada desplegado: estas piezas las usa `buoh-operaciones` desde el PR 5, y los pasos de producción llegan con el PR de despliegue, el 6.
+Desde el PR 2 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16, el worker trae los roles de producción (§8) y el cifrado de la conexión (§9). Todavía no hay nada desplegado: estas piezas las usa `buoh-operaciones` desde el PR 5, y los pasos de producción están en «Producción (F2.2)».
 
 - **Cifrado.** `BUOH_POSTGRES_SSLMODE` admite `disable`, `require` o `verify-full`, y la aplican el pool y el cliente del bloqueo de la fuente. En `production` y `staging` es obligatoria y no admite `disable`: sin ella, o con `disable`, el comando sale con el error de configuración que la nombra. Fuera de un despliegue vale `disable` por defecto, la de los servicios locales. `require` cifra sin verificar el certificado, y `verify-full` verifica la autoridad y el nombre del servidor. Con cualquiera de los dos, la conexión a un servidor sin TLS falla en lugar de seguir sin cifrar. La opción llega siempre explícita a `pg`, así que `PGSSLMODE` no cambia nada.
 - **Roles.** `ensureRuntimeRoles` (`src/postgres/roles.ts`) crea los que falten, con el usuario por defecto de Render, que no es superusuario y tiene `CREATEROLE`:
@@ -607,7 +607,7 @@ Desde el PR 2 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-producc
 - **Privilegios.** `grantLogPrivileges` da los del esquema de un log. `buoh_lectura` recibe el uso del esquema y `SELECT` en todas sus tablas. `buoh_ingesta` recibe el uso del esquema, `SELECT` e `INSERT` en las tablas de `0002` en adelante, `SELECT` en `buoh_schema_migrations` y el uso de las secuencias, y nada en las tablas de datasets de `0001` ni en `operations_reports` (`0006`), que solo escribe `buoh-operaciones`. Si el esquema tiene una tabla que no está en ninguna de sus listas, para sin dar ninguno (`UnclassifiedTableError`): la migración que la crea decide sus privilegios en el mismo PR.
 - **Contraseñas.** `setRolePassword` pone la de un rol de ejecución con el verificador SCRAM-SHA-256 calculado en el cliente, así que la contraseña no viaja ni queda en claro en el servidor.
 - Las tres funciones son idempotentes y trabajan en una transacción.
-- **Rotación de la credencial dueña.** El usuario de antes da `buoh_dueno` al nuevo con `ADMIN OPTION` y `SET`. En PostgreSQL 18, `DROP ROLE` de un usuario que dio esa pertenencia falla con `2BP01` mientras exista, y la prueba de los roles lo comprueba. Render nunca borra el usuario original de la base, solo le quita el inicio de sesión ([credenciales de Render Postgres](https://render.com/docs/postgresql-credentials)), así que la primera rotación no choca con eso, pero las siguientes sí pueden chocar. El PR de despliegue comprueba con la base creada cómo da Render sus privilegios al usuario nuevo, y fija el orden de los pasos.
+- **Rotación de la credencial dueña.** El usuario de antes da `buoh_dueno` al nuevo con `ADMIN OPTION` y `SET`. En PostgreSQL 18, `DROP ROLE` de un usuario que dio esa pertenencia falla con `2BP01` mientras exista, y la prueba de los roles lo comprueba. Render nunca borra el usuario original de la base, solo le quita el inicio de sesión ([credenciales de Render Postgres](https://render.com/docs/postgresql-credentials)), así que la primera rotación no choca con eso, pero las siguientes sí pueden chocar. Cómo da Render sus privilegios al usuario nuevo se comprueba con la base creada, y el PR que lo registre fija el orden de los pasos (ver «Producción (F2.2)», «Rotar credenciales»).
 
 ## Logs sucesivos de producción (F2.2)
 
@@ -621,7 +621,7 @@ Desde el PR 3 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-producc
 
 ## Operaciones (`buoh-operaciones`)
 
-Desde el PR 5 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16, el worker trae el comando del cron job `buoh-operaciones` (§11): `pnpm --filter @buoh/market-data-worker run operations`, que corre `apps/market-data-worker/dist/cli/operations.js` con los tamaños de V8 de `WORKER_NODE_FLAGS` (ver «Captura viva continua (`ingest`)», «Memoria»). Cada ejecución hace, en orden, los pasos 1, 2, 4 y 5 de §11: los roles y los logs, la salud, la verificación por partes (desde el PR 5b) y el espacio (desde el PR 5b). La retención, el paso 3, el corte y el informe final de un log cortado llegan con el PR 8. Todavía no hay nada desplegado: el cron job, cada 5 minutos, lo crea el PR de despliegue, el 6.
+Desde el PR 5 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16, el worker trae el comando del cron job `buoh-operaciones` (§11): `pnpm --filter @buoh/market-data-worker run operations`, que corre `apps/market-data-worker/dist/cli/operations.js` con los tamaños de V8 de `WORKER_NODE_FLAGS` (ver «Captura viva continua (`ingest`)», «Memoria»). Cada ejecución hace, en orden, los pasos 1, 2, 4 y 5 de §11: los roles y los logs, la salud, la verificación por partes (desde el PR 5b) y el espacio (desde el PR 5b). La retención, el paso 3, el corte y el informe final de un log cortado llegan con el PR 8. Todavía no hay nada desplegado: el cron job, cada 5 minutos, lo define `render-datos.yaml` y existe cuando el propietario crea el Blueprint (ver «Producción (F2.2)»).
 
 **Configuración** (`loadOperationsConfig`, en `apps/market-data-worker/src/operations/config.ts`). El servicio solo existe en `production`, y cada credencial tiene su propio nombre:
 
@@ -685,7 +685,9 @@ Cada informe se guarda además, como `buoh_dueno`, en la tabla `operations_repor
 
 ## Producción (F2.2)
 
-Los pasos para poner en producción el sistema de datos de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) llegan en dos PR (§16, PR 6): el 6a trae las comprobaciones previas de R2, y el 6b, el Blueprint `render-datos.yaml` y los pasos para preparar, desplegar, parar, recuperar, rotar credenciales y borrar. Todavía no hay nada desplegado. Nada de esta sección cuesta dinero salvo que se diga, y ninguna credencial pasa por el chat ni por Git.
+Los pasos para poner en producción el sistema de datos de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) llegan en dos PR (§16, PR 6): el 6a trajo las comprobaciones previas de R2, y el 6b, el Blueprint `render-datos.yaml` y los pasos para preparar, desplegar, parar, recuperar, rotar credenciales y borrar. Qué define el Blueprint está en [despliegue en Render](despliegue-en-render.md) («Qué define `render-datos.yaml`»). Todavía no hay nada desplegado. Nada de esta sección cuesta dinero salvo «Desplegar», y ninguna credencial pasa por el chat ni por Git.
+
+El orden es: las comprobaciones previas de R2, «Preparar», «Desplegar» y «Acceso del agente». «Preparar» espera a que estén fusionados los PR 6c y 7 de §16.
 
 ### Comprobaciones previas de R2
 
@@ -728,6 +730,130 @@ Escribe una sola línea JSON con `endpoint` (`r2` o `local`, para que el PR 7 mu
 3. borra los tres secretos de Kiro (ADR-0018 §12).
 
 El 2026-10-31, contra el SeaweedFS de «Entorno local y replay», con un bucket `buoh-prueba` creado para el ensayo, las tres pasaron, con `endpoint: local` y `cleanup: complete`, y no quedó ningún objeto. Con servidores S3 falsos locales: uno que sobrescribe hizo fallar `sin_sobrescribir` con `second_write_not_rejected` (salida 1); uno que rechaza los borrados dio `cleanup: incomplete`; uno que detiene una lectura hizo fallar `sumas_de_comprobacion` con `deadline_exceeded` y el script borró lo suyo; y un endpoint con ruta, como `…/buoh-captura`, dio `ConfigError` sin conectar.
+
+### Preparar
+
+Antes de crear nada de producción tienen que estar fusionados:
+
+- el PR 6c de ADR-0018 §16. Con la regla de bloqueo del paso 2, R2 responde a una escritura en una clave que ya existe con 409 (`ObjectLockedByBucketPolicy`) en lugar de 412, y hasta ese PR el worker solo reconoce el 412. `ingest` vuelve a guardar el esquema de fuente con la misma clave al empezar cada sesión (ver «Captura viva continua (`ingest`)»), así que la segunda sesión de un log esperaría sin fin con `source_schema_unavailable` (ADR-0018 §10);
+- el PR 7, con el resultado de las comprobaciones previas. Si alguna falló, no se sigue.
+
+**El propietario, en Cloudflare** ([dash.cloudflare.com](https://dash.cloudflare.com)):
+
+1. En **R2 Object Storage**, pulsa **Create bucket**, con el nombre `buoh-captura` y, en **Location**, la indicación **Eastern North America (ENAM)** (`enam`), sin jurisdicción. No lo hagas público.
+2. En el bucket, en la pestaña **Settings**, tarjeta **Bucket lock rules**, pulsa **Add rule**: nombre `logs-30-dias`, prefijo `logs/` y retención de 30 días. Pulsa **Save changes**. Desde ese momento, nadie puede borrar ni sobrescribir un objeto de `logs/` hasta que cumple 30 días, tampoco con un token filtrado (ADR-0018 §10).
+
+**El propietario, en Render** ([dashboard.render.com](https://dashboard.render.com)):
+
+3. En **Workspace Settings**, comprueba que **Overlapping Deploy Policy** está en **Wait**, para que un despliegue que llega durante otro espere a que termine (ADR-0018 §5). Es el valor por defecto de los workspaces creados desde el 2025-07-14. Si muestra otro, elige **Wait**.
+
+Los tokens de R2 se crean en «Desplegar», justo antes de pegarlos en Render, para que no queden guardados en ningún otro sitio.
+
+### Desplegar
+
+Desde aquí cuesta dinero: unos 16 USD al mes (ADR-0018 §14). Render cobra cada recurso por segundo desde que lo crea.
+
+**El propietario, en Render:**
+
+1. Pulsa **New** y después **Blueprint**, y **Connect** junto a `pedroxynox/buoh`.
+2. Nombre del Blueprint: `buoh-datos`. Rama: `main`. En **Blueprint Path**, escribe `render-datos.yaml`: sin él, Render usaría `render.yaml`, el del sitio.
+3. Revisa la lista: tres recursos nuevos, `buoh-postgres`, `buoh-ingesta` y `buoh-operaciones`, y nada más. Si muestra otra cosa, un error o un sufijo en los nombres (Render lo añade cuando ya existe un recurso con ese nombre), para y avísale al agente.
+4. Render pide nueve valores, los `sync: false`. Con Cloudflare en otra pestaña, crea tres tokens como el de prueba (**R2 Object Storage**, **Account Details**, **Manage** junto a **API Tokens**, **Create Account API token**), todos solo para `buoh-captura` (**Apply to specific buckets only**) y con **TTL** *Forever*: uno que vence para su proceso sin aviso, y se cambian con «Rotar credenciales». Pega cada uno en cuanto lo crees, porque Cloudflare muestra su **Secret Access Key** solo esa vez:
+
+   | Token | Permiso | Variables donde va su **Access Key ID** y su **Secret Access Key** |
+   |---|---|---|
+   | `ingesta` | **Object Read & Write** | `BUOH_S3_ACCESS_KEY_ID` y `BUOH_S3_SECRET_ACCESS_KEY`, de `buoh-ingesta` |
+   | `operaciones` | **Object Read & Write** | `BUOH_OPERACIONES_S3_ACCESS_KEY_ID` y `BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY`, de `buoh-operaciones` |
+   | `salud` | **Object Read only** | `BUOH_SALUD_S3_ACCESS_KEY_ID` y `BUOH_SALUD_S3_SECRET_ACCESS_KEY`, de `buoh-operaciones` |
+
+   Los otros tres valores son el mismo endpoint, `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, como en las comprobaciones previas, sin el nombre del bucket ni nada detrás: `BUOH_S3_ENDPOINT`, de `buoh-ingesta`, y `BUOH_OPERACIONES_S3_ENDPOINT` y `BUOH_SALUD_S3_ENDPOINT`, de `buoh-operaciones`. Render solo pide estos valores al crear el Blueprint: cambiarlos después es «Rotar credenciales».
+5. Pulsa **Deploy Blueprint**. Si Render pide un medio de pago, añádelo.
+6. Espera a que la base y los dos servicios terminen de crearse, unos minutos. `buoh-ingesta` arranca y espera (ADR-0018 §4), y `buoh-operaciones` corre cada 5 minutos, en los minutos múltiplos de 5, en UTC.
+
+**Comprobar el arranque.** El agente no tiene acceso a Render, así que el propietario le copia lo que muestran los **Logs** de cada servicio. Sus líneas no llevan ningún secreto. En unos 10 minutos tiene que verse esto:
+
+- **`buoh-operaciones`, primera ejecución:** la línea `operations_step` de `roles_and_logs` con `status: completed` y `prepared: 1`, la de `health` con la salud del log 1 en `paused`, porque todavía no hay captura, y al final la línea `operations_run`.
+- **`buoh-ingesta`:** alertas `ingest_waiting`, primero con `postgres_unavailable`, porque el rol `buoh_ingesta` todavía no existe, y quizás después con `log_not_prepared`. Dejan de salir cuando `buoh-operaciones` termina su primera ejecución, y empieza la captura.
+- **`buoh-operaciones`, ejecuciones siguientes:** una con `prepared: 2`, la primera después de que `ingest` escribió en el log 1, y la salud del log 1 en `healthy`.
+- **Cloudflare:** `buoh-captura` tiene objetos bajo `logs/000001/`.
+
+Si un servicio sale con `ConfigError` (salida 2), la línea nombra la variable mal puesta, nunca su valor, y se corrige en **Environment** de ese servicio, como en «Rotar credenciales». Cualquier otra cosa, se la pasa al agente.
+
+### Acceso del agente
+
+Para leer producción (ADR-0018 §12 y §13), el agente usa el rol `buoh_agente` y el token `agente`, los dos de solo lectura, con secretos de Kiro de nombres propios, que ninguna prueba ni comando local lee por error. **El propietario:**
+
+1. En Cloudflare, crea el token `agente`: **Object Read only**, solo para `buoh-captura`, con **TTL** *Forever*.
+2. En Render, copia la contraseña de `buoh_agente` (en `buoh-operaciones`, **Environment**, `BUOH_AGENTE_POSTGRES_PASSWORD`) y el **Hostname** de la base (en `buoh-postgres`, **Info**), que empieza por `dpg-`. El servidor externo es ese nombre seguido de `.virginia-postgres.render.com`, el que aparece entre `@` y `/buoh` en **External Database URL**. No copies esa URL entera: lleva la contraseña de `buoh`, la credencial dueña, que el agente nunca recibe (ADR-0018 §12).
+3. En Kiro Web, en **Settings → Sandbox → Secrets**, guarda cinco secretos: `BUOH_AGENTE_POSTGRES_HOST`, con el servidor externo; `BUOH_AGENTE_POSTGRES_PASSWORD`; `BUOH_AGENTE_S3_ENDPOINT`, con el endpoint; y `BUOH_AGENTE_S3_ACCESS_KEY_ID` y `BUOH_AGENTE_S3_SECRET_ACCESS_KEY`, con el token `agente`. Nunca en el chat ni en Git.
+
+**El agente** solo los pasa al comando que los necesita, con los nombres que lee el worker y en un subshell, y nunca los muestra. Para `data:health`, desde la raíz del repositorio:
+
+```sh
+(
+  unset BUOH_POSTGRES_SCHEMA BUOH_POSTGRES_OWNER_ROLE
+  export BUOH_DEPLOYMENT_ENVIRONMENT=production BUOH_POSTGRES_PORT=5432 BUOH_POSTGRES_DB=buoh \
+    BUOH_POSTGRES_USER=buoh_agente BUOH_POSTGRES_SSLMODE=require \
+    BUOH_S3_REGION=auto BUOH_S3_BUCKET=buoh-captura
+  export BUOH_POSTGRES_HOST="$BUOH_AGENTE_POSTGRES_HOST" \
+    BUOH_POSTGRES_PASSWORD="$BUOH_AGENTE_POSTGRES_PASSWORD" \
+    BUOH_S3_ENDPOINT="$BUOH_AGENTE_S3_ENDPOINT" \
+    BUOH_S3_ACCESS_KEY_ID="$BUOH_AGENTE_S3_ACCESS_KEY_ID" \
+    BUOH_S3_SECRET_ACCESS_KEY="$BUOH_AGENTE_S3_SECRET_ACCESS_KEY"
+  pnpm run data:health -- --json
+)
+```
+
+La conexión externa siempre va cifrada. Usa `require` hasta que se compruebe, con la base creada, si su certificado se valida con las autoridades de Node: si se valida, el PR que lo registre cambia aquí `require` por `verify-full` (ADR-0018 §9). `buoh_agente` tiene 4 conexiones como mucho (ver «Roles y cifrado de PostgreSQL (F2.2)»).
+
+### Parar
+
+- **Pausar la captura:** en `buoh-ingesta`, en **Settings**, **Suspend Service**. La salud del log activo deja de ser `healthy`, y la parada queda en el log como un hueco visible. Para seguir, **Resume Service**: `ingest` vuelve al log activo, con las reglas de «Al arrancar» de ADR-0018 §6. `buoh-operaciones` sigue en marcha: guarda la salud y, desde el PR 8 de §16, borra lo que vence. Una captura parada vence igual, a los 30 días de su última escritura (ADR-0018 §7).
+- **Parar también las operaciones:** suspender `buoh-operaciones` igual. Mientras tanto, nadie guarda la salud ni verifica los segmentos, y desde el PR 8, nada borra lo que vence hasta que se reanude. Con `buoh-ingesta` capturando, nadie vigila su salud: reanúdalo cuanto antes.
+- **La base** sigue en marcha y cobrando aunque los dos servicios estén suspendidos. Dejar de pagar del todo es «Borrar».
+
+### Recuperar
+
+- **Un despliegue malo:** en la página del servicio, en la lista de despliegues, elige el último bueno y pulsa **Rollback**. Render apaga entonces los despliegues automáticos de ese servicio: cuando el arreglo esté en `main`, se vuelven a encender en **Settings → Auto-Deploy → After CI Checks Pass**. Volver atrás no deshace una migración, y no hace falta: las de los logs solo añaden, y el código anterior sigue funcionando con ellas (ADR-0018 §5).
+- **Un servicio que arranca una y otra vez:** Render vuelve a arrancar el proceso que termina con error (ADR-0018 §3), y sus **Logs** dicen por qué. `ConfigError` nombra la variable mal puesta. Lo demás, como `log_not_derivable`, se lo pasa el propietario al agente.
+- **Lo urgente:** `operations_segment_mismatch`, porque un log perdió o cambió un objeto (ver «Operaciones (`buoh-operaciones`)», «Alertas»); `ingest_waiting` durante más de 10 minutos fuera de un despliegue; y, desde el PR 8, `log_cut_blocked`. El agente ve la salud y lo que encuentra `buoh-operaciones` en los informes guardados del log. Las alertas de `ingest` solo están en los **Logs** de Render.
+- **La base llena:** Render la suspende cuando llena su disco, y los umbrales de ADR-0018 §7 están para avisar antes. Para volver: en **Info**, **Resume Database**, y enseguida, en **Plan**, **Storage**, **Edit**, poner 5 GB y **Save**. Cuesta 1,50 USD al mes en lugar de 0,30 y no se puede reducir, así que antes necesita el visto bueno del propietario (plan §12). Ese mismo día, el agente abre el PR que pone `diskSizeGB: 5` en `render-datos.yaml`, para que el Blueprint diga lo mismo que la base.
+- **Volver a un momento anterior de la base:** Render guarda los últimos 3 días en el plan Hobby (ADR-0018 §7). En **Recovery**, **Restore Database** crea otra base con el estado de ese momento, sin tocar la original y con su misma lista de IPs. Es otra base de pago mientras exista. Qué hacer con ella, como leer lo que se perdió o usarla en lugar de `buoh-postgres`, que cambia el Blueprint, lo decide el propietario con el agente.
+
+### Rotar credenciales
+
+Se rotan si una pudo filtrarse o si el agente lo pide (ADR-0018 §12). Ninguna pasa por el chat.
+
+**Un token de R2** (`ingesta`, `operaciones` o `salud`):
+
+1. En Cloudflare, crea otro con el mismo permiso, solo para `buoh-captura` y con **TTL** *Forever*, como en «Desplegar».
+2. En Render, en el servicio que lo usa (la tabla de «Desplegar»), en **Environment**, cambia sus dos variables por las del token nuevo y guarda con **Save and deploy**.
+3. Cuando termine el despliegue, borra el token viejo en Cloudflare si todo sigue bien: con `ingesta`, la salud sigue `healthy`; con `operaciones` o `salud`, la ejecución siguiente de `buoh-operaciones` no deja `operations_step_failed`.
+
+El token `agente` se rota igual, con sus dos secretos de Kiro en lugar de las variables de Render.
+
+**La contraseña de un rol de ejecución** (`buoh_ingesta`, `buoh_salud` o `buoh_agente`). Render solo genera un valor nuevo (`generateValue`) cuando la variable no existe:
+
+1. En el servicio que la tiene, en **Environment**, borra la variable y guarda con **Save only**: `BUOH_POSTGRES_PASSWORD`, de `buoh-ingesta`, para `buoh_ingesta`, y `BUOH_SALUD_POSTGRES_PASSWORD` o `BUOH_AGENTE_POSTGRES_PASSWORD`, de `buoh-operaciones`, para los otros dos.
+2. En la página del Blueprint `buoh-datos`, pulsa **Manual Sync**. Render vuelve a crear la variable con un valor nuevo y despliega el servicio. Las variables que toman su valor de otro servicio (`fromService`), como `BUOH_INGESTA_POSTGRES_PASSWORD` de `buoh-operaciones`, se actualizan en cada sincronización.
+3. En su ejecución siguiente, `buoh-operaciones` le pone la contraseña nueva al rol (`passwords_set`, en la línea de `roles_and_logs`). Con `buoh_ingesta`, la instancia nueva de `ingest` espera mientras tanto con `postgres_unavailable` (ADR-0018 §4), y la captura puede parar unos minutos. Si a los 10 minutos sigue esperando, `buoh-operaciones` todavía tiene el valor viejo: otra **Manual Sync** lo arregla.
+4. Con `buoh_agente`, el propietario copia la contraseña nueva a su secreto de Kiro.
+
+**La credencial dueña** (`buoh`, el usuario por defecto de Render) todavía no tiene pasos: no la rotes. En una rotación, Render crea otro usuario, que necesita la pertenencia a `buoh_dueno` con `ADMIN OPTION`, y solo puede dársela el anterior (ver «Roles y cifrado de PostgreSQL (F2.2)»). Cómo da Render sus privilegios al usuario nuevo se comprueba con la base creada, y el PR que lo registre pone aquí los pasos (ADR-0018 §8). Si se filtra antes:
+
+1. En `buoh-postgres`, en **Info**, sección **Networking**, quita `0.0.0.0/0` y guarda. La base deja de aceptar conexiones de fuera de Render, así que la credencial solo sirve desde sus servicios. El agente pierde también su acceso.
+2. Avísale al agente. Prepara el PR que pone `ipAllowList: []` en `render-datos.yaml`, para que una sincronización del Blueprint no vuelva a abrir la base, y los pasos de la rotación.
+
+### Borrar
+
+Borra todo lo de producción, por ejemplo si Deriv termina la relación (ADR-0018 §7; sus términos, 2.4). No se puede deshacer, así que lo decide el propietario.
+
+1. En Cloudflare, en `buoh-captura`, en **Settings**, tarjeta **Bucket lock rules**: junto a la regla `logs-30-dias`, pulsa **...** y **Delete**. Con la regla puesta, Cloudflare no deja vaciar el bucket.
+2. En Render, desconecta el Blueprint `buoh-datos`, desde su página. Sus recursos siguen, pero Render ya no los vuelve a crear cuando se borran.
+3. Borra `buoh-ingesta` y `buoh-operaciones`, al final de su **Settings**, y después `buoh-postgres`, al final de su **Info** (**Delete Database**). Render no guarda copias de una base borrada: lo de PostgreSQL desaparece en ese momento.
+4. En Cloudflare, en `buoh-captura`, **Settings**, **Empty Bucket**, y después borra el bucket. Borra también los tokens `ingesta`, `operaciones`, `salud` y `agente`.
+5. En Kiro, borra los secretos `BUOH_AGENTE_*`.
+6. Avísale al agente, que registra el borrado en un PR.
 
 ## Reporte y evidencia
 
