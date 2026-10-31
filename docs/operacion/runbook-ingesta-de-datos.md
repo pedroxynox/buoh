@@ -755,7 +755,7 @@ Los tokens de R2 se crean en «Desplegar», justo antes de pegarlos en Render, p
 
 ### Desplegar
 
-Desde aquí cuesta dinero: unos 16 USD al mes (ADR-0018 §14). Render cobra cada recurso por segundo desde que lo crea.
+Desde aquí cuesta dinero: unos 19 USD al mes (ADR-0018 §14). Render cobra cada recurso por segundo desde que lo crea.
 
 **El propietario, en Render:**
 

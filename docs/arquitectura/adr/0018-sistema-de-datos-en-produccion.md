@@ -3,8 +3,8 @@
 - **Estado:** Aceptada
 - **Fecha:** 2026-10-31
 - **Ámbito:** Fase 2, incremento F2.2 (`F2-DEPLOY-001`, `F2-ROLE-001` y `F2-RETENTION-001` del [plan de Fase 2](../../plan/fase-2-laboratorio-y-bot-shadow.md))
-- **Decisores:** Propietario de buoh (región, retención frente a los términos de Deriv, el cron job de unos 1 USD al mes y la base de datos abierta a internet), a propuesta de la dirección técnica (lo demás).
-- **Complementa:** [ADR-0016](0016-alojamiento-del-sistema-de-datos.md) §4, cuyas condiciones resuelve, y §2, cuyo presupuesto sube en unos 1 USD; [ADR-0015](0015-reconexion-recuperacion-y-salud-f1-5.md) §7, que sustituye en `production`, §3 y [ADR-0012](0012-catalogo-y-adaptador-publico-de-deriv.md) §9, cuyo fallo con `source_lock_taken` al arrancar cambia en `production` por una espera, y ADR-0015 §10, que decide la historia de las paradas programadas; [ADR-0017](0017-punto-de-control-de-la-derivacion-en-vivo.md) §4, cuya verificación periódica programa, y §7, cuyo corte entre logs decide y cambia; [ADR-0005](0005-persistencia-local-y-formato-fisico-f1-3.md) §3, cuyas claves llevan en `production` el prefijo del log; y [ADR-0006](0006-alojamiento-en-render.md), cuya región fija. No cambia los datasets, el replay ni los vectores, ni la retención de `development` y `test` ([ADR-0004](0004-pipeline-y-reproduccion-de-datos-fase-1.md) §13).
+- **Decisores:** Propietario de buoh (región, retención frente a los términos de Deriv, el cron job de unos 1 USD al mes, la base de datos abierta a internet y el costo de R2 con el redondeo de Cloudflare), a propuesta de la dirección técnica (lo demás).
+- **Complementa:** [ADR-0016](0016-alojamiento-del-sistema-de-datos.md) §4, cuyas condiciones resuelve, y §2, cuyo presupuesto sube en unos 4 USD; [ADR-0015](0015-reconexion-recuperacion-y-salud-f1-5.md) §7, que sustituye en `production`, §3 y [ADR-0012](0012-catalogo-y-adaptador-publico-de-deriv.md) §9, cuyo fallo con `source_lock_taken` al arrancar cambia en `production` por una espera, y ADR-0015 §10, que decide la historia de las paradas programadas; [ADR-0017](0017-punto-de-control-de-la-derivacion-en-vivo.md) §4, cuya verificación periódica programa, y §7, cuyo corte entre logs decide y cambia; [ADR-0005](0005-persistencia-local-y-formato-fisico-f1-3.md) §3, cuyas claves llevan en `production` el prefijo del log; y [ADR-0006](0006-alojamiento-en-render.md), cuya región fija. No cambia los datasets, el replay ni los vectores, ni la retención de `development` y `test` ([ADR-0004](0004-pipeline-y-reproduccion-de-datos-fase-1.md) §13).
 
 ## Contexto
 
@@ -217,10 +217,12 @@ Un paso que falla deja su alerta saneada y su informe, si PostgreSQL responde, y
 | Render Postgres Basic-256mb, 1 GB | 6,30 USD |
 | `buoh-ingesta`, worker Starter | 7 USD |
 | `buoh-operaciones`, cron job | 1 USD, el mínimo |
-| Cloudflare R2: las operaciones de clase A que pasan de lo gratuito | unos 1,60 USD |
+| Cloudflare R2: las operaciones de clase A que pasan de lo gratuito | 4,50 USD |
 | Tráfico de salida por encima de 5 GB | unos 0,30 USD (estimación) |
 
-En total, unos 16 USD al mes: unos 23 con la API (F2.3) y unos 30 con el motor (F2.9). Cada despliegue del Blueprint de datos compila dos servicios con los minutos de compilación del workspace, que caben en los 500 incluidos (estimación).
+En total, unos 19 USD al mes: unos 26 con la API (F2.3) y unos 33 con el motor (F2.9). Cada despliegue del Blueprint de datos compila dos servicios con los minutos de compilación del workspace, que caben en los 500 incluidos (estimación).
+
+(Precisión del 2026-10-31, después del PR 7 de §16: R2 redondea el uso al millón siguiente. Con unos 1,35 millones de operaciones de clase A al mes (ADR-0016, «Consecuencias»), lo que pasa del millón gratuito se cobra como un millón entero, 4,50 USD, y no los unos 1,60 USD que daba la cuenta proporcional. Las de clase B, unos 4,7 millones (§11), siguen dentro de los 10 millones gratuitos. El agente le dio al propietario dos opciones: A, aceptar unos 19 USD al mes (la recomendación), o B, cambiar el guardado de cada evento para no pasar del millón gratuito, que ahorraría unos 3 USD al mes, pero cambiaría una pieza central del log y retrasaría la producción. Respondió: «ok aprueba apcion a, sigue trabajando».)
 
 ### 15. Pruebas
 
@@ -262,7 +264,7 @@ Cada PR es pequeño, con su revisión semántica:
 
 ### Relación con ADR anteriores
 
-- **ADR-0016 §4:** la retención y el entorno, en §4, §6 y §7; los roles, en §8; R2, en §10; `data:health`, en §11; las credenciales, en §12; y la región, en §1. §2 sube en unos 1 USD (§14).
+- **ADR-0016 §4:** la retención y el entorno, en §4, §6 y §7; los roles, en §8; R2, en §10; `data:health`, en §11; las credenciales, en §12; y la región, en §1. §2 sube en unos 4 USD (§14): el cron job, el tráfico de salida y las operaciones de R2, que ADR-0016 («Consecuencias») calculó sin el redondeo de Cloudflare.
 - **ADR-0015:** §7 queda sustituida en `production` (§4) y sigue en `development` y `test`. En `production`, el fallo con `source_lock_taken` al arrancar de §3 pasa a ser una espera (§4). Lo que §10 dejaba para el plan de alojamiento, la historia de las paradas programadas, queda decidido en §5.
 - **ADR-0012 §9:** una sola instancia por fuente sigue valiendo. En `production`, la segunda espera el bloqueo en lugar de terminar (§4 y §5).
 - **ADR-0017:** la verificación periódica de §4 es el paso 4 de §11. El borrado del prefijo de un log terminado ocupa el lugar del borrado de su bucket. El corte de §7 está en §6, que lo cambia: una `event_gap_unresolved` no lo bloquea, a las 24 horas no lo bloquea nada, tampoco la falta de un cierre pedido, y el informe final es el traspaso explícito.
@@ -279,7 +281,7 @@ Cada PR es pequeño, con su revisión semántica:
 - **Espacio.** Mientras `buoh-operaciones` funcione, producción guarda entre 30 y unos 38 días, salvo el log 1 (§16): unos 0,55 GB de PostgreSQL y 1,3 GB de R2. Si la captura se detiene del todo, lo guardado vence igual a los 30 días. Las copias de Render permiten restaurar un log borrado durante 3 días más.
 - **Corte forzado.** Un corte a las 24 horas deja sin recuperar lo que quedaba pendiente del log terminado. Su informe final lo registra.
 - **Varios logs.** La API (F2.3), los datasets (F2.5) y el motor (F2.9) leen una sucesión de logs con la misma búsqueda del log activo, y un dataset no puede abarcar dos logs.
-- **Costo.** El sistema de datos pasa a costar unos 16 USD al mes.
+- **Costo.** El sistema de datos pasa a costar unos 19 USD al mes.
 - **Registros.** Los informes de la salud y de la verificación se borran con su log. Los logs de Render solo duran 7 días.
 - **Evidencia.** El agente lee producción directamente, solo con permisos de lectura, y el propietario copia los números que solo dan los paneles.
 
@@ -313,6 +315,7 @@ Cada PR es pequeño, con su revisión semántica:
 - [Render: documentación en texto](https://render.com/llms-full.txt), con Auto Sync, *Blueprint Path*, health checks, retención de logs, *Metrics* y la suspensión de una base llena
 - [Cloudflare R2: ubicación de los datos](https://developers.cloudflare.com/r2/reference/data-location/), [tokens](https://developers.cloudflare.com/r2/api/tokens/), [API S3](https://developers.cloudflare.com/r2/api/s3/api/), [consistencia](https://developers.cloudflare.com/r2/reference/consistency/) y [bloqueo de buckets](https://developers.cloudflare.com/r2/buckets/bucket-locks/)
 - [Kiro Web: variables de entorno y secretos del sandbox](https://kiro.dev/docs/web/sandbox/environment-variables.md)
+- Con la corrección del costo, el 2026-10-31: [Cloudflare R2: precios](https://developers.cloudflare.com/r2/pricing/), con el redondeo al millón siguiente («Billable unit rounding»)
 - Código leído el 2026-10-31, en `apps/market-data-worker`: `src/config.ts`, `src/ingest-args.ts`, `src/ingest.ts`, `src/runtime.ts`, `src/node-flags.ts`, `src/object-keys.ts`, `src/postgres/metadata-store.ts`, `src/postgres/migrate.ts`, `src/s3/object-store.ts`, `src/cli/ingest.ts`, `src/cli/migrate.ts` y `migrations/0001` a `0005`; y `scripts/data-health.mjs` y `scripts/render-blueprint.test.mjs`.
 
 El contenido de fuentes externas fue reformulado para cumplir restricciones de licencia.

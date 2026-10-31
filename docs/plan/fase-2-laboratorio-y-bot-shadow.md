@@ -407,13 +407,13 @@ Un ensayo en vivo o en producción nunca sustituye una prueba sin red, porque la
 | Render Postgres Basic-256mb, con 1 GB de disco | F2.2 | 6,30 USD |
 | Background worker Starter para `ingest` | F2.2 | 7 USD |
 | Cron job de Render para las operaciones del sistema de datos (ADR-0018 §11) | F2.2 | 1 USD, el mínimo |
-| Cloudflare R2 | F2.2 | de 1 a 2 USD |
+| Cloudflare R2 | F2.2 | 4,50 USD |
 | Servicio web Starter para la API y la web | F2.3 | 7 USD |
 | Background worker Starter para el motor `shadow` | F2.9 | 7 USD |
 
-En total, unos 30 USD al mes. La base, el worker de `ingest`, R2 y la API son los unos 22 USD que aprobó el propietario (ADR-0016 §2). El cron job lo aprobó el 2026-10-31 («la respuesta nro 2, apruebo 1 usd mas»), y el servidor del motor el 2026-10-29 («1. Si, un servidor pequeño para el bot»), que se compra con F2.9. Los backtests corren dentro del servicio de la API, sin costo aparte. Los precios son los que comprobó ADR-0016 y se confirman al comprar.
+En total, unos 33 USD al mes. La base, el worker de `ingest`, R2 y la API son los unos 22 USD que aprobó el propietario (ADR-0016 §2), más los unos 3 USD de R2 que aprobó el 2026-10-31 al conocer el redondeo de Cloudflare («ok aprueba apcion a, sigue trabajando»; ADR-0018 §14). El cron job lo aprobó el 2026-10-31 («la respuesta nro 2, apruebo 1 usd mas»), y el servidor del motor el 2026-10-29 («1. Si, un servidor pequeño para el bot»), que se compra con F2.9. Los backtests corren dentro del servicio de la API, sin costo aparte. Los precios son los que comprobó ADR-0016 y se confirman al comprar.
 
-La línea de R2 es la estimación de ADR-0016 para la captura y `data:health`, que ADR-0018 §14 afina en unos 1,60 USD. No incluye las lecturas de la API y del motor. El tráfico de salida de Render tampoco está medido: ADR-0018 §13 lo estima en unos 0,30 USD al mes por encima de lo incluido, y F2.2, F2.3 y F2.9 lo miden. Si lo medido no cabe en este presupuesto, se presenta al propietario antes de seguir (§4, punto 8).
+La línea de R2 es la de ADR-0018 §14 para la captura y `data:health`: R2 redondea el uso al millón siguiente, así que lo que pasa del millón gratuito de operaciones de clase A se cobra como un millón entero. No incluye las lecturas de la API y del motor. El tráfico de salida de Render tampoco está medido: ADR-0018 §13 lo estima en unos 0,30 USD al mes por encima de lo incluido, y F2.2, F2.3 y F2.9 lo miden. Si lo medido no cabe en este presupuesto, se presenta al propietario antes de seguir (§4, punto 8).
 
 Pueden sumarse, si sus ADR los eligen y el propietario los aprueba:
 
@@ -429,6 +429,7 @@ Pueden sumarse, si sus ADR los eligen y el propietario los aprueba:
 | Retención y tamaño del disco, si suben el presupuesto | dinero | delegada el 2026-10-31 en la dirección técnica, sin subir el presupuesto. Como los términos de Deriv solo permiten tener sus datos en caché 24 horas, el propietario decidió ese día: 30 días igualmente (ADR-0018 §7) |
 | Si el agente recibe un acceso de solo lectura a producción, o si la evidencia llega solo por el propietario (§4, punto 10) | seguridad | decidida el 2026-10-31: acceso, también total; el agente usa el mínimo que necesite cada tarea (§4, punto 10), y la base de datos queda abierta a internet (ADR-0018 §9 y §12) |
 | Un cron job de Render para las operaciones del sistema de datos, unos 1 USD más al mes | dinero | decidida el 2026-10-31: sí (§11 y ADR-0018 §11) |
+| El costo de R2 con el redondeo de Cloudflare, unos 3 USD más al mes | dinero | decidida el 2026-10-31: sí, unos 19 USD al mes para el sistema de datos (§11 y ADR-0018 §14) |
 | Cómo inicia sesión el propietario | seguridad | F2.3 |
 | Qué idiomas tiene el producto, para la preferencia de idioma del catálogo | producto | F2.4 |
 | Qué tipo de operación representan las posiciones hipotéticas, dentro de lo que ofrece Deriv para R_100 | producto | antes de abrir la ADR del modelo de estrategia (§8, punto 5) |
