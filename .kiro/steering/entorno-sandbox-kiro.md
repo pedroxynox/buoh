@@ -55,6 +55,16 @@ Si una sesión empieza sin seguir estos pasos, el propietario puede pedirlo en s
 - El comentario de PR listo se deja con `gh api repos/pedroxynox/buoh/issues/<n>/comments -F body=@<archivo>`. El agente no llama a la API de fusión (`PUT …/pulls/<n>/merge`). Para saber si el propietario ya fusionó: `gh api repos/pedroxynox/buoh/pulls/<n> --jq .merged_at`.
 - Guardar cuerpos de PR, logs y binarios auxiliares fuera del repo, por ejemplo en `/projects/sandbox/.buoh-local/`.
 
+## Secretos en el sandbox
+
+Los secretos de Kiro (*Settings → Sandbox → Secrets*) llegan al sandbox como variables de entorno y están también en la línea de comandos de procesos del sandbox. El 2026-11-01, un `pgrep -fa` de un subagente los mostró en el registro de la sesión (runbook, «Producción (F2.2)», «Acceso del agente»).
+
+- No mostrar nunca la línea de comandos de otros procesos ni el entorno: ni `ps`, `pgrep -a` o `pgrep -l`, `top`, `env`, `printenv`, `set`, `export -p`, `declare -p` o `declare -x`, ni `cat` de `/proc/*/cmdline` o `/proc/*/environ`, ni el entorno entero desde un programa, como `process.env` u `os.environ`. Tampoco `set -x` o `bash -x` en un comando que usa un secreto: muestran cada línea con sus valores.
+- Para ver qué secretos hay, solo sus nombres: `compgen -e | grep '^BUOH_'`. Para saber si un servicio local está en marcha, `pg_isready` o su puerto, no la lista de procesos.
+- Un secreto llega a un comando por el entorno, como en «Acceso del agente», nunca como argumento: un argumento queda en la línea de comandos de ese proceso.
+- El encargo a un subagente repite estas reglas, con los comandos prohibidos.
+- Si un secreto aparece en el registro de la sesión, en Git o en GitHub, el agente se lo dice al propietario en frases completas, le recomienda rotarlo con los pasos del runbook («Rotar credenciales») y registra en un PR lo que decida, con sus palabras y su fecha.
+
 ## Cambio de sesión
 
 Una sesión nueva no ve la conversación anterior, y puede no ver lo guardado fuera del repositorio, como `/projects/sandbox/.buoh-local/`. Cuando el propietario va a cambiar de sesión:
