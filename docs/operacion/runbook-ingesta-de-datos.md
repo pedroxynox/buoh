@@ -753,7 +753,7 @@ Antes de crear nada de producción tiene que estar fusionado el PR 7 de ADR-0018
 
 Los tokens de R2 se crean en «Desplegar», justo antes de pegarlos en Render, para que no queden guardados en ningún otro sitio.
 
-El 2026-10-31, las capturas del propietario mostraron el formulario de `buoh-captura` con la indicación **Eastern North America**, sin jurisdicción y con la clase **Standard**, el de la regla `logs-30-dias` sobre `logs/` y de 30 días, y la política **Wait** del workspace. Que creó el bucket con ese nombre y guardó la regla lo dijo él. El nombre lo confirma el `healthy` del arranque («Desplegar»), que lee de `buoh-captura`; la regla no la confirma nada de lo que se vio.
+El 2026-10-31, antes de las 23:11 UTC, las capturas del propietario mostraron el formulario de `buoh-captura` con la indicación **Eastern North America**, sin jurisdicción y con la clase **Standard**, y el de la regla `logs-30-dias` sobre `logs/` y de 30 días. Después, antes de «Desplegar», mostraron la política **Wait** del workspace. Que creó el bucket con ese nombre y guardó la regla lo dijo él. El nombre lo confirma el `healthy` del arranque («Desplegar»), que lee de `buoh-captura`; la regla no la confirma nada de lo que se vio.
 
 ### Desplegar
 
