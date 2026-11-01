@@ -55,7 +55,9 @@ import { waitForNoSessions } from '../test/support/databases.js';
  * miembros del usuario original: hacen como `buoh_dueno` lo que hace `buoh-operaciones` sin que
  * nadie les dé ninguna pertenencia, así que el anterior se puede borrar, y quitarle el inicio de
  * sesión al original no lo cambia. Uno sin esa pertenencia no puede (`42501`): es el caso en que el
- * runbook para la rotación antes de sincronizar el Blueprint.
+ * runbook para la rotación antes de sincronizar el Blueprint. Uno miembro del anterior, y no del
+ * original, pierde `buoh_dueno` cuando se borra el anterior: es el caso en que el runbook no lo
+ * borra.
  *
  * La sesión no sale a la red: su fábrica de sockets es falsa y sus esquemas son sintéticos. Las
  * contraseñas de la prueba son aleatorias y nunca se escriben. Los roles son de todo el servidor:
@@ -76,8 +78,14 @@ const ROTATED = ['buoh_integration_dueno_2', 'buoh_integration_dueno_3'] as cons
 const RENDER_ROTATED = ['buoh_integration_render_2', 'buoh_integration_render_3'] as const;
 /** Un usuario de una rotación al que Render no le da ninguna pertenencia. */
 const RENDER_UNGRANTED = 'buoh_integration_render_solo';
+/**
+ * Dos usuarios de dos rotaciones sucesivas, si Render hiciera a cada uno miembro del usuario por
+ * defecto del momento, y no del original: el primero, del original, y el segundo, del primero.
+ */
+const RENDER_CHAINED = ['buoh_integration_render_4', 'buoh_integration_render_5'] as const;
 /** Todos los roles de la prueba, en un orden en que se pueden borrar. */
 const TEST_ROLES = [
+  ...[...RENDER_CHAINED].reverse(),
   ...RENDER_ROTATED,
   RENDER_UNGRANTED,
   ...[...ROTATED].reverse(),
@@ -105,6 +113,7 @@ let platform: Pool | undefined;
 let renderPool: Pool | undefined;
 let renderClient: PoolClient | undefined;
 const passwords = {
+  chained: RENDER_CHAINED.map(() => randomBytes(32).toString('base64')),
   health: randomBytes(32).toString('base64'),
   ingest: randomBytes(32).toString('base64'),
   render: randomBytes(32).toString('base64'),
@@ -602,6 +611,7 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
   async function rotationCheck(user: string) {
     const { rows } = await ready(admin).query<{
       can_admin: boolean;
+      can_connect: boolean;
       can_set: boolean;
       member_of: string[];
       rolcanlogin: boolean;
@@ -609,6 +619,7 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
       rolsuper: boolean;
     }>(
       `SELECT r.rolcanlogin, r.rolcreaterole, r.rolsuper,
+              has_database_privilege(r.oid, current_database(), 'CONNECT') AS can_connect,
               pg_has_role(r.oid, $2::name, 'SET') AS can_set,
               pg_has_role(r.oid, $2::name, 'MEMBER WITH ADMIN OPTION') AS can_admin,
               ARRAY(SELECT g.rolname || ' inherit=' || a.inherit_option || ' set=' || a.set_option
@@ -632,6 +643,15 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
       [POSTGRES_ROLES.owner],
     );
     return rows.map((row) => row.grant);
+  }
+
+  /** Si `user` es miembro de `role`, directa o indirectamente: el paso 4 del runbook. */
+  async function isMemberOf(user: string, role: string): Promise<boolean> {
+    const { rows } = await ready(admin).query<{ member: boolean }>(
+      "SELECT pg_has_role($1::name, $2::name, 'MEMBER') AS member",
+      [user, role],
+    );
+    return rows[0]?.member === true;
   }
 
   /** Las pertenencias que dio `user`: mientras tenga una, su `DROP ROLE` falla con `2BP01`. */
@@ -711,6 +731,7 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
   /** Lo que da `rotationCheck` para un usuario que Render hizo miembro del original. */
   const memberOfOriginal = {
     can_admin: true,
+    can_connect: true,
     can_set: true,
     member_of: [`${RENDER_USER} inherit=true set=true`],
     rolcanlogin: true,
@@ -731,7 +752,9 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
     }
     await ownerWork(first, passwords.renderRotated[0] ?? '', 7);
     await ownerWork(second, passwords.renderRotated[1] ?? '', 8);
-    // Render borra el usuario de la primera rotación: no dio ninguna pertenencia, así que se puede.
+    // Render borra el usuario de la primera rotación: el segundo no pasa por él y él no dio ninguna
+    // pertenencia, así que se puede (paso 4 del runbook).
+    expect(await isMemberOf(second, first)).toBe(false);
     expect(await grantsBy(first)).toBe(0);
     expect(await sqlState(server, `DROP ROLE ${first}`)).toBeNull();
     // Render no borra el original: le quita el inicio de sesión.
@@ -770,6 +793,41 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
       await expect(owner.listLogs()).rejects.toMatchObject({ code: '42501' });
     } finally {
       await owner.close();
+    }
+  });
+
+  it('un usuario nuevo miembro del anterior, y no del original, pasa las comprobaciones de antes de sincronizar, pero borrar el anterior le quita buoh_dueno (42501): por eso el runbook no lo borra', async () => {
+    const server = ready(platform);
+    const [previous, next] = RENDER_CHAINED;
+    const [previousPassword, nextPassword] = passwords.chained;
+    await server.query(
+      `CREATE ROLE ${previous} LOGIN CREATEROLE CREATEDB PASSWORD ${pg.escapeLiteral(previousPassword ?? '')}`,
+    );
+    await server.query(`GRANT ${RENDER_USER} TO ${previous}`);
+    await server.query(
+      `CREATE ROLE ${next} LOGIN CREATEROLE CREATEDB PASSWORD ${pg.escapeLiteral(nextPassword ?? '')}`,
+    );
+    await server.query(`GRANT ${previous} TO ${next}`);
+    // El paso 2 pasa, y el anterior no dio ninguna pertenencia: solo la de ser su miembro lo delata.
+    expect(await rotationCheck(next)).toEqual({
+      ...memberOfOriginal,
+      member_of: [`${previous} inherit=true set=true`],
+    });
+    expect(await grantsBy(previous)).toBe(0);
+    expect(await isMemberOf(next, previous)).toBe(true);
+    // Sin esa comprobación, borrar el anterior le quita al nuevo el camino hasta buoh_dueno.
+    expect(await sqlState(server, `DROP ROLE ${previous}`)).toBeNull();
+    expect(await rotationCheck(next)).toEqual({
+      ...memberOfOriginal,
+      can_admin: false,
+      can_set: false,
+      member_of: [],
+    });
+    const pool = createPool(roleConfig(next, nextPassword ?? '').postgres);
+    try {
+      expect(await sqlState(pool, `SET ROLE ${POSTGRES_ROLES.owner}`)).toBe('42501');
+    } finally {
+      await pool.end();
     }
   });
 });
