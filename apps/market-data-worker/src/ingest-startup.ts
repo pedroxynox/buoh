@@ -4,6 +4,7 @@ import {
   type SessionLock,
   type SessionLockProvider,
 } from './deriv/session.js';
+import { type LogCutReads } from './log-cut.js';
 import { type OperationalAlert } from './operational/registry.js';
 import { failureReason } from './source-log/source-event-log.js';
 import { type LogLocation } from './successive-logs.js';
@@ -32,13 +33,12 @@ export type StartupWaitReason = (typeof STARTUP_WAIT_REASONS)[number];
 /** El motivo de un bloqueo que ya no está tomado al recibirlo, como el de la sesión. */
 const LOCK_LOST = 'source_lock_lost';
 
-/** Las lecturas de la espera, que no escriben nada. En `ingest`, `openStartupReads`. */
-export interface StartupReads {
-  /**
-   * El log activo de la fuente (`findActiveLog`), o `null` si no hay ninguno preparado. Rechaza si
-   * PostgreSQL no acepta la credencial o no responde.
-   */
-  locateLog(): Promise<LogLocation | null>;
+/**
+ * Las lecturas de la espera y del corte de los logs (`LogCutReads`, ADR-0018 §6), que no escriben
+ * nada. En `ingest`, `openStartupReads`. Su `locateLog` rechaza si PostgreSQL no acepta la
+ * credencial o no responde.
+ */
+export interface StartupReads extends LogCutReads {
   /** Las migraciones del worker que le faltan al esquema del log, sin aplicar nada. */
   pendingMigrations(log: LogLocation): Promise<readonly string[]>;
   /** Libera las conexiones. */

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   findActiveLog,
+  firstWriteOf,
   isLogExpired,
   listCaptureLogs,
   loadConfig,
@@ -245,6 +246,51 @@ describe('listCaptureLogs (ADR-0018 §6)', () => {
     });
     expect(log).toEqual(logLocation(2));
     expect(order).toEqual(['namespaces', 'log', 'log', 'now']);
+  });
+});
+
+describe('firstWriteOf (ADR-0018 §6, «Hora de corte»)', () => {
+  it('la escritura más temprana de la fuente en el log: el primer evento por su posición o el primer latido por su orden de escritura', async () => {
+    const { pool, queries } = fakePool(() => ({
+      rows: [{ event: '2026-11-01T00:06:06.704Z', heartbeat: '2026-11-01T00:06:06.087Z' }],
+    }));
+    expect(await firstWriteOf(pool, logLocation(1), 'deriv_options')).toBe(
+      '2026-11-01T00:06:06.087Z',
+    );
+    const [query] = queries;
+    expect(query?.values).toEqual(['deriv_options']);
+    expect(query?.text).toContain('FROM buoh_log_000001.source_event_index WHERE source = $1');
+    expect(query?.text).toContain('ORDER BY segment_index, position LIMIT 1');
+    expect(query?.text).toContain('FROM buoh_log_000001.ingestion_heartbeats WHERE source = $1');
+    expect(query?.text).toContain('ORDER BY write_order LIMIT 1');
+
+    const eventFirst = fakePool(() => ({
+      rows: [{ event: '2026-03-02T10:00:00.000Z', heartbeat: '2026-03-02T10:00:00.500Z' }],
+    }));
+    expect(await firstWriteOf(eventFirst.pool, logLocation(2), 'deriv_options')).toBe(
+      '2026-03-02T10:00:00.000Z',
+    );
+  });
+
+  it('con solo eventos o solo latidos, esa; sin ninguno, null; y rechaza si el log no se puede leer', async () => {
+    const onlyHeartbeat = fakePool(() => ({
+      rows: [{ event: null, heartbeat: '2026-03-02T10:00:00.000Z' }],
+    }));
+    expect(await firstWriteOf(onlyHeartbeat.pool, logLocation(1), 'deriv_options')).toBe(
+      '2026-03-02T10:00:00.000Z',
+    );
+    const onlyEvent = fakePool(() => ({
+      rows: [{ event: '2026-03-02T10:00:01.000Z', heartbeat: null }],
+    }));
+    expect(await firstWriteOf(onlyEvent.pool, logLocation(1), 'deriv_options')).toBe(
+      '2026-03-02T10:00:01.000Z',
+    );
+    const empty = fakePool(() => ({ rows: [{ event: null, heartbeat: null }] }));
+    expect(await firstWriteOf(empty.pool, logLocation(1), 'deriv_options')).toBeNull();
+    const failing = fakePool(() => coded('42P01'));
+    await expect(firstWriteOf(failing.pool, logLocation(1), 'deriv_options')).rejects.toMatchObject(
+      { code: '42P01' },
+    );
   });
 });
 

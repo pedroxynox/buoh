@@ -12,7 +12,12 @@ import { sourceLockHolder } from './postgres/source-lock.js';
 import { PostgresSourceLogStore } from './postgres/source-log-store.js';
 import { S3ObjectStore } from './s3/object-store.js';
 import { failureReason } from './source-log/source-event-log.js';
-import { findActiveLog, readCaptureLog, type LogLocation } from './successive-logs.js';
+import {
+  findActiveLog,
+  firstWriteOf,
+  readCaptureLog,
+  type LogLocation,
+} from './successive-logs.js';
 
 export interface OpenStoresOptions {
   /** Alerta saneada, en stderr por defecto. */
@@ -109,13 +114,14 @@ export function openHealthStores(
 }
 
 /**
- * Las lecturas de la espera del arranque de `ingest` en `production` (ADR-0018 §4), sobre un pool
- * propio con la credencial de la configuración y los mismos plazos de cada conexión y de cada
- * consulta que `data:health`, para que un PostgreSQL que acepta la conexión y no contesta no deje
- * la espera parada: el log activo de `source` (`findActiveLog`) y las migraciones que le faltan
- * (`pendingMigrations` con su esquema). Ninguna escribe nada. Si PostgreSQL cierra una conexión
- * libre del pool, deja la alerta `postgres_connection_lost`, como `openStores`. `close` libera las
- * conexiones.
+ * Las lecturas de la espera del arranque de `ingest` en `production` (ADR-0018 §4) y del corte de
+ * los logs (§6), sobre un pool propio con la credencial de la configuración y los mismos plazos de
+ * cada conexión y de cada consulta que `data:health`, para que un PostgreSQL que acepta la conexión
+ * y no contesta no deje la espera ni el corte parados: el log activo de `source` (`findActiveLog`),
+ * las migraciones que le faltan a un log (`pendingMigrations` con su esquema), su primera escritura
+ * (`firstWriteOf`) y si está preparado: existe, se puede leer, no tiene escrituras y no le falta
+ * ninguna migración. Ninguna escribe nada. Si PostgreSQL cierra una conexión libre del pool, deja la
+ * alerta `postgres_connection_lost`, como `openStores`. `close` libera las conexiones.
  */
 export function openStartupReads(
   config: WorkerConfig,
@@ -134,6 +140,14 @@ export function openStartupReads(
   });
   return {
     close: () => pool.end(),
+    firstWrite: (log) => firstWriteOf(pool, log, input.source),
+    isPrepared: async (log) => {
+      const found = await readCaptureLog(pool, { number: log.number, source: input.source });
+      if (found === null || !found.readable || found.lastWriteUtc !== null) {
+        return false;
+      }
+      return (await pendingMigrations(pool, log.schema)).length === 0;
+    },
     locateLog: () => findActiveLog(pool, { now: input.now, source: input.source }),
     pendingMigrations: (log) => pendingMigrations(pool, log.schema),
   };

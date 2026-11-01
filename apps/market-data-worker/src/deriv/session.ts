@@ -1,5 +1,5 @@
 import { type IngestionCursor, type SourceEvent } from '@buoh/contracts';
-import { liveDerivationView, sourceEventTime } from '@buoh/domain';
+import { liveDerivationView, sourceEventTime, type LiveDerivationView } from '@buoh/domain';
 
 import { ObjectReadError } from '../errors.js';
 import { RawFirstIngestor } from '../ingestion/raw-first-ingestor.js';
@@ -126,6 +126,12 @@ export interface DerivSessionInput extends Pick<
    * `LogIntegrityError` (`SourceEventLog.open`).
    */
   readonly openLog: (lock: SessionLock) => Promise<SourceEventLog>;
+  /**
+   * Suelta un bloqueo de la sesión, el que ya no necesita o el que tiene al terminar: por defecto,
+   * su `release`. En `production`, el corte de los logs lo retiene al terminar para la sesión del
+   * log siguiente (ADR-0018 §6, `LockRetention`). Nunca falla.
+   */
+  readonly releaseLock?: (lock: SessionLock) => Promise<void>;
   /** Azar de la espera entre intentos, en [0, 1). */
   readonly random: () => number;
   /**
@@ -263,6 +269,14 @@ export interface DerivSession {
    * soltar el bloqueo.
    */
   readonly done: Promise<DerivSessionResult>;
+  /**
+   * El estado vivo del log de la sesión, desde su último punto de control válido y con el perfil de
+   * medición, como lo lee la vigilancia del hueco (`readLiveState`, ADR-0017 §4). `null` si la sesión
+   * todavía no abrió su log o ya se pidió su parada, o si el log tuvo un fallo de persistencia. Lanza
+   * `LogReadError` si un almacén no responde y `LogIntegrityError` si el contenido no pasa sus
+   * comprobaciones. Solo lee: lo usa el corte de los logs de producción (ADR-0018 §6).
+   */
+  liveView(): Promise<LiveDerivationView | null>;
   /** La parada por señal (ADR-0015 §3, «Parada»). No hace nada si ya se pidió. */
   stop(): void;
 }
@@ -381,7 +395,7 @@ async function readCursors(
   return { latest: latest?.cursor ?? null, symbols };
 }
 
-/** Una sesión en curso: su estado vive aquí, y `startDerivSession` expone `done` y `stop`. */
+/** Una sesión en curso: su estado vive aquí, y `startDerivSession` expone `done`, `liveView` y `stop`. */
 class SessionRun {
   readonly done: Promise<DerivSessionResult>;
   readonly #input: DerivSessionInput;
@@ -481,6 +495,16 @@ class SessionRun {
     this.#cancelWait?.();
     this.#abort?.abort();
     this.#connection?.stop();
+  }
+
+  /** `DerivSession.liveView`: lee con el log del ingestor de la sesión, como `#watchGap`. */
+  async liveView(): Promise<LiveDerivationView | null> {
+    const ingestor = this.#ingestor;
+    const lookup = this.#lookup;
+    if (ingestor === null || lookup === null || this.#stopped) {
+      return null;
+    }
+    return ingestor.readLog(async (log) => liveDerivationView(await readLiveState(log, lookup)));
   }
 
   async #run(): Promise<DerivSessionResult> {
@@ -1367,7 +1391,9 @@ class SessionRun {
   async #releaseLock(): Promise<void> {
     const lock = this.#lock;
     this.#lock = null;
-    await lock?.release();
+    if (lock !== null) {
+      await (this.#input.releaseLock ?? ((held: SessionLock) => held.release()))(lock);
+    }
   }
 }
 
@@ -1403,6 +1429,7 @@ export function startDerivSession(input: DerivSessionInput): DerivSession {
   const run = new SessionRun(input);
   return {
     done: run.done,
+    liveView: () => run.liveView(),
     stop: () => {
       run.stop();
     },
