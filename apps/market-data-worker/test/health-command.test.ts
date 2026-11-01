@@ -723,15 +723,37 @@ describe('healthCommand en production: el log activo (ADR-0018 §6)', () => {
     expect(run.opened).toEqual([]);
   });
 
-  it('con --log, busca ese log en lugar del activo y lo observa con su esquema y su prefijo (ADR-0018 §11)', async () => {
+  it('con --log, busca ese log y el activo, y lo observa con su esquema y su prefijo (ADR-0018 §11)', async () => {
     const run = await commandHarness();
+    const result = await healthCommand([...ARGS, '--log', '2'], PRODUCTION_ENV, run.deps());
+
+    // El log 2 es el activo: el escritor vivo es el suyo, como sin --log.
+    expect(result.exitCode).toBe(0);
+    expect(reportOf(result.stdout)).toMatchObject({ service_health: 'healthy' });
+    expect(run.requests).toEqual([2, null]);
+    expect(run.opened.map((config) => [config.postgres.schema, config.s3.keyPrefix])).toEqual([
+      ['buoh_log_000002', 'logs/000002/'],
+    ]);
+  });
+
+  it('con --log de un log anterior al activo, que terminó, lo observa sin escritor vivo: la regla 4 cierra en memoria la conexión que quedó abierta (ADR-0018 §6, «Traspaso»)', async () => {
+    const run = await commandHarness();
+    const before = run.contents();
     const result = await healthCommand([...ARGS, '--log', '1'], PRODUCTION_ENV, run.deps());
 
-    expect(result.exitCode).toBe(0);
-    expect(run.requests).toEqual([1]);
-    expect(run.opened.map((config) => [config.postgres.schema, config.s3.keyPrefix])).toEqual([
-      ['buoh_log_000001', 'logs/000001/'],
-    ]);
+    // El bloqueo de la fuente lo tiene el escritor del log 2, el activo, y nunca vuelve al log 1.
+    expect(result.exitCode).toBe(1);
+    expect(reportOf(result.stdout)).toMatchObject({
+      backlog_bytes: 0,
+      backlog_count: 0,
+      connection_state: 'disconnected',
+      open_condition_types: ['connection_lost'],
+      service_health: 'paused',
+    });
+    expect(run.requests).toEqual([1, null]);
+    expect(run.opened.map((config) => config.postgres.schema)).toEqual(['buoh_log_000001']);
+    // El cierre es solo en memoria: nada se escribe.
+    expect(run.contents()).toEqual(before);
   });
 
   it('fuera de production, --log es un error de uso: salida 2, sin buscar ni abrir nada', async () => {

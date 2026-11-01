@@ -131,10 +131,17 @@ async function locateAndObserve(
   },
 ): Promise<HealthEvaluation> {
   let target = config;
+  let ended = false;
   if (config.environment === 'production') {
     let log: LogLocation | null;
     try {
       log = await dependencies.locateLog(config, input.log);
+      // Un log anterior al activo terminó (ADR-0018 §6): quien tiene el bloqueo de la fuente escribe
+      // en otro log y nunca vuelve a este.
+      if (log !== null && input.log !== null) {
+        const active = await dependencies.locateLog(config, null);
+        ended = active !== null && active.number > log.number;
+      }
     } catch (error) {
       return evaluateDataHealth({
         reason: failureReason(error),
@@ -167,7 +174,9 @@ async function locateAndObserve(
     nextId: dependencies.nextId,
     now: dependencies.now,
     progress: input.progress,
-    stores,
+    // Un log que terminó no tiene escritor vivo: la regla 4 cierra en memoria la conexión que quedó
+    // abierta, como la verá su informe final.
+    stores: ended ? { ...stores, lockHolder: () => Promise.resolve(null) } : stores,
     symbol: input.symbol,
   });
   return evaluateDataHealth(observation);
@@ -214,8 +223,9 @@ function loadHealthConfig(env: Readonly<Record<string, string | undefined>>): Wo
  *   abrir nada. En `production`, `BUOH_POSTGRES_SCHEMA` también es inválida.
  * - En `production`, observa el log activo (ADR-0018 §6), o el de `--log`: lo busca dentro del
  *   plazo total y abre los almacenes con su esquema y su prefijo. Sin log activo, o si el pedido no
- *   existe o todavía no se puede leer, la regla 2 con `log_not_prepared`. Fuera de `production`,
- *   `--log` es un error de uso.
+ *   existe o todavía no se puede leer, la regla 2 con `log_not_prepared`. Un log de `--log` anterior
+ *   al activo terminó: lo observa sin escritor vivo, con la regla 4. Fuera de `production`, `--log`
+ *   es un error de uso.
  * - Si no, stdout lleva el `HealthReport` y stderr la alerta saneada de las reglas 2 y 3, si la hay.
  *   Un error de programación da el informe `failed` con la alerta `unexpected_error`.
  * - Si la observación y la evaluación no terminan en `HEALTH_DEADLINE_MS`, el informe es el de la

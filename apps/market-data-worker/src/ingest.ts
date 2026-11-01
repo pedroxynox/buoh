@@ -20,6 +20,13 @@ import {
 import { type SocketFactory } from './deriv/socket.js';
 import { checkIngestConfig, IngestConfigError, parseIngestArgs } from './ingest-args.js';
 import {
+  locateCaptureLog,
+  LockRetention,
+  LogCutWatch,
+  type CaptureTarget,
+  type LogCutSession,
+} from './log-cut.js';
+import {
   HandedOverLockProvider,
   waitForProductionStart,
   type StartupReads,
@@ -83,6 +90,11 @@ export interface IngestInput {
   /** Azar de la espera entre intentos, en [0, 1). */
   readonly random: () => number;
   /**
+   * Cómo suelta la sesión su bloqueo: por defecto, su `release`. En `production`, `ingestCommand`
+   * lo retiene en un corte para la sesión del log siguiente (ADR-0018 §6, `LockRetention`).
+   */
+  readonly releaseLock?: (lock: SessionLock) => Promise<void>;
+  /**
    * La retención de la captura: por defecto, `INGEST_RETENTION_MS` (ADR-0015 §7). Con `null`,
    * ninguna: ni para a las 23 horas ni comprueba `retention_expired`, porque en `production` la
    * retención la llevan los logs sucesivos (ADR-0018 §4).
@@ -97,6 +109,12 @@ export interface IngestInput {
   readonly signals: (onSignal: () => void) => () => void;
   readonly stores: Omit<IngestStores, 'close' | 'pendingMigrations'>;
   readonly symbol: string;
+  /**
+   * Recibe la sesión en cuanto empieza y devuelve la función que deja de vigilarla, a la que se llama
+   * cuando la sesión termina. En `production`, `ingestCommand` vigila así el corte del log (ADR-0018
+   * §6, `LogCutWatch`).
+   */
+  readonly watchSession?: (session: LogCutSession) => () => void;
 }
 
 /** Una recuperación de historia en el resultado de `ingest`: sin horas ni precios. */
@@ -193,6 +211,7 @@ export async function runIngest(input: IngestInput): Promise<IngestReport> {
     openLog: input.openLog,
     random: input.random,
     registry,
+    ...(input.releaseLock === undefined ? {} : { releaseLock: input.releaseLock }),
     requestedResponses: stores.requestedResponses,
     ...(input.retentionMs === null
       ? {}
@@ -215,11 +234,13 @@ export async function runIngest(input: IngestInput): Promise<IngestReport> {
       session.stop();
     }
   });
+  const unwatch = input.watchSession?.(session) ?? null;
   let result: DerivSessionResult;
   try {
     result = await session.done;
   } finally {
     stopListening();
+    unwatch?.();
   }
   return {
     connections: result.connections,
@@ -320,11 +341,13 @@ function commandSignals(signals: IngestInput['signals']) {
  *   MIGRATIONS_PENDING` y las que faltan, sin tomar el bloqueo; si PostgreSQL no responde al
  *   leerlas, salida 1, `code: STORAGE_UNAVAILABLE` y el motivo saneado. La captura tiene la
  *   retención de 23 horas.
- * - En `production`, espera el arranque sin escribir nada (`waitForProductionStart`): el log activo,
- *   sus migraciones y el bloqueo. Si una señal la para, salida 0, `status: stopped`, `code:
- *   WAIT_STOPPED` y el motivo por el que esperaba (`waiting`). Si no, abre los almacenes con el
- *   esquema y el prefijo del log activo (`withLog`) y corre la captura sin retención, con el
- *   bloqueo que tomó la espera (`HandedOverLockProvider`).
+ * - En `production`, espera el arranque sin escribir nada (`waitForProductionStart`): el log en el que
+ *   toca capturar (`locateCaptureLog`), sus migraciones y el bloqueo. Si una señal la para, salida 0,
+ *   `status: stopped`, `code: WAIT_STOPPED` y el motivo por el que esperaba (`waiting`). Si no, abre
+ *   los almacenes con el esquema y el prefijo de ese log (`withLog`) y corre la captura sin
+ *   retención, con el bloqueo que tomó la espera (`HandedOverLockProvider`) y la vigilancia de su
+ *   corte (`LogCutWatch`, ADR-0018 §6). Tras un corte sigue igual con el log siguiente, con el mismo
+ *   bloqueo, y la línea es la de la última sesión.
  * - Si no, el resultado de la captura con su código (`ingestExitCode`). Un error inesperado da
  *   `code: UNEXPECTED` y salida 1.
  */
@@ -353,11 +376,15 @@ export async function ingestCommand(
     dependencies;
   const stop = commandSignals(signals);
 
-  /** La captura sobre los almacenes de `target`, con ese bloqueo y esa retención. */
+  /**
+   * La captura sobre los almacenes de `target`, con ese bloqueo y esa retención y, en `production`,
+   * la vigilancia del corte y cómo se suelta el bloqueo (`cut`).
+   */
   const capture = async (
     target: WorkerConfig,
     lock: SessionLockProvider,
     production: boolean,
+    cut?: Pick<IngestInput, 'releaseLock' | 'watchSession'>,
   ): Promise<{ readonly exitCode: 0 | 1 | 2; readonly line: string }> => {
     const stores = openStores(target);
     try {
@@ -402,10 +429,114 @@ export async function ingestCommand(
         signals: stop.signals,
         stores,
         symbol,
+        ...cut,
       });
       return { exitCode: ingestExitCode(report), line: JSON.stringify(report) };
     } finally {
       await stores.close();
+    }
+  };
+
+  /**
+   * La captura en `production` (ADR-0018 §4 y §6): espera el arranque sin escribir nada, captura en
+   * el log que toca (`locateCaptureLog`) y vigila su corte (`LogCutWatch`). Tras un corte, vuelve a la
+   * espera con el bloqueo que retuvo (`LockRetention`), para el log siguiente, hasta que una sesión
+   * termina sin corte o llega la parada. Si al arrancar se salta el log activo porque su hora de
+   * corte pasó hace 24 horas o más, deja la alerta `log_cut_forced`.
+   */
+  const captureProduction = async (
+    provider: SessionLockProvider,
+    reads: StartupReads,
+  ): Promise<{ readonly exitCode: 0 | 1 | 2; readonly line: string }> => {
+    const alert = ports.alert ?? stderrAlert;
+    let after: number | null = null;
+    let retained: SessionLock | null = null;
+    for (;;) {
+      const located: { target: CaptureTarget | null } = { target: null };
+      const waitLock = retained === null ? null : new HandedOverLockProvider(retained, provider);
+      const cutFrom = after;
+      let waited: StartupWaitResult;
+      try {
+        waited = await waitForProductionStart({
+          alert,
+          lock: waitLock ?? provider,
+          now: ports.now,
+          reads: {
+            locateLog: async () => {
+              located.target = await locateCaptureLog(reads, { after: cutFrom, now: ports.now });
+              return located.target?.log ?? null;
+            },
+            pendingMigrations: (log) => reads.pendingMigrations(log),
+          },
+          scheduler: ports.scheduler,
+          signals: stop.signals,
+        });
+      } finally {
+        // El bloqueo del corte, si la espera no llegó a tomarlo, como tras una parada.
+        await waitLock?.releaseUnused();
+      }
+      if (waited.status === 'stopped') {
+        return {
+          exitCode: 0,
+          line: JSON.stringify({ code: WAIT_STOPPED, status: 'stopped', waiting: waited.waiting }),
+        };
+      }
+      const { log } = waited;
+      const skipped = cutFrom === null ? (located.target?.skipped ?? null) : null;
+      if (skipped !== null) {
+        // El salto al arrancar es un corte forzado sin cierre pedido (ADR-0018 §6, «Al arrancar»):
+        // este proceso no abre el log saltado, así que lo que quedó abierto lo dice su informe final.
+        alert({
+          event: 'log_cut_forced',
+          log: String(skipped.number),
+          next: String(log.number),
+          open_condition_types: null,
+          pending_continuity: null,
+          reason: 'cut_deadline_passed_at_start',
+        });
+      }
+      const handedOver = new HandedOverLockProvider(waited.lock, provider);
+      const retention = new LockRetention();
+      const watches: LogCutWatch[] = [];
+      let result: { readonly exitCode: 0 | 1 | 2; readonly line: string };
+      let next: { readonly after: number; readonly lock: SessionLock | null } | null = null;
+      try {
+        result = await capture(withLog(config, log), handedOver, true, {
+          releaseLock: retention.release,
+          watchSession: (session) => {
+            const watch = new LogCutWatch({
+              alert,
+              log,
+              now: ports.now,
+              onCut: () => {
+                retention.retain();
+              },
+              reads,
+              scheduler: ports.scheduler,
+              session,
+            });
+            watches.push(watch);
+            watch.start();
+            return () => {
+              watch.stop();
+            };
+          },
+        });
+        const decision = watches[0]?.decision ?? null;
+        if (decision !== null && result.exitCode === 0) {
+          next = { after: decision.log.number, lock: retention.takeRetained() };
+        }
+      } finally {
+        await handedOver.releaseUnused();
+        // Un bloqueo retenido que no pasa a la sesión siguiente se suelta, también si `capture`
+        // lanzó: ninguno queda tomado al terminar.
+        await retention.takeRetained()?.release();
+      }
+      if (next === null) {
+        return result;
+      }
+      after = next.after;
+      retained = next.lock;
     }
   };
 
@@ -415,30 +546,10 @@ export async function ingestCommand(
       return await capture(config, provider, false);
     }
     const reads = openStartupReads(config);
-    let waited: StartupWaitResult;
     try {
-      waited = await waitForProductionStart({
-        alert: ports.alert ?? stderrAlert,
-        lock: provider,
-        now: ports.now,
-        reads,
-        scheduler: ports.scheduler,
-        signals: stop.signals,
-      });
+      return await captureProduction(provider, reads);
     } finally {
       await reads.close();
-    }
-    if (waited.status === 'stopped') {
-      return {
-        exitCode: 0,
-        line: JSON.stringify({ code: WAIT_STOPPED, status: 'stopped', waiting: waited.waiting }),
-      };
-    }
-    const handedOver = new HandedOverLockProvider(waited.lock, provider);
-    try {
-      return await capture(withLog(config, waited.log), handedOver, true);
-    } finally {
-      await handedOver.releaseUnused();
     }
   } catch (error) {
     return {

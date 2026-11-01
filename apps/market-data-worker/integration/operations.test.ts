@@ -234,6 +234,8 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     expect(run.steps.map((line) => [line['step'], line['status']])).toEqual([
       ['roles_and_logs', 'completed'],
       ['health', 'completed'],
+      // Ningún log terminó: el informe final no guarda nada (ADR-0018 §6, «Traspaso»).
+      ['final_health', 'completed'],
       ['verification', 'completed'],
       ['space', 'completed'],
     ]);

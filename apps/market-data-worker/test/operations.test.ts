@@ -494,7 +494,13 @@ async function run(
 
 describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
   it('en una base vacía: los roles, el log 1 con sus migraciones y sus privilegios, las contraseñas, la salud del log 1, la verificación y el espacio, con sus informes en ese log', async () => {
-    expect(OPERATIONS_STEPS).toEqual(['roles_and_logs', 'health', 'verification', 'space']);
+    expect(OPERATIONS_STEPS).toEqual([
+      'roles_and_logs',
+      'health',
+      'final_health',
+      'verification',
+      'space',
+    ]);
     const db = fakeDatabase({ loggedIn: new Set(), logs: [] });
     const children = fakeChildren((child) =>
       child === 'migrate'
@@ -525,6 +531,8 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       'report:1:roles_and_logs',
       'list',
       'report:1:health',
+      // El informe final: ningún log terminó, así que no lee nada más ni guarda ningún informe.
+      'list',
       'list',
       'segments:1:120',
       'list',
@@ -562,6 +570,14 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
         run_id: uuid(1),
         status: 'completed',
         step: 'health',
+      },
+      {
+        event: 'operations_step',
+        log: null,
+        report: { log: null },
+        run_id: uuid(1),
+        status: 'completed',
+        step: 'final_health',
       },
       {
         event: 'operations_step',
@@ -717,7 +733,18 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
     const children = fakeChildren();
     const { alerts, lines, result } = await run(db, children);
 
-    expect(db.calls).toEqual(['roles', 'list', 'list', 'list', 'list', 'list', 'list', 'list']);
+    expect(db.calls).toEqual([
+      'roles',
+      'list',
+      'list',
+      'list',
+      'list',
+      'list',
+      'list',
+      'list',
+      'list',
+      'list',
+    ]);
     expect(children.runs).toEqual([]);
     expect(lines.slice(0, 2)).toEqual([
       expect.objectContaining({
@@ -743,12 +770,19 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
       { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'roles_and_logs' },
       { event: 'operations_step_failed', reason: 'ECONNREFUSED', step: 'health' },
       { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'health' },
+      { event: 'operations_step_failed', reason: 'ECONNREFUSED', step: 'final_health' },
+      { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'final_health' },
       { event: 'operations_step_failed', reason: 'ECONNREFUSED', step: 'verification' },
       { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'verification' },
       { event: 'operations_step_failed', reason: 'ECONNREFUSED', step: 'space' },
       { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'space' },
     ]);
-    expect(lines.slice(2, 4)).toEqual([
+    expect(lines.slice(2, 5)).toEqual([
+      expect.objectContaining({
+        report: { log: null, reason: 'ECONNREFUSED' },
+        status: 'failed',
+        step: 'final_health',
+      }),
       expect.objectContaining({
         report: { due: null, mismatched: [], read: 0, reason: 'ECONNREFUSED', slot: 120 },
         status: 'failed',
@@ -933,6 +967,167 @@ describe('runOperations: la salud (ADR-0018 §11, paso 2)', () => {
       { event: 'operations_report_unavailable', reason: '42P01', step: 'verification' },
       { event: 'operations_report_unavailable', reason: '42P01', step: 'space' },
     ]);
+  });
+});
+
+describe('runOperations: el informe final de un log que terminó (ADR-0018 §6, «Traspaso», y §11, paso 2)', () => {
+  /** Una escritura anterior a `NOW`, sin que el log venza. */
+  const EARLIER = '2026-03-01T00:00:00.000Z';
+  /** Una escritura de hace más de 30 días: el log venció. */
+  const EXPIRED = '2026-01-15T00:00:00.000Z';
+  /** Los procesos de `data:health` de la ejecución, con su log. */
+  const healthRuns = (children: ReturnType<typeof fakeChildren>) =>
+    children.runs.filter((item) => item.child === 'health').map((item) => item.args.join(' '));
+
+  it('con el log 2 activo, el log 1 terminó: data:health --log 1 después de la salud del activo, y su informe va al log 1 como final_health; la ejecución siguiente no lo repite', async () => {
+    const db = fakeDatabase({
+      loggedIn: new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']),
+      logs: [log(1, EARLIER), log(2, NOW), log(3)],
+    });
+    const children = fakeChildren();
+    const first = await run(db, children);
+
+    expect(healthRuns(children)).toEqual(['--json --log 2', '--json --log 1']);
+    expect(first.lines[2]).toEqual({
+      event: 'operations_step',
+      log: 1,
+      report: { alerts: [], exit_code: 1, log: 1, report: REPORT },
+      run_id: uuid(1),
+      status: 'completed',
+      step: 'final_health',
+    });
+    expect(
+      db.reports
+        .filter(({ row }) => row.step.endsWith('health'))
+        .map(({ log: number, row }) => [number, row.step, row.status]),
+    ).toEqual([
+      [2, 'health', 'completed'],
+      [1, 'final_health', 'completed'],
+    ]);
+    expect(first.result.status).toBe('completed');
+
+    const again = fakeChildren();
+    const second = await run(db, again);
+    expect(healthRuns(again)).toEqual(['--json --log 2']);
+    expect(second.lines[2]).toMatchObject({
+      log: null,
+      report: { log: null },
+      status: 'completed',
+      step: 'final_health',
+    });
+    expect(db.reports.filter(({ row }) => row.step === 'final_health')).toHaveLength(1);
+  });
+
+  it('con dos logs terminados sin informe final, uno por ejecución, empezando por el de menor número', async () => {
+    const db = fakeDatabase({
+      loggedIn: new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']),
+      logs: [log(1, EARLIER), log(2, EARLIER), log(3, NOW), log(4)],
+    });
+    const first = fakeChildren();
+    await run(db, first);
+    const second = fakeChildren();
+    await run(db, second);
+
+    expect(healthRuns(first)).toEqual(['--json --log 3', '--json --log 1']);
+    expect(healthRuns(second)).toEqual(['--json --log 3', '--json --log 2']);
+    expect(
+      db.reports.filter(({ row }) => row.step === 'final_health').map(({ log: number }) => number),
+    ).toEqual([1, 2]);
+  });
+
+  it('un informe final que falla se guarda failed en ese log, con la alerta del paso, y la ejecución siguiente lo vuelve a intentar', async () => {
+    const db = fakeDatabase({
+      loggedIn: new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']),
+      logs: [log(1, EARLIER), log(2, NOW), log(3)],
+    });
+    const failing = fakeChildren((child, args) =>
+      child === 'health' && args.includes('1') ? { exitCode: 2, stdout: '' } : {},
+    );
+    const first = await run(db, failing);
+    expect(first.lines[2]).toMatchObject({
+      log: 1,
+      report: { exit_code: 2, log: 1, reason: 'health_command_failed' },
+      status: 'failed',
+      step: 'final_health',
+    });
+    expect(first.alerts).toEqual([
+      { event: 'operations_step_failed', reason: 'health_command_failed', step: 'final_health' },
+    ]);
+    expect(first.result.status).toBe('failed');
+
+    const retry = fakeChildren();
+    await run(db, retry);
+    expect(healthRuns(retry)).toEqual(['--json --log 2', '--json --log 1']);
+    expect(
+      db.reports
+        .filter(({ row }) => row.step === 'final_health')
+        .map(({ log: number, row }) => [number, row.status]),
+    ).toEqual([
+      [1, 'failed'],
+      [1, 'completed'],
+    ]);
+  });
+
+  it.each([
+    ['un almacén no respondió (regla 3)', 'data_health_storage_unavailable', 'ECONNREFUSED'],
+    [
+      'la reconstrucción del estado vivo no terminó',
+      'data_health_checkpoint_rebuild_incomplete',
+      'deadline_exceeded',
+    ],
+  ])(
+    'un informe final sin observación, porque %s, se guarda failed con health_not_observed y se vuelve a intentar; la salud del activo, igual, no falla',
+    async (_label, event, reason) => {
+      const db = fakeDatabase({
+        loggedIn: new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']),
+        logs: [log(1, EARLIER), log(2, NOW), log(3)],
+      });
+      const stderr = `${JSON.stringify({ event, reason })}\n`;
+      const unobserved = fakeChildren((child) => (child === 'health' ? { stderr } : {}));
+      const first = await run(db, unobserved);
+
+      expect(first.lines[1]).toMatchObject({ log: 2, status: 'completed', step: 'health' });
+      expect(first.lines[2]).toMatchObject({
+        log: 1,
+        report: {
+          alerts: [{ event, reason }],
+          exit_code: 1,
+          log: 1,
+          reason: 'health_not_observed',
+        },
+        status: 'failed',
+        step: 'final_health',
+      });
+      expect(first.alerts).toEqual([
+        { event: 'operations_step_failed', reason: 'health_not_observed', step: 'final_health' },
+      ]);
+
+      const retry = fakeChildren();
+      await run(db, retry);
+      expect(healthRuns(retry)).toEqual(['--json --log 2', '--json --log 1']);
+      expect(
+        db.reports.filter(({ row }) => row.step === 'final_health').map(({ row }) => row.status),
+      ).toEqual(['failed', 'completed']);
+    },
+  );
+
+  it('un log terminado que venció, uno que no se puede leer y uno sin escrituras no reciben informe final', async () => {
+    const db = fakeDatabase({
+      loggedIn: new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']),
+      logs: [
+        log(1, EXPIRED),
+        { lastWriteUtc: null, location: logLocation(2), readable: false },
+        log(3),
+        log(4, NOW),
+        log(5),
+      ],
+    });
+    const children = fakeChildren();
+    const { lines } = await run(db, children);
+
+    expect(healthRuns(children)).toEqual(['--json --log 4']);
+    expect(lines[2]).toMatchObject({ log: null, report: { log: null }, step: 'final_health' });
+    expect(db.calls.filter((call) => call.endsWith(':final_health'))).toEqual([]);
   });
 });
 

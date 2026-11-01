@@ -182,6 +182,38 @@ async function lastWriteOf(
   }
 }
 
+/** La más temprana de dos horas UTC, o `null` si no hay ninguna. */
+function earliest(a: string | null, b: string | null): string | null {
+  if (a === null || b === null) {
+    return a ?? b;
+  }
+  return Date.parse(a) <= Date.parse(b) ? a : b;
+}
+
+/**
+ * La hora UTC de la primera escritura de `source` en el log (ADR-0018 §6, «Hora de corte»): la más
+ * temprana entre la del primer evento del índice, por su posición, y la del primer latido, por su
+ * orden de escritura, con la clave primaria del índice y el índice `(source, write_order)` de la
+ * `0006`, sin recorrer el log. `null` si no tiene ninguna. Es la misma definición que la de la última
+ * escritura (`listCaptureLogs`), desde el otro extremo. Rechaza si el esquema no se puede leer.
+ */
+export async function firstWriteOf(
+  pool: Pick<Pool, 'query'>,
+  log: LogLocation,
+  source: string,
+): Promise<string | null> {
+  // El nombre del esquema sale de `logLocation`: solo minúsculas, cifras y `_`.
+  const { rows } = await pool.query<{ event: string | null; heartbeat: string | null }>(
+    `SELECT
+       (SELECT event_time_utc FROM ${log.schema}.source_event_index WHERE source = $1
+         ORDER BY segment_index, position LIMIT 1) AS event,
+       (SELECT observed_at_utc FROM ${log.schema}.ingestion_heartbeats WHERE source = $1
+         ORDER BY write_order LIMIT 1) AS heartbeat`,
+    [source],
+  );
+  return earliest(rows[0]?.event ?? null, rows[0]?.heartbeat ?? null);
+}
+
 /**
  * Busca el log activo de `source` (ADR-0018 §6) con `pool`, de cualquier esquema: lee los logs y
  * después toma la hora (`now`), para que una escritura de mientras tanto no lo deje vencido.

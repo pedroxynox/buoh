@@ -290,7 +290,24 @@ export {
   type SegmentMismatch,
 } from './operations/verification.js';
 export {
+  cutTimeOf,
+  isCleanForCut,
+  locateCaptureLog,
+  LockRetention,
+  LOG_CUT_ALERT_INTERVAL_MS,
+  LOG_CUT_CHECK_MS,
+  LOG_CUT_FORCE_AFTER_MS,
+  LogCutWatch,
+  type CaptureTarget,
+  type LogCutDecision,
+  type LogCutReads,
+  type LogCutSession,
+  type LogCutWatchInput,
+  type LogReadiness,
+} from './log-cut.js';
+export {
   findActiveLog,
+  firstWriteOf,
   isLogExpired,
   listCaptureLogs,
   LOG_NUMBER_DIGITS,

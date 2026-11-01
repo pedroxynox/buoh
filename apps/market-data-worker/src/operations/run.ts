@@ -31,11 +31,20 @@ import {
 
 // Una ejecución de `buoh-operaciones` (ADR-0018 §11): los pasos en orden, cada uno con su informe.
 // Un paso que falla deja su alerta saneada y su informe, si PostgreSQL responde, y no impide los
-// siguientes. Están los roles y los logs, la salud, la verificación por partes y el espacio; la
-// retención, el paso 3, llega con el PR 8 de §16.
+// siguientes. Están los roles y los logs, la salud con el informe final de un log cortado, la
+// verificación por partes y el espacio; la retención, el paso 3, llega con el PR 8b de §16.
 
-/** Los pasos de una ejecución, en orden. */
-export const OPERATIONS_STEPS = ['roles_and_logs', 'health', 'verification', 'space'] as const;
+/**
+ * Los pasos de una ejecución, en orden. `final_health` es la segunda parte del paso 2 de §11: el
+ * informe final de un log que terminó (§6, «Traspaso»).
+ */
+export const OPERATIONS_STEPS = [
+  'roles_and_logs',
+  'health',
+  'final_health',
+  'verification',
+  'space',
+] as const;
 export type OperationsStep = (typeof OPERATIONS_STEPS)[number];
 
 /** Un informe: solo códigos, nombres, números y horas, nunca un mensaje de error ni un precio. */
@@ -282,10 +291,8 @@ function healthErrorCode(stderr: string): string | null {
 }
 
 /**
- * Paso 2 (ADR-0018 §11): `data:health` sobre el log activo, con `--log`, en un proceso aparte con el
- * entorno de `healthEnvironment`. Su `HealthReport` va al informe, que se guarda en ese log. Una
- * salud que no es `healthy` no es un fallo del paso; sí lo son la salida 2, un proceso que no termina
- * en su plazo o una línea que no es un `HealthReport`.
+ * Paso 2 (ADR-0018 §11): `data:health` sobre el log activo (`observeLog`). Sin log activo, el paso
+ * falla con `log_not_prepared`.
  */
 async function health(input: OperationsInput): Promise<StepOutcome> {
   let log: LogLocation | null;
@@ -297,6 +304,80 @@ async function health(input: OperationsInput): Promise<StepOutcome> {
   if (log === null) {
     return failedHealth(null, { reason: 'log_not_prepared' });
   }
+  return observeLog(input, log);
+}
+
+/**
+ * Paso 2 de ADR-0018 §11, su segunda parte: el informe final de un log que terminó (§6,
+ * «Traspaso»). Un log terminó cuando un log posterior, el activo, tiene una escritura: después de un
+ * corte, `ingest` nunca vuelve a escribir en él. De los que terminaron, que tienen alguna escritura,
+ * se pueden leer, no han vencido y todavía no tienen un informe final `completed`, el de menor
+ * número recibe `data:health --log`, que lo observa sin escritor vivo (regla 4), y su informe se
+ * guarda en ese log. Uno por ejecución: el siguiente, en la ejecución siguiente. Si no hay ninguno,
+ * el paso termina sin guardar nada. Un informe que falla se guarda `failed`, y la ejecución
+ * siguiente lo vuelve a intentar: también uno sin observación (`health_not_observed`), porque un
+ * almacén no respondió o la reconstrucción no terminó, que en el paso de la salud no es un fallo.
+ */
+async function finalHealth(input: OperationsInput): Promise<StepOutcome> {
+  let target: LogLocation | null = null;
+  try {
+    const logs = await input.database.listLogs();
+    const now = input.now();
+    const active = selectActiveLog(logs, now);
+    const ended = logs
+      .filter(
+        (log) =>
+          active !== null &&
+          log.location.number < active.number &&
+          log.readable &&
+          log.lastWriteUtc !== null &&
+          !isLogExpired(log, now),
+      )
+      .sort((left, right) => left.location.number - right.location.number);
+    for (const log of ended) {
+      if ((await input.database.lastCompletedReport(log.location, 'final_health')) === null) {
+        target = log.location;
+        break;
+      }
+    }
+  } catch (error) {
+    return failedHealth(null, { reason: failureReason(error) });
+  }
+  if (target === null) {
+    return { log: null, report: { log: null }, status: 'completed', store: false };
+  }
+  const outcome = await observeLog(input, target);
+  // Un informe sin observación, porque un almacén no respondió (regla 3) o la reconstrucción del
+  // estado vivo no terminó, no registra lo que quedó abierto: es un fallo, y se repite.
+  const alerts = outcome.report['alerts'];
+  const unobserved =
+    Array.isArray(alerts) &&
+    alerts.some(
+      (item) =>
+        typeof item === 'object' &&
+        item !== null &&
+        !Array.isArray(item) &&
+        typeof item['event'] === 'string' &&
+        UNOBSERVED_HEALTH_ALERTS.has(item['event']),
+    );
+  return outcome.status === 'completed' && unobserved
+    ? { ...outcome, report: { ...outcome.report, reason: 'health_not_observed' }, status: 'failed' }
+    : outcome;
+}
+
+/** Las alertas de `data:health` que dicen que no pudo observar el log (ADR-0015 §8 y ADR-0017 §6). */
+const UNOBSERVED_HEALTH_ALERTS: ReadonlySet<string> = new Set([
+  'data_health_checkpoint_rebuild_incomplete',
+  'data_health_storage_unavailable',
+]);
+
+/**
+ * `data:health --log` sobre el log, en un proceso aparte con el entorno de `healthEnvironment`. Su
+ * `HealthReport` va al informe, que se guarda en ese log. Una salud que no es `healthy` no es un
+ * fallo; sí lo son la salida 2, un proceso que no termina en su plazo o una línea que no es un
+ * `HealthReport`.
+ */
+async function observeLog(input: OperationsInput, log: LogLocation): Promise<StepOutcome> {
   const result = await input.runChild(
     'health',
     ['--json', '--log', String(log.number)],
@@ -520,6 +601,7 @@ export async function runOperations(input: OperationsInput): Promise<OperationsR
   const lines: string[] = [];
   let failed = false;
   const steps: Record<OperationsStep, () => Promise<StepOutcome>> = {
+    final_health: () => finalHealth(input),
     health: () => health(input),
     roles_and_logs: () => rolesAndLogs(input),
     space: () => space(input),

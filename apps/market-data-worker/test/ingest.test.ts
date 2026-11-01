@@ -7,6 +7,8 @@ import {
   INGEST_RETENTION_MS,
   ingestCommand,
   lockedSourceLogStore,
+  LOG_CUT_CHECK_MS,
+  LOG_CUT_FORCE_AFTER_MS,
   logLocation,
   SourceEventLog,
   STARTUP_RETRY_MS,
@@ -106,8 +108,12 @@ function logSince(firstAt: string): SourceEvent[] {
  */
 interface StartupState {
   closing: Promise<void>;
+  /** La primera escritura de cada log, por número; sin ella, ninguna (ADR-0018 §6). */
+  firstWrites: Map<number, string>;
   locate: LogLocation | null | Error;
   pending: readonly string[];
+  /** Los logs preparados para el corte, por número (ADR-0018 §6). */
+  prepared: Set<number>;
 }
 
 interface IngestHarnessOptions {
@@ -145,29 +151,52 @@ async function ingestHarness(options: IngestHarnessOptions = {}) {
   for (const event of options.events ?? []) {
     await seed.append(event);
   }
-  const stores = {
-    catalog: new MemoryCatalogStore(),
-    close: () => {
-      timeline.push('close');
-      return Promise.resolve();
-    },
-    ingestionStatus: new MemoryIngestionStatusStore(),
-    objects,
-    operational: new MemoryOperationalStore(),
-    pendingMigrations: () =>
-      options.pendingError === undefined
-        ? Promise.resolve(options.pending ?? [])
-        : Promise.reject(options.pendingError),
-    requestedResponses: new MemoryRequestedResponseIncidentStore(),
-    sourceLog,
-  } satisfies IngestStores;
+  /** Los almacenes en memoria de un log: el log, sus objetos y lo demás. */
+  const memoryStores = (logStore: MemorySourceLogStore, logObjects: MemoryObjectStore) =>
+    ({
+      catalog: new MemoryCatalogStore(),
+      close: () => {
+        timeline.push('close');
+        return Promise.resolve();
+      },
+      ingestionStatus: new MemoryIngestionStatusStore(),
+      objects: logObjects,
+      operational: new MemoryOperationalStore(),
+      pendingMigrations: () =>
+        options.pendingError === undefined
+          ? Promise.resolve(options.pending ?? [])
+          : Promise.reject(options.pendingError),
+      requestedResponses: new MemoryRequestedResponseIncidentStore(),
+      sourceLog: logStore,
+    }) satisfies IngestStores;
+  const stores = memoryStores(sourceLog, objects);
+  /**
+   * Los almacenes de cada esquema: los del primero que se abre son `stores`, y los de cada esquema
+   * siguiente, como el del log siguiente tras un corte (ADR-0018 §6), otros vacíos.
+   */
+  const byLog = new Map<string, typeof stores>();
+  const storesOf = (schema: string): typeof stores => {
+    const found = byLog.get(schema);
+    if (found === undefined) {
+      throw new TypeError(`ingest no abrió los almacenes de ${schema}.`);
+    }
+    return found;
+  };
   const provider = new FakeLockProvider(options.locks ?? [], timeline);
   const signal: { handler: (() => void) | null; listening: boolean } = {
     handler: null,
     listening: false,
   };
   // En production, el log 2 está preparado y tiene todas sus migraciones.
-  const startup: StartupState = { closing: Promise.resolve(), locate: logLocation(2), pending: [] };
+  const startup: StartupState = {
+    closing: Promise.resolve(),
+    firstWrites: new Map(),
+    locate: logLocation(2),
+    pending: [],
+    prepared: new Set(),
+  };
+  /** Las lecturas del corte, en orden: `first:<log>` y `prepared:<log>`. */
+  const cutReads: string[] = [];
   const deps: IngestDependencies = {
     alert: (payload) => alerts.push(payload),
     connect: (input) => {
@@ -202,6 +231,14 @@ async function ingestHarness(options: IngestHarnessOptions = {}) {
           timeline.push('reads:close');
           return startup.closing;
         },
+        firstWrite: (log) => {
+          cutReads.push(`first:${String(log.number)}`);
+          return Promise.resolve(startup.firstWrites.get(log.number) ?? null);
+        },
+        readiness: (log) => {
+          cutReads.push(`prepared:${String(log.number)}`);
+          return Promise.resolve(startup.prepared.has(log.number) ? 'ready' : 'not_prepared');
+        },
         locateLog: () => {
           timeline.push('locate');
           return startup.locate instanceof Error
@@ -217,7 +254,16 @@ async function ingestHarness(options: IngestHarnessOptions = {}) {
     openStores: (config) => {
       configs.push(config);
       timeline.push('open');
-      return stores;
+      const { schema } = config.postgres;
+      let chosen = byLog.get(schema);
+      if (chosen === undefined) {
+        chosen =
+          byLog.size === 0
+            ? stores
+            : memoryStores(new MemorySourceLogStore(), new MemoryObjectStore());
+        byLog.set(schema, chosen);
+      }
+      return chosen;
     },
     random: () => 0,
     scheduler: clock.scheduler,
@@ -250,6 +296,7 @@ async function ingestHarness(options: IngestHarnessOptions = {}) {
     alerts,
     clock,
     configs,
+    cutReads,
     deps,
     fixture,
     provider,
@@ -259,6 +306,7 @@ async function ingestHarness(options: IngestHarnessOptions = {}) {
     sockets,
     startup,
     stores,
+    storesOf,
     timeline,
   };
 }
@@ -275,8 +323,9 @@ async function start(
   run: Awaited<ReturnType<typeof ingestHarness>>,
   argv: readonly string[] = ['--live', '--symbol', 'SYNTH_100'],
   env: Readonly<Record<string, string | undefined>> = ENV,
+  deps: IngestDependencies = run.deps,
 ) {
-  const command = ingestCommand(argv, env, run.deps);
+  const command = ingestCommand(argv, env, deps);
   // La descarga sintética lee su cuerpo en varios pasos, y antes se leen las migraciones.
   await settle();
   await settle();
@@ -637,13 +686,13 @@ describe('ingestCommand en production (ADR-0018 §4)', () => {
   it('con el log activo preparado y el bloqueo libre, captura en el esquema y el prefijo de ese log con el bloqueo que tomó la espera, sin pedir otro', async () => {
     const run = await ingestHarness();
     const { command } = await startProduction(run);
+    // Las lecturas siguen abiertas durante la captura: el corte las usa (ADR-0018 §6).
     expect(run.timeline).toEqual([
       'reads',
       'locate',
       'pending:buoh_log_000002',
       'acquire:1',
       'locate',
-      'reads:close',
       'open',
       'connect:1',
     ]);
@@ -664,7 +713,7 @@ describe('ingestCommand en production (ADR-0018 §4)', () => {
       status: 'completed',
       stopped_for_retention: false,
     });
-    expect(run.timeline.slice(-3)).toEqual(['connect:1', 'release:1', 'close']);
+    expect(run.timeline.slice(-4)).toEqual(['connect:1', 'release:1', 'close', 'reads:close']);
     // Los latidos de la sesión llevan el PID del bloqueo de la espera.
     expect(
       new Set(run.stores.ingestionStatus.heartbeats.map((item) => item.pg_backend_pid)),
@@ -722,7 +771,6 @@ describe('ingestCommand en production (ADR-0018 §4)', () => {
       'pending:buoh_log_000001',
       'acquire:1',
       'locate',
-      'reads:close',
       'open',
       'connect:1',
     ]);
@@ -748,14 +796,15 @@ describe('ingestCommand en production (ADR-0018 §4)', () => {
 
   it('una señal entre la espera y la sesión no se pierde: la sesión para sin conectar y el bloqueo de la espera se suelta', async () => {
     const run = await ingestHarness();
-    let closed: () => void = () => undefined;
-    run.startup.closing = new Promise((resolve) => {
-      closed = resolve;
+    // La señal llega al abrir los almacenes, después de la espera y antes de la sesión.
+    const open = run.deps.openStores;
+    const { command } = await start(run, undefined, PRODUCTION_ENV, {
+      ...run.deps,
+      openStores: (config) => {
+        run.raise();
+        return open(config);
+      },
     });
-    const { command } = await startProduction(run);
-    expect(run.timeline.at(-1)).toBe('reads:close');
-    run.raise();
-    closed();
 
     const { exitCode, line } = await command;
     expect(exitCode).toBe(0);
@@ -766,10 +815,10 @@ describe('ingestCommand en production (ADR-0018 §4)', () => {
       'pending:buoh_log_000002',
       'acquire:1',
       'locate',
-      'reads:close',
       'open',
       'close',
       'release:1',
+      'reads:close',
     ]);
     expect(run.sockets).toEqual([]);
   });
@@ -792,7 +841,13 @@ describe('ingestCommand en production (ADR-0018 §4)', () => {
       end: { detail: null, reason: 'source_lock_taken', status: 'failed' },
       status: 'failed',
     });
-    expect(run.timeline.slice(-4)).toEqual(['connect:1', 'release:1', 'acquire:taken', 'close']);
+    expect(run.timeline.slice(-5)).toEqual([
+      'connect:1',
+      'release:1',
+      'acquire:taken',
+      'close',
+      'reads:close',
+    ]);
   });
 
   it('sin BUOH_POSTGRES_SSLMODE, ConfigError con salida 2 que la nombra, sin abrir nada', async () => {
@@ -812,5 +867,340 @@ describe('ingestCommand en production (ADR-0018 §4)', () => {
       }),
     });
     expect(run.timeline).toEqual([]);
+  });
+});
+
+/** Los source events de los almacenes de un log, en orden, leídos de sus objetos. */
+function eventsOf(stores: {
+  readonly objects: MemoryObjectStore;
+  readonly sourceLog: MemorySourceLogStore;
+}): SourceEvent[] {
+  return stores.sourceLog.rows.map((row) => {
+    const bytes = stores.objects.objects.get(contentKey(row.object_sha256));
+    if (bytes === undefined) {
+      throw new TypeError('Falta el objeto de un evento.');
+    }
+    return JSON.parse(new TextDecoder().decode(bytes)) as SourceEvent;
+  });
+}
+
+/** Responde a la petición `forget_all` que envió el socket. */
+function answerForgetAll(socket: FakeDerivSocket): void {
+  const request = forgetAll(socket).at(-1) as { req_id?: number } | undefined;
+  if (request?.req_id === undefined) {
+    throw new TypeError('El socket no envió forget_all.');
+  }
+  socket.text(derivMessages.forgetAll(request.req_id));
+}
+
+/** El epoch de Deriv de la hora del reloj de pared del harness, en segundos enteros. */
+const epochNow = (run: Awaited<ReturnType<typeof ingestHarness>>): number =>
+  Math.floor(Date.parse(run.clock.now()) / 1000);
+
+/**
+ * Deja correr lo asíncrono entre dos sesiones: el fin de la sesión del log cortado, la espera del log
+ * siguiente, la descarga sintética de los esquemas y el arranque de la sesión nueva.
+ */
+async function settleHandover(): Promise<void> {
+  for (let round = 0; round < 8; round += 1) {
+    await settle();
+  }
+}
+
+/** Abre la conexión `number`, recibe el catálogo y un tick con la hora del reloj. */
+async function subscribe(run: Awaited<ReturnType<typeof ingestHarness>>, number: number) {
+  run.socket(number).open();
+  await settle();
+  run.socket(number).text(derivMessages.catalog(1));
+  await settle();
+  run.socket(number).text(derivMessages.tick(2, epochNow(run), '100.25'));
+  await settle();
+}
+
+/** La hora de corte de un log escrito por primera vez en `START`, un lunes: el lunes siguiente. */
+const CUT_TIME = '2026-03-09T00:00:00.000Z';
+
+describe('ingestCommand en production: el corte semanal (ADR-0018 §6)', () => {
+  it('a su hora de corte, con el log limpio y el siguiente preparado, corta como una parada y sigue en el siguiente con el mismo bloqueo, sin soltarlo', async () => {
+    const run = await ingestHarness();
+    run.startup.firstWrites.set(2, START);
+    run.startup.prepared.add(3);
+    const { command } = await startProduction(run);
+    await subscribe(run, 1);
+    // El primer paso del corte lee la primera escritura del log 2; el siguiente, 30 s después, cae
+    // justo en la hora de corte.
+    await run.clock.advance(0);
+    run.clock.jumpWallClock(Date.parse(CUT_TIME) - Date.parse(run.clock.now()) - LOG_CUT_CHECK_MS);
+    await run.clock.advance(LOG_CUT_CHECK_MS);
+    expect(run.alerts).toEqual([{ event: 'log_cut', forced: 'false', log: '2', next: '3' }]);
+    // Dos lecturas de la primera escritura en la espera, antes y después de tomar el bloqueo, y una
+    // de la vigilancia del corte, que después ya no la vuelve a leer.
+    expect(run.cutReads).toEqual(['first:2', 'first:2', 'first:2', 'prepared:3']);
+    // La parada pedida de la sesión del log 2.
+    answerForgetAll(run.socket(1));
+    await settleHandover();
+    expect(run.sockets).toHaveLength(2);
+
+    // El log 2 terminó con un cierre pedido y su segmento cerrado.
+    const log2 = run.storesOf('buoh_log_000002');
+    expect(eventsOf(log2).at(-1)).toMatchObject({
+      closure_type: 'requested',
+      kind: 'connection_closed',
+    });
+    expect(log2.sourceLog.closed.at(-1)?.close_reason).toBe('requested');
+    // El log 3: el esquema de fuente guardado y una primera conexión sin anterior.
+    const log3 = run.storesOf('buoh_log_000003');
+    const schemaKey = contentKey(run.fixture.expected.entries_sha256['ticks_response.schema.json']);
+    expect(log3.objects.objects.get(schemaKey)).toEqual(
+      run.fixture.entries['ticks_response.schema.json'],
+    );
+    await subscribe(run, 2);
+    expect(eventsOf(log3)[0]).toMatchObject({
+      kind: 'connection_opened',
+      supersedes_connection_id: null,
+    });
+    expect(log3.catalog).not.toBe(log2.catalog);
+    run.raise();
+    answerForgetAll(run.socket(2));
+
+    const { exitCode, line } = await command;
+    expect(exitCode).toBe(0);
+    // La línea es la de la última sesión: la del log 3.
+    expect(JSON.parse(line)).toMatchObject({
+      connections: [{ closure: { closure_type: 'requested' } }],
+      status: 'completed',
+    });
+    // Un solo bloqueo, que pasó de una sesión a la otra sin soltarse, y los almacenes de cada log.
+    expect(run.timeline).toEqual([
+      'reads',
+      'locate',
+      'pending:buoh_log_000002',
+      'acquire:1',
+      'locate',
+      'open',
+      'connect:1',
+      'close',
+      'locate',
+      'pending:buoh_log_000003',
+      'locate',
+      'open',
+      'connect:2',
+      'release:1',
+      'close',
+      'reads:close',
+    ]);
+    expect(run.configs.at(-1)).toMatchObject({
+      postgres: { schema: 'buoh_log_000003' },
+      s3: { keyPrefix: 'logs/000003/' },
+    });
+    const pid = run.provider.lock(1).backendPid;
+    expect(new Set(log3.ingestionStatus.heartbeats.map((item) => item.pg_backend_pid))).toEqual(
+      new Set([pid]),
+    );
+  });
+
+  it('al arrancar con la hora de corte pasada hace menos de 24 horas, retoma el log activo y lo corta en cuanto está limpio', async () => {
+    const run = await ingestHarness();
+    run.startup.firstWrites.set(2, START);
+    run.startup.prepared.add(3);
+    // Un reinicio una hora después de la hora de corte: la hora sale de la primera escritura del log.
+    run.clock.jumpWallClock(Date.parse(CUT_TIME) + 3_600_000 - Date.parse(START));
+    const { command } = await startProduction(run);
+    expect(run.configs.at(-1)?.postgres.schema).toBe('buoh_log_000002');
+    await subscribe(run, 1);
+    await run.clock.advance(0);
+    expect(run.alerts).toEqual([{ event: 'log_cut', forced: 'false', log: '2', next: '3' }]);
+    answerForgetAll(run.socket(1));
+    await settleHandover();
+    expect(run.configs.at(-1)?.postgres.schema).toBe('buoh_log_000003');
+    await subscribe(run, 2);
+    run.raise();
+    answerForgetAll(run.socket(2));
+    expect((await command).exitCode).toBe(0);
+    expect(eventsOf(run.storesOf('buoh_log_000002'))[0]).toMatchObject({
+      kind: 'connection_opened',
+    });
+  });
+
+  it('al arrancar 24 horas o más después de la hora de corte, empieza en el log siguiente sin escribir en el activo, con log_cut_forced', async () => {
+    const run = await ingestHarness();
+    run.startup.firstWrites.set(2, START);
+    run.startup.prepared.add(3);
+    run.clock.jumpWallClock(Date.parse(CUT_TIME) + LOG_CUT_FORCE_AFTER_MS - Date.parse(START));
+    const { command } = await startProduction(run);
+
+    expect(run.alerts).toEqual([
+      {
+        event: 'log_cut_forced',
+        log: '2',
+        next: '3',
+        open_condition_types: null,
+        pending_continuity: null,
+        reason: 'cut_deadline_passed_at_start',
+      },
+    ]);
+    // Los almacenes que abre son solo los del log 3: el log 2 ya no recibe nada.
+    expect(run.configs.slice(2).map((config) => config.postgres.schema)).toEqual([
+      'buoh_log_000003',
+    ]);
+    expect(run.timeline).toEqual([
+      'reads',
+      'locate',
+      'pending:buoh_log_000003',
+      'acquire:1',
+      'locate',
+      'open',
+      'connect:1',
+    ]);
+    await subscribe(run, 1);
+    run.raise();
+    answerForgetAll(run.socket(1));
+    expect((await command).exitCode).toBe(0);
+    expect(eventsOf(run.storesOf('buoh_log_000003'))[0]).toMatchObject({
+      kind: 'connection_opened',
+      supersedes_connection_id: null,
+    });
+  });
+
+  it('al arrancar 24 horas o más después de la hora de corte, sin el log siguiente preparado, espera con log_not_prepared sin escribir nada', async () => {
+    const run = await ingestHarness();
+    run.startup.firstWrites.set(2, START);
+    run.clock.jumpWallClock(Date.parse(CUT_TIME) + LOG_CUT_FORCE_AFTER_MS - Date.parse(START));
+    const { command } = await startProduction(run);
+
+    expect(run.alerts).toEqual([
+      { detail: null, event: 'ingest_waiting', reason: 'log_not_prepared' },
+    ]);
+    expect(run.timeline).toEqual(['reads', 'locate']);
+    run.startup.prepared.add(3);
+    await run.clock.advance(STARTUP_RETRY_MS);
+    await settleHandover();
+    expect(run.configs.at(-1)?.postgres.schema).toBe('buoh_log_000003');
+    expect(run.alerts.map((alert) => alert['event'])).toEqual(['ingest_waiting', 'log_cut_forced']);
+    await subscribe(run, 1);
+    run.raise();
+    answerForgetAll(run.socket(1));
+    expect((await command).exitCode).toBe(0);
+  });
+
+  it('si algo falla después de decidir el corte, suelta el bloqueo retenido: salida 1 con UNEXPECTED y ningún bloqueo tomado', async () => {
+    const run = await ingestHarness();
+    run.startup.firstWrites.set(2, START);
+    run.startup.prepared.add(3);
+    const { command } = await startProduction(run);
+    await subscribe(run, 1);
+    await run.clock.advance(0);
+    run.clock.jumpWallClock(Date.parse(CUT_TIME) - Date.parse(run.clock.now()) - LOG_CUT_CHECK_MS);
+    await run.clock.advance(LOG_CUT_CHECK_MS);
+    expect(run.alerts.map((alert) => alert['event'])).toEqual(['log_cut']);
+    // Cerrar los almacenes del log 2 falla, después de que la sesión retuvo el bloqueo.
+    run.storesOf('buoh_log_000002').close = () => Promise.reject(new RangeError('cierre roto'));
+    answerForgetAll(run.socket(1));
+
+    expect(await command).toEqual({
+      exitCode: 1,
+      line: '{"code":"UNEXPECTED","message":"RangeError","status":"failed"}',
+    });
+    expect(run.timeline.slice(-2)).toEqual(['release:1', 'reads:close']);
+    expect(run.sockets).toHaveLength(1);
+  });
+
+  it('si el proceso termina entre el corte y la primera escritura del log siguiente, el arranque siguiente retoma el log cortado y lo vuelve a cortar (ADR-0018 §6, «Cortar»)', async () => {
+    const run = await ingestHarness();
+    run.startup.firstWrites.set(2, START);
+    run.startup.prepared.add(3);
+    // La segunda descarga de los esquemas, la de la sesión del log 3, falla.
+    let downloads = 0;
+    const download = run.deps.fetch;
+    const failing: IngestDependencies = {
+      ...run.deps,
+      fetch: (...args) => {
+        downloads += 1;
+        return downloads === 2
+          ? Promise.resolve(new Response('no disponible', { status: 503 }))
+          : download(...args);
+      },
+    };
+    const first = await start(run, undefined, PRODUCTION_ENV, failing);
+    await settle();
+    await settle();
+    await subscribe(run, 1);
+    await run.clock.advance(0);
+    run.clock.jumpWallClock(Date.parse(CUT_TIME) - Date.parse(run.clock.now()) - LOG_CUT_CHECK_MS);
+    await run.clock.advance(LOG_CUT_CHECK_MS);
+    answerForgetAll(run.socket(1));
+    // La sesión del log 3 termina failed antes de escribir nada, sin llegar a pedir el bloqueo, que
+    // se suelta después de cerrar sus almacenes.
+    const ended = await first.command;
+    expect(ended.exitCode).toBe(1);
+    expect(JSON.parse(ended.line)).toMatchObject({ connections: [], status: 'failed' });
+    expect(run.timeline.slice(-3)).toEqual(['close', 'release:1', 'reads:close']);
+    const log3 = run.storesOf('buoh_log_000003');
+    expect(log3.sourceLog.rows).toEqual([]);
+    expect(log3.ingestionStatus.heartbeats).toEqual([]);
+
+    // El reinicio: el log 2 sigue siendo el activo, y su hora de corte pasó hace menos de 24 horas.
+    const second = await start(run, undefined, PRODUCTION_ENV);
+    await settleHandover();
+    expect(run.configs.at(-1)?.postgres.schema).toBe('buoh_log_000002');
+    // La conexión nueva espera a pasar la hora del cierre anterior, 1 ms del reloj. La primera
+    // mirada del corte la ve todavía sin conectar.
+    await run.clock.advance(1);
+    await settleHandover();
+    await subscribe(run, 2);
+    const log2 = run.storesOf('buoh_log_000002');
+    expect(eventsOf(log2).filter((event) => event.kind === 'connection_opened')).toHaveLength(2);
+    await run.clock.advance(LOG_CUT_CHECK_MS);
+    expect(run.alerts.filter((alert) => alert['event'] === 'log_cut')).toHaveLength(2);
+    answerForgetAll(run.socket(2));
+    await settleHandover();
+    expect(run.configs.at(-1)?.postgres.schema).toBe('buoh_log_000003');
+    await subscribe(run, 3);
+    run.raise();
+    answerForgetAll(run.socket(3));
+    expect((await second.command).exitCode).toBe(0);
+  });
+
+  it('una señal entre el corte y la sesión del log siguiente la para: salida 0 con WAIT_STOPPED, sin abrir el log siguiente, y suelta el bloqueo retenido', async () => {
+    const run = await ingestHarness();
+    run.startup.firstWrites.set(2, START);
+    run.startup.prepared.add(3);
+    const open = run.deps.openStartupReads;
+    const { command } = await start(run, undefined, PRODUCTION_ENV, {
+      ...run.deps,
+      openStartupReads: (config) => {
+        const reads = open(config);
+        return {
+          ...reads,
+          pendingMigrations: (log) => {
+            // La señal llega mientras la espera mira el log 3.
+            if (log.number === 3) {
+              run.raise();
+            }
+            return reads.pendingMigrations(log);
+          },
+        };
+      },
+    });
+    await settle();
+    await settle();
+    await subscribe(run, 1);
+    await run.clock.advance(0);
+    run.clock.jumpWallClock(Date.parse(CUT_TIME) - Date.parse(run.clock.now()) - LOG_CUT_CHECK_MS);
+    await run.clock.advance(LOG_CUT_CHECK_MS);
+    answerForgetAll(run.socket(1));
+
+    expect(await command).toEqual({
+      exitCode: 0,
+      line: JSON.stringify({ code: WAIT_STOPPED, status: 'stopped', waiting: null }),
+    });
+    expect(run.timeline.slice(-5)).toEqual([
+      'close',
+      'locate',
+      'pending:buoh_log_000003',
+      'release:1',
+      'reads:close',
+    ]);
+    expect(run.sockets).toHaveLength(1);
   });
 });
