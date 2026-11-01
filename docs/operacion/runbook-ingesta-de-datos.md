@@ -302,7 +302,7 @@ Una salida distinta de 0 sin línea JSON significa que falló la compilación o 
 
 ### Captura viva continua (`ingest`)
 
-Desde el PR 5 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13 (§7), `pnpm --filter @buoh/market-data-worker run ingest -- --live [--symbol R_100]` ejecuta la sesión de ingesta (ver «Adaptador público de Deriv», «Sesión de ingesta») sobre PostgreSQL y el almacenamiento de objetos. Es un script del paquete, como `db:migrate` y `fixture:publish`, fuera del contrato de comandos raíz del plan §5, y corre `apps/market-data-worker/dist/cli/ingest.js`, desde el PR 6 de [ADR-0017](../arquitectura/adr/0017-punto-de-control-de-la-derivacion-en-vivo.md) §11 con los tamaños de V8 de `WORKER_NODE_FLAGS` (`--max-semi-space-size=1` y `--max-old-space-size=256`; ver «Memoria»). Es la primera vez que buoh guarda datos reales fuera de la memoria (ADR-0004 §13): la captura para sola a las 23 horas y se borra entera, esquema y bucket, antes de las 24. Nada se publica. Fuera de `production`, corre en el equipo donde están los servicios. Desde el PR 4 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16 también sabe correr en `production`, con otras reglas (ver «En `production`», abajo), pero todavía no hay nada desplegado: los pasos están en «Producción (F2.2)».
+Desde el PR 5 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13 (§7), `pnpm --filter @buoh/market-data-worker run ingest -- --live [--symbol R_100]` ejecuta la sesión de ingesta (ver «Adaptador público de Deriv», «Sesión de ingesta») sobre PostgreSQL y el almacenamiento de objetos. Es un script del paquete, como `db:migrate` y `fixture:publish`, fuera del contrato de comandos raíz del plan §5, y corre `apps/market-data-worker/dist/cli/ingest.js`, desde el PR 6 de [ADR-0017](../arquitectura/adr/0017-punto-de-control-de-la-derivacion-en-vivo.md) §11 con los tamaños de V8 de `WORKER_NODE_FLAGS` (`--max-semi-space-size=1` y `--max-old-space-size=256`; ver «Memoria»). Es la primera vez que buoh guarda datos reales fuera de la memoria (ADR-0004 §13): la captura para sola a las 23 horas y se borra entera, esquema y bucket, antes de las 24. Nada se publica. Fuera de `production`, corre en el equipo donde están los servicios. Desde el PR 4 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16 también sabe correr en `production`, con otras reglas (ver «En `production`», abajo), y así corre en producción desde el 2026-11-01: los pasos están en «Producción (F2.2)».
 
 Antes de abrir ningún almacén o conexión, comprueba los argumentos y la configuración (`apps/market-data-worker/src/ingest-args.ts`):
 
@@ -595,7 +595,7 @@ Desde el PR 5 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-producc
 
 ## Roles y cifrado de PostgreSQL (F2.2)
 
-Desde el PR 2 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16, el worker trae los roles de producción (§8) y el cifrado de la conexión (§9). Todavía no hay nada desplegado: estas piezas las usa `buoh-operaciones` desde el PR 5, y los pasos de producción están en «Producción (F2.2)».
+Desde el PR 2 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16, el worker trae los roles de producción (§8) y el cifrado de la conexión (§9). Estas piezas las usa `buoh-operaciones` desde el PR 5, en producción desde el 2026-11-01, y los pasos de producción están en «Producción (F2.2)».
 
 - **Cifrado.** `BUOH_POSTGRES_SSLMODE` admite `disable`, `require` o `verify-full`, y la aplican el pool y el cliente del bloqueo de la fuente. En `production` y `staging` es obligatoria y no admite `disable`: sin ella, o con `disable`, el comando sale con el error de configuración que la nombra. Fuera de un despliegue vale `disable` por defecto, la de los servicios locales. `require` cifra sin verificar el certificado, y `verify-full` verifica la autoridad y el nombre del servidor. Con cualquiera de los dos, la conexión a un servidor sin TLS falla en lugar de seguir sin cifrar. La opción llega siempre explícita a `pg`, así que `PGSSLMODE` no cambia nada.
 - **Roles.** `ensureRuntimeRoles` (`src/postgres/roles.ts`) crea los que falten, con el usuario por defecto de Render, que no es superusuario y tiene `CREATEROLE`:
@@ -611,7 +611,7 @@ Desde el PR 2 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-producc
 
 ## Logs sucesivos de producción (F2.2)
 
-Desde el PR 3 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16, el worker sabe dónde vive cada log de producción y cuál es el activo (§6), en `src/successive-logs.ts`. Todavía no hay nada desplegado: `ingest` en `production` llega con el PR 4, la preparación de los logs con `buoh-operaciones` en el PR 5 (ver «Operaciones (`buoh-operaciones`)»), y el corte semanal y el borrado con el PR 8. En `development` y `test`, un log sigue siendo el esquema de `BUOH_POSTGRES_SCHEMA` y el bucket de `BUOH_S3_BUCKET`, sin prefijo.
+Desde el PR 3 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16, el worker sabe dónde vive cada log de producción y cuál es el activo (§6), en `src/successive-logs.ts`. `ingest` en `production` llegó con el PR 4 y la preparación de los logs con `buoh-operaciones` en el PR 5 (ver «Operaciones (`buoh-operaciones`)»), los dos en producción desde el 2026-11-01. El corte semanal y el borrado llegan con el PR 8. En `development` y `test`, un log sigue siendo el esquema de `BUOH_POSTGRES_SCHEMA` y el bucket de `BUOH_S3_BUCKET`, sin prefijo.
 
 - **Nombres.** El log *n* tiene el esquema `buoh_log_<n>` y el prefijo `logs/<n>/` en el bucket de la captura, con *n* en seis cifras, de 1 a 999 999 (`logLocation`). `S3ObjectStore` guarda y lee cada clave bajo el prefijo de la configuración (`keyPrefix`), así que el log sigue pidiendo `sha256/<hash>` y sus filas no cambian. La configuración de un log lleva su esquema y su prefijo (`withLog`).
 - **Última escritura.** La de un log es la más tardía entre el último evento de la fuente en el índice, por su posición, y su último latido, por su orden de escritura (`listCaptureLogs`). La del evento usa la clave primaria del índice y no recorre el log. Hasta el PR 5, la del latido recorría los latidos del log, unos 46 000 en 8 días; desde la migración `0006` usa su índice `(source, write_order)` y tampoco los recorre (ver «Entorno local y replay», tablas de la `0006`).
@@ -621,7 +621,7 @@ Desde el PR 3 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-producc
 
 ## Operaciones (`buoh-operaciones`)
 
-Desde el PR 5 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16, el worker trae el comando del cron job `buoh-operaciones` (§11): `pnpm --filter @buoh/market-data-worker run operations`, que corre `apps/market-data-worker/dist/cli/operations.js` con los tamaños de V8 de `WORKER_NODE_FLAGS` (ver «Captura viva continua (`ingest`)», «Memoria»). Cada ejecución hace, en orden, los pasos 1, 2, 4 y 5 de §11: los roles y los logs, la salud, la verificación por partes (desde el PR 5b) y el espacio (desde el PR 5b). La retención, el paso 3, el corte y el informe final de un log cortado llegan con el PR 8. Todavía no hay nada desplegado: el cron job, cada 5 minutos, lo define `render-datos.yaml` y existe cuando el propietario crea el Blueprint (ver «Producción (F2.2)»).
+Desde el PR 5 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16, el worker trae el comando del cron job `buoh-operaciones` (§11): `pnpm --filter @buoh/market-data-worker run operations`, que corre `apps/market-data-worker/dist/cli/operations.js` con los tamaños de V8 de `WORKER_NODE_FLAGS` (ver «Captura viva continua (`ingest`)», «Memoria»). Cada ejecución hace, en orden, los pasos 1, 2, 4 y 5 de §11: los roles y los logs, la salud, la verificación por partes (desde el PR 5b) y el espacio (desde el PR 5b). La retención, el paso 3, el corte y el informe final de un log cortado llegan con el PR 8. El cron job, cada 5 minutos, lo define `render-datos.yaml`, y existe desde el 2026-11-01, cuando el propietario creó el Blueprint (ver «Producción (F2.2)»).
 
 **Configuración** (`loadOperationsConfig`, en `apps/market-data-worker/src/operations/config.ts`). El servicio solo existe en `production`, y cada credencial tiene su propio nombre:
 
@@ -685,7 +685,7 @@ Cada informe se guarda además, como `buoh_dueno`, en la tabla `operations_repor
 
 ## Producción (F2.2)
 
-Los pasos para poner en producción el sistema de datos de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) llegan en tres PR (§16, PR 6): el 6a trajo las comprobaciones previas de R2; el 6b, el Blueprint `render-datos.yaml` y los pasos para preparar, desplegar, parar, recuperar, rotar credenciales y borrar; y el 6c, una cuarta comprobación, con una regla de bloqueo, y la respuesta de esa regla en el worker. Qué define el Blueprint está en [despliegue en Render](despliegue-en-render.md) («Qué define `render-datos.yaml`»). Todavía no hay nada desplegado. Nada de esta sección cuesta dinero salvo que se diga, y ninguna credencial pasa por el chat ni por Git.
+Los pasos para poner en producción el sistema de datos de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) llegan en tres PR (§16, PR 6): el 6a trajo las comprobaciones previas de R2; el 6b, el Blueprint `render-datos.yaml` y los pasos para preparar, desplegar, parar, recuperar, rotar credenciales y borrar; y el 6c, una cuarta comprobación, con una regla de bloqueo, y la respuesta de esa regla en el worker. Qué define el Blueprint está en [despliegue en Render](despliegue-en-render.md) («Qué define `render-datos.yaml`»). Producción está desplegada desde el 2026-11-01 («Desplegar»). Nada de esta sección cuesta dinero salvo que se diga, y ninguna credencial pasa por el chat ni por Git.
 
 El orden es: las comprobaciones previas de R2; «Preparar», con el PR 7 de §16 fusionado; «Desplegar»; y «Acceso del agente».
 
@@ -753,6 +753,8 @@ Antes de crear nada de producción tiene que estar fusionado el PR 7 de ADR-0018
 
 Los tokens de R2 se crean en «Desplegar», justo antes de pegarlos en Render, para que no queden guardados en ningún otro sitio.
 
+El 2026-10-31, antes de las 23:11 UTC, las capturas del propietario mostraron el formulario de `buoh-captura` con la indicación **Eastern North America**, sin jurisdicción y con la clase **Standard**, y el de la regla `logs-30-dias` sobre `logs/` y de 30 días. Después, antes de «Desplegar», mostraron la política **Wait** del workspace. Que creó el bucket con ese nombre y guardó la regla lo dijo él. El nombre lo confirma el `healthy` del arranque («Desplegar»), que lee de `buoh-captura`; la regla no la confirma nada de lo que se vio.
+
 ### Desplegar
 
 Desde aquí cuesta dinero: unos 19 USD al mes (ADR-0018 §14). Render cobra cada recurso por segundo desde que lo crea.
@@ -783,6 +785,14 @@ Desde aquí cuesta dinero: unos 19 USD al mes (ADR-0018 §14). Render cobra cada
 
 Si un servicio sale con `ConfigError` (salida 2), la línea nombra la variable mal puesta, nunca su valor, y se corrige en **Environment** de ese servicio, como en «Rotar credenciales». Cualquier otra cosa, se la pasa al agente.
 
+El 2026-11-01, el propietario creó el Blueprint `buoh-datos` desde `main` en `9982259`. Render mostró los tres recursos, sin sufijos, y estimó 13,30 USD al mes sin el cron job: los 6,30 de la base y los 7 del worker de ADR-0018 §14. La lista de tokens de Cloudflare mostró `ingesta` y `operaciones` con **Object Read & Write** y `salud` con **Object Read only**, los tres solo para `buoh-captura` y **Active** sin fecha. Lo demás sale de los **Logs** de Render: de `buoh-ingesta`, una captura del propietario, y de `buoh-operaciones`, el texto que copió.
+
+- `buoh-ingesta` arrancó a las 00:05:03 UTC y a las 00:05:04 dejó `ingest_waiting` con `postgres_unavailable` (`ECONNREFUSED`), mientras se creaba la base. En la captura no hay otra línea después de esa.
+- La primera ejecución de `buoh-operaciones`, de 00:05:45 a 00:05:48 UTC, terminó `completed`. Migró el log 1 con `0001` a `0006`, puso las contraseñas de `buoh_ingesta`, `buoh_salud` y `buoh_agente` y preparó el log 1 (`prepared: 1`). La salud del log 1 dio `paused` y `disconnected`, con salida 1, y el espacio, 8 550 079 bytes de la base y 294 912 del log 1.
+- La segunda, de 00:10:22 a 00:10:43 UTC, también `completed`, preparó el log 2 (`prepared: 2`) sin poner ninguna contraseña. La salud del log 1 dio `healthy` y `connected`, con salida 0, sin condiciones abiertas y con su último evento a las 00:10:26 UTC.
+
+La captura del log 1 empezó, así, después de las 00:05:45 UTC, cuando empezó la ejecución que puso la contraseña de `buoh_ingesta` y preparó el log 1, y antes de las 00:10:43, cuando terminó la que preparó el log 2 porque el 1 ya tenía una escritura. El panel de `buoh-captura` no se miró: el `healthy` de `data:health` ya supone que lee del bucket, con el token `salud`, el esquema de fuente y los eventos del log 1.
+
 ### Acceso del agente
 
 Para leer producción (ADR-0018 §12 y §13), el agente usa el rol `buoh_agente` y el token `agente`, los dos de solo lectura, con secretos de Kiro de nombres propios, que ninguna prueba ni comando local lee por error. **El propietario:**
@@ -790,6 +800,10 @@ Para leer producción (ADR-0018 §12 y §13), el agente usa el rol `buoh_agente`
 1. En Cloudflare, crea el token `agente`: **Object Read only**, solo para `buoh-captura`, con **TTL** *Forever*.
 2. En Render, copia la contraseña de `buoh_agente` (en `buoh-operaciones`, **Environment**, `BUOH_AGENTE_POSTGRES_PASSWORD`) y el **Hostname** de la base (en `buoh-postgres`, **Info**), que empieza por `dpg-`. El servidor externo es ese nombre seguido de `.virginia-postgres.render.com`, el que aparece justo después de `@` en **External Database URL**, hasta el `:` del puerto o la `/`. No copies esa URL entera: lleva la contraseña de `buoh`, la credencial dueña, que el agente nunca recibe (ADR-0018 §12).
 3. En Kiro Web, en **Settings → Sandbox → Secrets**, guarda cinco secretos: `BUOH_AGENTE_POSTGRES_HOST`, con el servidor externo; `BUOH_AGENTE_POSTGRES_PASSWORD`; `BUOH_AGENTE_S3_ENDPOINT`, con el endpoint; y `BUOH_AGENTE_S3_ACCESS_KEY_ID` y `BUOH_AGENTE_S3_SECRET_ACCESS_KEY`, con el token `agente`. Nunca en el chat ni en Git.
+
+En la sesión de Kiro del PR 7 y de este despliegue, abierta el 2026-10-31, los `BUOH_PRUEBA_*` seguían a la vista el 2026-11-01, después de que el propietario dijera que los borró, y los `BUOH_AGENTE_*` no aparecieron cuando dijo que los guardó. Encaja con que Kiro cargue los secretos al abrir cada sesión, y su documentación solo dice que llegan como variables de entorno durante la tarea. Por eso el agente usa los secretos nuevos desde una sesión nueva, que tiene que ver los `BUOH_AGENTE_*` y ya no los `BUOH_PRUEBA_*`. Borrar un secreto de Kiro no anula su credencial: el token `agente` se anula al borrarlo en Cloudflare, y la contraseña de `buoh_agente`, con los pasos de «Rotar credenciales», que le ponen otra en PostgreSQL. Borrar solo su variable en Render no la anula, y además deja `buoh-operaciones` sin arrancar, con `ConfigError`.
+
+El 2026-11-01, el propietario creó el token `agente`, que la lista de tokens de Cloudflare mostró con **Object Read only** y solo para `buoh-captura` y que él confirmó **Active**, y guardó los cinco secretos. El agente los comprueba con el `data:health` de abajo desde la sesión siguiente.
 
 **El agente** solo los pasa al comando que los necesita, con los nombres que lee el worker y en un subshell, y nunca los muestra. Para `data:health`, desde la raíz del repositorio:
 
