@@ -277,6 +277,11 @@ export interface DerivSession {
    * comprobaciones. Solo lee: lo usa el corte de los logs de producción (ADR-0018 §6).
    */
   liveView(): Promise<LiveDerivationView | null>;
+  /**
+   * Si la sesión sigue: `false` desde que se pidió su parada, por una señal o por el corte, o desde
+   * que terminó por su cuenta. Lo mira el corte antes de decidir (ADR-0018 §6).
+   */
+  running(): boolean;
   /** La parada por señal (ADR-0015 §3, «Parada»). No hace nada si ya se pidió. */
   stop(): void;
 }
@@ -395,13 +400,18 @@ async function readCursors(
   return { latest: latest?.cursor ?? null, symbols };
 }
 
-/** Una sesión en curso: su estado vive aquí, y `startDerivSession` expone `done`, `liveView` y `stop`. */
+/**
+ * Una sesión en curso: su estado vive aquí, y `startDerivSession` expone `done`, `liveView`,
+ * `running` y `stop`.
+ */
 class SessionRun {
   readonly done: Promise<DerivSessionResult>;
   readonly #input: DerivSessionInput;
   readonly #connections: DerivSessionConnection[] = [];
   readonly #waits: number[] = [];
   #stopped = false;
+  /** La sesión terminó, de cualquier forma: `done` ya se resolvió o se rechazó. */
+  #ended = false;
   #lock: SessionLock | null = null;
   #ingestor: RawFirstIngestor | null = null;
   #connection: DerivConnection | null = null;
@@ -507,7 +517,20 @@ class SessionRun {
     return ingestor.readLog(async (log) => liveDerivationView(await readLiveState(log, lookup)));
   }
 
+  /** `DerivSession.running`. */
+  running(): boolean {
+    return !this.#stopped && !this.#ended;
+  }
+
   async #run(): Promise<DerivSessionResult> {
+    try {
+      return await this.#runSession();
+    } finally {
+      this.#ended = true;
+    }
+  }
+
+  async #runSession(): Promise<DerivSessionResult> {
     let end: SessionEnd;
     try {
       end = await this.#session();
@@ -1430,6 +1453,7 @@ export function startDerivSession(input: DerivSessionInput): DerivSession {
   return {
     done: run.done,
     liveView: () => run.liveView(),
+    running: () => run.running(),
     stop: () => {
       run.stop();
     },

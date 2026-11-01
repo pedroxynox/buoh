@@ -235,9 +235,9 @@ async function ingestHarness(options: IngestHarnessOptions = {}) {
           cutReads.push(`first:${String(log.number)}`);
           return Promise.resolve(startup.firstWrites.get(log.number) ?? null);
         },
-        isPrepared: (log) => {
+        readiness: (log) => {
           cutReads.push(`prepared:${String(log.number)}`);
-          return Promise.resolve(startup.prepared.has(log.number));
+          return Promise.resolve(startup.prepared.has(log.number) ? 'ready' : 'not_prepared');
         },
         locateLog: () => {
           timeline.push('locate');
@@ -1081,6 +1081,84 @@ describe('ingestCommand en production: el corte semanal (ADR-0018 §6)', () => {
     run.raise();
     answerForgetAll(run.socket(1));
     expect((await command).exitCode).toBe(0);
+  });
+
+  it('si algo falla después de decidir el corte, suelta el bloqueo retenido: salida 1 con UNEXPECTED y ningún bloqueo tomado', async () => {
+    const run = await ingestHarness();
+    run.startup.firstWrites.set(2, START);
+    run.startup.prepared.add(3);
+    const { command } = await startProduction(run);
+    await subscribe(run, 1);
+    await run.clock.advance(0);
+    run.clock.jumpWallClock(Date.parse(CUT_TIME) - Date.parse(run.clock.now()) - LOG_CUT_CHECK_MS);
+    await run.clock.advance(LOG_CUT_CHECK_MS);
+    expect(run.alerts.map((alert) => alert['event'])).toEqual(['log_cut']);
+    // Cerrar los almacenes del log 2 falla, después de que la sesión retuvo el bloqueo.
+    run.storesOf('buoh_log_000002').close = () => Promise.reject(new RangeError('cierre roto'));
+    answerForgetAll(run.socket(1));
+
+    expect(await command).toEqual({
+      exitCode: 1,
+      line: '{"code":"UNEXPECTED","message":"RangeError","status":"failed"}',
+    });
+    expect(run.timeline.slice(-2)).toEqual(['release:1', 'reads:close']);
+    expect(run.sockets).toHaveLength(1);
+  });
+
+  it('si el proceso termina entre el corte y la primera escritura del log siguiente, el arranque siguiente retoma el log cortado y lo vuelve a cortar (ADR-0018 §6, «Cortar»)', async () => {
+    const run = await ingestHarness();
+    run.startup.firstWrites.set(2, START);
+    run.startup.prepared.add(3);
+    // La segunda descarga de los esquemas, la de la sesión del log 3, falla.
+    let downloads = 0;
+    const download = run.deps.fetch;
+    const failing: IngestDependencies = {
+      ...run.deps,
+      fetch: (...args) => {
+        downloads += 1;
+        return downloads === 2
+          ? Promise.resolve(new Response('no disponible', { status: 503 }))
+          : download(...args);
+      },
+    };
+    const first = await start(run, undefined, PRODUCTION_ENV, failing);
+    await settle();
+    await settle();
+    await subscribe(run, 1);
+    await run.clock.advance(0);
+    run.clock.jumpWallClock(Date.parse(CUT_TIME) - Date.parse(run.clock.now()) - LOG_CUT_CHECK_MS);
+    await run.clock.advance(LOG_CUT_CHECK_MS);
+    answerForgetAll(run.socket(1));
+    // La sesión del log 3 termina failed antes de escribir nada, sin llegar a pedir el bloqueo, que
+    // se suelta después de cerrar sus almacenes.
+    const ended = await first.command;
+    expect(ended.exitCode).toBe(1);
+    expect(JSON.parse(ended.line)).toMatchObject({ connections: [], status: 'failed' });
+    expect(run.timeline.slice(-3)).toEqual(['close', 'release:1', 'reads:close']);
+    const log3 = run.storesOf('buoh_log_000003');
+    expect(log3.sourceLog.rows).toEqual([]);
+    expect(log3.ingestionStatus.heartbeats).toEqual([]);
+
+    // El reinicio: el log 2 sigue siendo el activo, y su hora de corte pasó hace menos de 24 horas.
+    const second = await start(run, undefined, PRODUCTION_ENV);
+    await settleHandover();
+    expect(run.configs.at(-1)?.postgres.schema).toBe('buoh_log_000002');
+    // La conexión nueva espera a pasar la hora del cierre anterior, 1 ms del reloj. La primera
+    // mirada del corte la ve todavía sin conectar.
+    await run.clock.advance(1);
+    await settleHandover();
+    await subscribe(run, 2);
+    const log2 = run.storesOf('buoh_log_000002');
+    expect(eventsOf(log2).filter((event) => event.kind === 'connection_opened')).toHaveLength(2);
+    await run.clock.advance(LOG_CUT_CHECK_MS);
+    expect(run.alerts.filter((alert) => alert['event'] === 'log_cut')).toHaveLength(2);
+    answerForgetAll(run.socket(2));
+    await settleHandover();
+    expect(run.configs.at(-1)?.postgres.schema).toBe('buoh_log_000003');
+    await subscribe(run, 3);
+    run.raise();
+    answerForgetAll(run.socket(3));
+    expect((await second.command).exitCode).toBe(0);
   });
 
   it('una señal entre el corte y la sesión del log siguiente la para: salida 0 con WAIT_STOPPED, sin abrir el log siguiente, y suelta el bloqueo retenido', async () => {

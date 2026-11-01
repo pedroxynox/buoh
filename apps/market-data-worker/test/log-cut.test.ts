@@ -99,6 +99,8 @@ function fakeReads(
     active?: LogLocation | null;
     fail?: Error;
     firstWrites?: Map<number, string>;
+    /** Los logs a los que solo les faltan migraciones. */
+    pending?: Set<number>;
     prepared?: Set<number>;
   } = {},
 ) {
@@ -110,9 +112,15 @@ function fakeReads(
       calls.push(`first:${String(log.number)}`);
       return answer(() => state.firstWrites?.get(log.number) ?? null);
     },
-    isPrepared: (log) => {
+    readiness: (log) => {
       calls.push(`prepared:${String(log.number)}`);
-      return answer(() => state.prepared?.has(log.number) ?? false);
+      return answer(() =>
+        state.prepared?.has(log.number) === true
+          ? 'ready'
+          : state.pending?.has(log.number) === true
+            ? 'migrations_pending'
+            : 'not_prepared',
+      );
     },
     locateLog: () => {
       calls.push('locate');
@@ -164,6 +172,19 @@ describe('locateCaptureLog: el log en el que captura ingest en production (ADR-0
     expect(missing.calls).toEqual(['locate', 'first:2', 'prepared:3']);
   });
 
+  it('el log siguiente al que solo le faltan migraciones vale: la espera del arranque las espera con migrations_pending', async () => {
+    const forced = new Date(CUT_MS + LOG_CUT_FORCE_AFTER_MS).toISOString();
+    const { reads } = fakeReads({ firstWrites: new Map([[2, MONDAY]]), pending: new Set([3]) });
+    expect(await locateCaptureLog(reads, { after: null, now: at(forced) })).toEqual({
+      log: logLocation(3),
+      skipped: logLocation(2),
+    });
+    expect(await locateCaptureLog(reads, { after: 2, now: at(MONDAY) })).toEqual({
+      log: logLocation(3),
+      skipped: null,
+    });
+  });
+
   it('después de un corte del mismo proceso, el log siguiente al cortado si está preparado, sin mirar su hora de corte', async () => {
     const { calls, reads } = fakeReads({ prepared: new Set([3]) });
     expect(await locateCaptureLog(reads, { after: 2, now: at(MONDAY) })).toEqual({
@@ -204,6 +225,8 @@ function watchHarness(
   const decisions: LogCutDecision[] = [];
   const session = {
     reads: 0,
+    /** Si la sesión sigue: la parada, por una señal o por el corte, lo pone en `false`. */
+    running: true,
     stops: 0,
     view: options.view === undefined ? view() : options.view,
   };
@@ -227,8 +250,10 @@ function watchHarness(
         const current = session.view;
         return current instanceof Error ? Promise.reject(current) : Promise.resolve(current);
       },
+      running: () => session.running,
       stop: () => {
         session.stops += 1;
+        session.running = false;
       },
     },
   });
@@ -438,12 +463,54 @@ describe('LogCutWatch: la vigilancia del corte mientras la sesión captura (ADR-
     expect(JSON.stringify(run.alerts)).not.toContain('10.0.0.5');
   });
 
+  it('con el log siguiente solo a falta de migraciones, log_cut_blocked dice next_log_migrations_pending; al cambiar el motivo avisa enseguida; con todo listo, corta', async () => {
+    const run = watchHarness({ prepared: false, start: CUT });
+    run.fake.state.pending = new Set([3]);
+    run.watch.start();
+    await run.clock.advance(0);
+    const pending = {
+      event: 'log_cut_blocked',
+      log: '2',
+      next: '3',
+      reason: 'next_log_migrations_pending',
+    };
+    expect(run.alerts).toEqual([pending]);
+    // El log siguiente deja de poder leerse: el motivo cambia y la alerta sale sin esperar el minuto.
+    run.fake.state.pending = new Set();
+    await run.clock.advance(LOG_CUT_CHECK_MS);
+    expect(run.alerts).toEqual([pending, { ...pending, reason: 'next_log_not_prepared' }]);
+    run.fake.state.prepared = new Set([3]);
+    await run.clock.advance(LOG_CUT_CHECK_MS);
+    expect(run.decisions).toEqual([{ forced: false, log: logLocation(2), next: logLocation(3) }]);
+  });
+
+  it('si una señal para la sesión antes de decidir el corte, no corta ni deja alertas, tampoco a las 24 horas', async () => {
+    for (const start of [CUT, new Date(CUT_MS + LOG_CUT_FORCE_AFTER_MS).toISOString()]) {
+      const run = watchHarness({ start });
+      run.watch.start();
+      // La señal llega mientras se lee si el log siguiente está preparado: la sesión deja de seguir,
+      // aunque el log esté limpio.
+      const read = run.fake.reads.readiness.bind(run.fake.reads);
+      run.fake.reads.readiness = async (log) => {
+        const readiness = await read(log);
+        run.session.running = false;
+        return readiness;
+      };
+      await run.clock.advance(0);
+      expect(run.decisions).toEqual([]);
+      expect(run.alerts).toEqual([]);
+      expect(run.session.stops).toBe(0);
+    }
+  });
+
   it('stop la detiene sin cortar, también con una lectura en curso', async () => {
     const run = watchHarness({ start: CUT });
     let answer: (value: boolean) => void = () => undefined;
-    run.fake.reads.isPrepared = () =>
+    run.fake.reads.readiness = () =>
       new Promise((resolve) => {
-        answer = resolve;
+        answer = (ready) => {
+          resolve(ready ? 'ready' : 'not_prepared');
+        };
       });
     run.watch.start();
     await run.clock.advance(0);

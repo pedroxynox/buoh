@@ -67,17 +67,23 @@ function nextLog(number: number): LogLocation | null {
   return number >= MAX_LOG_NUMBER ? null : logLocation(number + 1);
 }
 
+/**
+ * Cómo está un log para empezar a capturar en él (ADR-0018 §6): `ready` si está preparado, porque
+ * existe, se puede leer, no tiene escrituras y tiene todas las migraciones del worker;
+ * `migrations_pending` si solo le faltan migraciones, como tras un despliegue que trae una, hasta
+ * que `buoh-operaciones` la aplica; y `not_prepared` si no existe, no se puede leer o ya tiene
+ * escrituras.
+ */
+export type LogReadiness = 'migrations_pending' | 'not_prepared' | 'ready';
+
 /** Las lecturas de PostgreSQL del corte, sin escribir nada: `openStartupReads` en `ingest`. */
 export interface LogCutReads {
   /** El log activo de la fuente (`findActiveLog`), o `null` si no hay ninguno preparado. */
   locateLog(): Promise<LogLocation | null>;
   /** La primera escritura de la fuente en el log (`firstWriteOf`), o `null` si no tiene ninguna. */
   firstWrite(log: LogLocation): Promise<string | null>;
-  /**
-   * Si el log está preparado (ADR-0018 §6): existe, se puede leer, no tiene escrituras y tiene todas
-   * las migraciones del worker.
-   */
-  isPrepared(log: LogLocation): Promise<boolean>;
+  /** Cómo está el log para empezar a capturar en él (`LogReadiness`). */
+  readiness(log: LogLocation): Promise<LogReadiness>;
 }
 
 /**
@@ -92,16 +98,17 @@ export interface CaptureTarget {
 /**
  * El log en el que captura `ingest` en `production` (ADR-0018 §6), sin escribir nada:
  *
- * - con `after`, el número del log que el mismo proceso acaba de cortar, el siguiente a ese, si
- *   está preparado, mientras el activo no lo haya pasado;
+ * - con `after`, el número del log que el mismo proceso acaba de cortar, el siguiente a ese,
+ *   mientras el activo no lo haya pasado;
  * - si no, el log activo, también si su hora de corte ya pasó: entonces la sesión retoma ese log para
  *   buscar el momento limpio, como si no se hubiera parado («Al arrancar»). Pasadas 24 horas desde
- *   la hora de corte, ya no vuelve a escribir en él: el log es el siguiente, si está preparado, y el
- *   activo queda en `skipped`.
+ *   la hora de corte, ya no vuelve a escribir en él: el log es el siguiente, y el activo queda en
+ *   `skipped`.
  *
- * `null` si no hay log activo, o si el log que toca no está preparado: la espera del arranque lo
- * trata como `log_not_prepared` (ADR-0018 §4). La hora se toma después de leer, como en
- * `findActiveLog`. Rechaza si PostgreSQL no responde.
+ * El log siguiente vale si está preparado o si solo le faltan migraciones: la espera del arranque las
+ * comprueba después y espera con `migrations_pending` (ADR-0018 §4). `null` si no hay log activo o si
+ * el siguiente no está preparado: la espera lo trata como `log_not_prepared`. La hora se toma después
+ * de leer, como en `findActiveLog`. Rechaza si PostgreSQL no responde.
  */
 export async function locateCaptureLog(
   reads: LogCutReads,
@@ -113,7 +120,7 @@ export async function locateCaptureLog(
   }
   if (input.after !== null && active.number <= input.after) {
     const next = nextLog(input.after);
-    return next !== null && (await reads.isPrepared(next)) ? { log: next, skipped: null } : null;
+    return next !== null && (await usable(reads, next)) ? { log: next, skipped: null } : null;
   }
   const first = await reads.firstWrite(active);
   if (first === null) {
@@ -124,13 +131,20 @@ export async function locateCaptureLog(
     return { log: active, skipped: null };
   }
   const next = nextLog(active.number);
-  return next !== null && (await reads.isPrepared(next)) ? { log: next, skipped: active } : null;
+  return next !== null && (await usable(reads, next)) ? { log: next, skipped: active } : null;
 }
 
-/** Lo que el corte necesita de la sesión del log: su estado vivo y la parada. */
+/** Si la espera del arranque puede ir al log: preparado o solo con migraciones pendientes. */
+async function usable(reads: Pick<LogCutReads, 'readiness'>, log: LogLocation): Promise<boolean> {
+  return (await reads.readiness(log)) !== 'not_prepared';
+}
+
+/** Lo que el corte necesita de la sesión del log: su estado vivo, si sigue y la parada. */
 export interface LogCutSession {
   /** `DerivSession.liveView`. */
   liveView(): Promise<LiveDerivationView | null>;
+  /** `DerivSession.running`: `false` desde que se pidió su parada o terminó. */
+  running(): boolean;
   /** La parada pedida (ADR-0015 §3, «Parada»). */
   stop(): void;
 }
@@ -152,7 +166,7 @@ export interface LogCutWatchInput {
   readonly now: () => string;
   /** Justo antes de pedir la parada del corte: quien la llama retiene el bloqueo para la sesión siguiente. */
   readonly onCut: (decision: LogCutDecision) => void;
-  readonly reads: Pick<LogCutReads, 'firstWrite' | 'isPrepared'>;
+  readonly reads: Pick<LogCutReads, 'firstWrite' | 'readiness'>;
   readonly scheduler: Scheduler;
   readonly session: LogCutSession;
 }
@@ -164,14 +178,18 @@ export interface LogCutWatchInput {
  * 1. la primera escritura del log, hasta que la tiene, y con ella la hora de corte (`cutTimeOf`),
  *    que no cambia con los reinicios;
  * 2. antes de esa hora, solo el reloj;
- * 3. desde ella, si el log siguiente está preparado: si no, deja `log_cut_blocked`, como mucho una
- *    vez cada `LOG_CUT_ALERT_INTERVAL_MS`, y sigue en este log;
+ * 3. desde ella, si el log siguiente está preparado (`readiness`): si no, deja `log_cut_blocked`,
+ *    con `next_log_not_prepared` o, si solo le faltan migraciones, `next_log_migrations_pending`,
+ *    al cambiar el motivo y, mientras no cambia, como mucho una vez cada
+ *    `LOG_CUT_ALERT_INTERVAL_MS`, y sigue en este log;
  * 4. si lo está, si el log está limpio (`isCleanForCut`), salvo a partir de las 24 horas de la hora
  *    de corte, cuando corta igual, con la alerta `log_cut_forced` y lo que quedó abierto.
  *
- * Al cortar deja la alerta `log_cut`, llama a `onCut` y pide la parada a la sesión. Una lectura que
- * falla deja `log_cut_check_unavailable` con su motivo saneado y se vuelve a intentar: la captura va
- * antes que el corte. `stop` la detiene sin cortar.
+ * Al cortar deja la alerta `log_cut`, llama a `onCut` y pide la parada a la sesión, sin esperar nada
+ * entre las tres cosas. Si la sesión ya no sigue, porque una señal la paró o terminó por su cuenta,
+ * no corta ni deja ninguna alerta. Una lectura que falla deja `log_cut_check_unavailable` con su
+ * motivo saneado y se vuelve a intentar: la captura va antes que el corte. `stop` la detiene sin
+ * cortar.
  */
 export class LogCutWatch {
   readonly #input: LogCutWatchInput;
@@ -181,6 +199,7 @@ export class LogCutWatch {
   #cancel: (() => void) | null = null;
   #stopped = false;
   #lastBlockedAlertMs: number | null = null;
+  #lastBlockedReason: string | null = null;
 
   constructor(input: LogCutWatchInput) {
     this.#input = input;
@@ -242,12 +261,18 @@ export class LogCutWatch {
         // Después del último log no hay a dónde cortar: la captura sigue en este.
         return;
       }
-      const prepared = await reads.isPrepared(next);
+      const readiness = await reads.readiness(next);
       if (this.#isStopped()) {
         return;
       }
-      if (!prepared) {
-        this.#blocked(nowMs, next);
+      if (readiness !== 'ready') {
+        this.#blocked(
+          nowMs,
+          next,
+          readiness === 'migrations_pending'
+            ? 'next_log_migrations_pending'
+            : 'next_log_not_prepared',
+        );
         this.#schedule(LOG_CUT_CHECK_MS);
         return;
       }
@@ -266,7 +291,7 @@ export class LogCutWatch {
       } else {
         // Lo que quedó abierto, para la alerta; sin él, la alerta lo dice con `null`.
         view = await session.liveView().catch(() => null);
-        if (this.#isStopped()) {
+        if (this.#isStopped() || !session.running()) {
           return;
         }
         alert({
@@ -278,6 +303,10 @@ export class LogCutWatch {
             view === null ? null : String(view.pendingContinuitySymbols.length > 0),
           reason: 'clean_moment_not_reached',
         });
+      }
+      // Una sesión que una señal paró, o que terminó, no se corta: lo que siga lo decide su fin.
+      if (!session.running()) {
+        return;
       }
       const decision: LogCutDecision = { forced, log, next };
       this.#decision = decision;
@@ -303,18 +332,22 @@ export class LogCutWatch {
     }
   }
 
-  /** `log_cut_blocked`, como mucho una vez cada `LOG_CUT_ALERT_INTERVAL_MS`, también si el reloj retrocede. */
-  #blocked(nowMs: number, next: LogLocation): void {
+  /**
+   * `log_cut_blocked` con su motivo: al cambiar el motivo y, mientras no cambia, como mucho una vez
+   * cada `LOG_CUT_ALERT_INTERVAL_MS`, también si el reloj retrocede.
+   */
+  #blocked(nowMs: number, next: LogLocation, reason: string): void {
     const last = this.#lastBlockedAlertMs;
     const elapsed = last === null ? Number.POSITIVE_INFINITY : nowMs - last;
-    if (elapsed >= LOG_CUT_ALERT_INTERVAL_MS || elapsed < 0) {
+    if (reason !== this.#lastBlockedReason || elapsed >= LOG_CUT_ALERT_INTERVAL_MS || elapsed < 0) {
       this.#input.alert({
         event: 'log_cut_blocked',
         log: String(this.#input.log.number),
         next: String(next.number),
-        reason: 'next_log_not_prepared',
+        reason,
       });
       this.#lastBlockedAlertMs = nowMs;
+      this.#lastBlockedReason = reason;
     }
   }
 }

@@ -312,9 +312,11 @@ async function health(input: OperationsInput): Promise<StepOutcome> {
  * «Traspaso»). Un log terminó cuando un log posterior, el activo, tiene una escritura: después de un
  * corte, `ingest` nunca vuelve a escribir en él. De los que terminaron, que tienen alguna escritura,
  * se pueden leer, no han vencido y todavía no tienen un informe final `completed`, el de menor
- * número recibe `data:health --log` como el activo, y su informe se guarda en ese log. Uno por
- * ejecución: el siguiente, en la ejecución siguiente. Si no hay ninguno, el paso termina sin guardar
- * nada. Un informe que falla se guarda `failed`, y la ejecución siguiente lo vuelve a intentar.
+ * número recibe `data:health --log`, que lo observa sin escritor vivo (regla 4), y su informe se
+ * guarda en ese log. Uno por ejecución: el siguiente, en la ejecución siguiente. Si no hay ninguno,
+ * el paso termina sin guardar nada. Un informe que falla se guarda `failed`, y la ejecución
+ * siguiente lo vuelve a intentar: también uno sin observación (`health_not_observed`), porque un
+ * almacén no respondió o la reconstrucción no terminó, que en el paso de la salud no es un fallo.
  */
 async function finalHealth(input: OperationsInput): Promise<StepOutcome> {
   let target: LogLocation | null = null;
@@ -344,8 +346,30 @@ async function finalHealth(input: OperationsInput): Promise<StepOutcome> {
   if (target === null) {
     return { log: null, report: { log: null }, status: 'completed', store: false };
   }
-  return observeLog(input, target);
+  const outcome = await observeLog(input, target);
+  // Un informe sin observación, porque un almacén no respondió (regla 3) o la reconstrucción del
+  // estado vivo no terminó, no registra lo que quedó abierto: es un fallo, y se repite.
+  const alerts = outcome.report['alerts'];
+  const unobserved =
+    Array.isArray(alerts) &&
+    alerts.some(
+      (item) =>
+        typeof item === 'object' &&
+        item !== null &&
+        !Array.isArray(item) &&
+        typeof item['event'] === 'string' &&
+        UNOBSERVED_HEALTH_ALERTS.has(item['event']),
+    );
+  return outcome.status === 'completed' && unobserved
+    ? { ...outcome, report: { ...outcome.report, reason: 'health_not_observed' }, status: 'failed' }
+    : outcome;
 }
+
+/** Las alertas de `data:health` que dicen que no pudo observar el log (ADR-0015 §8 y ADR-0017 §6). */
+const UNOBSERVED_HEALTH_ALERTS: ReadonlySet<string> = new Set([
+  'data_health_checkpoint_rebuild_incomplete',
+  'data_health_storage_unavailable',
+]);
 
 /**
  * `data:health --log` sobre el log, en un proceso aparte con el entorno de `healthEnvironment`. Su

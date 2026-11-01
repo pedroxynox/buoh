@@ -19,6 +19,7 @@ import {
   pendingMigrations,
   PostgresSessionLockProvider,
   S3ObjectStore,
+  SourceLock,
   type OperationalAlert,
   type WorkerConfig,
 } from '../src/index.js';
@@ -37,7 +38,7 @@ import { waitForNoSessions } from '../test/support/databases.js';
  * escritura del log fija su hora de corte, el log siguiente está preparado y, a esa hora, con el log
  * limpio, la sesión para como una parada y el mismo proceso sigue en el log siguiente, con su
  * catálogo, su esquema de fuente guardado y una primera conexión sin anterior, sin soltar el
- * bloqueo de la fuente.
+ * bloqueo de la fuente: otro proceso que lo pide sin parar durante el corte nunca lo consigue.
  *
  * Usa su propia base, `buoh_integration_log_cut`, y los logs 201 y 202, números que ninguna otra
  * prueba usa, porque el bucket es el de todas. Como en integration/ingest-production.test.ts, el
@@ -282,10 +283,30 @@ describe('el corte de un log al siguiente (ADR-0018 §6)', () => {
     await eventually(() => alerts.some((alert) => alert['event'] === 'log_cut'));
     expect(alerts).toEqual([{ event: 'log_cut', forced: 'false', log: '201', next: '202' }]);
 
-    // 2. La parada del log 201 y la sesión nueva en el 202.
+    // 2. La parada del log 201 y la sesión nueva en el 202. Mientras tanto, otro proceso, como la
+    // instancia nueva de un despliegue, pide el bloqueo de la fuente sin parar: nunca lo consigue.
+    const attempts: boolean[] = [];
+    const poll = { on: true };
+    const poller = (async () => {
+      while (poll.on) {
+        const other = await SourceLock.acquire({
+          postgres: local(localConfig).postgres,
+          source: DERIV_SOURCE,
+        });
+        attempts.push(other !== null);
+        await other?.release();
+        await new Promise((resolve) => {
+          setTimeout(resolve, 5);
+        });
+      }
+    })();
     await answerForgetAll(first);
     const second = await socketNumber(sockets, 2);
     await subscribe(second, NEXT);
+    poll.on = false;
+    await poller;
+    expect(attempts.length).toBeGreaterThan(0);
+    expect(attempts.filter(Boolean)).toEqual([]);
     (signal as (() => void) | null)?.();
     await answerForgetAll(second);
 

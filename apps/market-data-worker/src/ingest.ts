@@ -499,6 +499,7 @@ export async function ingestCommand(
       const retention = new LockRetention();
       const watches: LogCutWatch[] = [];
       let result: { readonly exitCode: 0 | 1 | 2; readonly line: string };
+      let next: { readonly after: number; readonly lock: SessionLock | null } | null = null;
       try {
         result = await capture(withLog(config, log), handedOver, true, {
           releaseLock: retention.release,
@@ -521,18 +522,21 @@ export async function ingestCommand(
             };
           },
         });
+        const decision = watches[0]?.decision ?? null;
+        if (decision !== null && result.exitCode === 0) {
+          next = { after: decision.log.number, lock: retention.takeRetained() };
+        }
       } finally {
         await handedOver.releaseUnused();
+        // Un bloqueo retenido que no pasa a la sesión siguiente se suelta, también si `capture`
+        // lanzó: ninguno queda tomado al terminar.
+        await retention.takeRetained()?.release();
       }
-      const kept = retention.takeRetained();
-      const decision = watches[0]?.decision ?? null;
-      if (decision !== null && result.exitCode === 0) {
-        after = decision.log.number;
-        retained = kept;
-        continue;
+      if (next === null) {
+        return result;
       }
-      await kept?.release();
-      return result;
+      after = next.after;
+      retained = next.lock;
     }
   };
 

@@ -1068,6 +1068,49 @@ describe('runOperations: el informe final de un log que terminó (ADR-0018 §6, 
     ]);
   });
 
+  it.each([
+    ['un almacén no respondió (regla 3)', 'data_health_storage_unavailable', 'ECONNREFUSED'],
+    [
+      'la reconstrucción del estado vivo no terminó',
+      'data_health_checkpoint_rebuild_incomplete',
+      'deadline_exceeded',
+    ],
+  ])(
+    'un informe final sin observación, porque %s, se guarda failed con health_not_observed y se vuelve a intentar; la salud del activo, igual, no falla',
+    async (_label, event, reason) => {
+      const db = fakeDatabase({
+        loggedIn: new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']),
+        logs: [log(1, EARLIER), log(2, NOW), log(3)],
+      });
+      const stderr = `${JSON.stringify({ event, reason })}\n`;
+      const unobserved = fakeChildren((child) => (child === 'health' ? { stderr } : {}));
+      const first = await run(db, unobserved);
+
+      expect(first.lines[1]).toMatchObject({ log: 2, status: 'completed', step: 'health' });
+      expect(first.lines[2]).toMatchObject({
+        log: 1,
+        report: {
+          alerts: [{ event, reason }],
+          exit_code: 1,
+          log: 1,
+          reason: 'health_not_observed',
+        },
+        status: 'failed',
+        step: 'final_health',
+      });
+      expect(first.alerts).toEqual([
+        { event: 'operations_step_failed', reason: 'health_not_observed', step: 'final_health' },
+      ]);
+
+      const retry = fakeChildren();
+      await run(db, retry);
+      expect(healthRuns(retry)).toEqual(['--json --log 2', '--json --log 1']);
+      expect(
+        db.reports.filter(({ row }) => row.step === 'final_health').map(({ row }) => row.status),
+      ).toEqual(['failed', 'completed']);
+    },
+  );
+
   it('un log terminado que venció, uno que no se puede leer y uno sin escrituras no reciben informe final', async () => {
     const db = fakeDatabase({
       loggedIn: new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']),

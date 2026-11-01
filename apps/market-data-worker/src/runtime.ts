@@ -119,8 +119,8 @@ export function openHealthStores(
  * cada conexión y de cada consulta que `data:health`, para que un PostgreSQL que acepta la conexión
  * y no contesta no deje la espera ni el corte parados: el log activo de `source` (`findActiveLog`),
  * las migraciones que le faltan a un log (`pendingMigrations` con su esquema), su primera escritura
- * (`firstWriteOf`) y si está preparado: existe, se puede leer, no tiene escrituras y no le falta
- * ninguna migración. Ninguna escribe nada. Si PostgreSQL cierra una conexión libre del pool, deja la
+ * (`firstWriteOf`) y cómo está para capturar en él (`LogReadiness`): preparado, solo con migraciones
+ * pendientes o sin preparar. Ninguna escribe nada. Si PostgreSQL cierra una conexión libre del pool, deja la
  * alerta `postgres_connection_lost`, como `openStores`. `close` libera las conexiones.
  */
 export function openStartupReads(
@@ -141,12 +141,14 @@ export function openStartupReads(
   return {
     close: () => pool.end(),
     firstWrite: (log) => firstWriteOf(pool, log, input.source),
-    isPrepared: async (log) => {
+    readiness: async (log) => {
       const found = await readCaptureLog(pool, { number: log.number, source: input.source });
       if (found === null || !found.readable || found.lastWriteUtc !== null) {
-        return false;
+        return 'not_prepared';
       }
-      return (await pendingMigrations(pool, log.schema)).length === 0;
+      return (await pendingMigrations(pool, log.schema)).length === 0
+        ? 'ready'
+        : 'migrations_pending';
     },
     locateLog: () => findActiveLog(pool, { now: input.now, source: input.source }),
     pendingMigrations: (log) => pendingMigrations(pool, log.schema),

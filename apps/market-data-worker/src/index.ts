@@ -303,6 +303,7 @@ export {
   type LogCutReads,
   type LogCutSession,
   type LogCutWatchInput,
+  type LogReadiness,
 } from './log-cut.js';
 export {
   findActiveLog,
