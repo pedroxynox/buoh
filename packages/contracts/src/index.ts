@@ -4,6 +4,14 @@
  * JSON Schema de generated/ salen de los esquemas `…Structural` con `pnpm run schemas:generate`.
  */
 export {
+  apiErrorCodeSchema,
+  apiErrorSchema,
+  apiHealthSchema,
+  type ApiError,
+  type ApiErrorCode,
+  type ApiHealth,
+} from './api.js';
+export {
   ContractContextError,
   deriveConnectionConditionKey,
   deriveGapConditionKey,

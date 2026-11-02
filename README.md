@@ -29,7 +29,7 @@ pnpm run data:smoke -- --live                   # prueba viva opt-in contra Deri
 pnpm run data:health -- --json                  # HealthReport de una captura; no escribe nada
 ```
 
-pnpm usa el runtime Node fijado por el proyecto. Consulta [`packages/contracts`](packages/contracts/) para los esquemas ejecutables, [`packages/domain`](packages/domain/) para la normalización y las reglas de calidad puras y [`apps/market-data-worker`](apps/market-data-worker/) para publicación y replay. El entorno local está en el [runbook](docs/operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13).
+pnpm usa el runtime Node fijado por el proyecto. Consulta [`packages/contracts`](packages/contracts/) para los esquemas ejecutables, [`packages/domain`](packages/domain/) para la normalización y las reglas de calidad puras y [`apps/market-data-worker`](apps/market-data-worker/) para publicación y replay. [`apps/api`](apps/api/) es la API de buoh, que se construye en F2.3 ([ADR-0019](docs/arquitectura/adr/0019-api-cuentas-y-auditoria.md)). El entorno local está en el [runbook](docs/operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13).
 
 ## Propósito
 

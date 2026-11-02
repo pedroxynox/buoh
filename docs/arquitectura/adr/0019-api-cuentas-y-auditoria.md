@@ -113,6 +113,12 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 - Fastify valida cada entrada y cada salida con esos esquemas, con un compilador propio de pocas líneas. Una salida que no cumple su contrato es un error `internal`, nunca una respuesta a medias.
 - **Errores:** una sola forma, `{"error": {"code": …, "request_id": …}}`, con una lista cerrada de códigos, como `invalid_request`, `invalid_credentials`, `credential_disabled`, `unauthenticated`, `csrf_rejected`, `not_found`, `rate_limited` (con los segundos que faltan), `not_ready`, `postgres_unavailable` e `internal`. Nunca el mensaje de un error interno ni su traza.
 - **OpenAPI 3.1:** un script de `apps/api` lo genera en `apps/api/generated/openapi.json` desde la misma tabla de rutas que registra Fastify y desde los contratos, con `z.toJSONSchema` en el dialecto 2020-12, que es el de OpenAPI 3.1. `pnpm run openapi:check` lo compara byte a byte, como `schemas:check`, y entra en `verify:core`. La API no lo publica.
+- (Precisión del PR 2 de §14.) La lista de códigos empieza con los que produce el esqueleto: `invalid_request`, `not_found` e `internal`. Cada PR siguiente suma los suyos. Además:
+  - cada ruta declara el esquema de su consulta, y la que no admite parámetros usa una consulta vacía: un parámetro de más es `invalid_request`;
+  - la salida de una ruta pasa por el serializador con su esquema, y un estado que la ruta no declara es `internal`;
+  - los errores de Fastify, como el de la validación (`FST_ERR_VALIDATION`), conservan su estado de la familia 4xx con `invalid_request`, o `not_found` con un 404. Cualquier otro error es `internal`, aunque traiga su propio estado;
+  - el identificador de cada petición es un UUID versión 4 que genera la API con `crypto.randomUUID`, y la cabecera que envíe el cliente no cuenta;
+  - el OpenAPI pone una sola vez en `components.schemas` cada esquema con `id`, y declara en cada ruta sus respuestas 400 y 500, con `ApiError`.
 
 ### 7. Base de datos de la API
 
@@ -163,6 +169,9 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 - **Scripts.** Los hashes son los de cada script en línea que Next.js escribe en ese archivo, y la API los calcula de los archivos que sirve. `script-src` nunca lleva `'unsafe-inline'` ni `'unsafe-eval'`: la web tiene una sesión, y un script inyectado actuaría como el propietario. `style-src-attr 'unsafe-inline'` hace falta porque React escribe atributos `style` en los gráficos, como en el escritorio.
 - El PR puede estrechar esta política. Ampliarla cambia esta ADR.
 - Ningún recurso de terceros: las fuentes y los iconos ya son locales (ADR-0008 §4).
+- (Precisión del PR 2 de §14.) El esqueleto solo responde JSON, con sus cabeceras. Dos respuestas no pasan por los ganchos de Fastify:
+  - la que el servidor HTTP escribe antes de crear la petición, por ejemplo ante un mensaje HTTP mal formado: la API la escribe con las mismas cabeceras y con `ApiError`;
+  - la del cierre en curso, que Fastify escribiría con un 503 propio: queda apagada (`return503OnClosing: false`), así que una petición que llega durante el cierre sigue el camino normal.
 
 ### 10. El servicio en Render
 
@@ -179,6 +188,7 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 - **Rotación:** la contraseña de un rol se rota como en ADR-0018 §12. Cambiar `BUOH_API_PASSWORD_PEPPER` o `BUOH_API_TOTP_KEY` deja inservible la credencial guardada, así que va seguido de `restablecer` (§3). Cambiar `BUOH_API_TOKEN_KEY` cierra todas las sesiones y anula los enlaces sin usar. El runbook de la API da los pasos.
 - **Costo:** 7 USD al mes, dentro del presupuesto aprobado (plan §11). El total pasa a unos 26 USD al mes (ADR-0018 §14), más los unos 0,30 USD del tráfico de salida que estima §8 desde F2.4. El Blueprint aplica los cambios de `render-datos.yaml` en cada push a `main` (*Auto Sync*, [despliegue en Render](../../operacion/despliegue-en-render.md)), así que fusionar el PR de despliegue crea el servicio y empieza a cobrarlo. Con ese PR el propietario aprueba el gasto (ADR-0016 §3).
 - **Memoria:** el PR de despliegue fija los tamaños de V8 de la API con una medición. Con un backtest en curso, el servicio entero no pasa de 435 MB (`F2-API-001`, §12).
+- (Precisión del PR 2 de §14.) La API escucha en el puerto de `PORT`, que Render da a cada servicio web, o en el 10000 si no hay. Escucha en `0.0.0.0` en `production` y en `127.0.0.1` en `development` y `test`. `fastify` va en la 5.12.7, con `handlerTimeout` en 0 (ADR-0003, «Bibliotecas de la API»).
 
 ### 11. Registros
 
@@ -187,6 +197,10 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 - Por diseño, tres respuestas llevan un secreto a su dueño, y ninguna otra: el `Set-Cookie` del inicio de sesión, con el identificador de la sesión; el cuerpo del inicio de sesión y de `GET /api/v1/sesion`, con el token CSRF de esa sesión; y la respuesta del alta o del restablecimiento, con el secreto TOTP nuevo, una sola vez. Son la autenticación misma, no una fuga: así se lee la regla de `F2-API-001` de que ninguna respuesta lleve secretos.
 - Las pruebas capturan los registros y las respuestas y buscan en ellos los secretos de la prueba: la contraseña, el secreto y los códigos TOTP, el identificador de la sesión, el token CSRF, el del enlace y las tres claves. Cada uno solo puede aparecer en su canal de arriba, y en ningún otro sitio: ni en otra respuesta, ni en un error, ni en una línea de registro (`F2-API-001` y `F2-AUTH-001`).
 - Render guarda sus registros 7 días y ve la dirección IP de cada petición.
+- (Precisión del PR 2 de §14.) El registro es una lista cerrada de campos, el tipo `ApiLogLine` de `apps/api/src/log.ts`, así que no hace falta una lista de redacción: nada fuera de esos campos llega a una línea. Además de la línea de cada petición (`api_request`), la API escribe estas líneas:
+  - `api_error`, con el nombre del error de una respuesta `internal`;
+  - `api_client_error`, con el código de una petición que el servidor HTTP rechaza;
+  - su arranque (`api_listening`) y su parada (`api_stopping`, `api_stopped` o `api_stop_failed`).
 
 ### 12. Aislamiento de los backtests (F2.7)
 

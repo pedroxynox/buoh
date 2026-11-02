@@ -25,6 +25,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
+    "openapi:check": "pnpm --filter @buoh/api run openapi:check",
+    "openapi:generate": "pnpm --filter @buoh/api run openapi:generate",
     "runtime:check": "node scripts/check-runtime.mjs",
     "schemas:check": "pnpm --filter @buoh/contracts run schemas:check",
     "schemas:generate": "pnpm --filter @buoh/contracts run schemas:generate",
@@ -35,7 +37,7 @@
     "test:vectors": "turbo run test:vectors",
     "typecheck": "turbo run typecheck",
     "verify": "pnpm run verify:core && pnpm run docs:check",
-    "verify:core": "pnpm run runtime:check && pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run schemas:check",
+    "verify:core": "pnpm run runtime:check && pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run schemas:check && pnpm run openapi:check",
     "verify:pr": "pnpm run verify:core && pnpm run docs:check:pr"
   },
   "devDependencies": {

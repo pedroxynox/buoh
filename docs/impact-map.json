@@ -49,6 +49,12 @@
       ]
     },
     {
+      "id": "api",
+      "description": "La API de buoh debe seguir su ADR de la API, las cuentas y la auditoría.",
+      "includes": ["apps/api/**"],
+      "requires_any": ["docs/arquitectura/adr/0019-api-cuentas-y-auditoria.md"]
+    },
+    {
       "id": "infrastructure",
       "description": "Persistencia y despliegue requieren revisar arquitectura u operación.",
       "includes": ["infra/**"],

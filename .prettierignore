@@ -6,6 +6,7 @@ coverage/
 .turbo/
 pnpm-lock.yaml
 packages/contracts/generated/**
+apps/api/generated/**
 **/*.md
 test-vectors/**
 **/src-tauri/target/**

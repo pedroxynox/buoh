@@ -1,0 +1,19 @@
+{
+  "name": "@buoh/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "openapi:check": "tsx scripts/generate-openapi.ts --check",
+    "openapi:generate": "tsx scripts/generate-openapi.ts",
+    "start": "node dist/cli/serve.js",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@buoh/contracts": "workspace:*",
+    "fastify": "5.12.7",
+    "zod": "4.6.7"
+  }
+}
