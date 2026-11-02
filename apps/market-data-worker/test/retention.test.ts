@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   deleteKeys,
+  failureReason,
   isObjectLocked,
   logDeletion,
   logLocation,
@@ -90,11 +91,10 @@ const LOG_1 = logLocation(1);
 describe('logDeletion: los objetos de un log para borrarlos (ADR-0018 §7)', () => {
   it('lista solo bajo el prefijo del log, con el número de claves pedido y después de la clave dada, y las da sin el prefijo', async () => {
     const { client, requests } = clientAnswering(() =>
-      listing(['logs/000001/sha256/aaa', 'logs/000001/sha256/bbb', 'logs/000002/sha256/ccc']),
+      listing(['logs/000001/sha256/aaa', 'logs/000001/sha256/bbb']),
     );
     const objects = logDeletion(client, 'buoh-captura', LOG_1);
 
-    // Una clave de otro prefijo en la respuesta no se da: nunca se borraría.
     expect(await objects.list(null, 1000)).toEqual(['sha256/aaa', 'sha256/bbb']);
     expect(await objects.list('sha256/bbb', 1)).toEqual(['sha256/aaa', 'sha256/bbb']);
     expect(requests.map((request) => [request.method, request.path])).toEqual([
@@ -112,6 +112,23 @@ describe('logDeletion: los objetos de un log para borrarlos (ADR-0018 §7)', () 
       prefix: 'logs/000001/',
       'start-after': 'logs/000001/sha256/bbb',
     });
+  });
+
+  it('un listado con una clave fuera del prefijo, de un almacén que no respetó Prefix, rechaza con listing_outside_prefix: no se descarta, para que no parezca vacío', async () => {
+    for (const keys of [
+      ['logs/000002/sha256/ccc'],
+      ['logs/000001/sha256/aaa', 'logs/000002/sha256/ccc'],
+      ['sha256/aaa'],
+    ]) {
+      const { client } = clientAnswering(() => listing(keys));
+      const rejected = await logDeletion(client, 'buoh-captura', LOG_1)
+        .list(null, 1)
+        .then(
+          () => null,
+          (error: unknown) => failureReason(error),
+        );
+      expect(rejected).toBe('listing_outside_prefix');
+    }
   });
 
   it('borra cada clave bajo el prefijo del log, una por petición: 204 es deleted, también si ya no estaba', async () => {

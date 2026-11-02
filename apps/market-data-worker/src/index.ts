@@ -273,6 +273,7 @@ export {
 } from './operations/owner-database.js';
 export {
   deleteKeys,
+  ListingOutsidePrefixError,
   logDeletion,
   openLogDeletion,
   RETENTION_CONCURRENCY,

@@ -501,10 +501,25 @@ function fakeDeletion(
     readonly onDelete?: () => void;
     /** Cada borrado queda pendiente hasta que se cierran los objetos: entonces rechaza. */
     readonly stall?: boolean;
+    /**
+     * Cada borrado queda pendiente hasta `release`, que lo termina bien, también después de cerrar
+     * los objetos: como un borrado que acaba después del plazo.
+     */
+    readonly hold?: boolean;
   } = {},
 ) {
   const calls: string[] = [];
   const stored = new Set(options.keys ?? []);
+  const held: (() => void)[] = [];
+  /** Termina bien los borrados que esperan, y da tiempo a que sus trabajadores sigan. */
+  const release = async () => {
+    for (const finish of held.splice(0)) {
+      finish();
+    }
+    for (let i = 0; i < 5; i += 1) {
+      await Promise.resolve();
+    }
+  };
   const reject = (error: unknown) =>
     Promise.reject(error instanceof Error ? error : new Error('fallo sintético'));
   const open = (location: LogLocation): LogDeletion => {
@@ -522,6 +537,14 @@ function fakeDeletion(
         if (options.stall === true) {
           return new Promise((_resolve, fail) => {
             stalled.push(fail);
+          });
+        }
+        if (options.hold === true) {
+          return new Promise((resolve) => {
+            held.push(() => {
+              stored.delete(full);
+              resolve('deleted');
+            });
           });
         }
         options.onDelete?.();
@@ -552,7 +575,7 @@ function fakeDeletion(
       },
     };
   };
-  return { calls, open, stored };
+  return { calls, open, release, stored };
 }
 
 /** Una ejecución con la base, los procesos y los objetos falsos, con IDs y hora fijos. */
@@ -1536,6 +1559,34 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
     });
   });
 
+  it('al vencer el plazo, un borrado que todavía termina bien no empieza otro', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, EXPIRED), log(2, NOW), log(3)] });
+    const clock = new ManualClock(NOW);
+    const deletion = fakeDeletion({ hold: true, keys: keysOf(1, 20) });
+    const running = run(db, fakeChildren(), {
+      deletion,
+      now: clock.now,
+      scheduler: clock.scheduler,
+    });
+    for (let i = 0; i < 100 && !deletion.calls.some((call) => call.startsWith('delete:')); i += 1) {
+      await flush();
+    }
+    const started = () => deletion.calls.filter((call) => call.startsWith('delete:')).length;
+    expect(started()).toBe(8);
+    await clock.advance(RETENTION_DEADLINE_MS);
+    const { lines } = await running;
+    expect(retentionLine(lines)).toMatchObject({
+      report: { deadline_reached: true, deleted: 0, log: 1, schema_dropped: false },
+      status: 'completed',
+    });
+
+    // Los 8 terminan después del plazo y del cierre: ninguno sigue con la clave siguiente.
+    await deletion.release();
+    expect(started()).toBe(8);
+    expect(deletion.stored.size).toBe(12);
+    expect(db.drops).toEqual([]);
+  });
+
   it('un borrado que no termina se corta al vencer el plazo: cierra los objetos del log y para sin fallar', async () => {
     const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, EXPIRED), log(2, NOW), log(3)] });
     const clock = new ManualClock(NOW);
@@ -1620,6 +1671,16 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
       report: { deleted: 0, log: 1, schema_dropped: true },
       status: 'completed',
     });
+    // Los dos informes se guardan en el log activo, también el de la ejecución que no borró ningún
+    // objeto y solo el esquema.
+    expect(
+      db.reports
+        .filter(({ row }) => row.step === 'retention')
+        .map(({ log: number, row }) => [number, row.status, row.report]),
+    ).toEqual([
+      [2, 'failed', { deleted: 3, locked: 0, log: 1, reason: '55P03', schema_dropped: false }],
+      [2, 'completed', { deleted: 0, locked: 0, log: 1, schema_dropped: true }],
+    ]);
   });
 
   it('si PostgreSQL no responde al buscar los logs, falla sin abrir ningún objeto', async () => {
@@ -1781,6 +1842,34 @@ describe('runOperations: la verificación por partes (ADR-0018 §11, paso 4)', (
         .filter(({ row }) => row.step === 'verification')
         .map(({ log: number, row }) => [number, row.status]),
     ).toEqual([[2, 'completed']]);
+  });
+
+  it('no vuelve a leer los segmentos de un log vencido a medio borrar, que la retención dejó con un objeto que la regla de bloqueo todavía protege', async () => {
+    // Desde que vence un log hasta que la retención borra su esquema, lleva varias ejecuciones: sus
+    // objetos van desapareciendo, y leerlos daría alertas operations_segment_mismatch falsas.
+    const locked = `${logLocation(1).prefix}sha256/0000`;
+    const db = fakeDatabase({
+      loggedIn: new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']),
+      logs: [log(1, EXPIRED), log(2, ON_TIME), log(3)],
+      segments: { 1: [segmentRow(120)], 2: [] },
+    });
+    const deletion = fakeDeletion({ keys: [locked], locked: new Set([locked]) });
+    const objects = fakeObjects();
+    const { alerts, lines } = await run(db, fakeChildren(), { deletion, objects });
+
+    expect(lines.find((line) => line['step'] === 'retention')).toMatchObject({
+      report: { locked: 1, log: 1, schema_dropped: false },
+    });
+    expect(db.calls.filter((call) => call.startsWith('segments:'))).toEqual([
+      'segments:2:120',
+      'segments:3:120',
+    ]);
+    expect(objects.calls).toEqual([]);
+    expect(verificationLine(lines)).toMatchObject({
+      report: { due: 0, mismatched: [], read: 0, slot: 120 },
+      status: 'completed',
+    });
+    expect(alerts).toEqual([]);
   });
 
   it('un segmento que no coincide va al informe y deja la alerta operations_segment_mismatch; es un resultado, no un fallo', async () => {

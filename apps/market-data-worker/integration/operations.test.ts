@@ -702,7 +702,9 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
           await expect(
             database.dropExpiredLog(logLocation(1), '2026-04-01T10:00:00.000Z'),
           ).rejects.toMatchObject({ code: '55P03' });
-          expect(Date.now() - started).toBeGreaterThanOrEqual(DROP_LOG_LOCK_TIMEOUT_MS - 50);
+          const waited = Date.now() - started;
+          expect(waited).toBeGreaterThanOrEqual(DROP_LOG_LOCK_TIMEOUT_MS - 50);
+          expect(waited).toBeLessThan(DROP_LOG_LOCK_TIMEOUT_MS + 2000);
         } finally {
           await reader.query('ROLLBACK');
           reader.release();

@@ -32,7 +32,8 @@ export type ObjectDeletion = 'deleted' | 'locked';
 export interface LogDeletion {
   /**
    * Hasta `max` claves del prefijo del log, sin el prefijo, en orden, y después de `startAfter` si
-   * se da. Rechaza con el error del almacenamiento si no responde.
+   * se da. Rechaza con el error del almacenamiento si no responde, y con
+   * `ListingOutsidePrefixError` si trae una clave fuera del prefijo.
    */
   list(startAfter: string | null, max: number): Promise<string[]>;
   /**
@@ -43,6 +44,19 @@ export interface LogDeletion {
   delete(key: string): Promise<ObjectDeletion>;
   /** Libera el cliente, y con él sus conexiones. */
   close(): void;
+}
+
+/**
+ * El almacenamiento listó una clave fuera del prefijo del log que se le pidió. El motivo saneado es
+ * su código, `listing_outside_prefix`: la retención para sin borrar el esquema.
+ */
+export class ListingOutsidePrefixError extends Error {
+  readonly code = 'listing_outside_prefix';
+
+  constructor() {
+    super('El listado del prefijo de un log trajo una clave fuera de él.');
+    this.name = 'ListingOutsidePrefixError';
+  }
 }
 
 /** Lanza `TypeError` si el prefijo no es el de un log de producción, por ejemplo uno vacío. */
@@ -85,9 +99,14 @@ export function logDeletion(client: S3Client, bucket: string, log: LogLocation):
           ...(startAfter === null ? {} : { StartAfter: log.prefix + startAfter }),
         }),
       );
-      return (page.Contents ?? []).flatMap((item) =>
-        item.Key?.startsWith(log.prefix) === true ? [item.Key.slice(log.prefix.length)] : [],
-      );
+      return (page.Contents ?? []).map((item) => {
+        // Una clave fuera del prefijo, de un almacén que no respetó `Prefix`, no se descarta: un
+        // listado que pareciera vacío dejaría borrar el esquema con objetos en el prefijo.
+        if (item.Key?.startsWith(log.prefix) !== true) {
+          throw new ListingOutsidePrefixError();
+        }
+        return item.Key.slice(log.prefix.length);
+      });
     },
   };
 }
