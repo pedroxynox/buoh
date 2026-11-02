@@ -8,6 +8,7 @@ import type { ApiLogLine } from '../src/log.js';
 import {
   EXPECTED_JSON_HEADERS,
   parseRawResponse,
+  parseRawResponses,
   rawExchange,
   testApp,
   testRequestId,
@@ -184,10 +185,36 @@ describe('mensajes HTTP crudos, por una conexión en memoria', () => {
     expect(lines).toEqual([requestLine('/api/salud', 200)]);
   });
 
-  it('HTTP/1.0 no necesita Host, como en Node', async () => {
+  it.each([
+    ['HTTP/1.0 sin Host', 'GET /api/salud HTTP/1.0\r\n\r\n'],
+    // RFC 9112 §3.2 admite un Host vacío, el de una dirección sin autoridad.
+    ['HTTP/1.1 con un Host vacío', 'GET /api/salud HTTP/1.1\r\nHost:\r\nConnection: close\r\n\r\n'],
+  ])('%s vale, como en Node', async (_name, message) => {
     const { app } = testApp();
-    const response = parseRawResponse(await rawExchange(app, 'GET /api/salud HTTP/1.0\r\n\r\n'));
+    const response = parseRawResponse(await rawExchange(app, message));
     expect(response.statusLine).toBe('HTTP/1.1 200 OK');
     expectRawSecurityHeaders(response);
+  });
+
+  it('tras un Expect desconocido, la conexión sigue y la petición que llega detrás tiene su respuesta', async () => {
+    const { app, lines } = testApp();
+    const responses = parseRawResponses(
+      await rawExchange(
+        app,
+        'GET /api/salud HTTP/1.1\r\nHost: a\r\nExpect: x-desconocido\r\n\r\n' +
+          'GET /api/salud HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n',
+      ),
+    );
+    expect(responses.map((response) => response.statusLine)).toEqual([
+      'HTTP/1.1 417 Expectation Failed',
+      'HTTP/1.1 200 OK',
+    ]);
+    for (const response of responses) {
+      expectRawSecurityHeaders(response);
+    }
+    expect(lines).toEqual([
+      requestLine(null, 417),
+      { ...requestLine('/api/salud', 200), request_id: testRequestId(2) },
+    ]);
   });
 });

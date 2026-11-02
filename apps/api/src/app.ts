@@ -116,7 +116,9 @@ export function buildApp(options: ApiAppOptions): FastifyInstance {
   });
 
   // Node respondería él mismo a un `Expect` distinto de `100-continue`, con un 417 vacío y sin las
-  // cabeceras de seguridad. La petición no llega a Fastify.
+  // cabeceras de seguridad. La petición no llega a Fastify. Como en Node, la conexión sigue
+  // abierta: si la cerrara, una petición que llega detrás correría en su ruta sin respuesta ni
+  // línea en el registro.
   app.server.on('checkExpectation', (request: IncomingMessage, response: ServerResponse) => {
     const started = options.now();
     const requestId = options.requestId();

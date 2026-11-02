@@ -182,6 +182,46 @@ describe('rutas que Fastify no puede leer', () => {
   );
 });
 
+describe('rutas que Fastify no puede elegir', () => {
+  it('el fallo de una restricción asíncrona responde internal, con su api_error y su línea', async () => {
+    const { app, lines } = testApp();
+    // La API no usa restricciones; esta, de prueba, falla en cada petición antes de elegir la ruta.
+    app.addConstraintStrategy({
+      name: 'prueba',
+      // Falla antes de buscar en su almacén, que por eso no guarda nada.
+      storage: () => ({ get: () => null, set: () => undefined }),
+      deriveConstraint: (
+        _request: unknown,
+        _context: unknown,
+        done?: (error: Error | null, value?: unknown) => void,
+      ) => {
+        done?.(new Error(SECRET));
+      },
+    });
+    app.route({
+      method: 'GET',
+      url: '/api/prueba/restringida',
+      constraints: { prueba: 'x' },
+      handler: () => ({ status: 'ok' }),
+    });
+    const response = await app.inject({ method: 'GET', url: '/api/salud' });
+    expectError(response, 500, 'internal');
+    expectSecurityHeaders(response);
+    expect(lines).toEqual([
+      { event: 'api_error', request_id: testRequestId(1), error: 'FST_ERR_ASYNC_CONSTRAINT' },
+      {
+        event: 'api_request',
+        method: 'GET',
+        route: null,
+        status: 500,
+        duration_ms: 5,
+        request_id: testRequestId(1),
+      },
+    ]);
+    expect(JSON.stringify(lines) + response.body).not.toContain(SECRET);
+  });
+});
+
 describe('errores', () => {
   it('un fallo de la ruta responde internal, sin el mensaje ni la traza', async () => {
     const { app, lines } = testApp(TEST_ROUTES);

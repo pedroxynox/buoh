@@ -51,7 +51,7 @@ export interface RawErrorResponse {
 
 /**
  * Un error `invalid_request` con su estado, para una respuesta que no pasa por los ganchos de
- * Fastify: lleva aquí las cabeceras de seguridad y cierra la conexión.
+ * Fastify: lleva aquí las cabeceras de seguridad.
  */
 export function rawErrorResponse(status: number, requestId: string): RawErrorResponse {
   const body = errorBody('invalid_request', requestId);
@@ -59,7 +59,6 @@ export function rawErrorResponse(status: number, requestId: string): RawErrorRes
     status,
     headers: {
       ...JSON_RESPONSE_HEADERS,
-      connection: 'close',
       'content-length': String(Buffer.byteLength(body)),
       'content-type': JSON_CONTENT_TYPE,
     },
@@ -80,6 +79,8 @@ export function clientErrorResponse(error: unknown, requestId: string): string |
   const status =
     code === 'ERR_HTTP_REQUEST_TIMEOUT' ? 408 : code === 'HPE_HEADER_OVERFLOW' ? 431 : 400;
   const response = rawErrorResponse(status, requestId);
-  const lines = Object.entries(response.headers).map(([name, value]) => `${name}: ${value}\r\n`);
+  // El analizador no puede seguir leyendo esta conexión, así que la respuesta la cierra.
+  const headers = { ...response.headers, connection: 'close' };
+  const lines = Object.entries(headers).map(([name, value]) => `${name}: ${value}\r\n`);
   return `HTTP/1.1 ${String(status)} ${STATUS_CODES[status] ?? 'Error'}\r\n${lines.join('')}\r\n${response.body}`;
 }

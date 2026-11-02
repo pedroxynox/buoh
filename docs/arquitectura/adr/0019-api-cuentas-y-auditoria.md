@@ -172,11 +172,12 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 - (Precisión del PR 2 de §14.) El esqueleto solo responde JSON, con sus cabeceras. Las cabeceras se ponen en el gancho `onSend` de Fastify, y estas respuestas no pasan por él. La API las escribe con las mismas cabeceras, con `ApiError` y con su línea de registro (§11):
   - la que el servidor HTTP escribe antes de crear la petición, por ejemplo ante un mensaje HTTP mal formado (`clientErrorHandler`);
   - la que Fastify da antes de buscar la ruta (`frameworkErrors`): una ruta con un `%` mal codificado (400), un parámetro demasiado largo (414) o el fallo de una restricción asíncrona (500, `internal`). Sin ella, Fastify respondería con su propio cuerpo, que en los dos primeros casos repite la ruta;
-  - la de un `Expect` distinto de `100-continue`, que Node respondería con un 417 vacío (`checkExpectation`).
+  - la de un `Expect` distinto de `100-continue`, que Node respondería con un 417 vacío (`checkExpectation`). Como la de Node, deja la conexión abierta: si la cerrara, una petición que llega detrás en la misma conexión correría en su ruta sin respuesta ni línea de registro.
 - Otras dos dejan de existir:
-  - el 400 vacío que Node escribe ante una petición HTTP/1.1 sin `Host`: queda apagado (`requireHostHeader: false`), y la API la rechaza en el gancho `onRequest` con el mismo 400 (RFC 9112 §3.2), así que sigue el camino normal;
+  - el 400 vacío que Node escribe ante una petición HTTP/1.1 sin `Host`: queda apagado (`requireHostHeader: false`), y la API la rechaza en el gancho `onRequest` con el mismo estado 400 (RFC 9112 §3.2), así que sigue el camino normal. Con la misma condición que Node: un `Host` vacío vale. A diferencia de Node, la conexión sigue abierta, y con `Expect: 100-continue` el 400 llega después de un `100 Continue`;
   - la del cierre en curso, que Fastify escribiría con un 503 propio: queda apagada (`return503OnClosing: false`), así que una petición que llega durante el cierre sigue el camino normal.
-- Las pruebas envían estos mensajes crudos al analizador HTTP de Node por una conexión en memoria, sin abrir ningún puerto, y comprueban que cada cabecera llega una sola vez.
+- Las pruebas envían al analizador HTTP de Node, por una conexión en memoria y sin abrir ningún puerto, los mensajes crudos de una ruta mal codificada, de una petición sin `Host`, de un `Expect` desconocido, también con otra petición detrás, y de un mensaje mal formado, y comprueban que cada cabecera llega una sola vez. El parámetro demasiado largo y la restricción asíncrona que falla se prueban con `inject`.
+- Con estas opciones, Node 24 no escribe por su cuenta ninguna otra respuesta final. Si `maxRequestsPerSocket` pasara de 0, su valor actual, escribiría un 503 vacío.
 
 ### 10. El servicio en Render
 
@@ -202,7 +203,7 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 - Por diseño, tres respuestas llevan un secreto a su dueño, y ninguna otra: el `Set-Cookie` del inicio de sesión, con el identificador de la sesión; el cuerpo del inicio de sesión y de `GET /api/v1/sesion`, con el token CSRF de esa sesión; y la respuesta del alta o del restablecimiento, con el secreto TOTP nuevo, una sola vez. Son la autenticación misma, no una fuga: así se lee la regla de `F2-API-001` de que ninguna respuesta lleve secretos.
 - Las pruebas capturan los registros y las respuestas y buscan en ellos los secretos de la prueba: la contraseña, el secreto y los códigos TOTP, el identificador de la sesión, el token CSRF, el del enlace y las tres claves. Cada uno solo puede aparecer en su canal de arriba, y en ningún otro sitio: ni en otra respuesta, ni en un error, ni en una línea de registro (`F2-API-001` y `F2-AUTH-001`).
 - Render guarda sus registros 7 días y ve la dirección IP de cada petición.
-- (Precisión del PR 2 de §14.) El registro es una lista cerrada de campos, el tipo `ApiLogLine` de `apps/api/src/log.ts`, así que no hace falta una lista de redacción: nada fuera de esos campos llega a una línea. Además de la línea de cada petición (`api_request`), también la de las respuestas de §9 que no pasan por los ganchos de Fastify, la API escribe estas líneas:
+- (Precisión del PR 2 de §14.) El registro es una lista cerrada de campos, el tipo `ApiLogLine` de `apps/api/src/log.ts`, así que no hace falta una lista de redacción: nada fuera de esos campos llega a una línea. Además de la línea de cada petición (`api_request`), también la de las respuestas de `frameworkErrors` y del `Expect` desconocido de §9, la API escribe estas líneas:
   - `api_error`, con el nombre del error de una respuesta `internal`;
   - `api_client_error`, con el código de una petición que el servidor HTTP rechaza y el identificador que recibe el cliente;
   - su arranque (`api_listening`) y su parada (`api_stopping`, `api_stopped` o `api_stop_failed`);
