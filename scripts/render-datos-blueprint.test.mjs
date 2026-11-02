@@ -137,14 +137,22 @@ const blueprint = parseBlueprint(read('render-datos.yaml'));
 const rootPackage = JSON.parse(read('package.json'));
 const workerPackage = JSON.parse(read('apps/market-data-worker/package.json'));
 
-/** Las claves `BUOH_*` del primer `z.object({ … })` que sigue a `marker` en una fuente del worker. */
-function schemaKeys(path, marker) {
+/**
+ * Las claves `BUOH_*` del primer `z.object({ … })` que sigue a `marker` en una fuente del worker, cada
+ * una con el resto de su línea: su esquema, si cabe en ella.
+ */
+function schemaEntries(path, marker) {
   const source = read(path);
   const start = source.indexOf(marker);
   assert.ok(start >= 0, `${path} tiene ${marker}`);
   const body = source.slice(start, source.indexOf('\n});', start));
-  return [...body.matchAll(/^ {2}(BUOH_[A-Z0-9_]+):/gm)].map((match) => match[1]);
+  return [...body.matchAll(/^ {2}(BUOH_[A-Z0-9_]+):(.*)$/gm)].map((match) => [
+    match[1],
+    match[2].trim(),
+  ]);
 }
+
+const schemaKeys = (path, marker) => schemaEntries(path, marker).map(([key]) => key);
 
 /** Los tamaños de V8 de `WORKER_NODE_FLAGS`, leídos de `src/node-flags.ts`. */
 function workerNodeFlags() {
@@ -345,6 +353,18 @@ test('buoh-operaciones: las variables de loadOperationsConfig, con la credencial
   const vars = variables('buoh-operaciones');
   assert.equal(vars.size, service('buoh-operaciones').envVars.length, 'sin claves repetidas');
   assert.deepEqual([...vars.keys()].sort(), expected.sort());
+  // Las variables que el servicio admite y que el Blueprint todavía no le da (ADR-0019 §7) van en
+  // otro objeto, que la comparación de arriba no lee: si el Blueprint da una, falla hasta que pasa
+  // al primero. Mientras tanto son opcionales, porque una obligatoria que el Blueprint no da pararía
+  // el servicio en cada ejecución.
+  const pending = schemaEntries(
+    'apps/market-data-worker/src/operations/config.ts',
+    'const pendingEnvironmentSchema',
+  );
+  assert.ok(pending.length > 0, 'pendingEnvironmentSchema tiene variables');
+  for (const [key, schema] of pending) {
+    assert.match(schema, /\.optional\(\),$/, `${key} es opcional`);
+  }
   for (const key of vars.keys()) {
     assert.doesNotMatch(key, /^BUOH_(?:POSTGRES|S3)_/, key);
   }

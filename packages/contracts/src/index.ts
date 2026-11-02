@@ -12,6 +12,18 @@ export {
   type ApiHealth,
 } from './api.js';
 export {
+  AUDIT_ACTIONS,
+  AUDIT_EVENT_SCHEMA_VERSIONS,
+  auditActorSchema,
+  auditEventSchema,
+  auditObjectKindSchema,
+  auditObjectSchema,
+  type AuditAction,
+  type AuditActor,
+  type AuditEvent,
+  type AuditObject,
+} from './audit.js';
+export {
   ContractContextError,
   deriveConnectionConditionKey,
   deriveGapConditionKey,

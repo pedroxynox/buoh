@@ -1,11 +1,13 @@
 import { randomBytes } from 'node:crypto';
 
 import { DeleteObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
+import { auditEventSchema, canonicalJson } from '@buoh/contracts';
 import pg, { type Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { DERIV_SOURCE } from '../src/deriv/profile.js';
 import {
+  API_ROLE,
   createPool,
   DROP_LOG_LOCK_TIMEOUT_MS,
   healthCommand,
@@ -23,9 +25,11 @@ import {
   openStores,
   operationsCommand,
   POSTGRES_ROLES,
+  runNodeScript,
   S3ObjectStore,
   SourceEventLog,
   withLog,
+  workerChildScript,
   type ChildResult,
   type RunChild,
   type WorkerConfig,
@@ -54,7 +58,13 @@ import { previousConnectionEvents } from '../test/support/recovery-harness.js';
  */
 const DATABASE = 'buoh_integration_ops';
 const RENDER_USER = 'buoh_integration_ops_render';
-const TEST_ROLES = [...LOGIN_ROLES, POSTGRES_ROLES.reader, POSTGRES_ROLES.owner, RENDER_USER];
+const TEST_ROLES = [
+  ...LOGIN_ROLES,
+  API_ROLE,
+  POSTGRES_ROLES.reader,
+  POSTGRES_ROLES.owner,
+  RENDER_USER,
+];
 const LOG_1 = 'buoh_log_000001';
 const LOG_2 = 'buoh_log_000002';
 const fixture = syntheticSchemaArchive();
@@ -63,6 +73,7 @@ let sequence = 0;
 const secret = () => randomBytes(32).toString('base64');
 const passwords = {
   agent: secret(),
+  api: secret(),
   health: secret(),
   ingest: secret(),
   render: secret(),
@@ -115,8 +126,21 @@ function operationsEnvironment(rotated: { agent?: string; health?: string } = {}
   };
 }
 
-/** `db:migrate` y `data:health` en este proceso, con el entorno que les da el servicio. */
+/**
+ * `db:migrate` y `data:health` en este proceso, con el entorno que les da el servicio. El
+ * `db:migrate` de la API corre en su proceso, con el CLI compilado de `apps/api` y el entorno que le
+ * da el servicio, salvo el cifrado, que el servidor local no tiene: `test` y `disable`.
+ */
 const inProcess: RunChild = async (child, args, env) => {
+  if (child === 'api_migrate') {
+    return runNodeScript(
+      workerChildScript(child, args, {
+        ...env,
+        BUOH_DEPLOYMENT_ENVIRONMENT: 'test',
+        BUOH_POSTGRES_SSLMODE: 'disable',
+      }),
+    );
+  }
   if (child === 'migrate') {
     const { exitCode, line } = await migrateCommand(env, {
       createPool: (postgres) => createPool(plain(postgres)),
@@ -181,7 +205,12 @@ async function reportsOf(schema: string) {
 }
 
 /** El código SQLSTATE con que falla `text` con ese usuario, o `null` si no falla. */
-async function sqlStateAs(user: string, password: string, text: string): Promise<string | null> {
+async function sqlStateAs(
+  user: string,
+  password: string,
+  text: string,
+  values: unknown[] = [],
+): Promise<string | null> {
   const pool = createPool({
     ...local.postgres,
     database: DATABASE,
@@ -190,7 +219,7 @@ async function sqlStateAs(user: string, password: string, text: string): Promise
     user,
   });
   try {
-    return await pool.query(text).then(
+    return await pool.query(text, values).then(
       () => null,
       (error: unknown) => String((error as { code?: unknown }).code),
     );
@@ -772,5 +801,112 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       secondObjects.destroy();
       s3.destroy();
     }
+  });
+
+  it('con la contraseña de buoh_api, el paso 1 crea el rol, migra buoh_api como buoh_dueno con el db:migrate de la API y le da solo SELECT e INSERT; buoh_lectura no la lee (ADR-0019 §7)', async () => {
+    // Hasta aquí, sin la contraseña, como en producción hasta el PR 6, el servicio no tocó la API.
+    const api = async () => {
+      const { rows } = await ready(admin).query<{ roles: number; schemas: number }>(
+        `SELECT (SELECT count(*)::int FROM pg_roles WHERE rolname = $1) AS roles,
+                (SELECT count(*)::int FROM pg_namespace WHERE nspname = $1) AS schemas`,
+        [API_ROLE],
+      );
+      return rows[0];
+    };
+    expect(await api()).toEqual({ roles: 0, schemas: 0 });
+
+    const env = { ...operationsEnvironment(), BUOH_API_POSTGRES_PASSWORD: passwords.api };
+    const first = await operations(env);
+    expect(first.alerts).toEqual([]);
+    expect(first.step('roles_and_logs')).toMatchObject({
+      report: {
+        api_migrated: ['0001_auditoria.sql'],
+        failures: [],
+        passwords_set: [API_ROLE],
+      },
+      status: 'completed',
+    });
+    expect(await api()).toEqual({ roles: 1, schemas: 1 });
+    const { rows: owners } = await ready(admin).query<{ owner: string; name: string }>(
+      `SELECT nspname AS name, nspowner::regrole::text AS owner FROM pg_namespace WHERE nspname = $1
+        UNION ALL
+       SELECT tablename, tableowner FROM pg_tables WHERE schemaname = $1
+        ORDER BY name`,
+      [API_ROLE],
+    );
+    expect(owners).toEqual([
+      { name: 'audit_events', owner: POSTGRES_ROLES.owner },
+      { name: 'buoh_api', owner: POSTGRES_ROLES.owner },
+      { name: 'buoh_schema_migrations', owner: POSTGRES_ROLES.owner },
+    ]);
+
+    // buoh_api lee e inserta en sus tablas, y nada más.
+    const asApi = (text: string, values: unknown[] = []) =>
+      sqlStateAs(API_ROLE, passwords.api, text, values);
+    const event = auditEventSchema.parse({
+      account_id: '01900000-0000-7000-8000-00000000a001',
+      action: 'session_started',
+      actor: 'account',
+      audit_event_id: '01900000-0000-7000-8000-000000000001',
+      objects: [{ id: '01900000-0000-7000-8000-00000000b001', kind: 'session' }],
+      occurred_at_utc: '2026-11-03T10:00:00.000Z',
+      reason: 'password_and_totp',
+      request_id: '00000000-0000-4000-8000-000000000001',
+      schema_version: '1.0.0',
+    });
+    expect(
+      await asApi(
+        `INSERT INTO buoh_api.audit_events
+           (audit_event_id, account_id, occurred_at_utc, action, event_jcs)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          event.audit_event_id,
+          event.account_id,
+          event.occurred_at_utc,
+          event.action,
+          canonicalJson(event),
+        ],
+      ),
+    ).toBeNull();
+    for (const text of [
+      'SELECT count(*) FROM buoh_api.audit_events',
+      'SELECT count(*) FROM buoh_api.buoh_schema_migrations',
+    ]) {
+      expect(await asApi(text), text).toBeNull();
+    }
+    for (const text of [
+      "UPDATE buoh_api.audit_events SET action = 'session_closed'",
+      'DELETE FROM buoh_api.audit_events',
+      'TRUNCATE buoh_api.audit_events',
+      "INSERT INTO buoh_api.buoh_schema_migrations (name, sha256) VALUES ('0002_x.sql', 'x')",
+      "UPDATE buoh_api.buoh_schema_migrations SET sha256 = 'x'",
+      'DELETE FROM buoh_api.buoh_schema_migrations',
+      'TRUNCATE buoh_api.buoh_schema_migrations',
+      'ALTER TABLE buoh_api.buoh_schema_migrations ADD COLUMN intrusa int',
+      'DROP TABLE buoh_api.buoh_schema_migrations',
+      'CREATE TABLE buoh_api.intrusa (x int)',
+      'ALTER TABLE buoh_api.audit_events ADD COLUMN intrusa int',
+      'DROP TABLE buoh_api.audit_events',
+      'CREATE SCHEMA intruso',
+      `SELECT count(*) FROM ${logLocation(3).schema}.operations_reports`,
+    ]) {
+      expect(await asApi(text), text).toBe('42501');
+    }
+    // buoh_lectura, con buoh_salud y buoh_agente, no lee nada de buoh_api.
+    for (const [user, password] of [
+      [POSTGRES_ROLES.health, passwords.health],
+      [POSTGRES_ROLES.agent, passwords.agent],
+    ] as const) {
+      expect(await sqlStateAs(user, password, 'SELECT count(*) FROM buoh_api.audit_events')).toBe(
+        '42501',
+      );
+    }
+
+    // La ejecución siguiente no cambia nada.
+    const second = await operations(env);
+    expect(second.step('roles_and_logs')).toMatchObject({
+      report: { api_migrated: [], failures: [], passwords_set: [] },
+      status: 'completed',
+    });
   });
 });

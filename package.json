@@ -33,7 +33,7 @@
     "test": "pnpm run test:scripts && turbo run test",
     "test:docs": "node --test scripts/check-doc-impact.test.mjs",
     "test:scripts": "node --test \"scripts/*.test.mjs\"",
-    "test:integration": "turbo run build --filter=@buoh/market-data-worker --output-logs=errors-only && pnpm --filter @buoh/market-data-worker run test:integration",
+    "test:integration": "turbo run build --filter=@buoh/market-data-worker --filter=@buoh/api --output-logs=errors-only && pnpm --filter @buoh/market-data-worker run test:integration && pnpm --filter @buoh/api run test:integration",
     "test:vectors": "turbo run test:vectors",
     "typecheck": "turbo run typecheck",
     "verify": "pnpm run verify:core && pnpm run docs:check",

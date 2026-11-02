@@ -125,9 +125,13 @@ export {
 export { createPool, PostgresMetadataStore, postgresSslOption } from './postgres/metadata-store.js';
 export {
   AGENT_CONNECTION_LIMIT,
+  API_ROLE,
+  API_SCHEMA,
   AGENT_IDLE_IN_TRANSACTION_TIMEOUT,
   AGENT_STATEMENT_TIMEOUT,
+  ensureApiRole,
   ensureRuntimeRoles,
+  grantApiPrivileges,
   grantLogPrivileges,
   INGEST_DENIED_TABLES,
   INGEST_WRITE_TABLES,
@@ -140,6 +144,7 @@ export {
   setRolePassword,
   UnclassifiedTableError,
   type LoginRole,
+  type PasswordRole,
 } from './postgres/roles.js';
 export { publishDataset, type PublishDatasetInput } from './publication.js';
 export {
@@ -255,6 +260,7 @@ export {
   type WorkerChild,
 } from './operations/child.js';
 export {
+  apiMigrateEnvironment,
   healthEnvironment,
   loadOperationsConfig,
   migrateEnvironment,

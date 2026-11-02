@@ -3,8 +3,11 @@ import { fileURLToPath } from 'node:url';
 
 import { WORKER_NODE_FLAGS } from '../node-flags.js';
 
-/** Los comandos del worker que `buoh-operaciones` corre en un proceso aparte (ADR-0018 §11). */
-export type WorkerChild = 'health' | 'migrate';
+/**
+ * Los comandos que `buoh-operaciones` corre en un proceso aparte (ADR-0018 §11): `data:health` y
+ * `db:migrate` del worker, y `db:migrate` de la API (`api_migrate`, ADR-0019 §7).
+ */
+export type WorkerChild = 'api_migrate' | 'health' | 'migrate';
 
 /** Cómo terminó un proceso: su código, su salida y si se cortó por su plazo. */
 export interface ChildResult {
@@ -24,11 +27,22 @@ export type RunChild = (
 
 /**
  * El plazo de cada proceso. `data:health` responde en unos 35 s como mucho (`HEALTH_DEADLINE_MS` y
- * `HEALTH_CLOSE_DEADLINE_MS`); `db:migrate` aplica migraciones que solo añaden.
+ * `HEALTH_CLOSE_DEADLINE_MS`); los dos `db:migrate` aplican migraciones que solo añaden.
  */
 export const CHILD_TIMEOUT_MS: Readonly<Record<WorkerChild, number>> = {
+  api_migrate: 120_000,
   health: 60_000,
   migrate: 120_000,
+};
+
+/**
+ * El script de cada comando: los del worker en su `dist/cli/`, y el de la API en `apps/api/dist/cli/`,
+ * que `buoh-operaciones` compila desde el PR 6 de ADR-0019 §14.
+ */
+const CHILD_SCRIPTS: Readonly<Record<WorkerChild, URL>> = {
+  api_migrate: new URL('../../../api/dist/cli/migrate.js', import.meta.url),
+  health: new URL('../cli/health.js', import.meta.url),
+  migrate: new URL('../cli/migrate.js', import.meta.url),
 };
 
 /** Lo que se guarda, como mucho, de stdout y de stderr de un proceso. */
@@ -86,9 +100,10 @@ export function runNodeScript(input: {
 }
 
 /**
- * Cómo corre `runWorkerChild` un comando: `data:health` (`dist/cli/health.js`) o `db:migrate`
- * (`dist/cli/migrate.js`), con los tamaños de V8 de los procesos del worker (`WORKER_NODE_FLAGS`,
- * ADR-0018 §3), su plazo, sus argumentos y el entorno dado.
+ * Cómo corre `runWorkerChild` un comando: `data:health` (`dist/cli/health.js`), `db:migrate`
+ * (`dist/cli/migrate.js`) o el `db:migrate` de la API (`apps/api/dist/cli/migrate.js`), con los
+ * tamaños de V8 de los procesos del worker (`WORKER_NODE_FLAGS`, ADR-0018 §3), su plazo, sus
+ * argumentos y el entorno dado.
  */
 export function workerChildScript(
   child: WorkerChild,
@@ -99,11 +114,11 @@ export function workerChildScript(
     args,
     env,
     nodeFlags: WORKER_NODE_FLAGS,
-    script: fileURLToPath(new URL(`../cli/${child}.js`, import.meta.url)),
+    script: fileURLToPath(CHILD_SCRIPTS[child]),
     timeoutMs: CHILD_TIMEOUT_MS[child],
   };
 }
 
-/** `data:health` o `db:migrate` en un proceso aparte (`workerChildScript`). */
+/** Un comando de `WorkerChild` en un proceso aparte (`workerChildScript`). */
 export const runWorkerChild: RunChild = (child, args, env) =>
   runNodeScript(workerChildScript(child, args, env));

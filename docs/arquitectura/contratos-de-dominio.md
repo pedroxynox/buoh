@@ -6,13 +6,13 @@ Desde F1.1, [`packages/contracts`](../../packages/contracts/) es canónico para 
 
 Las validaciones que JSON Schema no expresa —hashes derivados, orden, cardinalidad entre artifacts y relaciones entre campos— permanecen en los esquemas runtime y sus pruebas. Un consumidor no debe sustituir la validación runtime por validar únicamente el JSON Schema. Las invariantes entre artefactos de un dataset (conteos, orden canónico, unión tick→raw, referencias de incidencias, procedencia y extremos temporales) están en `validateDatasetConsistency`, que usan el verificador de vectores y `data:replay` en ambos modos.
 
-Fase 1 implementa `SourceEvent`, `MarketTick`, `DataQualityIncident`, `OperationalConditionEvent`, `IngestionCursor`, `DatasetManifest`, `PublishedManifestRecord` y `HealthReport`. F1.4b añade `SourceCatalogSnapshot` ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md)), y F2.1, `LiveDerivationCheckpoint` ([ADR-0017](adr/0017-punto-de-control-de-la-derivacion-en-vivo.md)). Estrategias, señales y ejecución permanecen conceptuales.
+Fase 1 implementa `SourceEvent`, `MarketTick`, `DataQualityIncident`, `OperationalConditionEvent`, `IngestionCursor`, `DatasetManifest`, `PublishedManifestRecord` y `HealthReport`. F1.4b añade `SourceCatalogSnapshot` ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md)); F2.1, `LiveDerivationCheckpoint` ([ADR-0017](adr/0017-punto-de-control-de-la-derivacion-en-vivo.md)); y F2.3, los mensajes de la API y `AuditEvent` ([ADR-0019](adr/0019-api-cuentas-y-auditoria.md)). Estrategias, señales y ejecución permanecen conceptuales.
 
 ## Evidencia de F1.1
 
 - Zod 4 mantiene contratos estrictos y uniones discriminadas.
 - `canonicalize` implementa RFC 8785 para IDs y hashes estructurados.
-- `pnpm run schemas:generate` produjo ocho JSON Schema en F1.1, nueve desde F1.4b con `SourceCatalogSnapshot` y diez desde F2.1 con `LiveDerivationCheckpoint`; `schemas:check` detecta deriva.
+- `pnpm run schemas:generate` produjo ocho JSON Schema en F1.1, nueve desde F1.4b con `SourceCatalogSnapshot`, diez desde F2.1 con `LiveDerivationCheckpoint` y once desde F2.3 con `AuditEvent`; `schemas:check` detecta deriva.
 - `pnpm run test:vectors` verifica manifiestos, raw hashes, IDs derivados, publicaciones y escenarios principal/cero-ticks sin red.
 - Desde F1.2, `test:vectors` además regenera con `packages/domain` todos los artefactos de ambos escenarios y los compara byte a byte.
 
@@ -664,6 +664,48 @@ ApiHealth {
 - `ApiError` es el cuerpo de toda respuesta de error. No admite un mensaje, una traza ni otros campos: un error interno nunca sale con su mensaje. `request_id` es el UUID que la API genera para cada petición; nunca el que envía el cliente.
 - La lista de códigos es cerrada, y cada PR de ADR-0019 §14 suma los que produce. `invalid_request`: la petición no cumple su contrato, por ejemplo con un parámetro de consulta que la ruta no admite, o el servidor HTTP la rechazó antes de llegar a una ruta. `not_found`: ninguna ruta atiende ese método y esa dirección. `internal`: un fallo del servidor, también una respuesta que no cumple su contrato.
 - `ApiHealth` es la respuesta de `GET /api/salud`, la ruta de salud de Render, cuando el proceso responde.
+
+## `AuditEvent`
+
+Decidido en [ADR-0019](adr/0019-api-cuentas-y-auditoria.md) §5 (F2.3). Desde el PR 3 de su §14 está en `packages/contracts/src/audit.ts`, con su JSON Schema generado (`audit-event`), y cada entrada se guarda en JCS en `buoh_api.audit_events`, que nadie modifica ni borra. Es una entrada de la auditoría: quién hizo qué, cuándo, por qué y sobre qué objetos. A diferencia de los mensajes de la API, es un documento guardado y lleva `schema_version`: cada incremento que suma acciones sube el minor (plan de Fase 2, §9), y una versión sin lector se rechaza.
+
+```text
+AuditEvent =
+  schema_version: "1.0.0"
+  audit_event_id: UuidV7
+  occurred_at_utc: UtcTimestampMs
+  account_id: UuidV7 | null              # la cuenta de la entrada; null solo en login_failures
+  actor: "account" | "operator" | "system" | "anonymous"
+  action: AuditAction                    # el discriminante: cada acción fija sus autores y motivos
+  reason: …                              # un código, de la lista de su acción
+  objects: AuditObject[]                 # en orden por kind y después por id, sin repetir
+  request_id: UUID | null                # el de ApiError; null con la orden cuenta y en los agrupados
+  failure_count: integer >= 1            # solo en login_failures
+  window_started_at_utc: UtcTimestampMs  # solo en login_failures
+
+AuditObject = { kind: "account" | "credential" | "link" | "session", id: UuidV7 }
+```
+
+| Acción | Autor | Motivos |
+|---|---|---|
+| `link_created` | `operator` | `enrollment`, `reset` |
+| `link_used` | `anonymous` | `enrollment`, `reset` |
+| `account_enrolled` | `anonymous` | `enrollment_link` |
+| `credential_reset` | `anonymous` | `reset_link` |
+| `credential_disabled` | `system` | `failure_limit` |
+| `session_started` | `account` | `password_and_totp` |
+| `login_failed` | `anonymous` | `invalid_credentials` |
+| `login_failures` | `anonymous` | `unknown_username`, `disabled_credential`, `rate_limited` |
+| `session_closed` | `account` con `logout`; `system` con `session_limit` | `logout`, `session_limit` |
+| `sessions_closed` | `account` con `other_sessions`; `operator` con `operator_command`; `system` con `credential_reset` | `other_sessions`, `operator_command`, `credential_reset` |
+
+- **Autor:** la cuenta de la sesión (`account`), la orden `cuenta` desde la consola de Render (`operator`), la propia API (`system`) o quien todavía no tiene sesión (`anonymous`). Con `account`, `account_id` es esa cuenta.
+- **Cuenta:** `account_id` es la cuenta de la entrada, la que la ve por la API (ADR-0019 §4). Solo `login_failures` puede ir sin cuenta: los intentos con un nombre que no existe (`unknown_username`) nunca tienen cuenta, y los que llegan a una credencial deshabilitada siempre la tienen.
+- **Objetos:** al menos uno, salvo en `login_failures`, cada uno con su identificador UUIDv7: un token, un hash con clave o un nombre nunca son un objeto. Una entrada sin cuenta, que ninguna cuenta ve, no nombra ninguno, y una cuenta entre los objetos es siempre la de `account_id`, así que ninguna entrada de una cuenta nombra otra.
+- **Agrupados:** `login_failures` cuenta los intentos fallidos de una ventana de 5 minutos, por clase y por cuenta (ADR-0019 §5): `failure_count` es su número y `window_started_at_utc` el principio de la ventana, que no es posterior a la entrada. `login_failed`, en cambio, es un solo intento fallido con una cuenta que existe.
+- **Sin datos de la petición:** el contrato no tiene ningún campo para un secreto, una dirección IP, el navegador ni el nombre escrito en un intento fallido, y como objeto estricto rechaza cualquier campo de más.
+- **Validación runtime:** el JSON Schema describe la forma de cada acción. Solo `auditEventSchema` comprueba el orden de los objetos, que haya al menos uno salvo en `login_failures` y ninguno en una entrada sin cuenta, la cuenta de los objetos, la pareja de autor y motivo de los cierres, la petición de `sessions_closed` y las reglas de `login_failures`.
+- **Persistencia:** la fila guarda el documento en JCS (`event_jcs`) con su identificador, su cuenta, su hora y su acción en columnas, y la base comprueba que esas columnas son iguales a los campos del documento (migración `0001_auditoria.sql` de `apps/api`).
 
 ## Contratos futuros
 

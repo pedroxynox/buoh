@@ -9,6 +9,7 @@ import { sha256Hex, type HealthReport } from '@buoh/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
+  apiMigrateEnvironment,
   CHILD_OUTPUT_LIMIT_BYTES,
   ConfigError,
   healthEnvironment,
@@ -37,6 +38,7 @@ import {
   type LogObjects,
   type LogSchemaDrop,
   type OperationalAlert,
+  type OperationsConfig,
   type OperationsReportRow,
   type OwnerDatabase,
   type RunChild,
@@ -78,6 +80,9 @@ const ENV = {
   BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY: 'secreto-operaciones-sintetico',
 };
 const CONFIG = loadOperationsConfig(ENV);
+/** La contraseña de `buoh_api`, que el Blueprint le da a `buoh-operaciones` desde el PR 6 de ADR-0019 §14. */
+const API_PASSWORD = 'api-sintetica-0123456789';
+const API_CONFIG = loadOperationsConfig({ ...ENV, BUOH_API_POSTGRES_PASSWORD: API_PASSWORD });
 const NOW = '2026-03-02T10:00:00.000Z';
 
 /** Un temporizador que nunca vence: los plazos de la verificación no cuentan en esas pruebas. */
@@ -129,6 +134,7 @@ const segmentKey = (number: number, row: DueSegment): string =>
 describe('loadOperationsConfig (ADR-0018 §11)', () => {
   it('lee la credencial dueña, las contraseñas de los roles y los tokens salud y operaciones con sus propios nombres', () => {
     expect(CONFIG).toEqual({
+      apiPassword: null,
       healthObjects: {
         accessKeyId: 'clave-salud-sintetica',
         bucket: 'buoh-captura',
@@ -199,6 +205,19 @@ describe('loadOperationsConfig (ADR-0018 §11)', () => {
     ]);
   });
 
+  it('la contraseña de buoh_api es opcional hasta el PR 6 de ADR-0019 §14, con las reglas de las demás', () => {
+    expect(API_CONFIG).toEqual({ ...CONFIG, apiPassword: API_PASSWORD });
+    expect(rejected({ ...ENV, BUOH_API_POSTGRES_PASSWORD: 'corta' })).toEqual([
+      'BUOH_API_POSTGRES_PASSWORD',
+    ]);
+    expect(rejected({ ...ENV, BUOH_API_POSTGRES_PASSWORD: 'con espacios dentro 123' })).toEqual([
+      'BUOH_API_POSTGRES_PASSWORD',
+    ]);
+    expect(rejected({ BUOH_API_POSTGRES_PASSWORD: 'corta' })).toEqual(
+      [...Object.keys(ENV), 'BUOH_API_POSTGRES_PASSWORD'].sort(),
+    );
+  });
+
   it('una variable BUOH_POSTGRES_* o BUOH_S3_* presente se rechaza: el servicio no tiene ninguna', () => {
     expect(
       rejected({
@@ -246,6 +265,30 @@ describe('el entorno explícito de cada proceso (ADR-0018 §11)', () => {
       'agente-sintetico-0123456789',
       'ingesta-sintetica-0123456789',
       'clave-operaciones-sintetica',
+      'secreto-operaciones-sintetico',
+    ]) {
+      expect(Object.values(env)).not.toContain(secret);
+    }
+  });
+
+  it('el db:migrate de la API recibe solo la credencial dueña y el rol dueño: ni la contraseña de buoh_api, ni un esquema, ni un token', () => {
+    const env = apiMigrateEnvironment(API_CONFIG);
+    expect(env).toEqual({
+      BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+      BUOH_POSTGRES_DB: 'buoh',
+      BUOH_POSTGRES_HOST: 'pg-sintetico.invalid',
+      BUOH_POSTGRES_OWNER_ROLE: 'buoh_dueno',
+      BUOH_POSTGRES_PASSWORD: 'dueno-sintetico',
+      BUOH_POSTGRES_PORT: '5432',
+      BUOH_POSTGRES_SSLMODE: 'require',
+      BUOH_POSTGRES_USER: 'buoh',
+    });
+    for (const secret of [
+      API_PASSWORD,
+      'agente-sintetico-0123456789',
+      'ingesta-sintetica-0123456789',
+      'salud-sintetica-0123456789',
+      'clave-salud-sintetica',
       'secreto-operaciones-sintetico',
     ]) {
       expect(Object.values(env)).not.toContain(secret);
@@ -346,9 +389,17 @@ function fakeDatabase(state: {
         return 'dropped';
       });
     },
+    ensureApiRole: () => {
+      calls.push('api_role');
+      return answer('ensureApiRole', () => undefined);
+    },
     ensureRuntimeRoles: () => {
       calls.push('roles');
       return answer('ensureRuntimeRoles', () => undefined);
+    },
+    grantApiPrivileges: () => {
+      calls.push('api_grant');
+      return answer('grantApiPrivileges', () => undefined);
     },
     grantLogPrivileges: (target) => {
       calls.push(`grant:${String(target.number)}`);
@@ -414,7 +465,7 @@ function fakeChildren(
   const runChild: RunChild = (child, args, env) => {
     runs.push({ args, child, env });
     const defaults: ChildResult =
-      child === 'migrate'
+      child === 'migrate' || child === 'api_migrate'
         ? {
             exitCode: 0,
             stderr: '',
@@ -583,6 +634,7 @@ async function run(
   db: ReturnType<typeof fakeDatabase>,
   children: ReturnType<typeof fakeChildren>,
   options: {
+    readonly config?: OperationsConfig;
     readonly deletion?: ReturnType<typeof fakeDeletion>;
     readonly now?: () => string;
     readonly objects?: ReturnType<typeof fakeObjects>;
@@ -594,7 +646,7 @@ async function run(
   let sequence = 0;
   const result = await runOperations({
     alert: (payload) => alerts.push(payload),
-    config: CONFIG,
+    config: options.config ?? CONFIG,
     database: db.database,
     deletion: (options.deletion ?? fakeDeletion()).open,
     forwardChildStderr: (text) => forwarded.push(text),
@@ -808,6 +860,167 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
     ]);
     expect(lines[0]).toMatchObject({ report: { prepared: 2 } });
     expect(children.runs.at(-1)?.args).toEqual(['--json', '--log', '1']);
+  });
+});
+
+describe('runOperations: el esquema y el rol de la API en el paso 1 (ADR-0019 §7)', () => {
+  /** Los logs 1, escrito, y 2, vacío: el paso 1 no prepara ninguno. */
+  const ready = (loggedIn: readonly string[] = ['buoh_ingesta', 'buoh_salud', 'buoh_agente']) =>
+    fakeDatabase({ loggedIn: new Set(loggedIn), logs: [log(1, NOW), log(2)] });
+
+  it('sin la contraseña de buoh_api, como en producción hasta el PR 6, no toca la API', async () => {
+    const db = ready();
+    const children = fakeChildren();
+    const { lines } = await run(db, children);
+    expect(db.calls.filter((call) => call.startsWith('api_') || call.endsWith('buoh_api'))).toEqual(
+      [],
+    );
+    expect(children.runs.map((item) => item.child)).not.toContain('api_migrate');
+    expect(Object.keys(lines[0]?.['report'] as object)).not.toContain('api_migrated');
+  });
+
+  it('con ella, después de los logs crea el rol, migra buoh_api en un proceso aparte, le da sus privilegios y le pone la contraseña', async () => {
+    const db = ready();
+    const children = fakeChildren((child) =>
+      child === 'api_migrate'
+        ? {
+            stdout: JSON.stringify({
+              applied: ['0001_auditoria.sql'],
+              current: ['0001_auditoria.sql'],
+              status: 'migrated',
+            }),
+          }
+        : {},
+    );
+    const { lines, result } = await run(db, children, { config: API_CONFIG });
+    expect(db.calls.slice(0, 15)).toEqual([
+      'roles',
+      'list',
+      'grant:1',
+      'grant:2',
+      'list',
+      'api_role',
+      'api_grant',
+      'login:buoh_ingesta',
+      'login:buoh_salud',
+      'login:buoh_agente',
+      'login:buoh_api',
+      'password:buoh_api',
+      'list',
+      'report:1:roles_and_logs',
+      'list',
+    ]);
+    expect(children.runs.map((item) => [item.child, item.args, item.env]).slice(0, 3)).toEqual([
+      ['migrate', [], migrateEnvironment(API_CONFIG, 'buoh_log_000001')],
+      ['migrate', [], migrateEnvironment(API_CONFIG, 'buoh_log_000002')],
+      ['api_migrate', [], apiMigrateEnvironment(API_CONFIG)],
+    ]);
+    expect(result.status).toBe('completed');
+    const report = {
+      api_migrated: ['0001_auditoria.sql'],
+      failures: [],
+      migrated: [],
+      passwords_set: ['buoh_api'],
+      passwords_unchecked: [],
+      prepared: null,
+    };
+    expect(lines[0]).toMatchObject({ report, status: 'completed', step: 'roles_and_logs' });
+    expect(db.reports[0]?.row.report).toEqual(report);
+  });
+
+  it('una migración nueva de la API basta para guardar el informe del paso 1', async () => {
+    const db = ready(['buoh_ingesta', 'buoh_salud', 'buoh_agente', 'buoh_api']);
+    const children = fakeChildren((child) =>
+      child === 'api_migrate'
+        ? {
+            stdout: JSON.stringify({
+              applied: ['0002_cuentas.sql'],
+              current: ['0001_auditoria.sql', '0002_cuentas.sql'],
+              status: 'migrated',
+            }),
+          }
+        : {},
+    );
+    await run(db, children, { config: API_CONFIG });
+    expect(db.reports[0]?.row).toMatchObject({
+      report: { api_migrated: ['0002_cuentas.sql'], passwords_set: [] },
+      status: 'completed',
+      step: 'roles_and_logs',
+    });
+  });
+
+  it('con todo hecho, solo comprueba la contraseña de buoh_api, y no guarda el informe del paso 1', async () => {
+    const db = ready(['buoh_ingesta', 'buoh_salud', 'buoh_agente', 'buoh_api']);
+    const children = fakeChildren();
+    const { lines } = await run(db, children, { config: API_CONFIG });
+    expect(db.calls).toContain('login:buoh_api');
+    expect(db.calls).not.toContain('password:buoh_api');
+    expect(db.reports.map(({ row }) => row.step)).not.toContain('roles_and_logs');
+    expect(lines[0]).toMatchObject({
+      report: { api_migrated: [], failures: [], passwords_set: [] },
+      status: 'completed',
+    });
+  });
+
+  it('sin el rol no migra la API ni le pone la contraseña; el paso termina failed y lo demás sigue', async () => {
+    const db = fakeDatabase({
+      fail: { ensureApiRole: coded('42501') },
+      loggedIn: new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']),
+      logs: [log(1, NOW), log(2)],
+    });
+    const children = fakeChildren();
+    const { lines, result } = await run(db, children, { config: API_CONFIG });
+    expect(children.runs.map((item) => item.child)).not.toContain('api_migrate');
+    expect(db.calls).not.toContain('api_grant');
+    expect(db.calls).not.toContain('login:buoh_api');
+    expect(db.calls).toContain('login:buoh_agente');
+    expect(lines[0]).toMatchObject({
+      report: { api_migrated: [], failures: [{ action: 'api_role', reason: '42501' }] },
+      status: 'failed',
+    });
+    expect(lines.map((line) => line['step'])).toContain('space');
+    expect(result.status).toBe('failed');
+  });
+
+  it('si el db:migrate de la API falla, deja su motivo saneado, no da privilegios y le pone igual la contraseña', async () => {
+    const db = ready();
+    const children = fakeChildren((child) =>
+      child === 'api_migrate'
+        ? {
+            exitCode: 1,
+            stdout: JSON.stringify({
+              code: 'MIGRATION_FAILED',
+              migration: '0001_auditoria.sql',
+              reason: '42501',
+              status: 'failed',
+            }),
+          }
+        : {},
+    );
+    const { lines } = await run(db, children, { config: API_CONFIG });
+    expect(db.calls).not.toContain('api_grant');
+    expect(db.calls).toContain('password:buoh_api');
+    expect(lines[0]).toMatchObject({
+      report: {
+        api_migrated: [],
+        failures: [{ action: 'api_migrate', reason: '42501' }],
+        passwords_set: ['buoh_api'],
+      },
+      status: 'failed',
+    });
+  });
+
+  it('si no le puede dar los privilegios, lo anota con su motivo saneado', async () => {
+    const db = fakeDatabase({
+      fail: { grantApiPrivileges: coded('42501') },
+      loggedIn: new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente', 'buoh_api']),
+      logs: [log(1, NOW), log(2)],
+    });
+    const { lines } = await run(db, fakeChildren(), { config: API_CONFIG });
+    expect(lines[0]).toMatchObject({
+      report: { failures: [{ action: 'api_grant', reason: '42501' }] },
+      status: 'failed',
+    });
   });
 });
 
@@ -2314,6 +2527,16 @@ describe('workerChildScript: el proceso de cada comando del worker (ADR-0018 §1
       env,
       nodeFlags: WORKER_NODE_FLAGS,
       script: fileURLToPath(new URL('../src/cli/migrate.js', import.meta.url)),
+      timeoutMs: 120_000,
+    });
+  });
+
+  it('el db:migrate de la API corre el CLI compilado de apps/api con WORKER_NODE_FLAGS y 120 s de plazo', () => {
+    expect(workerChildScript('api_migrate', [], env)).toEqual({
+      args: [],
+      env,
+      nodeFlags: WORKER_NODE_FLAGS,
+      script: fileURLToPath(new URL('../../api/dist/cli/migrate.js', import.meta.url)),
       timeoutMs: 120_000,
     });
   });

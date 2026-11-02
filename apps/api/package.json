@@ -5,15 +5,21 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "db:migrate": "node dist/cli/migrate.js",
     "openapi:check": "tsx scripts/generate-openapi.ts --check",
     "openapi:generate": "tsx scripts/generate-openapi.ts",
     "start": "node dist/cli/serve.js",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@buoh/contracts": "workspace:*",
     "fastify": "5.12.7",
+    "pg": "8.23.1",
     "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
   }
 }

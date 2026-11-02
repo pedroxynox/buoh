@@ -4,7 +4,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   AGENT_CONNECTION_LIMIT,
+  API_ROLE,
+  API_SCHEMA,
+  ensureApiRole,
   ensureRuntimeRoles,
+  grantApiPrivileges,
   grantLogPrivileges,
   INGEST_DENIED_TABLES,
   INGEST_WRITE_TABLES,
@@ -153,6 +157,75 @@ describe('grantLogPrivileges', () => {
     const { client, queries } = fakeClient();
     await expect(grantLogPrivileges(client, 'Log; DROP')).rejects.toThrow(TypeError);
     expect(queries).toEqual([]);
+  });
+});
+
+describe('el rol y los privilegios de la API (ADR-0019 §7)', () => {
+  const normalized = (queries: readonly string[]) =>
+    queries.map((text) => text.replace(/\s+/gu, ' ').trim());
+
+  it('ensureApiRole crea buoh_api como buoh_dueno, con inicio de sesión y sin crear roles', async () => {
+    const { client, queries } = fakeClient();
+    await ensureApiRole(client);
+    expect(API_ROLE).toBe('buoh_api');
+    expect(normalized(queries)).toEqual([
+      'BEGIN',
+      'SET LOCAL ROLE "buoh_dueno"',
+      'SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AS exists',
+      'CREATE ROLE "buoh_api" LOGIN NOCREATEROLE',
+      'COMMIT',
+    ]);
+  });
+
+  it('ensureApiRole vuelve a fijar sus atributos si el rol ya existe', async () => {
+    const { client, queries } = fakeClient((text) =>
+      text.startsWith('SELECT EXISTS') ? { rows: [{ exists: true }] } : { rows: [] },
+    );
+    await ensureApiRole(client);
+    expect(queries).toContain('ALTER ROLE "buoh_api" LOGIN NOCREATEROLE');
+  });
+
+  it('grantApiPrivileges da a buoh_api SELECT e INSERT en sus tablas, solo SELECT en la de migraciones, y nada a buoh_lectura', async () => {
+    const { client, queries } = fakeClient((text) =>
+      text.includes('information_schema.tables')
+        ? { rows: [{ table_name: 'audit_events' }, { table_name: MIGRATIONS_TABLE }] }
+        : { rows: [] },
+    );
+    await grantApiPrivileges(client);
+    expect(API_SCHEMA).toBe('buoh_api');
+    expect(normalized(queries)).toEqual([
+      'BEGIN',
+      'SET LOCAL ROLE "buoh_dueno"',
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_type = 'BASE TABLE' ORDER BY table_name",
+      'GRANT USAGE ON SCHEMA "buoh_api" TO "buoh_api"',
+      'GRANT SELECT, INSERT ON "buoh_api"."audit_events" TO "buoh_api"',
+      'GRANT SELECT ON "buoh_api"."buoh_schema_migrations" TO "buoh_api"',
+      'GRANT USAGE ON ALL SEQUENCES IN SCHEMA "buoh_api" TO "buoh_api"',
+      'COMMIT',
+    ]);
+    expect(queries.join('\n')).not.toMatch(/UPDATE|DELETE|TRUNCATE|buoh_lectura|ALL TABLES/u);
+  });
+
+  it('un fallo al dar los privilegios deshace la transacción entera', async () => {
+    const { client, queries } = fakeClient((text) => {
+      if (text.startsWith('GRANT SELECT, INSERT')) {
+        throw Object.assign(new Error('permission denied'), { code: '42501' });
+      }
+      return text.includes('information_schema.tables')
+        ? { rows: [{ table_name: 'audit_events' }] }
+        : { rows: [] };
+    });
+    await expect(grantApiPrivileges(client)).rejects.toMatchObject({ code: '42501' });
+    expect(queries.at(-1)).toBe('ROLLBACK');
+  });
+
+  it('setRolePassword admite buoh_api', async () => {
+    const password = 'api-sintetica-0123456789';
+    const { client, queries } = fakeClient();
+    await setRolePassword(client, API_ROLE, password);
+    expect(queries[1]).toBe('SET LOCAL ROLE "buoh_dueno"');
+    expect(queries[2]).toMatch(/^ALTER ROLE "buoh_api" PASSWORD 'SCRAM-SHA-256\$4096:/u);
+    expect(queries.join('\n')).not.toContain(password);
   });
 });
 
