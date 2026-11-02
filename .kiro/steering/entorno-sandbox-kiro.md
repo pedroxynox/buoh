@@ -55,6 +55,17 @@ Si una sesión empieza sin seguir estos pasos, el propietario puede pedirlo en s
 - El comentario de PR listo se deja con `gh api repos/pedroxynox/buoh/issues/<n>/comments -F body=@<archivo>`. El agente no llama a la API de fusión (`PUT …/pulls/<n>/merge`). Para saber si el propietario ya fusionó: `gh api repos/pedroxynox/buoh/pulls/<n> --jq .merged_at`.
 - Guardar cuerpos de PR, logs y binarios auxiliares fuera del repo, por ejemplo en `/projects/sandbox/.buoh-local/`.
 
+## Secretos en el sandbox
+
+Los secretos de Kiro (*Settings → Sandbox → Secrets*) llegan al sandbox como variables de entorno y están también en la línea de comandos de procesos del sandbox. El 2026-11-01, un `pgrep -fa` de un subagente los mostró en el registro de la sesión (runbook, «Producción (F2.2)», «Acceso del agente»).
+
+- No mostrar nunca la línea de comandos de otros procesos ni las variables del entorno con sus valores, con ningún comando. Por ejemplo: `ps`, `pgrep -a` o `pgrep -l` y `top`; `printenv`, con o sin nombres, y `env` o `set` sin argumentos; `export`, `declare` o `typeset` sin argumentos, con `-p` o con `-x` sin nombres; cualquier lectura de `/proc/*/cmdline` o `/proc/*/environ` que muestre su contenido, con `cat` o con otro programa; y el entorno entero desde un programa, como `process.env` u `os.environ`. Tampoco `set -x` o `bash -x` en un comando que usa un secreto: muestran cada línea con sus valores. No muestran nada asignar con `export NOMBRE=valor`, como en «Acceso del agente», ni exportar con `set -a` y `set +a`, como en «Entorno local y replay». Ante la duda, el comando no se ejecuta.
+- Para ver qué secretos hay, solo sus nombres: `compgen -e | grep '^BUOH_'`. Para saber si un servicio local está en marcha, `pg_isready` o su puerto, no la lista de procesos.
+- Un secreto llega a un comando por el entorno, como en «Acceso del agente», nunca como argumento: un argumento queda en la línea de comandos de ese proceso.
+- De un error de un comando que usa un secreto, mostrar solo su código o su nombre, nunca su mensaje: puede llevar el servidor o el endpoint, que también son secretos (`BUOH_AGENTE_POSTGRES_HOST` y `BUOH_AGENTE_S3_ENDPOINT`).
+- El encargo a un subagente repite estas reglas, con los comandos prohibidos.
+- Si un secreto aparece en el registro de la sesión, en Git o en GitHub, el agente se lo dice al propietario en frases completas y registra en un PR lo que decida, con sus palabras y su fecha. Si es una contraseña o un token, le recomienda rotarlo con los pasos del runbook («Rotar credenciales»). El servidor y el endpoint no se rotan: lo que abre la base y el bucket es la contraseña o el token.
+
 ## Cambio de sesión
 
 Una sesión nueva no ve la conversación anterior, y puede no ver lo guardado fuera del repositorio, como `/projects/sandbox/.buoh-local/`. Cuando el propietario va a cambiar de sesión:
