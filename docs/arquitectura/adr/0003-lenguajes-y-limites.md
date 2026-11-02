@@ -45,6 +45,13 @@ Motivos completos en [ADR-0012](0012-catalogo-y-adaptador-publico-de-deriv.md):
 - `fflate` lee `schemas.zip` en el worker (§2): da el tamaño declarado de cada entrada antes de descomprimirla y extrae solo las que se piden. No tiene dependencias; un lector propio sobre `node:zlib` sería más código delicado que mantener.
 - `ws` es el cliente WebSocket del worker (§3): rechaza un mensaje por su tamaño declarado antes de leer su contenido (`maxPayload`) y permite desactivar la compresión. El `WebSocket` global de Node reúne el mensaje entero antes de que buoh pueda rechazarlo. `ws` no tiene dependencias propias, y sus tipos vienen de `@types/ws`, solo para compilar.
 
+### Bibliotecas de la API (F2.3)
+
+Motivos completos en [ADR-0019](0019-api-cuentas-y-auditoria.md). Cada biblioteca entra en el PR que la usa:
+
+- `fastify` 5 es el servidor HTTP de `apps/api`, como fija ADR-0001 (decisión 2). Valida cada entrada y cada salida con los esquemas de Zod de `packages/contracts`, con compiladores propios (ADR-0019 §6), y sus pruebas usan `inject`, que no abre ningún puerto. Es del equipo de Fastify, en la OpenJS Foundation, y no ejecuta scripts de instalación. Su registro (`pino`) queda apagado: la API escribe su propia línea por petición (ADR-0019 §11). La versión fijada es la 5.12.7. La 5.12.8, del 2026-11-02, todavía no tenía la edad mínima de publicación que exige pnpm, que solo la instalaba añadiendo una excepción a `pnpm-workspace.yaml`. Su aviso de seguridad (GHSA-3qgw-9275-xf8w) solo afecta a un `handlerTimeout` distinto de 0, que la API no usa. El PR de despliegue de ADR-0019 (§14, PR 6) la sube antes de desplegar.
+- Argon2id, TOTP, base32 y AES-GCM usan `node:crypto`, sin bibliotecas. `@fastify/static`, `@fastify/cookie` y la biblioteca del código QR entran con los PR de ADR-0019 §14 que los usan.
+
 ### Python — investigación cuantitativa aislada
 
 Python se limita a `research/python`: exploración estadística, transformación tabular, validación de hipótesis, simulaciones y generación de artefactos reproducibles. Se preferirán entornos bloqueados y bibliotecas explícitas de cálculo/estadística; sus resultados atraviesan la frontera hacia TypeScript mediante contratos y datos versionados.

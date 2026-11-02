@@ -644,6 +644,27 @@ Desde el PR 3 de [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §
 
 `history_inconsistent` (una página de historia incoherente) existe en `packages/domain` desde el PR 3 y es solo para las respuestas de historia. En PostgreSQL, `requested_response_incidents` lo admite desde la migración `0004`, del PR 5 de ADR-0015 §13; la `0003` no lo admitía.
 
+## Mensajes de la API
+
+Los mensajes de la API de buoh (`apps/api`, [ADR-0019](adr/0019-api-cuentas-y-auditoria.md) §6) están en `packages/contracts/src/api.ts`. Las rutas van bajo `/api/v1/`, y la versión de un mensaje es la de su ruta: estos mensajes no llevan `schema_version`, y un cambio incompatible crea `/api/v2/`. La API valida con ellos cada entrada y cada salida. Su descripción OpenAPI 3.1 sale de ellos y de la tabla de rutas de la API, en `apps/api/generated/openapi.json`, y no se edita a mano (`pnpm run openapi:generate`; `pnpm run openapi:check` lo comprueba). No tienen JSON Schema propio en `generated/`: lo lleva ese OpenAPI.
+
+```text
+ApiError {
+  error: {
+    code: "invalid_request" | "not_found" | "internal",
+    request_id: UUID
+  }
+}
+
+ApiHealth {
+  status: "ok"
+}
+```
+
+- `ApiError` es el cuerpo de toda respuesta de error. No admite un mensaje, una traza ni otros campos: un error interno nunca sale con su mensaje. `request_id` es el UUID que la API genera para cada petición; nunca el que envía el cliente.
+- La lista de códigos es cerrada, y cada PR de ADR-0019 §14 suma los que produce. `invalid_request`: la petición no cumple su contrato, por ejemplo con un parámetro de consulta que la ruta no admite, o el servidor HTTP la rechazó antes de llegar a una ruta. `not_found`: ninguna ruta atiende ese método y esa dirección. `internal`: un fallo del servidor, también una respuesta que no cumple su contrato.
+- `ApiHealth` es la respuesta de `GET /api/salud`, la ruta de salud de Render, cuando el proceso responde.
+
 ## Contratos futuros
 
 `StrategyDefinition`, `SignalEvent`, `RiskPolicy`, `ExecutionIntent` y `ExecutionEvent` se definirán en sus fases. Sus conceptos no autorizan crear tablas, APIs o servicios en Fase 1.

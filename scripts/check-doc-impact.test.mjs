@@ -96,6 +96,7 @@ test('fija las reglas productivas y sus rutas críticas', () => {
       'domain',
       'toolchain',
       'market-data-worker',
+      'api',
       'infrastructure',
       'render',
       'render-datos',
@@ -123,6 +124,8 @@ test('fija las reglas productivas y sus rutas críticas', () => {
     ['scripts/data-replay.mjs', 'docs/operacion/runbook-ingesta-de-datos.md'],
     ['scripts/data-smoke.mjs', 'docs/operacion/runbook-ingesta-de-datos.md'],
     ['scripts/data-health.mjs', 'docs/operacion/runbook-ingesta-de-datos.md'],
+    ['apps/api/src/app.ts', 'docs/arquitectura/adr/0019-api-cuentas-y-auditoria.md'],
+    ['apps/api/generated/openapi.json', 'docs/arquitectura/adr/0019-api-cuentas-y-auditoria.md'],
     ['infra/compose.yaml', 'docs/arquitectura/adr/0004-pipeline-y-reproduccion-de-datos-fase-1.md'],
     ['render.yaml', 'docs/operacion/despliegue-en-render.md'],
     ['render.yaml', 'docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md'],
@@ -162,8 +165,9 @@ test('fija las reglas productivas y sus rutas críticas', () => {
   }
 
   // Las reglas de infraestructura local y de Render no se cubren con la fuente de la otra, ni
-  // las de los dos Blueprints con la ADR del otro.
+  // las de los dos Blueprints con la ADR del otro, ni la de la API con la fuente del worker.
   for (const [changed, documentation] of [
+    ['apps/api/src/app.ts', 'docs/operacion/runbook-ingesta-de-datos.md'],
     ['infra/compose.yaml', 'docs/operacion/despliegue-en-render.md'],
     ['render.yaml', 'docs/operacion/runbook-ingesta-de-datos.md'],
     ['render.yaml', 'docs/arquitectura/adr/0018-sistema-de-datos-en-produccion.md'],
