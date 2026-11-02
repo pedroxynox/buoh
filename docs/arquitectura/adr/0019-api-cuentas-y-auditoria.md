@@ -3,8 +3,8 @@
 - **Estado:** Aceptada
 - **Fecha:** 2026-11-02
 - **Ámbito:** Fase 2, incremento F2.3 (`F2-API-001`, `F2-AUTH-001`, `F2-AUDIT-001` en lo de las sesiones y `F2-GOV-001` para `apps/api`, del [plan de Fase 2](../../plan/fase-2-laboratorio-y-bot-shadow.md)). Fija también lo que otros incrementos toman de ella: las lecturas del sistema de datos (F2.4), el aislamiento de los backtests (F2.7) y el código de lectura que comparte el motor (F2.9).
-- **Decisores:** Propietario de buoh (el método de inicio de sesión), a propuesta de la dirección técnica (lo demás).
-- **Complementa:** [ADR-0006](0006-alojamiento-en-render.md), cuyo servicio web para la API y la web fija (§10); y [ADR-0018](0018-sistema-de-datos-en-produccion.md): suma `buoh-api` al Blueprint de su §2, los roles de la API a su §8, el token de R2 de la API a su §10 y las credenciales de la API a su §12, y hace que el paso 1 de su §11 migre también el esquema de la API. Sustituye en parte [ADR-0008](0008-linea-visual-marca-y-clientes-web.md) §1 y §2, solo para la exportación de `apps/web` que sirve la API (§9). No cambia `apps/web/out`, el escritorio ([ADR-0010](0010-prototipo-de-escritorio.md)), el sitio ([ADR-0013](0013-publicacion-del-sitio-en-render.md)) ni la captura.
+- **Decisores:** Propietario de buoh (el método de inicio de sesión), a propuesta de la dirección técnica (lo demás, incluidas la duración de la sesión y la recuperación desde Render, que le propuso junto con la opción A).
+- **Complementa:** [ADR-0006](0006-alojamiento-en-render.md), cuyo servicio web para la API y la web fija (§10); y [ADR-0018](0018-sistema-de-datos-en-produccion.md): suma `buoh-api` al Blueprint de su §2, los roles de la API a su §8, el token de R2 de la API a su §10 y las credenciales de la API a su §12, y hace que el paso 1 de su §11 migre también el esquema de la API. Sustituye en parte [ADR-0008](0008-linea-visual-marca-y-clientes-web.md), solo para la exportación de `apps/web` que sirve la API (§9): en §1, la columna «Qué no es» de la fila de `apps/web`, y en §2, las reglas de los datos ficticios. No cambia `apps/web/out`, el escritorio ([ADR-0010](0010-prototipo-de-escritorio.md)), el sitio ([ADR-0013](0013-publicacion-del-sitio-en-render.md)) ni la captura.
 
 ## Contexto
 
@@ -18,7 +18,7 @@ Los requisitos piden, entre otras cosas (plan §7):
 
 Hechos comprobados el 2026-11-02:
 
-- `apps/api` no existe. El worker no se puede importar como biblioteca: su único punto de entrada carga también `ws`, `fflate` y `node:child_process`. El código que lee el log, los puntos de control, el catálogo y el registro operativo no los necesita, salvo por dos importaciones que §8 corrige (`apps/market-data-worker/package.json`, `src/index.ts`, `src/runtime.ts` y `src/health/observe.ts`).
+- `apps/api` no existe. El worker no se puede importar como biblioteca: su único punto de entrada carga también `ws`, `fflate` y `node:child_process`. El código que lee el log, los puntos de control, el catálogo y el registro operativo no los necesita, pero hoy los carga por importaciones que §8 corrige (`apps/market-data-worker/package.json`, `src/index.ts`, `src/runtime.ts`, `src/health/observe.ts`, `src/deriv/profile.ts` y `src/deriv/schema-archive.ts`).
 - `apps/web` se exporta como sitio estático (`output: 'export'`) a `apps/web/out`, que empaqueta el escritorio. Sus pruebas exigen la marca «Datos ficticios» en cada página y prohíben formularios, campos de contraseña y direcciones absolutas (`apps/web/test/export.test.ts` y `apps/desktop/test/desktop.test.ts`).
 - `onrender.com` está en la [Public Suffix List](https://publicsuffix.org/list/public_suffix_list.dat). Para el navegador, cada servicio de Render es un sitio propio, y otro servicio no puede poner ni leer sus cookies. El propietario no tiene dominio propio (ADR-0013).
 - Los servicios web de pago de Render, como el Starter, tienen consola (*Shell*) en el panel ([Render: SSH y Shell](https://render.com/docs/ssh)).
@@ -31,7 +31,7 @@ Hechos comprobados el 2026-11-02:
 - **B:** una contraseña y un código de 6 cifras de una app del teléfono;
 - **C:** las dos.
 
-Le recomendó la A: una página falsa no puede usar la llave, y el servidor solo guarda su parte pública. De la B le explicó su punto débil: una página falsa puede pedir la contraseña y el código y usarlos al momento. El propietario respondió: «opcion B».
+Le recomendó la A: una página falsa no puede usar la llave, y el servidor solo guarda su parte pública. De la B le explicó su punto débil: una página falsa puede pedir la contraseña y el código y usarlos al momento. Junto con la A le propuso además la duración de la sesión y la recuperación desde Render, y le preguntó si le parecían bien. El propietario respondió: «opcion B». Esta ADR aplica a la B esas dos propuestas (§2 y §3), que el propietario aprueba al fusionarla.
 
 ## Decisión
 
@@ -43,13 +43,15 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 - **Guardado de la contraseña:** Argon2id de `node:crypto`, con una sal aleatoria de 16 bytes, 64 MiB de memoria, 3 pasadas, un hilo y 32 bytes de salida. Usa además la clave del servidor `BUOH_API_PASSWORD_PEPPER` como entrada `secret`, que cumple el papel de la operación con clave que NIST recomienda, y esa clave vive fuera de la base (§10). Cada hash guarda su algoritmo y sus parámetros, para poder subirlos después. El proceso calcula un hash a la vez, y si hay demasiados esperando responde `rate_limited`. Con un usuario que no existe calcula uno igual, para que el tiempo de respuesta no diga qué usuarios existen.
 - **Código:** el secreto TOTP son 20 bytes aleatorios (160 bits; NIST pide al menos 112), con SHA-1, 6 cifras y pasos de 30 s, que es lo que leen todas las apps. Se acepta el paso actual y uno a cada lado, por el desfase del reloj y el tiempo de escribirlo. Cada paso vale una sola vez por credencial, y nunca uno anterior al último aceptado (§3.1.4). El secreto se guarda cifrado con AES-256-GCM y la clave `BUOH_API_TOTP_KEY`, con la cuenta y la credencial como datos asociados. Se muestra una sola vez, al darlo de alta, como código QR y como texto, y el alta termina con un código válido. El TOTP, el base32 y el cifrado son código propio sobre `node:crypto`. El QR se genera dentro de buoh, nunca en un servicio de terceros, con una biblioteca sin dependencias y con licencia MIT que el PR fija.
 - **Respuesta:** ante cualquier dato incorrecto, el mismo mensaje y el mismo código, `invalid_credentials`. La respuesta nunca dice qué parte falló.
-- **Límites** (NIST SP 800-63B-4, §3.2.2):
-  - Por cuenta: los fallos seguidos se cuentan con los intentos guardados (§5), sin un contador que se modifique. Con 100 fallos seguidos, la credencial queda deshabilitada hasta un restablecimiento (§3). Un acierto pone la cuenta a cero.
-  - Esperas: después de un fallo con una cuenta, la misma dirección espera antes de volver a intentarlo con esa cuenta. Tras cada uno de los cuatro primeros fallos seguidos no hay espera. Tras el quinto, la espera es de 30 s, y se duplica con cada fallo siguiente hasta 1 hora. Así, las esperas de un atacante no hacen esperar al propietario desde otra dirección. El tope de 100 sí es de la cuenta.
-  - Por dirección: como mucho 10 intentos fallidos cada 15 minutos entre el inicio de sesión y los enlaces de alta, y un límite general de peticiones que fija el PR.
-  - Las esperas y los límites por dirección se llevan en memoria y no se guardan, porque una dirección IP es un dato personal.
-  - La dirección del cliente es la que añade el proxy de Render, la última de `X-Forwarded-For`, nunca una que el cliente pueda elegir. El PR de evidencia lo comprueba en producción (§13).
+- **Límites** (NIST SP 800-63B-4, §3.2.2). Las esperas se cuentan por el nombre de usuario escrito, normalizado, exista o no, para que la respuesta no diga qué nombres existen:
+  - **Por nombre y dirección**, en memoria: tras cada uno de los cuatro primeros fallos seguidos no hay espera. Tras el quinto, la espera es de 30 s, y se duplica con cada fallo siguiente hasta 1 hora. Así, las esperas de un atacante no hacen esperar al propietario desde otra dirección.
+  - **Por nombre**, desde cualquier dirección: con 20 fallos seguidos o más, el nombre admite como mucho un intento por minuto. Con una cuenta que existe, los fallos se cuentan con los intentos guardados (§5), sin un contador que se modifique, y el recuento sobrevive a un reinicio. Con un nombre que no existe, el recuento se lleva en memoria.
+  - **Por cuenta:** con 100 fallos seguidos, la credencial queda deshabilitada hasta un restablecimiento (§3). Un acierto pone el recuento a cero. La respuesta sigue siendo `invalid_credentials`, salvo con la contraseña y el código correctos, que reciben `credential_disabled`: solo lo sabe quien tiene los dos factores.
+  - **Por dirección**, en memoria: como mucho 10 intentos fallidos cada 15 minutos entre el inicio de sesión y los enlaces de alta, y un límite general de peticiones que fija el PR.
+  - Lo que se lleva en memoria no se guarda, porque una dirección IP es un dato personal.
+  - La dirección del cliente es la que añade el proxy de Render, la última de `X-Forwarded-For`, nunca una que el cliente pueda elegir. Render no documenta cómo forma esa cabecera, así que el PR de evidencia comprueba en producción que no se puede falsear y que dos redes distintas cuentan por separado (§13).
   - Un intento que tiene que esperar recibe `rate_limited` con los segundos que faltan, sin calcular ningún hash.
+  - Quien conozca el nombre de usuario puede deshabilitar la credencial desde muchas direcciones. Con el límite por nombre, llegar a 100 fallos le lleva al menos 80 minutos. Por eso el nombre no sale del nombre público del propietario ni se publica («Consecuencias»).
 
 ### 2. Sesiones
 
@@ -58,13 +60,13 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 - **Duración** (NIST SP 800-63B-4, §2.2.3, para AAL2): la sesión termina tras 1 hora sin actividad del propietario, y siempre a las 24 horas de empezar.
   - Renuevan la inactividad las peticiones que cambian algo y las que la web marca como del propietario, al abrir una página o al pulsar algo.
   - Las actualizaciones automáticas de una pantalla (F2.4) no la renuevan, para que una pestaña abierta no mantenga viva la sesión.
-  - La actividad se guarda como mucho una vez por minuto.
-- **Cierre:** «Cerrar sesión» cierra la actual, y «Cerrar las demás sesiones», las otras. La orden `cuenta` (§3) y un restablecimiento las cierran todas. Una sesión cerrada o vencida no vuelve.
+  - La actividad se guarda como una fila nueva, como mucho una por minuto (§7).
+- **Cierre:** «Cerrar sesión» cierra la actual, y «Cerrar las demás sesiones», las otras. La orden `cuenta` (§3) y un restablecimiento las cierran todas. Cada cierre es una fila nueva, y una sesión cerrada o vencida no vuelve.
 - Una cuenta tiene como mucho 10 sesiones abiertas: una nueva cierra la más antigua.
 - **CSRF** ([OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)). Una petición que cambia algo necesita las tres condiciones siguientes:
   1. `Origin` igual al origen público de la API (`BUOH_API_ORIGIN`) y, si llega, `Sec-Fetch-Site: same-origin`;
   2. `Content-Type: application/json`, que un formulario de otro sitio no puede enviar;
-  3. con una sesión, la cabecera `X-CSRF-Token` con el token de esa sesión. El token nace con la sesión, el servidor guarda su hash y solo lo devuelve en el cuerpo de la respuesta del inicio de sesión y de `GET /api/v1/sesion` (el patrón del token sincronizado).
+  3. con una sesión, la cabecera `X-CSRF-Token` con el token de esa sesión. El token es el HMAC-SHA-256 del identificador de la sesión, con la clave `BUOH_API_CSRF_KEY` y una etiqueta propia, como los tokens con HMAC atados a la sesión de OWASP. El servidor no lo guarda: lo calcula al comprobarlo, en tiempo constante, y al devolverlo en el cuerpo de la respuesta del inicio de sesión y de `GET /api/v1/sesion`. Así lo recupera la web al abrir cada página, porque no lo guarda en el navegador.
 
   El inicio de sesión y el uso de un enlace de alta, que todavía no tienen sesión, necesitan las dos primeras. `SameSite=Strict` se suma a las tres.
 - La API no envía cabeceras CORS: solo responde a su propio origen.
@@ -83,7 +85,8 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 
 ### 4. Espacios personales
 
-- Cada sesión, cada entrada de auditoría y cada objeto del laboratorio tienen su cuenta, con `account_id` obligatorio. Los objetos del laboratorio son las estrategias y sus versiones, los backtests, los registros previos, las evaluaciones, las señales, las posiciones y las decisiones del motor.
+- Cada sesión y cada objeto del laboratorio tienen su cuenta, con `account_id` obligatorio. Los objetos del laboratorio son las estrategias y sus versiones, los backtests, los registros previos, las evaluaciones, las señales, las posiciones y las decisiones del motor.
+- Una entrada de auditoría sobre una cuenta también lleva su `account_id`. Las que no son de ninguna, como los fallos agrupados de un nombre que no existe (§5), lo llevan vacío, y ninguna cuenta las ve por la API.
 - La API lee y escribe solo con funciones que reciben la cuenta de la sesión: no hay consulta sin cuenta. Un objeto de otra cuenta responde `not_found`, igual que uno que no existe.
 - Las pruebas, con dos cuentas de prueba, demuestran que una cuenta no puede leer ni cambiar lo de la otra (`F2-AUTH-001`). En F2.3 son las sesiones y la auditoría, y cada incremento siguiente suma sus objetos.
 - No se usa la seguridad por filas de PostgreSQL: con una sola cuenta en producción y la API como única escritora, aporta poco. Se revisa antes de abrir cuentas a otras personas («Condiciones de revisión»).
@@ -99,16 +102,16 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 - El motivo es un código. En las acciones del propietario que lo piden, desde F2.6, lleva también su texto.
 - Ninguna entrada lleva secretos, direcciones IP ni el navegador. Tampoco el nombre de usuario escrito en un intento fallido, que podría ser una contraseña.
 - El contrato `AuditEvent` (§6) cierra la lista de acciones. F2.3 trae estas: el alta de la cuenta, cada enlace creado y usado, la credencial restablecida y la deshabilitada por los 100 fallos, el inicio de sesión, cada fallo, el cierre de una sesión y el de varias. Cada incremento siguiente suma las suyas (plan §9).
-- Los fallos con un usuario que existe quedan uno a uno, y los límites de §1 los acotan. Los fallos con un usuario que no existe se agrupan en una entrada por cada 5 minutos, con su número, para que un ataque no llene el disco de 1 GB que comparte la captura.
+- Los fallos con una cuenta que existe quedan uno a uno, y son como mucho 100 seguidos, porque el centésimo deshabilita la credencial (§1). Los demás se agrupan en una entrada por cada 5 minutos y por clase, con su número: los de un nombre que no existe, los que llegan a una credencial deshabilitada y los que rechaza un límite. Así, un ataque no llena el disco de 1 GB que comparte la captura.
 - El propietario ve sus entradas en la sección Auditoría, que las lee de `GET /api/v1/auditoria`, sin controles para cambiarlas. Desde F2.4, la sección muestra también los eventos de datos (versiones del catálogo, publicaciones, incidencias y condiciones), leídos de los logs con el rol de lectura (§8). Esos eventos siguen en su log y se borran con él a los 30 días (ADR-0018 §7), y la sección lo dice.
-- El esquema de la API no es un log: el corte semanal y la retención no lo tocan. Las entradas se guardan mientras exista la cuenta, y son unos pocos KB al día.
+- El esquema de la API no es un log: el corte semanal y la retención no lo tocan. Nada borra sus entradas, así que en la Fase 2 se guardan sin plazo. Son unos pocos KB al día, y un ataque suma como mucho las entradas agrupadas.
 
 ### 6. Contratos, rutas y OpenAPI
 
 - Los mensajes de la API (peticiones, respuestas y el error) y `AuditEvent` son contratos de `packages/contracts`, con el patrón de los demás: objetos estrictos de Zod 4 y esquemas públicos refinados ([contratos de dominio](../contratos-de-dominio.md), «Autoridad»). `AuditEvent` lleva `schema_version` y su JSON Schema generado, como los otros documentos.
 - Las rutas van bajo `/api/v1/`. Un cambio incompatible de un mensaje crea `/api/v2/`. La web y la API se despliegan juntas, desde el mismo commit.
 - Fastify valida cada entrada y cada salida con esos esquemas, con un compilador propio de pocas líneas. Una salida que no cumple su contrato es un error `internal`, nunca una respuesta a medias.
-- **Errores:** una sola forma, `{"error": {"code": …, "request_id": …}}`, con una lista cerrada de códigos, como `invalid_request`, `invalid_credentials`, `unauthenticated`, `csrf_rejected`, `not_found`, `rate_limited` (con los segundos que faltan), `not_ready`, `postgres_unavailable` e `internal`. Nunca el mensaje de un error interno ni su traza.
+- **Errores:** una sola forma, `{"error": {"code": …, "request_id": …}}`, con una lista cerrada de códigos, como `invalid_request`, `invalid_credentials`, `credential_disabled`, `unauthenticated`, `csrf_rejected`, `not_found`, `rate_limited` (con los segundos que faltan), `not_ready`, `postgres_unavailable` e `internal`. Nunca el mensaje de un error interno ni su traza.
 - **OpenAPI 3.1:** un script de `apps/api` lo genera en `apps/api/generated/openapi.json` desde la misma tabla de rutas que registra Fastify y desde los contratos, con `z.toJSONSchema` en el dialecto 2020-12, que es el de OpenAPI 3.1. `pnpm run openapi:check` lo compara byte a byte, como `schemas:check`, y entra en `verify:core`. La API no lo publica.
 
 ### 7. Base de datos de la API
@@ -117,12 +120,12 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 - Sus migraciones están en `apps/api/migrations`, con su propio `db:migrate`, que sanea sus errores como el del worker. Solo añaden, para que la versión anterior siga funcionando durante un despliegue (ADR-0018 §5).
 - **Quién migra.** `buoh-operaciones`, en su paso 1 (ADR-0018 §11), después de los logs. Lo hace en un proceso aparte que solo recibe la credencial dueña, como con el `db:migrate` del worker. Por eso `buoh-operaciones` compila también la API. El servicio de la API nunca tiene esa credencial.
 - **Espera.** Al arrancar, la API comprueba sus migraciones. Mientras faltan, su ruta de salud, `GET /api/salud`, responde 503. Render sigue enviando el tráfico a la instancia anterior, y cancela el despliegue si la nueva no pasa en 15 minutos ([Render: health checks](https://render.com/docs/health-checks)). Una vez lista, la ruta solo dice que el proceso responde. Si después cae PostgreSQL, las peticiones reciben `postgres_unavailable`, y Render no reinicia la API en bucle.
-- **Tablas append-only.** Todas admiten solo `INSERT` y `SELECT`, con el trigger de §5, salvo las columnas de actividad y de cierre de las sesiones, que el rol de la API puede actualizar. Un trigger impide reabrir una sesión cerrada. Nada se borra. Lo que cambia, como una credencial restablecida o las preferencias de F2.4, se guarda en una fila nueva, y vale la última. Una credencial reemplazada queda deshabilitada.
+- **Tablas append-only.** Todas admiten solo `INSERT` y `SELECT`, con el trigger de §5, como pide ADR-0018 §8 a los roles de ejecución. Nada se modifica ni se borra. Lo que cambia se guarda en una fila nueva, y vale la última: la actividad y el cierre de una sesión, una credencial restablecida o deshabilitada y las preferencias de F2.4. Una credencial reemplazada queda deshabilitada.
 - **Roles.** Complementan los de ADR-0018 §8:
 
   | Rol | Inicio de sesión | Privilegios | Lo usa |
   |---|---|---|---|
-  | `buoh_api` | sí | en `buoh_api`: uso del esquema y de sus secuencias, `SELECT` e `INSERT` en sus tablas y `UPDATE` solo de las columnas de actividad y de cierre de las sesiones; nada en los logs | la API y la orden `cuenta` |
+  | `buoh_api` | sí | en `buoh_api`: uso del esquema y de sus secuencias, y `SELECT` e `INSERT` en sus tablas; nada en los logs | la API y la orden `cuenta` |
   | `buoh_api_lectura` | sí, miembro de `buoh_lectura` | los de `buoh_lectura`: en cada log, `SELECT`; nada en `buoh_api` | las lecturas de datos de la API (F2.4) y los backtests (F2.7) |
 
   - `buoh_lectura`, y con él `buoh_salud` y `buoh_agente`, no lee nada de `buoh_api`, donde están los hashes y los secretos cifrados.
@@ -133,8 +136,9 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 ### 8. Lecturas del sistema de datos (F2.4 y siguientes)
 
 - **Código compartido.** La API y el motor importan el código de lectura del worker por una ruta de exportación nueva, `@buoh/market-data-worker/lectura`. El PR que la crea, el primero de F2.4:
-  - saca `SOURCE_SCHEMA_ENTRY` de `deriv/session.ts` y convierte en `import type` las importaciones de tipos de `runtime.ts`, para que leer no cargue `ws`;
-  - añade su punto de entrada, con lo que se lee: la configuración y los pools, la búsqueda del log activo, el log y sus puntos de control, el catálogo, el registro operativo, las publicaciones y el replay, y los almacenes en memoria para las pruebas;
+  - convierte en `import type` las importaciones que solo traen tipos, como las de `runtime.ts` y `deriv/profile.ts`. Hoy se escriben `import { type … }`, y con `verbatimModuleSyntax` dejan en el JavaScript un `import {} from …` que carga el módulo entero. La regla `@typescript-eslint/no-import-type-side-effects` de ESLint las corrige todas y evita que vuelvan;
+  - saca `SOURCE_SCHEMA_ENTRY` de `deriv/session.ts`, que carga `ws`, y `DERIV_SCHEMA_RELEASE` y `schemaEntryName` de `deriv/schema-archive.ts`, que carga `fflate`, a un módulo sin ninguno de los dos. Leer el log desde un punto de control necesita el perfil de medición, y el perfil necesita esas constantes;
+  - añade su punto de entrada, con lo que se lee: la configuración y los pools, la búsqueda del log activo, el log y sus puntos de control, el perfil de medición, el catálogo, el registro operativo, las publicaciones y el replay, y los almacenes en memoria para las pruebas;
   - y una prueba de que importarlo no carga `ws`, `fflate` ni `node:child_process`.
 - **Por qué no un paquete.** Un paquete nuevo movería unas 6 000 líneas del worker que captura en producción, y unas 9 500 de sus pruebas, y cambiaría la compilación de sus dos servicios. La ruta de exportación son pocas líneas, y el corte del plan (§6) no cambia. Si el motor (F2.9) u otro lector necesita algo que esa ruta no puede dar sin el código de la captura, la capa de lectura pasa a un paquete, en su propio PR, y esta decisión se revisa.
 - **Credenciales:** `buoh_api_lectura` y el token `api` de R2, de solo lectura (*Object Read only*) sobre `buoh-captura`, que el propietario crea en Cloudflare como los otros (complementa ADR-0018 §10). El bucket de los datasets lo decide F2.5.
@@ -143,6 +147,7 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
   - El gráfico de las últimas horas lee solo los segmentos cerrados que tocan la ventana, cada uno verificado por su hash, y el abierto. F2.4 fija la ventana máxima midiendo la memoria. Los segmentos cerrados no cambian, así que la API puede guardarlos en memoria, con un tope.
   - El catálogo, las publicaciones, las incidencias y las condiciones salen de consultas al log activo, nuevas en esa ruta.
 - **Lecturas de R2** (estimación): una ventana de 6 horas son 72 segmentos cerrados de 5 minutos y, de media, unas 160 lecturas del segmento abierto, que se guarda evento a evento (ADR-0018 §11). Son unas 230 lecturas por vista. Cien vistas al día serían unos 0,7 millones al mes. Con los unos 4,7 millones de la captura y de `buoh-operaciones`, siguen dentro de los 10 millones gratuitos de clase B. F2.4 las mide en producción (`F2-API-001`).
+- **Tráfico de salida** (estimación): en F2.3 es poco, porque la web se descarga una vez y queda en caché. Desde F2.4, Render cuenta cada lectura de R2 como tráfico de salida, con alrededor de 1 KB por petición (ADR-0018 §13): unos 0,7 GB al mes con cien vistas al día. Las respuestas del gráfico suman del orden de 0,5 MB por vista de 6 horas en ticks, sin comprimir: unos 1,5 GB al mes. Son unos 2 GB más por encima de los 5 GB incluidos, que la captura ya pasa, y unos 0,30 USD más al mes al precio de ADR-0018 §13. El PR 7 y F2.4 lo miden.
 
 ### 9. La web servida por la API
 
@@ -168,24 +173,26 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
   - `BUOH_DEPLOYMENT_ENVIRONMENT=production`. La API rechaza `staging`, que no existe en la Fase 2 (plan §4, punto 9).
   - El servidor, el puerto y la base de `buoh-postgres` (`fromDatabase`), y el usuario `buoh_api`, con su contraseña generada (`generateValue`).
   - `BUOH_POSTGRES_SSLMODE=require`.
-  - `BUOH_API_PASSWORD_PEPPER` y `BUOH_API_TOTP_KEY`, de 256 bits aleatorios que genera Render (`generateValue`).
+  - `BUOH_API_PASSWORD_PEPPER`, `BUOH_API_TOTP_KEY` y `BUOH_API_CSRF_KEY`, de 256 bits aleatorios que genera Render (`generateValue`).
   - Desde F2.4, las credenciales de `buoh_api_lectura` y el token `api`. Cada credencial tiene su propio nombre, que fija el PR. Como el Blueprint ya existe, Render no pide los valores `sync: false`: el propietario pega el token `api` en el servicio, con los pasos del PR de F2.4 (ADR-0018 §2).
-  - En `production`, sin las dos claves de 32 bytes o con `BUOH_POSTGRES_SSLMODE` en `disable`, la API no arranca.
-- **Rotación:** la contraseña de un rol se rota como en ADR-0018 §12. Cambiar `BUOH_API_PASSWORD_PEPPER` o `BUOH_API_TOTP_KEY` deja inservible la credencial guardada, así que va seguido de `restablecer` (§3). El runbook de la API da los pasos.
-- **Costo:** 7 USD al mes, dentro del presupuesto aprobado (plan §11). El total pasa a unos 26 USD al mes (ADR-0018 §14). El Blueprint aplica los cambios de `render-datos.yaml` en cada push a `main` (*Auto Sync*, [despliegue en Render](../../operacion/despliegue-en-render.md)), así que fusionar el PR de despliegue crea el servicio y empieza a cobrarlo. Con ese PR el propietario aprueba el gasto (ADR-0016 §3).
+  - En `production`, sin las tres claves de 32 bytes o con `BUOH_POSTGRES_SSLMODE` en `disable`, la API no arranca.
+- **Rotación:** la contraseña de un rol se rota como en ADR-0018 §12. Cambiar `BUOH_API_PASSWORD_PEPPER` o `BUOH_API_TOTP_KEY` deja inservible la credencial guardada, así que va seguido de `restablecer` (§3). Cambiar `BUOH_API_CSRF_KEY` solo obliga a las páginas abiertas a pedir otra vez su token. El runbook de la API da los pasos.
+- **Costo:** 7 USD al mes, dentro del presupuesto aprobado (plan §11). El total pasa a unos 26 USD al mes (ADR-0018 §14), más los unos 0,30 USD del tráfico de salida que estima §8 desde F2.4. El Blueprint aplica los cambios de `render-datos.yaml` en cada push a `main` (*Auto Sync*, [despliegue en Render](../../operacion/despliegue-en-render.md)), así que fusionar el PR de despliegue crea el servicio y empieza a cobrarlo. Con ese PR el propietario aprueba el gasto (ADR-0016 §3).
 - **Memoria:** el PR de despliegue fija los tamaños de V8 de la API con una medición. Con un backtest en curso, el servicio entero no pasa de 435 MB (`F2-API-001`, §12).
 
 ### 11. Registros
 
 - La API escribe una línea JSON por petición, con el método, la ruta (su patrón, sin la consulta), el estado, la duración, el identificador de la petición y, con una sesión, el de la cuenta. Nunca escribe cabeceras, cookies, cuerpos, la dirección IP ni el navegador. Una lista de redacción cubre además las cabeceras sensibles, por si un error las incluyera.
 - Un error se registra por su código o su nombre, nunca por su mensaje, como en el worker.
-- Las pruebas capturan los registros y las respuestas y buscan en ellos los secretos de la prueba: la contraseña, el secreto y los códigos TOTP, el identificador de la sesión, el token CSRF, el del enlace y las dos claves (`F2-API-001` y `F2-AUTH-001`).
+- Por diseño, tres respuestas llevan un secreto a su dueño, y ninguna otra: el `Set-Cookie` del inicio de sesión, con el identificador de la sesión; el cuerpo del inicio de sesión y de `GET /api/v1/sesion`, con el token CSRF de esa sesión; y la respuesta del alta o del restablecimiento, con el secreto TOTP nuevo, una sola vez. Son la autenticación misma, no una fuga: así se lee la regla de `F2-API-001` de que ninguna respuesta lleve secretos.
+- Las pruebas capturan los registros y las respuestas y buscan en ellos los secretos de la prueba: la contraseña, el secreto y los códigos TOTP, el identificador de la sesión, el token CSRF, el del enlace y las tres claves. Cada uno solo puede aparecer en su canal de arriba, y en ningún otro sitio: ni en otra respuesta, ni en un error, ni en una línea de registro (`F2-API-001` y `F2-AUTH-001`).
 - Render guarda sus registros 7 días y ve la dirección IP de cada petición.
 
 ### 12. Aislamiento de los backtests (F2.7)
 
 - Cada backtest corre en un proceso hijo de la API, con su propio script (`child_process.fork`). Nunca corre en el proceso que atiende las peticiones ni en un `worker_thread`.
-- El hijo recibe un entorno explícito con solo las credenciales de `buoh_api_lectura` y el token `api`. No recibe las de `buoh_api`, ni las claves de §1, ni ninguna sesión.
+- El hijo recibe un entorno explícito con solo las credenciales de `buoh_api_lectura` y el token `api`. No recibe las de `buoh_api`, ni las claves de §1 y §2, ni ninguna sesión.
+- Ese entorno evita que el hijo use por error una credencial que escribe, pero no es una barrera. El hijo corre con el mismo usuario del sistema que la API, y en Linux un proceso de ese usuario puede leer, por ejemplo, el entorno de su padre (`proc(5)`). Así que no detiene un código malicioso que corriera dentro del hijo. El riesgo es bajo, porque una estrategia es un documento declarativo y no código (`F2-STRATEGY-001`).
 - **Límites:** tamaños de V8 al arrancar; un vigilante del padre que termina al hijo si su memoria residente pasa de su techo; un plazo; y una preferencia del núcleo por terminar al hijo si falta memoria (`oom_score_adj`), para que muera el hijo y no la API. La ADR de la semántica del backtest (plan §8, punto 6) fija los valores con mediciones. Con un backtest en curso, el servicio no pasa de 435 MB medidos en Render.
 - **Uno a la vez:** pedir otro con uno en curso responde `backtest_in_progress`.
 - El padre valida con su contrato lo que devuelve el hijo, antes de guardarlo con `buoh_api`. Un hijo que falla o que se termina deja su backtest como fallido, con su causa, y la API sigue respondiendo.
@@ -196,23 +203,24 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
   - la contraseña: su longitud con NFC, la lista de bloqueo y las palabras del contexto; Argon2id con el vector de RFC 9106 §5.3, que usa `secret`;
   - TOTP con los vectores SHA-1 del apéndice B de RFC 6238, la ventana de un paso, el paso que vale una sola vez y el rechazo de uno anterior;
   - la duración de la sesión con un reloj falso, y que una actualización automática no renueva la inactividad;
-  - CSRF: la falta o el error de cada una de sus tres condiciones;
-  - los límites: las esperas, el tope de 100, la dirección del proxy y la espera que no calcula ningún hash;
+  - CSRF: la falta o el error de cada una de sus tres condiciones, y el token que la web recupera con `GET /api/v1/sesion` después de recargar la página, que vale para la petición siguiente;
+  - los límites: las esperas por nombre y dirección, el límite por nombre, el tope de 100, la dirección del proxy y la espera que no calcula ningún hash; y que un nombre que existe y uno que no reciben la misma respuesta en cada intento, también en el sexto y en el vigésimo;
   - las cabeceras y la política de contenido en cada respuesta, también en un 404, un 500 y un archivo estático, y que los hashes coinciden con los scripts en línea;
-  - ningún secreto en ninguna respuesta ni línea de registro (§11);
+  - que cada secreto solo aparece en su canal de §11;
   - `openapi:check`.
 - **Integración**, con PostgreSQL local:
   - las migraciones de la API con la credencial dueña, y sus errores saneados;
-  - con `buoh_api`, `UPDATE`, `DELETE` y `TRUNCATE` de la auditoría y el DDL fallan, y de las sesiones solo cambian las columnas permitidas; con `buoh_lectura`, leer `buoh_api` falla con `42501`;
+  - con `buoh_api`, `UPDATE`, `DELETE`, `TRUNCATE` y el DDL fallan en todas sus tablas; con `buoh_lectura`, leer `buoh_api` falla con `42501`;
   - el recorrido completo, con `inject` de Fastify contra la base: enlace, alta, inicio, cierre, cierre de las demás y restablecimiento;
-  - un enlace usado dos veces a la vez solo vale una;
-  - dos cuentas de prueba que no se ven;
+  - un enlace usado dos veces a la vez solo vale una, y dos inicios de sesión a la vez con el mismo código solo dejan entrar a uno;
+  - dos cuentas de prueba que no se ven, y que ninguna ve las entradas sin cuenta;
   - `require` contra un servidor sin TLS falla en lugar de conectar sin cifrar.
 - **Web:** las pruebas de `out` siguen como están, más la de que no llama a la API. Las de `out-api` comprueban la pantalla de inicio de sesión, con sus atributos para los gestores de contraseñas, y que no tiene direcciones absolutas ni recursos de terceros.
 - **Blueprint:** la prueba de `render-datos.yaml` suma `buoh-api`: el plan, la región, una instancia, la ruta de salud, el comando con sus tamaños de V8, el `buildFilter` y ninguna credencial con su valor en el archivo.
 - **En producción, fuera de CI** (PR de evidencia):
   - desde fuera: las cabeceras y la política de contenido, que llega una sola `Strict-Transport-Security`, la redirección a HTTPS y que un inicio fallido no deja ninguna cookie;
   - con un usuario que no existe, que cambiar `X-Forwarded-For` en cada intento no esquiva el límite por dirección;
+  - que dos redes distintas cuentan por separado: con el sandbox en el límite por dirección, el propietario entra desde su casa;
   - el alta y el primer inicio de sesión del propietario;
   - la memoria y el tráfico de salida, que el propietario copia de Render.
 
@@ -253,7 +261,7 @@ Después, F2.4 trae la ruta `lectura` (§8), `buoh_api_lectura`, el token `api`,
 ### Relación con ADR anteriores
 
 - **ADR-0006:** la API y la web corren en un servicio web de Render, `buoh-api` (§10).
-- **ADR-0008:** §1 (la fila de `apps/web`) y §2 quedan sustituidas solo para `out-api`, que tiene cuentas y sesiones y, desde F2.4, secciones con datos reales sin la marca de ficticios. Para `apps/web/out` siguen vigentes. §4, la exportación estática con App Router, vale para las dos.
+- **ADR-0008:** para `out-api`, quedan sustituidas la columna «Qué no es» de la fila de `apps/web` en §1 y, en §2, las reglas de los datos ficticios: la primera y la de dibujar con datos ficticios las funciones de las fases 1 a 3. `out-api` tiene API, cuentas y sesiones y, desde F2.4, secciones con datos reales sin la marca de ficticios. Las demás reglas de §2 siguen valiendo para `out-api`: modo y salud separados, métricas con su contexto, ninguna pantalla que envíe órdenes, guarde credenciales o simule una conexión, y la marca «Disponible en Fase N». Para `apps/web/out` sigue valiendo todo. §4, la exportación estática con App Router, vale para las dos.
 - **ADR-0010:** no cambia. El escritorio sigue empaquetando `apps/web/out`.
 - **ADR-0013:** `render.yaml` sigue siendo solo el sitio. Lo que su §8 dejaba fuera de Render, la API y `apps/web`, entra en `render-datos.yaml` con esta ADR.
 - **ADR-0016 §2 y §3:** el servicio cuesta lo previsto, y se crea al fusionar su PR de despliegue.
@@ -268,9 +276,10 @@ Después, F2.4 trae la ruta `lectura` (§8), `buoh_api_lectura`, el token `api`,
   - la dirección de buoh en los favoritos;
   - que buoh nunca envía enlaces para entrar, ni por correo ni por mensajes;
   - los límites de intentos y la auditoría, que muestra los intentos.
-- **Secretos en el servidor.** El secreto TOTP tiene que estar en el servidor: quien consiga la base y la clave de cifrado puede generar códigos. La contraseña, con Argon2id y la clave del servidor, resiste un ataque sin conexión mientras esa clave siga secreta. Cambiar una de las dos claves obliga a restablecer la credencial.
+- **Secretos en el servidor.** El secreto TOTP tiene que estar en el servidor: quien consiga la base y la clave de cifrado puede generar códigos. La contraseña, con Argon2id y la clave del servidor, resiste un ataque sin conexión mientras esa clave siga secreta. Cambiar la clave de la contraseña o la del TOTP obliga a restablecer la credencial.
 - **Dos factores.** Quien robe el teléfono con la app necesita además la contraseña, y quien robe la contraseña necesita el teléfono.
 - **Quedarse fuera.** Con 100 fallos seguidos, o sin el teléfono, solo Render devuelve el acceso. Quien pierde el acceso a Render pierde también buoh, como ya pasa con el sistema de datos.
+- **Bloqueo provocado.** Quien conozca el nombre de usuario puede deshabilitar la credencial desde muchas direcciones, en al menos 80 minutos (§1). No entra, pero el propietario tiene que volver con `restablecer`. Lo mitiga que el nombre no salga del nombre público del propietario ni se publique.
 - **Volver a entrar** cuesta la contraseña y un código al menos una vez al día, y después de una hora sin usar buoh.
 - **Costo:** 7 USD más al mes, unos 26 en total.
 - **Credenciales.** La API tiene el rol que escribe sus tablas y, desde F2.4, el de lectura. La credencial dueña sigue solo en `buoh-operaciones`, que desde el PR 6 compila también la API.
@@ -283,14 +292,14 @@ Después, F2.4 trae la ruta `lectura` (§8), `buoh_api_lectura`, el token `api`,
 | Alternativa | Motivo |
 |---|---|
 | Llave de acceso (*passkey*) | Era la recomendación de la dirección técnica: resiste las páginas falsas, y el servidor solo guarda su parte pública. El propietario eligió la contraseña con código. |
-| Llave de acceso y contraseña con código | Dos entradas que proteger, con más código y más pruebas, para un solo usuario. |
+| Llave de acceso y contraseña con código | El propietario eligió la B. Además, serían dos entradas que proteger, con más código y más pruebas, para un solo usuario. |
 | Entrar con Google u otra cuenta de terceros | buoh dependería de otra empresa, y su autenticación va separada de las cuentas de terceros ([seguridad y rigor](../../gobierno/seguridad-y-rigor-cuantitativo.md) §5). |
 | Enlace por correo | Pide un proveedor de correo nuevo, y el correo pasa a ser la llave. |
 | Solo contraseña | Un solo factor para una API en internet que controlará estrategias. |
 | Códigos de recuperación | Otro secreto que guardar. Render ya es la raíz de la confianza y de la recuperación. |
 | Una ruta de la API que crea cuentas, protegida por un secreto | Otra puerta en internet. La orden `cuenta` necesita el panel de Render. |
 | Una sesión en un token firmado que guarda el navegador | No se puede cerrar sin guardar estado en el servidor, y `F2-AUTH-001` pide una sesión de servidor. |
-| Un contador de fallos que se modifica | Las tablas son append-only, y los fallos se cuentan con los intentos guardados. |
+| Un contador de fallos, o columnas de las sesiones, que se modifican | Los roles de ejecución solo insertan y leen (ADR-0006 y ADR-0018 §8): los fallos se cuentan con los intentos guardados, y la actividad y el cierre de una sesión son filas nuevas. |
 | La seguridad por filas de PostgreSQL | Con una cuenta y una sola escritora aporta poco. Se revisa antes de abrir cuentas a otros. |
 | Un paquete nuevo para el código de lectura | Movería unas 6 000 líneas del worker en producción y unas 9 500 de sus pruebas. La ruta de exportación son pocas líneas (§8). |
 | Migrar el esquema de la API desde su servicio, al arrancar o con `preDeployCommand` | El servicio que recibe peticiones de internet tendría la credencial dueña, como ADR-0018 descartó para el worker. |
@@ -313,7 +322,7 @@ Consultadas el 2026-11-02:
 - [NIST SP 800-63B-4](https://pages.nist.gov/800-63-4/sp800-63b.html): las combinaciones de AAL2 (§2.2.1), la opción resistente al *phishing* en AAL2 (§2.2.2), la duración de la sesión en AAL2 (§2.2.3), las contraseñas y su guardado (§3.1.1), los códigos de un solo uso (§3.1.4) y el límite de intentos (§3.2.2).
 - [RFC 6238](https://www.rfc-editor.org/rfc/rfc6238) (TOTP, con los vectores del apéndice B), [RFC 4226](https://www.rfc-editor.org/rfc/rfc4226) (HOTP) y [RFC 9106](https://www.rfc-editor.org/rfc/rfc9106) (Argon2, con el vector de §5.3). Con Node 24.22.0, `crypto.argon2Sync` reproduce ese vector, y el HMAC-SHA-1 de `node:crypto`, los seis vectores SHA-1 de RFC 6238.
 - [Node.js 24: `crypto.argon2`](https://nodejs.org/docs/latest-v24.x/api/crypto.html).
-- [OWASP: prevención de CSRF](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html): el token sincronizado, las cabeceras propias, *Fetch Metadata* y los tipos de contenido simples.
+- [OWASP: prevención de CSRF](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html): el token sincronizado, los tokens con HMAC atados a la sesión, las cabeceras propias, *Fetch Metadata* y los tipos de contenido simples.
 - [MDN: `Set-Cookie`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie), con los prefijos `__Host-` y `__Host-Http-`.
 - [Public Suffix List](https://publicsuffix.org/list/public_suffix_list.dat), con `onrender.com`.
 - Render: [SSH y Shell](https://render.com/docs/ssh), [health checks](https://render.com/docs/health-checks) y [referencia del Blueprint](https://render.com/docs/blueprint-spec), con `generateValue` y `sync: false`.
