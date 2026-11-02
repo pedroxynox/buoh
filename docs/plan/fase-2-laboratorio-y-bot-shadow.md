@@ -91,7 +91,7 @@ apps/signal-engine/      # F2.9: motor de señales shadow
 - `render-datos.yaml`, un Blueprint de Render aparte de `render.yaml`, que sigue siendo solo el sitio, y su prueba: los servicios del sistema de datos, de la API y del motor ([ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §2).
 - `test-vectors/`: vectores sintéticos de estrategia, backtest y réplica.
 
-La API y el motor necesitan leer el log y los datasets con el código del worker. La ADR de la API y las cuentas (§8) decide si lo importan de `@buoh/market-data-worker` o si ese código pasa a un paquete propio. Si es un paquete, su PR lo añade a este corte.
+La API y el motor necesitan leer el log y los datasets con el código del worker. La ADR de la API y las cuentas (§8) decide si lo importan de `@buoh/market-data-worker` o si ese código pasa a un paquete propio. Si es un paquete, su PR lo añade a este corte. ([ADR-0019](../arquitectura/adr/0019-api-cuentas-y-auditoria.md) §8 decidió que lo importan del worker, por la ruta de exportación `@buoh/market-data-worker/lectura`, así que este corte no cambia.)
 
 ### Diferido explícitamente
 
@@ -360,7 +360,7 @@ F2.4 no tiene ADR: cambia el concepto de interfaz, que es su fuente canónica (P
 | **F2.1** Punto de control | `F2-CHECKPOINT-001` y `F2-GOV-001` (`packages/domain`) | este plan |
 | **F2.2** Sistema de datos en producción | `F2-DEPLOY-001`, `F2-ROLE-001` y `F2-RETENTION-001` | F2.1 |
 | **F2.3** API, cuentas y auditoría | `F2-API-001`, `F2-AUTH-001`, `F2-AUDIT-001` (sesiones) y `F2-GOV-001` (`apps/api`) | la captura de F2.2 corriendo en producción |
-| **F2.4** Datos reales en pantalla | `F2-UI-001` y `F2-CHART-001` | F2.3 |
+| **F2.4** Datos reales en pantalla | `F2-UI-001`, `F2-CHART-001` y `F2-AUDIT-001` (eventos de datos, ADR-0019 §5) | F2.3 |
 | **F2.5** Datasets vivos | `F2-THRESHOLD-001` y `F2-DATASET-001` | F2.2 con sus 7 días de captura |
 | **F2.6** Estrategias | `F2-STRATEGY-001`, `F2-AUDIT-001` (estrategias) y `F2-GOV-001` (`packages/strategy-sdk`) | F2.3 y las cuatro ADR del laboratorio |
 | **F2.7** Backtest | `F2-BACKTEST-001` y `F2-AUDIT-001` (backtests) | F2.5 y F2.6 |
@@ -430,7 +430,7 @@ Pueden sumarse, si sus ADR los eligen y el propietario los aprueba:
 | Si el agente recibe un acceso de solo lectura a producción, o si la evidencia llega solo por el propietario (§4, punto 10) | seguridad | decidida el 2026-10-31: acceso, también total; el agente usa el mínimo que necesite cada tarea (§4, punto 10), y la base de datos queda abierta a internet (ADR-0018 §9 y §12) |
 | Un cron job de Render para las operaciones del sistema de datos, unos 1 USD más al mes | dinero | decidida el 2026-10-31: sí (§11 y ADR-0018 §11) |
 | El costo de R2 con el redondeo de Cloudflare, unos 3 USD más al mes | dinero | decidida el 2026-10-31: sí, unos 19 USD al mes para el sistema de datos (§11 y ADR-0018 §14) |
-| Cómo inicia sesión el propietario | seguridad | F2.3 |
+| Cómo inicia sesión el propietario | seguridad | decidida el 2026-11-02: con una contraseña de buoh y un código de 6 cifras de una app de autenticación ([ADR-0019](../arquitectura/adr/0019-api-cuentas-y-auditoria.md) §1) |
 | Qué idiomas tiene el producto, para la preferencia de idioma del catálogo | producto | F2.4 |
 | Qué tipo de operación representan las posiciones hipotéticas, dentro de lo que ofrece Deriv para R_100 | producto | antes de abrir la ADR del modelo de estrategia (§8, punto 5) |
 | Cómo se reanuda una estrategia `shadow` detenida: a mano, como pide hoy el protocolo §5, o sola tras las degradaciones breves que la historia cubre, lo que cambia el protocolo. Las dos adelantan para `shadow` el «Volver a encender» del catálogo (`F2-STOP-001`) | riesgo y producto | antes de abrir la ADR del motor (§8, punto 8) |

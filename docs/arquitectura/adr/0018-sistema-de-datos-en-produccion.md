@@ -1,6 +1,6 @@
 # ADR-0018: Sistema de datos en producción (F2.2)
 
-- **Estado:** Aceptada
+- **Estado:** Aceptada; complementada por [ADR-0019](0019-api-cuentas-y-auditoria.md), que suma el servicio `buoh-api` a §2, los roles de la API a §8, su token de R2 a §10 y sus credenciales a §12, y hace que el paso 1 de §11 migre también el esquema de la API
 - **Fecha:** 2026-10-31
 - **Ámbito:** Fase 2, incremento F2.2 (`F2-DEPLOY-001`, `F2-ROLE-001` y `F2-RETENTION-001` del [plan de Fase 2](../../plan/fase-2-laboratorio-y-bot-shadow.md))
 - **Decisores:** Propietario de buoh (región, retención frente a los términos de Deriv, el cron job de unos 1 USD al mes, la base de datos abierta a internet y el costo de R2 con el redondeo de Cloudflare), a propuesta de la dirección técnica (lo demás).

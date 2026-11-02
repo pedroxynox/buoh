@@ -5,7 +5,7 @@
 - **Ámbito:** trabajo en paralelo a Fase 1, sin cambiar su alcance ni su puerta de salida
 - **Decisores:** Propietario de buoh, a propuesta de la dirección técnica
 - **Complementada por:** [ADR-0009](0009-prototipo-movil.md) (prototipo móvil), [ADR-0010](0010-prototipo-de-escritorio.md) (prototipo de escritorio) y [ADR-0013](0013-publicacion-del-sitio-en-render.md) (publicación del sitio oficial)
-- **Sustituida parcialmente por:** [ADR-0011](0011-identidad-desde-el-logo-del-propietario.md) en la tipografía de §4 (Sen en lugar de Manrope)
+- **Sustituida parcialmente por:** [ADR-0011](0011-identidad-desde-el-logo-del-propietario.md) en la tipografía de §4 (Sen en lugar de Manrope), y [ADR-0019](0019-api-cuentas-y-auditoria.md) en §1 y §2 solo para la exportación de `apps/web` que sirve la API (`apps/web/out-api`), que tiene cuentas y sesiones y, desde F2.4, datos reales. Para `apps/web/out` siguen vigentes
 - **Complementa:** [ADR-0001](0001-plataforma-y-stack.md) y [ADR-0003](0003-lenguajes-y-limites.md) (web con Next.js y React) y la [arquitectura objetivo](../arquitectura-objetivo.md) (`packages/design-system` y `apps/web`); añade `apps/site`.
 
 ## Contexto
