@@ -52,10 +52,10 @@ export interface PostgresConfig {
  * Lee la conexión a PostgreSQL de `env` (ADR-0019 §7). `BUOH_DEPLOYMENT_ENVIRONMENT` es obligatoria
  * y no admite `staging`. En `production`, `BUOH_POSTGRES_SSLMODE` es obligatoria y no admite
  * `disable`: una conexión sin cifrar es un error de configuración. Fuera de `production` es
- * `disable` por defecto, la de los servicios locales, y la base, el servidor, el puerto y el usuario
- * tienen los suyos (`infra/.env.example`); la contraseña siempre es obligatoria. Una variable
- * inválida o ausente lanza `ApiConfigError` con los nombres de todas las rechazadas, nunca sus
- * valores.
+ * `disable` por defecto, la de los servicios locales. En todos los entornos, como en el worker, la
+ * base, el servidor, el puerto y el usuario tienen por defecto los de los servicios locales
+ * (`infra/.env.example`), y la contraseña siempre es obligatoria. Una variable inválida o ausente
+ * lanza `ApiConfigError` con los nombres de todas las rechazadas, nunca sus valores.
  */
 export function loadPostgresConfig(env: Readonly<Record<string, string | undefined>>): {
   readonly environment: ApiEnvironment;

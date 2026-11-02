@@ -244,8 +244,9 @@ describe('AuditEvent', () => {
   });
 
   it('solo una entrada de intentos agrupados puede no ser de ninguna cuenta', () => {
+    // Lo rechaza la forma de cada acción, antes que la regla de los objetos sin cuenta.
     for (const action of AUDIT_ACTIONS.filter((name) => name !== 'login_failures')) {
-      expect(accepts(entry(action, { account_id: null })), action).toBe(false);
+      expect(rejectedPaths(entry(action, { account_id: null })), action).toEqual(['account_id']);
     }
     expect(accepts(ENTRIES.login_failures)).toBe(true);
   });
@@ -296,11 +297,32 @@ describe('AuditEvent', () => {
     expect(
       rejectedPaths(
         entry('login_failures', {
-          objects: [{ id: ACCOUNT, kind: 'account' }],
+          account_id: ACCOUNT,
+          objects: [{ id: OTHER_ACCOUNT, kind: 'account' }],
           reason: 'rate_limited',
         }),
       ),
     ).toEqual(['objects']);
+  });
+
+  it('una entrada sin cuenta no nombra ningún objeto, con cualquier motivo, porque ninguna cuenta la ve', () => {
+    const ids = { account: ACCOUNT, credential: CREDENTIAL, link: LINK, session: SESSION_A };
+    for (const reason of ['unknown_username', 'rate_limited']) {
+      for (const kind of auditObjectKindSchema.options) {
+        expect(
+          rejectedPaths(entry('login_failures', { objects: [{ id: ids[kind], kind }], reason })),
+          `${reason} ${kind}`,
+        ).toEqual(['objects']);
+      }
+    }
+    // Con su cuenta, los agrupados sí pueden nombrar su credencial.
+    for (const reason of ['disabled_credential', 'rate_limited']) {
+      const objects = [{ id: CREDENTIAL, kind: 'credential' }];
+      expect(
+        accepts(entry('login_failures', { account_id: ACCOUNT, objects, reason })),
+        reason,
+      ).toBe(true);
+    }
   });
 
   it('en los cierres de sesión, cada motivo con su autor', () => {
@@ -339,7 +361,7 @@ describe('AuditEvent', () => {
     expect(accepts(grouped({ reason: 'rate_limited' }))).toBe(true);
     expect(rejectedPaths(grouped({ account_id: ACCOUNT }))).toEqual(['account_id']);
     expect(rejectedPaths(grouped({ objects: [{ id: CREDENTIAL, kind: 'credential' }] }))).toEqual([
-      'account_id',
+      'objects',
     ]);
     expect(rejectedPaths(grouped({ reason: 'disabled_credential' }))).toEqual(['account_id']);
     expect(rejectedPaths(grouped({ window_started_at_utc: '2026-11-03T10:00:00.001Z' }))).toEqual([

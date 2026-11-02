@@ -1,4 +1,6 @@
+import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { resolve } from 'node:path';
 
 import { auditEventSchema, canonicalJson } from '@buoh/contracts';
 import pg, { type Pool } from 'pg';
@@ -26,6 +28,8 @@ const OWNER = 'buoh_dueno';
 const TEST_ROLES = [OWNER, RENDER_USER, OUTSIDER];
 const secret = () => randomBytes(32).toString('base64');
 const passwords = { outsider: secret(), render: secret() };
+/** El CLI compilado, el que lanza `buoh-operaciones`: `pnpm run test:integration` compila antes. */
+const MIGRATE_CLI = resolve(import.meta.dirname, '../dist/cli/migrate.js');
 
 let local: PostgresConfig;
 let platform: Pool | undefined;
@@ -61,6 +65,12 @@ async function runMigrate(user = RENDER_USER, password = passwords.render) {
   };
 }
 
+/** El CLI compilado con solo esas variables, como lo lanza `buoh-operaciones`. */
+function runCli(env: Record<string, string>) {
+  const run = spawnSync(process.execPath, [MIGRATE_CLI], { encoding: 'utf8', env });
+  return { status: run.status, stderr: run.stderr, stdout: run.stdout };
+}
+
 /** Espera a que la base no tenga sesiones de clientes, para borrarla sin cortar ninguna. */
 async function waitForNoSessions(server: Pool, database: string): Promise<void> {
   const deadline = Date.now() + 10_000;
@@ -87,8 +97,17 @@ async function dropDatabaseAndRoles(server: Pool): Promise<void> {
   }
 }
 
+/** Lo que corre una consulta: el pool del superusuario o un cliente con otro rol. */
+interface Queryable {
+  query(text: string, values?: unknown[]): Promise<unknown>;
+}
+
 /** El código SQLSTATE con que falla `text`, o `null` si no falla. */
-async function sqlState(pool: Pool, text: string, values: unknown[] = []): Promise<string | null> {
+async function sqlState(
+  pool: Queryable,
+  text: string,
+  values: unknown[] = [],
+): Promise<string | null> {
   return pool.query(text, values).then(
     () => null,
     (error: unknown) => String((error as { code?: unknown }).code),
@@ -225,14 +244,56 @@ describe('db:migrate de la API (ADR-0019 §7)', () => {
     }
   });
 
-  it('audit_events es append-only, también para su dueño: UPDATE, DELETE y TRUNCATE dan 23001', async () => {
+  it('el CLI compilado escribe una sola línea y sale con 0 si migra, 1 si no puede y 2 si la configuración no vale', () => {
+    expect(runCli(migrateEnvironment(RENDER_USER, passwords.render))).toEqual({
+      status: 0,
+      stderr: '',
+      stdout: '{"applied":[],"current":["0001_auditoria.sql"],"status":"migrated"}\n',
+    });
+    expect(runCli(migrateEnvironment(RENDER_USER, secret()))).toEqual({
+      status: 1,
+      stderr: '',
+      stdout: '{"code":"MIGRATION_FAILED","reason":"28P01","status":"failed"}\n',
+    });
+    const invalid = {
+      ...migrateEnvironment(RENDER_USER, passwords.render),
+      BUOH_POSTGRES_OWNER_ROLE: 'Dueño',
+    };
+    expect(runCli(invalid)).toEqual({
+      status: 2,
+      stderr: '',
+      stdout: `${JSON.stringify({
+        code: 'ConfigError',
+        message: 'Configuración inválida o ausente: BUOH_POSTGRES_OWNER_ROLE.',
+        status: 'failed',
+      })}\n`,
+    });
+  });
+
+  it('audit_events es append-only, también para su dueño: como buoh_dueno, UPDATE, DELETE y TRUNCATE dan 23001', async () => {
     await ready(admin).query(INSERT_AUDIT, auditRow(1));
-    for (const text of [
-      "UPDATE buoh_api.audit_events SET action = 'session_closed'",
-      'DELETE FROM buoh_api.audit_events',
-      'TRUNCATE buoh_api.audit_events',
-    ]) {
-      expect(await sqlState(ready(admin), text), text).toBe('23001');
+    // El usuario de Render con SET ROLE buoh_dueno, como db:migrate.
+    const owner = new pg.Client({
+      ...local,
+      database: DATABASE,
+      password: passwords.render,
+      ssl: false,
+      user: RENDER_USER,
+    });
+    await owner.connect();
+    try {
+      await owner.query(`SET ROLE ${OWNER}`);
+      const { rows: role } = await owner.query<{ name: string }>('SELECT current_user AS name');
+      expect(role).toEqual([{ name: OWNER }]);
+      for (const text of [
+        "UPDATE buoh_api.audit_events SET action = 'session_closed'",
+        'DELETE FROM buoh_api.audit_events',
+        'TRUNCATE buoh_api.audit_events',
+      ]) {
+        expect(await sqlState(owner, text), text).toBe('23001');
+      }
+    } finally {
+      await owner.end();
     }
     const { rows } = await ready(admin).query<{ n: number }>(
       'SELECT count(*)::int AS n FROM buoh_api.audit_events',
@@ -240,7 +301,13 @@ describe('db:migrate de la API (ADR-0019 §7)', () => {
     expect(rows).toEqual([{ n: 1 }]);
   });
 
-  it('cada columna es igual a su campo del documento, que es un objeto JSON', async () => {
+  it('audit_event_id es la clave: la misma entrada otra vez da 23505', async () => {
+    const row = auditRow(3);
+    expect(await sqlState(ready(admin), INSERT_AUDIT, row)).toBeNull();
+    expect(await sqlState(ready(admin), INSERT_AUDIT, row)).toBe('23505');
+  });
+
+  it('cada columna es igual a su campo del documento, que es un objeto JSON, y la hora y la acción tienen su formato', async () => {
     const [id, account, at, action, jcs] = auditRow(2);
     const insert = (values: unknown[]) => sqlState(ready(admin), INSERT_AUDIT, values);
     expect(await insert([id, '01900000-0000-7000-8000-00000000a002', at, action, jcs])).toBe(
@@ -255,8 +322,18 @@ describe('db:migrate de la API (ADR-0019 §7)', () => {
     expect(await insert([id, account, at, action, '[]'])).toBe('23514');
     expect(await insert([id, account, at, action, '{no es json'])).toBe('22P02');
     expect(await insert([id, account, '2026-11-03 10:00:00', action, jcs])).toBe('23514');
-    // Un documento al que le faltan los campos no cumple sus comprobaciones, tampoco sin cuenta.
+    // La hora y la acción tienen su formato aunque la columna y el documento coincidan.
     const event = JSON.parse(String(jcs)) as Record<string, unknown>;
+    const changed = (field: string, value: string) => JSON.stringify({ ...event, [field]: value });
+    for (const bad of ['2026-11-03T10:00:00Z', '2026-11-03 10:00:00.000']) {
+      expect(await insert([id, account, bad, action, changed('occurred_at_utc', bad)]), bad).toBe(
+        '23514',
+      );
+    }
+    for (const bad of ['session-started', 'Session_started']) {
+      expect(await insert([id, account, at, bad, changed('action', bad)]), bad).toBe('23514');
+    }
+    // Un documento al que le faltan los campos no cumple sus comprobaciones, tampoco sin cuenta.
     const without = (field: string) =>
       JSON.stringify(Object.fromEntries(Object.entries(event).filter(([key]) => key !== field)));
     for (const document of ['[]', '{}']) {

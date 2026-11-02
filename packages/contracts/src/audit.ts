@@ -216,11 +216,12 @@ const SESSIONS_CLOSED_ACTOR = {
 /**
  * El esquema runtime: la forma, y además:
  * - los objetos, únicos y en orden por `kind` y después por `id`, y al menos uno salvo en
- *   `login_failures`. Una cuenta entre los objetos es siempre la de `account_id`;
+ *   `login_failures`. Una entrada sin cuenta, que ninguna cuenta ve (ADR-0019 §4), no nombra
+ *   ninguno, y una cuenta entre los objetos es siempre la de `account_id`;
  * - en `session_closed` y `sessions_closed`, cada motivo con su autor. `sessions_closed` solo va sin
  *   petición cuando lo pide la orden `cuenta`;
- * - en `login_failures`, un nombre que no existe no tiene cuenta ni objetos; una credencial
- *   deshabilitada sí tiene cuenta; y la ventana no empieza después de la entrada.
+ * - en `login_failures`, un nombre que no existe no tiene cuenta; una credencial deshabilitada sí la
+ *   tiene; y la ventana no empieza después de la entrada.
  */
 export const auditEventSchema = auditEventStructuralSchema.superRefine((event, context) => {
   const issue = (path: string, message: string): void => {
@@ -232,7 +233,11 @@ export const auditEventSchema = auditEventStructuralSchema.superRefine((event, c
   if (event.action !== 'login_failures' && event.objects.length === 0) {
     issue('objects', 'Una entrada que no agrupa intentos nombra al menos un objeto.');
   }
-  if (event.objects.some((object) => object.kind === 'account' && object.id !== event.account_id)) {
+  if (event.account_id === null && event.objects.length > 0) {
+    issue('objects', 'Una entrada sin cuenta no nombra objetos.');
+  } else if (
+    event.objects.some((object) => object.kind === 'account' && object.id !== event.account_id)
+  ) {
     issue('objects', 'Una entrada solo nombra la cuenta de su account_id.');
   }
   if (event.action === 'session_closed' && SESSION_CLOSED_ACTOR[event.reason] !== event.actor) {
@@ -247,11 +252,8 @@ export const auditEventSchema = auditEventStructuralSchema.superRefine((event, c
     }
   }
   if (event.action === 'login_failures') {
-    if (
-      event.reason === 'unknown_username' &&
-      (event.account_id !== null || event.objects.length > 0)
-    ) {
-      issue('account_id', 'Los intentos con un nombre que no existe no tienen cuenta ni objetos.');
+    if (event.reason === 'unknown_username' && event.account_id !== null) {
+      issue('account_id', 'Los intentos con un nombre que no existe no tienen cuenta.');
     }
     if (event.reason === 'disabled_credential' && event.account_id === null) {
       issue('account_id', 'Una credencial deshabilitada es de una cuenta.');

@@ -27,7 +27,7 @@ Escribe una sola línea JSON en stdout, con la forma de la del `db:migrate` del 
 | Salida | Línea |
 |---:|---|
 | 0 | `{"applied":[…],"current":[…],"status":"migrated"}`: las aplicadas en esta ejecución y todas las de la API |
-| 1 | `{"code":"MIGRATION_INVALID","migration":…,"reason":…,"status":"failed"}` si las migraciones no cuadran (`migration_changed`, `migration_unknown` o `migration_out_of_sequence`), o `{"code":"MIGRATION_FAILED",…,"reason":…,"status":"failed"}` si PostgreSQL no responde o rechaza el SQL, con el SQLSTATE o el código del error y, si rechazó una migración, `migration` |
+| 1 | `{"code":"MIGRATION_INVALID","migration":…,"reason":…,"status":"failed"}` si las migraciones no cuadran (`migration_changed`, `migration_unknown` o `migration_out_of_sequence`), o `{"code":"MIGRATION_FAILED",…,"reason":…,"status":"failed"}` si PostgreSQL no responde o rechaza el SQL, con el motivo saneado (el SQLSTATE, el código del error o el nombre de su clase, como `Error` con un servidor sin TLS) y, si rechazó una migración, `migration` |
 | 2 | `{"code":"ConfigError","message":"Configuración inválida o ausente: …","status":"failed"}`, con los nombres de las variables rechazadas |
 
 Nunca escribe el mensaje de un error, que puede llevar el usuario, la base o el servidor.

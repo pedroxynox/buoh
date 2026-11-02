@@ -51,7 +51,7 @@ const operationsEnvironmentSchema = z.object({
  * `buoh_api` llega con el PR 6 de ADR-0019 §14, con `fromService` desde `buoh-api`, junto con la
  * compilación de la API. Sin ella, el paso 1 no toca la API (ADR-0019 §7). Van en otro objeto para
  * que la prueba del Blueprint, que compara las variables de `render-datos.yaml` con las del primero,
- * no la pida antes.
+ * no la pida antes, y esa prueba exige que cada una sea opcional.
  */
 const pendingEnvironmentSchema = z.object({
   BUOH_API_POSTGRES_PASSWORD: rolePassword.optional(),
