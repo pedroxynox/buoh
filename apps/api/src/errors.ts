@@ -42,10 +42,35 @@ export function errorBody(code: ApiErrorCode, requestId: string): string {
   return JSON.stringify(apiErrorSchema.parse({ error: { code, request_id: requestId } }));
 }
 
+/** Un error `invalid_request` que la API escribe fuera de los ganchos de Fastify. */
+export interface RawErrorResponse {
+  readonly status: number;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: string;
+}
+
+/**
+ * Un error `invalid_request` con su estado, para una respuesta que no pasa por los ganchos de
+ * Fastify: lleva aquí las cabeceras de seguridad y cierra la conexión.
+ */
+export function rawErrorResponse(status: number, requestId: string): RawErrorResponse {
+  const body = errorBody('invalid_request', requestId);
+  return {
+    status,
+    headers: {
+      ...JSON_RESPONSE_HEADERS,
+      connection: 'close',
+      'content-length': String(Buffer.byteLength(body)),
+      'content-type': JSON_CONTENT_TYPE,
+    },
+    body,
+  };
+}
+
 /**
  * La respuesta HTTP completa de un error que el servidor rechaza antes de crear la petición, como
- * un mensaje HTTP mal formado: Fastify la escribe en el socket sin pasar por sus ganchos, así que
- * lleva aquí las cabeceras de seguridad. `null` si la conexión ya se cortó.
+ * un mensaje HTTP mal formado: Fastify la escribe en el socket sin pasar por sus ganchos. `null`
+ * si la conexión ya se cortó.
  */
 export function clientErrorResponse(error: unknown, requestId: string): string | null {
   const code: unknown = error instanceof Error ? (error as { code?: unknown }).code : undefined;
@@ -54,13 +79,7 @@ export function clientErrorResponse(error: unknown, requestId: string): string |
   }
   const status =
     code === 'ERR_HTTP_REQUEST_TIMEOUT' ? 408 : code === 'HPE_HEADER_OVERFLOW' ? 431 : 400;
-  const body = errorBody('invalid_request', requestId);
-  const headers: Record<string, string> = {
-    ...JSON_RESPONSE_HEADERS,
-    connection: 'close',
-    'content-length': String(Buffer.byteLength(body)),
-    'content-type': JSON_CONTENT_TYPE,
-  };
-  const lines = Object.entries(headers).map(([name, value]) => `${name}: ${value}\r\n`);
-  return `HTTP/1.1 ${String(status)} ${STATUS_CODES[status] ?? 'Error'}\r\n${lines.join('')}\r\n${body}`;
+  const response = rawErrorResponse(status, requestId);
+  const lines = Object.entries(response.headers).map(([name, value]) => `${name}: ${value}\r\n`);
+  return `HTTP/1.1 ${String(status)} ${STATUS_CODES[status] ?? 'Error'}\r\n${lines.join('')}\r\n${response.body}`;
 }

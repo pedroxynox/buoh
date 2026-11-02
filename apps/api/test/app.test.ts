@@ -26,6 +26,11 @@ function route(url: string, handler: ApiRoute['handler'], extra: Partial<ApiRout
   };
 }
 
+/** Un error de prueba con su código y su estado, y el secreto en el mensaje. */
+function codedError(code: string, statusCode: number): Error {
+  return Object.assign(new Error(SECRET), { code, statusCode });
+}
+
 const TEST_ROUTES: readonly ApiRoute[] = [
   ...API_ROUTES,
   route('/api/prueba/falla', () => {
@@ -33,29 +38,61 @@ const TEST_ROUTES: readonly ApiRoute[] = [
   }),
   route('/api/prueba/estado-propio', () => {
     // Un error que no es de Fastify, con su propio estado: la API no se fía de él.
-    throw Object.assign(new Error(SECRET), { code: 'E_PROPIO', statusCode: 401 });
+    throw codedError('E_PROPIO', 401);
   }),
   route('/api/prueba/fastify-415', () => {
-    throw Object.assign(new Error(SECRET), {
-      code: 'FST_ERR_CTP_INVALID_MEDIA_TYPE',
-      statusCode: 415,
-    });
+    throw codedError('FST_ERR_CTP_INVALID_MEDIA_TYPE', 415);
   }),
   route('/api/prueba/fastify-404', () => {
-    throw Object.assign(new Error(SECRET), { code: 'FST_ERR_NOT_FOUND', statusCode: 404 });
+    throw codedError('FST_ERR_NOT_FOUND', 404);
+  }),
+  route('/api/prueba/fastify-500', () => {
+    throw codedError('FST_ERR_PRUEBA_500', 500);
   }),
   route('/api/prueba/fastify-503', () => {
-    throw Object.assign(new Error(SECRET), { code: 'FST_ERR_PRUEBA', statusCode: 503 });
+    throw codedError('FST_ERR_PRUEBA_503', 503);
+  }),
+  route('/api/prueba/nombre-con-datos', () => {
+    // Un código y un nombre que no son identificadores: llevan datos, y ninguno llega al registro.
+    throw Object.assign(new Error(SECRET), { code: `E_${SECRET}`, name: `Error ${SECRET}` });
   }),
   route('/api/prueba/salida-invalida', () => ({
     status: 200,
     body: { status: 'ok', extra: SECRET },
   })),
   route('/api/prueba/estado-no-declarado', () => ({ status: 202, body: { status: 'ok' } })),
+  route('/api/prueba/texto', () => ({ status: 200, body: `{"status":"ok","extra":"${SECRET}"}` })),
+  route('/api/prueba/texto-no-declarado', () => ({ status: 202, body: SECRET })),
+  route('/api/prueba/buffer', () => ({ status: 200, body: Buffer.from(SECRET) })),
+  route('/api/prueba/sin-cuerpo', () => ({ status: 200, body: undefined })),
+  route('/api/prueba/parametro/:id', () => ({ status: 200, body: { status: 'ok' } })),
   route('/api/prueba/consulta', (request) => ({ status: 200, body: request.query }), {
-    querystring: z.strictObject({ n: z.string().regex(/^\d{1,3}$/u) }),
-    responses: { 200: z.strictObject({ n: z.string() }) },
+    // La consulta y la respuesta cambian lo que validan: la ruta recibe el número, y la respuesta
+    // sale con el campo que añade su esquema.
+    querystring: z.strictObject({
+      n: z
+        .string()
+        .regex(/^\d{1,3}$/u)
+        .transform(Number),
+    }),
+    responses: { 200: z.strictObject({ n: z.number(), origen: z.string().default('esquema') }) },
   }),
+];
+
+/**
+ * Dos métodos en una misma URL, como tendrá `/api/v1/sesion` (ADR-0019 §2). La tabla solo admite
+ * GET por ahora, así que el POST se declara a la fuerza: el GET que responde el 201 del POST no
+ * puede salir con el contrato del POST.
+ */
+const TWO_METHOD_ROUTES: readonly ApiRoute[] = [
+  route('/api/prueba/dos-metodos', () => ({ status: 201, body: { status: 'ok', extra: SECRET } })),
+  {
+    ...route('/api/prueba/dos-metodos', () => ({ status: 201, body: { status: 'ok' } }), {
+      operationId: 'postDosMetodos',
+      responses: { 201: apiHealthSchema },
+    }),
+    method: 'POST',
+  } as unknown as ApiRoute,
 ];
 
 function expectSecurityHeaders(response: LightMyRequestResponse): void {
@@ -119,6 +156,32 @@ describe('rutas que no existen', () => {
   });
 });
 
+describe('rutas que Fastify no puede leer', () => {
+  it.each([
+    ['un % mal codificado', `/api/${SECRET}%zz`, 400],
+    ['un parámetro de más de 100 caracteres', `/api/prueba/parametro/${SECRET.repeat(5)}`, 414],
+  ] as const)(
+    '%s responde invalid_request con las cabeceras, sin repetir la ruta, y deja su línea',
+    async (_name, url, status) => {
+      const { app, lines } = testApp(TEST_ROUTES);
+      const response = await app.inject({ method: 'GET', url });
+      expectError(response, status, 'invalid_request');
+      expectSecurityHeaders(response);
+      expect(response.body).not.toContain(SECRET);
+      expect(lines).toEqual([
+        {
+          event: 'api_request',
+          method: 'GET',
+          route: null,
+          status,
+          duration_ms: 5,
+          request_id: testRequestId(1),
+        },
+      ]);
+    },
+  );
+});
+
 describe('errores', () => {
   it('un fallo de la ruta responde internal, sin el mensaje ni la traza', async () => {
     const { app, lines } = testApp(TEST_ROUTES);
@@ -161,15 +224,30 @@ describe('errores', () => {
     expect(lines.filter((line) => line.event === 'api_error')).toEqual([]);
   });
 
-  it('un error de Fastify con un estado 5xx responde internal', async () => {
+  it.each([500, 503])('un error de Fastify con el estado %i responde internal', async (status) => {
     const { app, lines } = testApp(TEST_ROUTES);
-    const response = await app.inject({ method: 'GET', url: '/api/prueba/fastify-503' });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/prueba/fastify-${String(status)}`,
+    });
     expectError(response, 500, 'internal');
     expect(lines).toContainEqual({
       event: 'api_error',
       request_id: testRequestId(1),
-      error: 'FST_ERR_PRUEBA',
+      error: `FST_ERR_PRUEBA_${String(status)}`,
     });
+  });
+
+  it('un error con datos en su código y en su nombre se registra como Error', async () => {
+    const { app, lines } = testApp(TEST_ROUTES);
+    const response = await app.inject({ method: 'GET', url: '/api/prueba/nombre-con-datos' });
+    expectError(response, 500, 'internal');
+    expect(lines).toContainEqual({
+      event: 'api_error',
+      request_id: testRequestId(1),
+      error: 'Error',
+    });
+    expect(JSON.stringify(lines) + response.body).not.toContain(SECRET);
   });
 
   it('una salida que no cumple su contrato responde internal, nunca a medias', async () => {
@@ -190,11 +268,46 @@ describe('errores', () => {
     expectError(response, 500, 'internal');
   });
 
-  it('valida la consulta con su contrato y entrega a la ruta lo validado', async () => {
+  it.each([
+    '/api/prueba/texto',
+    '/api/prueba/texto-no-declarado',
+    '/api/prueba/buffer',
+    '/api/prueba/sin-cuerpo',
+  ])(
+    '%s: un cuerpo que no es un objeto ni una lista responde internal, sin salir tal cual',
+    async (url) => {
+      const { app, lines } = testApp(TEST_ROUTES);
+      const response = await app.inject({ method: 'GET', url });
+      expectError(response, 500, 'internal');
+      expectSecurityHeaders(response);
+      expect(response.body).not.toContain(SECRET);
+      expect(lines).toContainEqual({
+        event: 'api_error',
+        request_id: testRequestId(1),
+        error: 'ResponseContractError',
+      });
+    },
+  );
+
+  it('cada método de una misma URL responde con su propio contrato', async () => {
+    const { app, lines } = testApp(TWO_METHOD_ROUTES);
+    const get = await app.inject({ method: 'GET', url: '/api/prueba/dos-metodos' });
+    expectError(get, 500, 'internal');
+    expect(get.body).not.toContain(SECRET);
+    const post = await app.inject({ method: 'POST', url: '/api/prueba/dos-metodos' });
+    expect(post.statusCode).toBe(201);
+    expect(post.json()).toEqual({ status: 'ok' });
+    expect(lines.filter((line) => line.event === 'api_request')).toMatchObject([
+      { method: 'GET', route: '/api/prueba/dos-metodos', status: 500 },
+      { method: 'POST', route: '/api/prueba/dos-metodos', status: 201 },
+    ]);
+  });
+
+  it('valida la consulta con su contrato y entrega a la ruta y al cliente lo validado', async () => {
     const { app } = testApp(TEST_ROUTES);
     const valid = await app.inject({ method: 'GET', url: '/api/prueba/consulta?n=12' });
     expect(valid.statusCode).toBe(200);
-    expect(valid.json()).toEqual({ n: '12' });
+    expect(valid.json()).toEqual({ n: 12, origen: 'esquema' });
     for (const url of [
       '/api/prueba/consulta',
       '/api/prueba/consulta?n=abc',
@@ -215,6 +328,13 @@ describe('cierre', () => {
     await closing;
     expect(response.statusCode).toBe(200);
     expectSecurityHeaders(response);
+  });
+});
+
+describe('configuración de Fastify', () => {
+  it('deja handlerTimeout en 0, fuera del aviso GHSA-3qgw-9275-xf8w', () => {
+    const { app } = testApp();
+    expect((app.initialConfig as { readonly handlerTimeout?: unknown }).handlerTimeout).toBe(0);
   });
 });
 
@@ -269,6 +389,7 @@ describe('registro', () => {
       await app.inject({ method: 'GET', url: '/api/salud', headers }),
       await app.inject({ method: 'GET', url: `/api/salud?token=${SECRET}`, headers }),
       await app.inject({ method: 'GET', url: `/api/${SECRET}`, headers }),
+      await app.inject({ method: 'GET', url: `/api/${SECRET}%zz`, headers }),
       await app.inject({ method: 'GET', url: '/api/prueba/falla', headers }),
     ];
     const logged = JSON.stringify(lines);

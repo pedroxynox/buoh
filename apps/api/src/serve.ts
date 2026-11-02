@@ -19,6 +19,22 @@ export interface ServeDeps {
   readonly setExitCode: (code: number) => void;
 }
 
+/** Lo que `serve` necesita de `process` para escuchar las señales. */
+export interface SignalSource {
+  on(signal: StopSignal, listener: () => void): unknown;
+}
+
+/**
+ * El `onSignal` de `serve` sobre `process`. Usa `on`, no `once`: con `once`, una segunda `SIGTERM`
+ * en plena parada ya no tendría oyente, y Node terminaría el proceso sin esperar a las peticiones
+ * en curso. El oyente de `serve` ya ignora las repeticiones.
+ */
+export function signalsOf(source: SignalSource): ServeDeps['onSignal'] {
+  return (signal, listener) => {
+    source.on(signal, listener);
+  };
+}
+
 /**
  * Arranca la API y la para con `SIGTERM` o `SIGINT` (ADR-0019 §10): deja de aceptar conexiones y
  * termina las peticiones en curso. Una segunda señal no hace nada más. Si el cierre falla, deja

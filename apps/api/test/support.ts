@@ -1,3 +1,6 @@
+import { Duplex } from 'node:stream';
+
+import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, vi } from 'vitest';
 
 import { buildApp } from '../src/app.js';
@@ -6,8 +9,9 @@ import type { ApiRoute } from '../src/routes.js';
 
 /**
  * Guardas de determinismo, como en las suites del dominio: la API no puede leer el reloj real, los
- * UUID aleatorios ni la red. El reloj y los identificadores le llegan inyectados. `Math.random` no
- * se prohíbe: avvio, el cargador de plugins de Fastify, lo usa para numerar sus pasos de arranque,
+ * UUID aleatorios ni la red. El reloj y los identificadores le llegan inyectados. Las funciones
+ * aleatorias de `node:crypto` las prohíbe `test/setup.ts` en todas las pruebas. `Math.random` no se
+ * prohíbe: avvio, el cargador de plugins de Fastify, lo usa para numerar sus pasos de arranque,
  * que no llegan a ninguna respuesta ni al registro.
  */
 export function useDeterminismGuards(): void {
@@ -67,4 +71,59 @@ export function testApp(routes?: readonly ApiRoute[]) {
     ...(routes === undefined ? {} : { routes }),
   });
   return { app, lines };
+}
+
+/** Una respuesta HTTP cruda, con los nombres de las cabeceras en minúsculas. */
+export interface RawResponse {
+  readonly statusLine: string;
+  readonly headers: ReadonlyMap<string, string>;
+  /** Cuántas veces llega cada cabecera. */
+  readonly headerCounts: ReadonlyMap<string, number>;
+  readonly body: string;
+}
+
+export function parseRawResponse(raw: string): RawResponse {
+  const end = raw.indexOf('\r\n\r\n');
+  const [statusLine = '', ...headerLines] = (end === -1 ? raw : raw.slice(0, end)).split('\r\n');
+  const headers = new Map<string, string>();
+  const headerCounts = new Map<string, number>();
+  for (const line of headerLines) {
+    const colon = line.indexOf(':');
+    const name = line.slice(0, colon).toLowerCase();
+    headers.set(name, line.slice(colon + 1).trim());
+    headerCounts.set(name, (headerCounts.get(name) ?? 0) + 1);
+  }
+  return { statusLine, headers, headerCounts, body: end === -1 ? '' : raw.slice(end + 4) };
+}
+
+/**
+ * Envía un mensaje HTTP crudo al servidor de `app` por una conexión en memoria, sin abrir ningún
+ * puerto, y devuelve lo que responde. Así llegan al analizador HTTP de Node los mensajes que
+ * `inject` no puede enviar, como uno sin `Host`. Termina cuando el servidor cierra la conexión: el
+ * mensaje pide `Connection: close`, es HTTP/1.0 o es uno que el servidor rechaza.
+ */
+export async function rawExchange(app: FastifyInstance, message: string): Promise<string> {
+  await app.ready();
+  return await new Promise((resolve) => {
+    const written: Buffer[] = [];
+    let sent = false;
+    const socket = new Duplex({
+      read() {
+        if (!sent) {
+          sent = true;
+          this.push(Buffer.from(message, 'latin1'));
+        }
+      },
+      write(chunk: Buffer, _encoding, callback) {
+        written.push(chunk);
+        callback();
+      },
+    });
+    const closed = () => {
+      resolve(Buffer.concat(written).toString('latin1'));
+    };
+    socket.once('finish', closed);
+    socket.once('close', closed);
+    app.server.emit('connection', socket);
+  });
 }

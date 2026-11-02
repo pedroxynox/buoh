@@ -1,7 +1,7 @@
 /**
- * Una línea del registro de la API (ADR-0019 §11). Solo existen estos campos: ninguna cabecera,
- * cookie, cuerpo, consulta, dirección IP ni navegador. Es una lista cerrada de campos, así que no
- * hace falta una lista de redacción.
+ * Una línea del registro de la API (ADR-0019 §11), también las que la CLI escribe en stderr. Solo
+ * existen estos campos: ninguna cabecera, cookie, cuerpo, consulta, dirección IP ni navegador. Es
+ * una lista cerrada de campos, así que no hace falta una lista de redacción.
  */
 export type ApiLogLine =
   | {
@@ -14,8 +14,11 @@ export type ApiLogLine =
       readonly request_id: string;
     }
   | { readonly event: 'api_error'; readonly request_id: string; readonly error: string }
-  | { readonly event: 'api_client_error'; readonly error: string }
+  | { readonly event: 'api_client_error'; readonly request_id: string; readonly error: string }
+  /** Los nombres de las variables de entorno rechazadas, nunca sus valores. */
+  | { readonly event: 'api_config_error'; readonly variables: readonly string[] }
   | { readonly event: 'api_listening'; readonly port: number }
+  | { readonly event: 'api_listen_failed'; readonly error: string }
   | { readonly event: 'api_stopping'; readonly signal: string }
   | { readonly event: 'api_stopped' }
   | { readonly event: 'api_stop_failed'; readonly error: string };

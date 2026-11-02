@@ -2,7 +2,11 @@ import { apiHealthSchema } from '@buoh/contracts';
 import type { FastifyRequest } from 'fastify';
 import { z, type ZodType } from 'zod';
 
-/** Lo que devuelve el manejador de una ruta: el estado y el cuerpo, que validará su esquema. */
+/**
+ * Lo que devuelve el manejador de una ruta: el estado y el cuerpo, que validará su esquema. El
+ * cuerpo es un objeto o una lista. Cualquier otro (un texto, un `Buffer`, un *stream* o ninguno)
+ * es `internal`, porque Fastify lo enviaría sin pasar por el serializador.
+ */
 export interface ApiRouteResult {
   readonly status: number;
   readonly body: unknown;

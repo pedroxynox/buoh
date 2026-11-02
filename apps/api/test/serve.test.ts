@@ -1,8 +1,10 @@
+import { EventEmitter } from 'node:events';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ApiConfig } from '../src/config.js';
 import type { ApiLogLine } from '../src/log.js';
-import { serve, type StopSignal } from '../src/serve.js';
+import { serve, signalsOf, type StopSignal } from '../src/serve.js';
 
 // Arranque y parada de la API (ADR-0019 §10): el SIGTERM de Render cierra el servidor.
 
@@ -67,5 +69,19 @@ describe('serve', () => {
     ]);
     expect(JSON.stringify(lines)).not.toContain(secret);
     expect(exitCodes).toEqual([1]);
+  });
+});
+
+describe('signalsOf', () => {
+  it('deja el oyente puesto: una segunda SIGTERM en plena parada le llega a serve, que la ignora', async () => {
+    const source = new EventEmitter();
+    const { app, deps, lines } = harness(() => new Promise(() => undefined));
+    await serve({ ...deps, onSignal: signalsOf(source) });
+    source.emit('SIGTERM');
+    source.emit('SIGTERM');
+    expect(source.listenerCount('SIGTERM')).toBe(1);
+    expect(source.listenerCount('SIGINT')).toBe(1);
+    expect(app.close).toHaveBeenCalledTimes(1);
+    expect(lines.slice(1)).toEqual([{ event: 'api_stopping', signal: 'SIGTERM' }]);
   });
 });

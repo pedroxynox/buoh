@@ -9,7 +9,7 @@ Desde la raíz del repositorio, con `pnpm`:
 | Comando | Qué hace |
 |---|---|
 | `pnpm --filter @buoh/api run build` | compila `src/` en `dist/` |
-| `pnpm --filter @buoh/api run test` | las pruebas sin red, con `inject` de Fastify, sin abrir puertos |
+| `pnpm --filter @buoh/api run test` | las pruebas, sin red ni puertos: `inject` de Fastify y, para los mensajes HTTP que `inject` no puede enviar, una conexión en memoria |
 | `pnpm run openapi:generate` | escribe `generated/openapi.json` desde `src/routes.ts` y los contratos |
 | `pnpm run openapi:check` | comprueba que `generated/openapi.json` está al día; corre en `verify:core` |
 | `BUOH_DEPLOYMENT_ENVIRONMENT=development pnpm --filter @buoh/api run start` | arranca la API en `127.0.0.1`, en el puerto de `PORT` o en el 10000 |
