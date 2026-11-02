@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { z } from 'zod';
 
+import { auditEventStructuralSchema } from '../src/audit.js';
 import { operationalConditionEventStructuralSchema } from '../src/conditions.js';
 import { dataQualityIncidentStructuralSchema } from '../src/data-quality.js';
 import {
@@ -21,6 +22,7 @@ const outputDirectory = resolve(packageRoot, 'generated/json-schema');
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  ['audit-event.schema.json', auditEventStructuralSchema],
   ['data-quality-incident.schema.json', dataQualityIncidentStructuralSchema],
   ['dataset-manifest.schema.json', datasetManifestStructuralSchema],
   ['health-report.schema.json', healthReportStructuralSchema],

@@ -2,7 +2,7 @@ import { deploymentEnvironmentSchema } from '@buoh/contracts';
 import { z } from 'zod';
 
 /** Los entornos de la API: en la Fase 2 no hay `staging` (plan de Fase 2, §4, punto 9). */
-const apiEnvironmentSchema = deploymentEnvironmentSchema.exclude(['staging']);
+export const apiEnvironmentSchema = deploymentEnvironmentSchema.exclude(['staging']);
 
 /** Render da a cada servicio web su puerto en `PORT`, y 10000 si no lo cambia. */
 export const DEFAULT_PORT = 10_000;

@@ -4,11 +4,13 @@ import pg, { type PoolClient } from 'pg';
 import { stderrAlert, type OperationalAlert } from '../operational/registry.js';
 import { createPool, postgresSslOption } from '../postgres/metadata-store.js';
 import {
+  ensureApiRole,
   ensureRuntimeRoles,
+  grantApiPrivileges,
   grantLogPrivileges,
   POSTGRES_ROLES,
   setRolePassword,
-  type LoginRole,
+  type PasswordRole,
 } from '../postgres/roles.js';
 import { failureReason } from '../source-log/source-event-log.js';
 import {
@@ -86,15 +88,19 @@ export interface OwnerDatabase {
   grantLogPrivileges(log: LogLocation): Promise<void>;
   /** Crea el esquema del log como `buoh_dueno`, si no existe. */
   createLogSchema(log: LogLocation): Promise<void>;
+  /** Crea el rol `buoh_api` o le vuelve a fijar sus atributos (`ensureApiRole`, ADR-0019 §7). */
+  ensureApiRole(): Promise<void>;
+  /** Da a `buoh_api` sus privilegios en el esquema de la API (`grantApiPrivileges`). */
+  grantApiPrivileges(): Promise<void>;
   /**
    * Si el rol inicia sesión con esa contraseña: `accepted`, `rejected` si PostgreSQL la rechaza
    * (`28P01`), o `unchecked` si no hay conexiones libres (`53300`), como con las 4 de `buoh_agente`
    * abiertas. La conexión de la comprobación cuenta en el límite del rol mientras dura. Cualquier
    * otro error, como un PostgreSQL que no responde, la rechaza con él.
    */
-  checkLogin(role: LoginRole, password: string): Promise<LoginCheck>;
+  checkLogin(role: PasswordRole, password: string): Promise<LoginCheck>;
   /** Pone la contraseña del rol con su verificador SCRAM (`setRolePassword`). */
-  setRolePassword(role: LoginRole, password: string): Promise<void>;
+  setRolePassword(role: PasswordRole, password: string): Promise<void>;
   /** Añade el informe a la tabla `operations_reports` del log. */
   appendReport(log: LogLocation, row: OperationsReportRow): Promise<void>;
   /**
@@ -239,7 +245,9 @@ export function openOwnerDatabase(
           throw error;
         }
       }),
+    ensureApiRole: () => withClient((client) => ensureApiRole(client)),
     ensureRuntimeRoles: () => withClient((client) => ensureRuntimeRoles(client)),
+    grantApiPrivileges: () => withClient((client) => grantApiPrivileges(client)),
     grantLogPrivileges: (log) => withClient((client) => grantLogPrivileges(client, log.schema)),
     lastCompletedReport: (log, step) =>
       asOwner(async (client) => {

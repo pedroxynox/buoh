@@ -46,10 +46,26 @@ const operationsEnvironmentSchema = z.object({
   BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY: nonEmpty,
 });
 
+/**
+ * Las variables que el servicio admite y que su Blueprint todavía no le da: la contraseña de
+ * `buoh_api` llega con el PR 6 de ADR-0019 §14, con `fromService` desde `buoh-api`, junto con la
+ * compilación de la API. Sin ella, el paso 1 no toca la API (ADR-0019 §7). Van en otro objeto para
+ * que la prueba del Blueprint, que compara las variables de `render-datos.yaml` con las del primero,
+ * no la pida antes.
+ */
+const pendingEnvironmentSchema = z.object({
+  BUOH_API_POSTGRES_PASSWORD: rolePassword.optional(),
+});
+
 /** Las variables que el worker lee y que el servicio no tiene (ADR-0018 §11). */
 const WORKER_VARIABLES = /^BUOH_(?:POSTGRES|S3)_/u;
 
 export interface OperationsConfig {
+  /**
+   * La contraseña que debe tener `buoh_api` (ADR-0019 §7), o `null` mientras el servicio no la
+   * tiene: entonces el paso 1 no crea el rol ni migra el esquema de la API.
+   */
+  readonly apiPassword: string | null;
   /** La conexión dueña, con el esquema `public`: los de los logs van con su nombre. */
   readonly owner: WorkerConfig['postgres'];
   /** La contraseña que debe tener cada rol de ejecución que inicia sesión. */
@@ -73,19 +89,23 @@ export function loadOperationsConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): OperationsConfig {
   const parsed = operationsEnvironmentSchema.safeParse(env);
+  const pending = pendingEnvironmentSchema.safeParse(env);
   const rejected = new Set(
-    parsed.success ? [] : parsed.error.issues.map((issue) => String(issue.path[0])),
+    [parsed, pending].flatMap((result) =>
+      result.success ? [] : result.error.issues.map((issue) => String(issue.path[0])),
+    ),
   );
   for (const [name, value] of Object.entries(env)) {
     if (value !== undefined && WORKER_VARIABLES.test(name)) {
       rejected.add(name);
     }
   }
-  if (!parsed.success || rejected.size > 0) {
+  if (!parsed.success || !pending.success || rejected.size > 0) {
     throw new ConfigError([...rejected].sort());
   }
   const value = parsed.data;
   return {
+    apiPassword: pending.data.BUOH_API_POSTGRES_PASSWORD ?? null,
     healthObjects: {
       accessKeyId: value.BUOH_SALUD_S3_ACCESS_KEY_ID,
       bucket: value.BUOH_SALUD_S3_BUCKET,
@@ -134,6 +154,24 @@ export function migrateEnvironment(
     BUOH_POSTGRES_PASSWORD: config.owner.password,
     BUOH_POSTGRES_PORT: String(config.owner.port),
     BUOH_POSTGRES_SCHEMA: schema,
+    BUOH_POSTGRES_SSLMODE: config.owner.sslMode,
+    BUOH_POSTGRES_USER: config.owner.user,
+  };
+}
+
+/**
+ * El entorno explícito del proceso de `db:migrate` de la API sobre el esquema `buoh_api`
+ * (ADR-0019 §7): solo la credencial dueña, con los nombres `BUOH_POSTGRES_*` que lee la API, y el
+ * rol dueño. No lleva la contraseña de `buoh_api` ni nada más del servicio.
+ */
+export function apiMigrateEnvironment(config: OperationsConfig): Record<string, string> {
+  return {
+    BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+    BUOH_POSTGRES_DB: config.owner.database,
+    BUOH_POSTGRES_HOST: config.owner.host,
+    BUOH_POSTGRES_OWNER_ROLE: POSTGRES_ROLES.owner,
+    BUOH_POSTGRES_PASSWORD: config.owner.password,
+    BUOH_POSTGRES_PORT: String(config.owner.port),
     BUOH_POSTGRES_SSLMODE: config.owner.sslMode,
     BUOH_POSTGRES_USER: config.owner.user,
   };

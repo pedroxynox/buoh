@@ -31,6 +31,18 @@ export const LOGIN_ROLES = [
 ] as const;
 export type LoginRole = (typeof LOGIN_ROLES)[number];
 
+/**
+ * El rol de la API (ADR-0019 §7), que inicia sesión: en el esquema `buoh_api`, uso del esquema y de
+ * sus secuencias, `SELECT` e `INSERT` en sus tablas y solo `SELECT` en la de migraciones; nada en
+ * los logs. No es un rol de ejecución del worker: `buoh-operaciones` solo lo crea cuando tiene su
+ * contraseña, que le llega con el PR 6 de ADR-0019 §14.
+ */
+export const API_ROLE = 'buoh_api';
+/** El esquema de la API, aparte de los logs, del que es dueño `buoh_dueno` (ADR-0019 §7). */
+export const API_SCHEMA = 'buoh_api';
+/** Los roles a los que `buoh-operaciones` pone contraseña: los de ejecución y el de la API. */
+export type PasswordRole = LoginRole | typeof API_ROLE;
+
 /** Conexiones de `buoh_agente` a la vez, para que no ocupe las 100 de Basic-256mb. */
 export const AGENT_CONNECTION_LIMIT = 4;
 /**
@@ -123,6 +135,7 @@ const ROLE_ATTRIBUTES = {
   [POSTGRES_ROLES.ingest]: 'LOGIN NOCREATEROLE',
   [POSTGRES_ROLES.owner]: 'NOLOGIN CREATEROLE',
   [POSTGRES_ROLES.reader]: 'NOLOGIN NOCREATEROLE',
+  [API_ROLE]: 'LOGIN NOCREATEROLE',
 } as const;
 
 /** Crea `role` con sus atributos o, si ya existe, se los vuelve a fijar. */
@@ -235,6 +248,46 @@ export async function grantLogPrivileges(client: Client, schema: string): Promis
   });
 }
 
+/**
+ * Crea el rol `buoh_api` o, si ya existe, le vuelve a fijar sus atributos (ADR-0019 §7): inicia
+ * sesión y no crea roles. Lo crea `buoh_dueno` (`SET LOCAL ROLE`), que lo administra como a los
+ * demás, en una transacción. Necesita `buoh_dueno` (`ensureRuntimeRoles`). Sin contraseña: la pone
+ * `setRolePassword`. Es idempotente.
+ */
+export async function ensureApiRole(client: Client): Promise<void> {
+  await inTransaction(client, async () => {
+    await client.query(`SET LOCAL ROLE ${ident(POSTGRES_ROLES.owner)}`);
+    await ensureRole(client, API_ROLE);
+  });
+}
+
+/**
+ * Da a `buoh_api` sus privilegios en el esquema de la API (ADR-0019 §7), en una transacción y como
+ * `buoh_dueno`, el dueño de sus tablas: uso del esquema, `SELECT` e `INSERT` en cada tabla, solo
+ * `SELECT` en la de migraciones, para que no pueda anotar una migración, y uso de las secuencias.
+ * Nada más: ni `UPDATE`, ni `DELETE`, ni `TRUNCATE`, ni crear objetos. `buoh_lectura` no recibe
+ * nada. Es idempotente, y una tabla nueva de la API recibe sus privilegios en la ejecución que la
+ * migra.
+ */
+export async function grantApiPrivileges(client: Client): Promise<void> {
+  await inTransaction(client, async () => {
+    await client.query(`SET LOCAL ROLE ${ident(POSTGRES_ROLES.owner)}`);
+    const { rows } = await client.query<{ table_name: string }>(
+      `SELECT table_name FROM information_schema.tables
+        WHERE table_schema = $1 AND table_type = 'BASE TABLE' ORDER BY table_name`,
+      [API_SCHEMA],
+    );
+    const s = ident(API_SCHEMA);
+    const api = ident(API_ROLE);
+    await client.query(`GRANT USAGE ON SCHEMA ${s} TO ${api}`);
+    for (const { table_name: table } of rows) {
+      const privileges = table === MIGRATIONS_TABLE ? 'SELECT' : 'SELECT, INSERT';
+      await client.query(`GRANT ${privileges} ON ${s}.${ident(table)} TO ${api}`);
+    }
+    await client.query(`GRANT USAGE ON ALL SEQUENCES IN SCHEMA ${s} TO ${api}`);
+  });
+}
+
 /** Las iteraciones del verificador SCRAM, las de PostgreSQL por defecto. */
 export const SCRAM_ITERATIONS = 4096;
 
@@ -267,16 +320,17 @@ export function scramSha256Verifier(
 export const MIN_ROLE_PASSWORD_LENGTH = 16;
 
 /**
- * Pone la contraseña de un rol de ejecución que inicia sesión, como `buoh_dueno`, que lo administra
- * (ADR-0018 §8). Envía el verificador SCRAM calculado aquí, nunca la contraseña.
+ * Pone la contraseña de un rol de ejecución que inicia sesión, o la de `buoh_api` (ADR-0019 §7),
+ * como `buoh_dueno`, que los administra (ADR-0018 §8). Envía el verificador SCRAM calculado aquí,
+ * nunca la contraseña.
  */
 export async function setRolePassword(
   client: Client,
-  role: LoginRole,
+  role: PasswordRole,
   password: string,
 ): Promise<void> {
-  if (!(LOGIN_ROLES as readonly string[]).includes(role)) {
-    throw new TypeError(`${role} no es un rol de ejecución que inicia sesión.`);
+  if (![...LOGIN_ROLES, API_ROLE].includes(role)) {
+    throw new TypeError(`${role} no es un rol que inicia sesión.`);
   }
   if (password.length < MIN_ROLE_PASSWORD_LENGTH) {
     throw new TypeError(

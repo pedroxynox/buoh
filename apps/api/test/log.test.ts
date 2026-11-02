@@ -11,9 +11,11 @@ function errorWith(fields: { readonly code?: unknown; readonly name?: string }):
 }
 
 describe('errorName', () => {
-  it('da el código de un error, si es un identificador', () => {
+  it('da el código de un error, si es un identificador, también el SQLSTATE de PostgreSQL', () => {
     expect(errorName(errorWith({ code: 'FST_ERR_VALIDATION' }))).toBe('FST_ERR_VALIDATION');
     expect(errorName(errorWith({ code: 'ECONNRESET', name: 'OtroNombre' }))).toBe('ECONNRESET');
+    expect(errorName(errorWith({ code: '42501', name: 'error' }))).toBe('42501');
+    expect(errorName(errorWith({ code: '28P01', name: 'error' }))).toBe('28P01');
   });
 
   it('da el nombre de su clase si el código falta o lleva datos', () => {

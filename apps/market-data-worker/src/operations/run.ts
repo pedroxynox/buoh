@@ -3,7 +3,7 @@ import { healthReportSchema, type HealthReport, type JsonValue } from '@buoh/con
 import { ConfigError } from '../config.js';
 import { type Scheduler } from '../deriv/ports.js';
 import { type OperationalAlert } from '../operational/registry.js';
-import { LOGIN_ROLES } from '../postgres/roles.js';
+import { API_ROLE, LOGIN_ROLES, type PasswordRole } from '../postgres/roles.js';
 import { failureReason } from '../source-log/source-event-log.js';
 import {
   isLogExpired,
@@ -15,6 +15,7 @@ import {
 } from '../successive-logs.js';
 import { type RunChild } from './child.js';
 import {
+  apiMigrateEnvironment,
   healthEnvironment,
   loadOperationsConfig,
   migrateEnvironment,
@@ -136,12 +137,17 @@ function migrateFailure(stdout: string, exitCode: number | null, timedOut: boole
   return `exit_${String(exitCode)}`;
 }
 
-/** Corre `db:migrate` sobre el esquema del log; da las aplicadas o el motivo saneado del fallo. */
-async function migrateLog(
+/**
+ * Corre un `db:migrate` en un proceso aparte, el del worker sobre el esquema de un log o el de la
+ * API, con su entorno; da las aplicadas o el motivo saneado del fallo. Los dos escriben la misma
+ * línea JSON.
+ */
+async function runMigrate(
   input: OperationsInput,
-  log: LogLocation,
+  child: 'api_migrate' | 'migrate',
+  env: Readonly<Record<string, string>>,
 ): Promise<{ readonly applied: string[] } | { readonly reason: string }> {
-  const result = await input.runChild('migrate', [], migrateEnvironment(input.config, log.schema));
+  const result = await input.runChild(child, [], env);
   if (result.stderr.length > 0) {
     input.forwardChildStderr(result.stderr);
   }
@@ -163,6 +169,45 @@ async function migrateLog(
   return { reason: migrateFailure(result.stdout, result.exitCode, result.timedOut) };
 }
 
+/** Corre `db:migrate` sobre el esquema del log. */
+function migrateLog(
+  input: OperationsInput,
+  log: LogLocation,
+): Promise<{ readonly applied: string[] } | { readonly reason: string }> {
+  return runMigrate(input, 'migrate', migrateEnvironment(input.config, log.schema));
+}
+
+/**
+ * El esquema y el rol de la API (ADR-0019 §7): crea o ajusta `buoh_api`, migra el esquema
+ * `buoh_api` con el `db:migrate` de la API, en un proceso aparte con solo la credencial dueña, y le
+ * da al rol sus privilegios. Anota los fallos y las migraciones aplicadas. Da si el rol existe, para
+ * ponerle después su contraseña.
+ */
+async function prepareApi(
+  input: OperationsInput,
+  failures: Report[],
+  applied: string[],
+): Promise<boolean> {
+  try {
+    await input.database.ensureApiRole();
+  } catch (error) {
+    failures.push({ action: 'api_role', reason: failureReason(error) });
+    return false;
+  }
+  const result = await runMigrate(input, 'api_migrate', apiMigrateEnvironment(input.config));
+  if ('reason' in result) {
+    failures.push({ action: 'api_migrate', reason: result.reason });
+    return true;
+  }
+  applied.push(...result.applied);
+  try {
+    await input.database.grantApiPrivileges();
+  } catch (error) {
+    failures.push({ action: 'api_grant', reason: failureReason(error) });
+  }
+  return true;
+}
+
 /**
  * Paso 1 (ADR-0018 §11): crea y ajusta los roles; aplica las migraciones pendientes a cada log que
  * existe, cada uno con `db:migrate` en un proceso aparte, y le da los privilegios; prepara el log
@@ -170,17 +215,24 @@ async function migrateLog(
  * ejecución que no inicia sesión con la suya (§8). Una que no se puede comprobar porque no hay
  * conexiones libres queda en `passwords_unchecked`, sin fallo. Sin los roles no sigue. Si falla otra
  * acción, sigue con las demás, y el paso termina `failed` con todas en `failures`.
+ *
+ * Con la contraseña de `buoh_api`, después de los logs, prepara también la API (`prepareApi`,
+ * ADR-0019 §7) y le pone esa contraseña; el informe lleva entonces `api_migrated`. Sin ella no toca
+ * la API: así es en producción hasta el PR 6 de ADR-0019 §14.
  */
 async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
   const { database } = input;
+  const { apiPassword } = input.config;
   const failures: Report[] = [];
   const migrated: Report[] = [];
+  const apiMigrated: string[] = [];
   const passwordsSet: string[] = [];
   const passwordsUnchecked: string[] = [];
   let prepared: number | null = null;
   const outcome = (): StepOutcome => ({
     log: null,
     report: {
+      ...(apiPassword === null ? {} : { api_migrated: apiMigrated }),
       failures,
       migrated,
       passwords_set: passwordsSet,
@@ -189,7 +241,11 @@ async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
     },
     status: failures.length === 0 ? 'completed' : 'failed',
     store:
-      failures.length > 0 || migrated.length > 0 || prepared !== null || passwordsSet.length > 0,
+      failures.length > 0 ||
+      migrated.length > 0 ||
+      apiMigrated.length > 0 ||
+      prepared !== null ||
+      passwordsSet.length > 0,
   });
   try {
     await database.ensureRuntimeRoles();
@@ -230,8 +286,14 @@ async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
   } catch (error) {
     failures.push({ action: 'logs', reason: failureReason(error) });
   }
-  for (const role of LOGIN_ROLES) {
-    const password = input.config.passwords[role];
+  const apiRoleReady = apiPassword !== null && (await prepareApi(input, failures, apiMigrated));
+  const passwords: (readonly [PasswordRole, string])[] = LOGIN_ROLES.map(
+    (role) => [role, input.config.passwords[role]] as const,
+  );
+  if (apiRoleReady) {
+    passwords.push([API_ROLE, apiPassword]);
+  }
+  for (const [role, password] of passwords) {
     try {
       const login = await database.checkLogin(role, password);
       if (login === 'rejected') {

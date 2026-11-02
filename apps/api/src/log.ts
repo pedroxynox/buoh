@@ -25,12 +25,13 @@ export type ApiLogLine =
 
 export type ApiLog = (line: ApiLogLine) => void;
 
-const ERROR_CODE = /^[A-Z][A-Z0-9_]{1,63}$/u;
+const ERROR_CODE = /^[A-Z0-9][A-Z0-9_]{1,63}$/u;
 const ERROR_NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/u;
 
 /**
- * El nombre saneado de un error: su código (`FST_ERR_…`, `ECONNRESET`) o el nombre de su clase,
- * nunca su mensaje, que puede llevar datos de la petición o de un servicio.
+ * El nombre saneado de un error: su código (`FST_ERR_…`, `ECONNRESET`, o el SQLSTATE de PostgreSQL,
+ * como `42501`) o el nombre de su clase, nunca su mensaje, que puede llevar datos de la petición o
+ * de un servicio.
  */
 export function errorName(error: unknown): string {
   if (!(error instanceof Error)) {
