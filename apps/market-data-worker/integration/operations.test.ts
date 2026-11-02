@@ -1,12 +1,13 @@
 import { randomBytes } from 'node:crypto';
 
-import { DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 import pg, { type Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { DERIV_SOURCE } from '../src/deriv/profile.js';
 import {
   createPool,
+  DROP_LOG_LOCK_TIMEOUT_MS,
   healthCommand,
   LOGIN_ROLES,
   loadConfig,
@@ -16,6 +17,7 @@ import {
   migrate,
   migrateCommand,
   openHealthStores,
+  openLogDeletion,
   openLogObjects,
   openOwnerDatabase,
   openStores,
@@ -154,6 +156,7 @@ async function operations(env = operationsEnvironment()) {
     now: clock.now,
     openDatabase: (config) =>
       openOwnerDatabase({ ...config, owner: plain(config.owner) }, { source: DERIV_SOURCE }),
+    openDeletion: (config, location) => openLogDeletion(config.operationsObjects, location),
     openObjects: (config, location) => openLogObjects(config.operationsObjects, location),
     runChild: inProcess,
     scheduler: clock.scheduler,
@@ -234,8 +237,10 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     expect(run.steps.map((line) => [line['step'], line['status']])).toEqual([
       ['roles_and_logs', 'completed'],
       ['health', 'completed'],
-      // Ningún log terminó: el informe final no guarda nada (ADR-0018 §6, «Traspaso»).
+      // Ningún log terminó: el informe final no guarda nada (ADR-0018 §6, «Traspaso»). Ninguno
+      // venció: la retención tampoco.
       ['final_health', 'completed'],
+      ['retention', 'completed'],
       ['verification', 'completed'],
       ['space', 'completed'],
     ]);
@@ -461,8 +466,8 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     expect(await sqlStateAs(POSTGRES_ROLES.health, passwords.health, 'SELECT 1')).toBe('28P01');
   });
 
-  // La última: los eventos que escribe en el log 1, sin su esquema de fuente guardado, cambian la
-  // salud de las ejecuciones siguientes.
+  // Los eventos que escribe en el log 1, sin su esquema de fuente guardado, cambian la salud de las
+  // ejecuciones siguientes: la prueba de la retención, después, no la mira.
   it('vuelve a leer con el token operaciones el segmento que toca, bajo el prefijo del log; uno que falta deja su alerta; y el espacio se mide una vez al día', async () => {
     const location = logLocation(1);
     const target = withLog(
@@ -588,6 +593,183 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       // Lo deja como estaba: el bucket es de todas las pruebas.
       await objects.putIfAbsent(key, bytes, 'application/gzip');
       objects.destroy();
+      s3.destroy();
+    }
+  });
+
+  // Después de la verificación: el log 1 tiene su latido de las 10:00 UTC del 2026-03-02 y sus
+  // objetos bajo logs/000001/, y el log 2 está preparado.
+  it('la retención: vence el log 1 y se borran su prefijo y su esquema, sin tocar los objetos ni las filas de los logs 2 y 3; después vence el 2, el activo de una captura detenida, y el preparado queda', async () => {
+    const s3 = new S3Client({
+      credentials: {
+        accessKeyId: local.s3.accessKeyId,
+        secretAccessKey: local.s3.secretAccessKey,
+      },
+      endpoint: local.s3.endpoint,
+      forcePathStyle: true,
+      region: local.s3.region,
+    });
+    /** Las claves del bucket bajo el prefijo, con su listado propio, sin el código del worker. */
+    const keysUnder = async (prefix: string): Promise<string[]> => {
+      const keys: string[] = [];
+      let token: string | undefined;
+      do {
+        const page = await s3.send(
+          new ListObjectsV2Command({
+            Bucket: local.s3.bucket,
+            ContinuationToken: token,
+            Prefix: prefix,
+          }),
+        );
+        keys.push(...(page.Contents ?? []).flatMap((item) => item.Key ?? []));
+        token = page.IsTruncated === true ? page.NextContinuationToken : undefined;
+      } while (token !== undefined);
+      return keys.sort();
+    };
+    const schemaExists = async (schema: string): Promise<boolean> =>
+      ((await ready(admin).query('SELECT 1 FROM pg_namespace WHERE nspname = $1', [schema]))
+        .rowCount ?? 0) > 0;
+    /** Las filas de las tablas de la captura de un log, que la retención de otro no puede cambiar. */
+    const captureRows = async (schema: string) =>
+      Promise.all(
+        ['ingestion_heartbeats', 'source_event_index', 'closed_source_segments'].map(
+          async (table) =>
+            (
+              await ready(admin).query<Record<string, unknown>>(
+                `SELECT * FROM ${schema}.${table} ORDER BY 1, 2, 3`,
+              )
+            ).rows,
+        ),
+      );
+    const LOG_3 = 'buoh_log_000003';
+    const second = withLog(
+      { ...local, postgres: { ...local.postgres, database: DATABASE } },
+      logLocation(2),
+    );
+    const secondObjects = S3ObjectStore.fromConfig(second.s3);
+    try {
+      // Una escritura en el log 2, de la hora de la prueba: el servicio prepara el log 3.
+      const writtenAt = clock.now();
+      expect(
+        await sqlStateAs(
+          POSTGRES_ROLES.ingest,
+          passwords.ingest,
+          `INSERT INTO ${LOG_2}.ingestion_heartbeats
+             (heartbeat_id, source, run_id, observed_at_utc, pg_backend_pid, connection_state,
+              backlog_count, backlog_bytes)
+           VALUES ('${uuid(9301)}', '${DERIV_SOURCE}', '${uuid(9302)}', '${writtenAt}', 4343,
+                   'connecting', 0, 0)`,
+        ),
+      ).toBeNull();
+      for (const index of [1, 2]) {
+        const bytes = new Uint8Array(randomBytes(64));
+        expect(
+          await secondObjects.putIfAbsent(`sha256/retencion-${String(index)}`, bytes, 'x/y'),
+        ).toBe('created');
+      }
+      const prepared = await operations();
+      expect(prepared.steps[0]?.['report']).toMatchObject({ prepared: 3 });
+
+      const firstKeys = await keysUnder('logs/000001/');
+      const secondKeys = await keysUnder('logs/000002/');
+      expect(firstKeys.length).toBeGreaterThan(0);
+      expect(secondKeys).toEqual(
+        expect.arrayContaining([
+          'logs/000002/sha256/retencion-1',
+          'logs/000002/sha256/retencion-2',
+        ]),
+      );
+      const secondRows = await captureRows(LOG_2);
+
+      // El borrado del esquema vuelve a mirar la última escritura en su transacción: antes de vencer
+      // no borra nada; un log que no existe no es un fallo; y con alguien leyendo sus tablas espera
+      // como mucho DROP_LOG_LOCK_TIMEOUT_MS y falla con 55P03, sin borrarlo.
+      const config = loadOperationsConfig(operationsEnvironment());
+      const database = openOwnerDatabase(
+        { ...config, owner: plain(config.owner) },
+        { source: DERIV_SOURCE },
+      );
+      try {
+        expect(await database.dropExpiredLog(logLocation(1), '2026-04-01T09:59:59.999Z')).toBe(
+          'not_expired',
+        );
+        expect(await database.dropExpiredLog(logLocation(999_998), clock.now())).toBe('absent');
+        const reader = await ready(admin).connect();
+        try {
+          await reader.query('BEGIN');
+          await reader.query(`SELECT 1 FROM ${LOG_1}.ingestion_heartbeats LIMIT 1`);
+          const started = Date.now();
+          await expect(
+            database.dropExpiredLog(logLocation(1), '2026-04-01T10:00:00.000Z'),
+          ).rejects.toMatchObject({ code: '55P03' });
+          const waited = Date.now() - started;
+          expect(waited).toBeGreaterThanOrEqual(DROP_LOG_LOCK_TIMEOUT_MS - 50);
+          expect(waited).toBeLessThan(DROP_LOG_LOCK_TIMEOUT_MS + 2000);
+        } finally {
+          await reader.query('ROLLBACK');
+          reader.release();
+        }
+      } finally {
+        await database.close();
+      }
+      expect(await schemaExists(LOG_1)).toBe(true);
+
+      // Un milisegundo antes de los 30 días de la última escritura del log 1, nada vence.
+      clock.jumpWallClock(Date.parse('2026-04-01T09:59:59.999Z') - Date.parse(clock.now()));
+      const early = await operations();
+      expect(early.step('retention')).toMatchObject({
+        report: { log: null },
+        status: 'completed',
+      });
+      expect(await keysUnder('logs/000001/')).toEqual(firstKeys);
+      expect(await schemaExists(LOG_1)).toBe(true);
+
+      // A los 30 días justos vence, y una sola ejecución lo borra: primero su prefijo, después su
+      // esquema.
+      clock.jumpWallClock(1);
+      const expired = await operations();
+      expect(expired.step('retention')).toMatchObject({
+        event: 'operations_step',
+        log: null,
+        status: 'completed',
+      });
+      expect(expired.step('retention')?.['report']).toEqual({
+        deleted: firstKeys.length,
+        locked: 0,
+        log: 1,
+        schema_dropped: true,
+      });
+      expect(await keysUnder('logs/000001/')).toEqual([]);
+      expect(await schemaExists(LOG_1)).toBe(false);
+      expect(await keysUnder('logs/000002/')).toEqual(secondKeys);
+      expect(await captureRows(LOG_2)).toEqual(secondRows);
+      expect(await schemaExists(LOG_3)).toBe(true);
+      // El informe queda en el log activo, el 2.
+      expect((await reportsOf(LOG_2)).filter((item) => item.step === 'retention')).toEqual([
+        {
+          report: { deleted: firstKeys.length, locked: 0, log: 1, schema_dropped: true },
+          status: 'completed',
+          step: 'retention',
+        },
+      ]);
+
+      // Sin captura, el log 2, el activo, vence a los 30 días de su latido; el 3, preparado, queda,
+      // y pasa a ser el activo.
+      clock.jumpWallClock(
+        Date.parse(writtenAt) + 30 * 24 * 60 * 60 * 1000 - Date.parse(clock.now()),
+      );
+      const stopped = await operations();
+      expect(stopped.step('retention')).toMatchObject({
+        report: { deleted: secondKeys.length, locked: 0, log: 2, schema_dropped: true },
+        status: 'completed',
+      });
+      expect(await keysUnder('logs/000002/')).toEqual([]);
+      expect(await schemaExists(LOG_2)).toBe(false);
+      expect(await schemaExists(LOG_3)).toBe(true);
+      expect(stopped.steps[0]?.['report']).toMatchObject({ prepared: null });
+      expect((await reportsOf(LOG_3)).map((item) => item.step)).toContain('retention');
+    } finally {
+      secondObjects.destroy();
       s3.destroy();
     }
   });

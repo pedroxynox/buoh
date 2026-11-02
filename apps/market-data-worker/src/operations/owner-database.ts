@@ -12,8 +12,10 @@ import {
 } from '../postgres/roles.js';
 import { failureReason } from '../source-log/source-event-log.js';
 import {
+  isLogExpired,
   listCaptureLogs,
   logNumberOf,
+  readCaptureLog,
   type CaptureLog,
   type LogLocation,
 } from '../successive-logs.js';
@@ -39,6 +41,19 @@ export type LoginCheck = 'accepted' | 'rejected' | 'unchecked';
 export const OPERATIONS_CONNECTION_TIMEOUT_MS = 5_000;
 /** El plazo de cada consulta del servicio. */
 export const OPERATIONS_QUERY_TIMEOUT_MS = 30_000;
+/**
+ * El plazo para tomar los bloqueos de las tablas de un log al borrar su esquema (`lock_timeout`): si
+ * alguien las está leyendo, como un `data:health` o el agente, el borrado falla con `55P03` y se
+ * intenta otra vez en la ejecución siguiente, en lugar de dejar en espera a quien llegue después.
+ */
+export const DROP_LOG_LOCK_TIMEOUT_MS = 5_000;
+
+/**
+ * Lo que pasó al borrar el esquema de un log vencido: `dropped`; `not_expired`, si al mirarlo otra
+ * vez tiene una escritura de hace menos de 30 días, y no se borra nada; o `absent`, si su esquema ya
+ * no existe.
+ */
+export type LogSchemaDrop = 'absent' | 'dropped' | 'not_expired';
 
 /** El espacio de la base y el de cada log, en bytes, en orden de log. */
 export interface SpaceMeasure {
@@ -97,6 +112,14 @@ export interface OwnerDatabase {
    * sus índices y su TOAST (`pg_total_relation_size`), en bytes (ADR-0018 §7).
    */
   measureSpace(): Promise<SpaceMeasure>;
+  /**
+   * Borra el esquema del log entero, con sus tablas (`DROP SCHEMA … CASCADE`), como `buoh_dueno`,
+   * si a la hora `now` sigue vencido (ADR-0018 §7): en la misma transacción vuelve a leer su última
+   * escritura (`readCaptureLog`) y no borra nada si ya no venció o si el esquema no existe. Espera
+   * los bloqueos de sus tablas como mucho `DROP_LOG_LOCK_TIMEOUT_MS`. Ninguna fila se modifica: se
+   * borran las tablas enteras.
+   */
+  dropExpiredLog(log: LogLocation, now: string): Promise<LogSchemaDrop>;
   /** Libera las conexiones. */
   close(): Promise<void>;
 }
@@ -190,6 +213,31 @@ export function openOwnerDatabase(
     createLogSchema: (log) =>
       asOwner(async (client) => {
         await client.query(`CREATE SCHEMA IF NOT EXISTS ${pg.escapeIdentifier(log.schema)}`);
+      }),
+    dropExpiredLog: (log, now) =>
+      asOwner(async (client) => {
+        await client.query('BEGIN');
+        try {
+          await client.query(`SET LOCAL lock_timeout = ${String(DROP_LOG_LOCK_TIMEOUT_MS)}`);
+          const current = await readCaptureLog(client, {
+            number: log.number,
+            source: input.source,
+          });
+          let result: LogSchemaDrop = 'absent';
+          if (current !== null) {
+            result = isLogExpired(current, now) ? 'dropped' : 'not_expired';
+          }
+          if (result === 'dropped') {
+            await client.query(`DROP SCHEMA ${pg.escapeIdentifier(log.schema)} CASCADE`);
+            await client.query('COMMIT');
+          } else {
+            await client.query('ROLLBACK');
+          }
+          return result;
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => undefined);
+          throw error;
+        }
       }),
     ensureRuntimeRoles: () => withClient((client) => ensureRuntimeRoles(client)),
     grantLogPrivileges: (log) => withClient((client) => grantLogPrivileges(client, log.schema)),
