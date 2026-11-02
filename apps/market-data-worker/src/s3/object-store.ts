@@ -22,13 +22,19 @@ function statusOf(error: unknown): number | undefined {
  */
 const OBJECT_LOCKED = 'ObjectLockedByBucketPolicy';
 
+/**
+ * Si R2 rechazó la petición por la regla de bloqueo del bucket: 409 con `ObjectLockedByBucketPolicy`.
+ * Con cualquier otro estado o código es otro error.
+ */
+export function isObjectLocked(error: unknown): boolean {
+  return (
+    statusOf(error) === 409 && error instanceof S3ServiceException && error.name === OBJECT_LOCKED
+  );
+}
+
 /** Si la escritura condicional falló porque la clave ya existe: 412, o el 409 de la regla de bloqueo. */
 function keyExists(error: unknown): boolean {
-  const status = statusOf(error);
-  return (
-    status === 412 ||
-    (status === 409 && error instanceof S3ServiceException && error.name === OBJECT_LOCKED)
-  );
+  return statusOf(error) === 412 || isObjectLocked(error);
 }
 
 async function readCapped(
@@ -64,6 +70,35 @@ export interface S3Timeouts {
   readonly requestTimeout: number;
 }
 
+/**
+ * El cliente S3 de la configuración, el de todo el worker: estilo de ruta, sin reintentos y con las
+ * sumas de comprobación solo cuando la operación las exige, como admite R2 (ADR-0018 §10). Con
+ * `timeouts`, cada petición tiene plazo: el SDK pasa esas opciones a su manejador HTTP por defecto
+ * (`NodeHttpHandler`, de `@smithy/node-http-handler`, que ya trae `@aws-sdk/client-s3`), y
+ * `throwOnRequestTimeout` hace que una petición vencida falle con `TimeoutError` (`ETIMEDOUT`) en
+ * lugar de seguir esperando con un aviso en la consola.
+ */
+export function createS3Client(
+  config: Omit<WorkerConfig['s3'], 'keyPrefix'>,
+  timeouts?: S3Timeouts,
+): S3Client {
+  return new S3Client({
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+    },
+    endpoint: config.endpoint,
+    forcePathStyle: true,
+    maxAttempts: 1,
+    region: config.region,
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    ...(timeouts === undefined
+      ? {}
+      : { requestHandler: { ...timeouts, throwOnRequestTimeout: true } }),
+    responseChecksumValidation: 'WHEN_REQUIRED',
+  });
+}
+
 /** Un prefijo de claves: vacío, o segmentos de minúsculas, cifras, `_` y `-`, cada uno con su `/`. */
 const KEY_PREFIX = /^(?:[a-z0-9][a-z0-9_-]*\/)*$/u;
 
@@ -90,32 +125,9 @@ export class S3ObjectStore implements ObjectStore {
     this.keyPrefix = keyPrefix;
   }
 
-  /**
-   * El cliente de la configuración. Con `timeouts`, cada petición tiene plazo: el SDK pasa esas
-   * opciones a su manejador HTTP por defecto (`NodeHttpHandler`, de `@smithy/node-http-handler`, que
-   * ya trae `@aws-sdk/client-s3`), y `throwOnRequestTimeout` hace que una petición vencida falle con
-   * `TimeoutError` (`ETIMEDOUT`) en lugar de seguir esperando con un aviso en la consola.
-   */
+  /** El cliente de la configuración (`createS3Client`), bajo su prefijo. */
   static fromConfig(config: WorkerConfig['s3'], timeouts?: S3Timeouts): S3ObjectStore {
-    return new S3ObjectStore(
-      new S3Client({
-        credentials: {
-          accessKeyId: config.accessKeyId,
-          secretAccessKey: config.secretAccessKey,
-        },
-        endpoint: config.endpoint,
-        forcePathStyle: true,
-        maxAttempts: 1,
-        region: config.region,
-        requestChecksumCalculation: 'WHEN_REQUIRED',
-        ...(timeouts === undefined
-          ? {}
-          : { requestHandler: { ...timeouts, throwOnRequestTimeout: true } }),
-        responseChecksumValidation: 'WHEN_REQUIRED',
-      }),
-      config.bucket,
-      config.keyPrefix,
-    );
+    return new S3ObjectStore(createS3Client(config, timeouts), config.bucket, config.keyPrefix);
   }
 
   async putIfAbsent(

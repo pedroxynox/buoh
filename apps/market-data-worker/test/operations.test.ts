@@ -19,6 +19,8 @@ import {
   ObjectReadError,
   OPERATIONS_STEPS,
   operationsCommand,
+  RETENTION_DEADLINE_MS,
+  RETENTION_PAGE_KEYS,
   runNodeScript,
   runOperations,
   VERIFICATION_DEADLINE_MS,
@@ -29,9 +31,11 @@ import {
   type CaptureLog,
   type ChildResult,
   type DueSegment,
+  type LogDeletion,
   type LogLocation,
   type LoginCheck,
   type LogObjects,
+  type LogSchemaDrop,
   type OperationalAlert,
   type OperationsReportRow,
   type OwnerDatabase,
@@ -286,11 +290,18 @@ function fakeDatabase(state: {
   /** Los roles que inician sesión con su contraseña. */
   loggedIn: Set<string>;
   fail?: Partial<Record<keyof OwnerDatabase, unknown>>;
+  /**
+   * Lo que responde el borrado del esquema de un log vencido. Sin él, lo borra: el log deja de
+   * existir, como tras `DROP SCHEMA`.
+   */
+  dropResult?: LogSchemaDrop;
   /** Los segmentos cerrados de cada log, por su número. */
   segments?: Readonly<Record<number, readonly DueSegment[]>>;
   space?: SpaceMeasure;
 }) {
   const calls: string[] = [];
+  /** La hora con la que se pidió borrar cada esquema. */
+  const drops: { log: number; now: string }[] = [];
   const reports: { log: number; row: OperationsReportRow }[] = [];
   const answer = <T>(name: keyof OwnerDatabase, value: () => T): Promise<T> => {
     const error = state.fail?.[name];
@@ -318,6 +329,21 @@ function fakeDatabase(state: {
       calls.push(`create:${String(target.number)}`);
       return answer('createLogSchema', () => {
         state.logs.push(log(target.number));
+      });
+    },
+    dropExpiredLog: (target, now) => {
+      calls.push(`drop:${String(target.number)}`);
+      drops.push({ log: target.number, now });
+      return answer('dropExpiredLog', () => {
+        if (state.dropResult !== undefined) {
+          return state.dropResult;
+        }
+        const index = state.logs.findIndex((item) => item.location.number === target.number);
+        if (index < 0) {
+          return 'absent';
+        }
+        state.logs.splice(index, 1);
+        return 'dropped';
       });
     },
     ensureRuntimeRoles: () => {
@@ -373,7 +399,7 @@ function fakeDatabase(state: {
       });
     },
   };
-  return { calls, database, reports };
+  return { calls, database, drops, reports };
 }
 
 const coded = (code: string) =>
@@ -460,11 +486,81 @@ function fakeObjects(
   return { calls, objects };
 }
 
+/**
+ * Los objetos falsos de la retención: las claves completas guardadas (prefijo del log y clave), que
+ * se listan en orden, como en S3. Una clave de `locked` responde como la regla de bloqueo del bucket
+ * mientras siga ahí. Anota cada listado, cada borrado y cada cierre.
+ */
+function fakeDeletion(
+  options: {
+    /** El error de un listado (`list`) o del borrado de una clave completa (`delete:<clave>`). */
+    readonly fail?: (call: string) => unknown;
+    readonly keys?: readonly string[];
+    readonly locked?: Set<string>;
+    /** Se llama en cada borrado, antes de responder: por ejemplo, para que el reloj avance. */
+    readonly onDelete?: () => void;
+    /** Cada borrado queda pendiente hasta que se cierran los objetos: entonces rechaza. */
+    readonly stall?: boolean;
+  } = {},
+) {
+  const calls: string[] = [];
+  const stored = new Set(options.keys ?? []);
+  const reject = (error: unknown) =>
+    Promise.reject(error instanceof Error ? error : new Error('fallo sintético'));
+  const open = (location: LogLocation): LogDeletion => {
+    const stalled: ((error: Error) => void)[] = [];
+    return {
+      close: () => {
+        calls.push(`close:${location.prefix}`);
+        for (const fail of stalled.splice(0)) {
+          fail(new Error('socket destruido'));
+        }
+      },
+      delete: (key) => {
+        const full = `${location.prefix}${key}`;
+        calls.push(`delete:${full}`);
+        if (options.stall === true) {
+          return new Promise((_resolve, fail) => {
+            stalled.push(fail);
+          });
+        }
+        options.onDelete?.();
+        const error = options.fail?.(`delete:${full}`);
+        if (error !== undefined) {
+          return reject(error);
+        }
+        if (options.locked?.has(full) === true) {
+          return Promise.resolve('locked');
+        }
+        stored.delete(full);
+        return Promise.resolve('deleted');
+      },
+      list: (startAfter, max) => {
+        calls.push(`list:${location.prefix}:${String(startAfter)}:${String(max)}`);
+        const error = options.fail?.('list');
+        if (error !== undefined) {
+          return reject(error);
+        }
+        return Promise.resolve(
+          [...stored]
+            .filter((full) => full.startsWith(location.prefix))
+            .map((full) => full.slice(location.prefix.length))
+            .sort()
+            .filter((key) => startAfter === null || key > startAfter)
+            .slice(0, max),
+        );
+      },
+    };
+  };
+  return { calls, open, stored };
+}
+
 /** Una ejecución con la base, los procesos y los objetos falsos, con IDs y hora fijos. */
 async function run(
   db: ReturnType<typeof fakeDatabase>,
   children: ReturnType<typeof fakeChildren>,
   options: {
+    readonly deletion?: ReturnType<typeof fakeDeletion>;
     readonly now?: () => string;
     readonly objects?: ReturnType<typeof fakeObjects>;
     readonly scheduler?: Scheduler;
@@ -477,6 +573,7 @@ async function run(
     alert: (payload) => alerts.push(payload),
     config: CONFIG,
     database: db.database,
+    deletion: (options.deletion ?? fakeDeletion()).open,
     forwardChildStderr: (text) => forwarded.push(text),
     nextId: () => uuid((sequence += 1)),
     now: options.now ?? (() => NOW),
@@ -493,11 +590,12 @@ async function run(
 }
 
 describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
-  it('en una base vacía: los roles, el log 1 con sus migraciones y sus privilegios, las contraseñas, la salud del log 1, la verificación y el espacio, con sus informes en ese log', async () => {
+  it('en una base vacía: los roles, el log 1 con sus migraciones y sus privilegios, las contraseñas, la salud del log 1, la retención, la verificación y el espacio, con sus informes en ese log', async () => {
     expect(OPERATIONS_STEPS).toEqual([
       'roles_and_logs',
       'health',
       'final_health',
+      'retention',
       'verification',
       'space',
     ]);
@@ -532,6 +630,8 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       'list',
       'report:1:health',
       // El informe final: ningún log terminó, así que no lee nada más ni guarda ningún informe.
+      'list',
+      // La retención: ningún log venció, así que no abre los objetos ni guarda su informe.
       'list',
       'list',
       'segments:1:120',
@@ -578,6 +678,14 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
         run_id: uuid(1),
         status: 'completed',
         step: 'final_health',
+      },
+      {
+        event: 'operations_step',
+        log: null,
+        report: { log: null },
+        run_id: uuid(1),
+        status: 'completed',
+        step: 'retention',
       },
       {
         event: 'operations_step',
@@ -740,6 +848,9 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
       'list',
       'list',
       'list',
+      // La retención: la búsqueda del log vencido y el intento de guardar su informe.
+      'list',
+      'list',
       'list',
       'list',
       'list',
@@ -772,16 +883,23 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
       { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'health' },
       { event: 'operations_step_failed', reason: 'ECONNREFUSED', step: 'final_health' },
       { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'final_health' },
+      { event: 'operations_step_failed', reason: 'ECONNREFUSED', step: 'retention' },
+      { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'retention' },
       { event: 'operations_step_failed', reason: 'ECONNREFUSED', step: 'verification' },
       { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'verification' },
       { event: 'operations_step_failed', reason: 'ECONNREFUSED', step: 'space' },
       { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'space' },
     ]);
-    expect(lines.slice(2, 5)).toEqual([
+    expect(lines.slice(2, 6)).toEqual([
       expect.objectContaining({
         report: { log: null, reason: 'ECONNREFUSED' },
         status: 'failed',
         step: 'final_health',
+      }),
+      expect.objectContaining({
+        report: { log: null, reason: 'ECONNREFUSED' },
+        status: 'failed',
+        step: 'retention',
       }),
       expect.objectContaining({
         report: { due: null, mismatched: [], read: 0, reason: 'ECONNREFUSED', slot: 120 },
@@ -1131,6 +1249,405 @@ describe('runOperations: el informe final de un log que terminó (ADR-0018 §6, 
   });
 });
 
+describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
+  /** Una escritura de hace más de 30 días: el log venció. */
+  const EXPIRED = '2026-01-15T00:00:00.000Z';
+  /** Una escritura de hace 30 días justos: también venció. */
+  const JUST_EXPIRED = '2026-01-31T10:00:00.000Z';
+  /** Una escritura de hace 30 días menos 1 ms: todavía no venció. */
+  const NOT_YET = '2026-01-31T10:00:00.001Z';
+  const loggedIn = () => new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']);
+  const retentionLine = (lines: Record<string, unknown>[]) =>
+    lines.find((line) => line['step'] === 'retention');
+  /** Las claves completas de `count` objetos del log, en orden. */
+  const keysOf = (number: number, count: number, from = 0) =>
+    Array.from(
+      { length: count },
+      (_, index) => `${logLocation(number).prefix}sha256/${String(from + index).padStart(4, '0')}`,
+    );
+  /** Los prefijos de log de los listados, borrados y cierres, en orden y sin repetir. */
+  const prefixesOf = (calls: readonly string[]) => [
+    ...new Set(calls.flatMap((call) => /logs\/[0-9]{6}\//u.exec(call)?.[0] ?? [])),
+  ];
+
+  it('sin ningún log vencido, no abre los objetos ni guarda informe', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, NOT_YET), log(2, NOW), log(3)] });
+    const deletion = fakeDeletion({ keys: keysOf(1, 2) });
+    const { lines } = await run(db, fakeChildren(), { deletion });
+
+    expect(retentionLine(lines)).toMatchObject({
+      log: null,
+      report: { log: null },
+      status: 'completed',
+    });
+    expect(deletion.calls).toEqual([]);
+    expect(db.drops).toEqual([]);
+    expect(db.reports.map(({ row }) => row.step)).not.toContain('retention');
+  });
+
+  it('del log vencido, borra los objetos de su prefijo y, con el listado vacío desde el principio, su esquema; los de los demás logs no los toca', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, EXPIRED), log(2, NOW), log(3)] });
+    const deletion = fakeDeletion({ keys: [...keysOf(1, 3), ...keysOf(2, 2)] });
+    const { alerts, lines, result } = await run(db, fakeChildren(), { deletion });
+
+    expect(deletion.calls).toEqual([
+      `list:logs/000001/:null:${String(RETENTION_PAGE_KEYS)}`,
+      'delete:logs/000001/sha256/0000',
+      'delete:logs/000001/sha256/0001',
+      'delete:logs/000001/sha256/0002',
+      `list:logs/000001/:sha256/0002:${String(RETENTION_PAGE_KEYS)}`,
+      'list:logs/000001/:null:1',
+      'close:logs/000001/',
+    ]);
+    expect([...deletion.stored]).toEqual(keysOf(2, 2));
+    expect(db.drops).toEqual([{ log: 1, now: NOW }]);
+    expect(retentionLine(lines)).toEqual({
+      event: 'operations_step',
+      log: null,
+      report: { deleted: 3, locked: 0, log: 1, schema_dropped: true },
+      run_id: uuid(1),
+      status: 'completed',
+      step: 'retention',
+    });
+    expect(alerts).toEqual([]);
+    expect(result.status).toBe('completed');
+    // Su informe va al log activo, el 2.
+    expect(
+      db.reports
+        .filter(({ row }) => row.step === 'retention')
+        .map(({ log: number, row }) => [number, row.status]),
+    ).toEqual([[2, 'completed']]);
+  });
+
+  it('nunca borra el log preparado ni uno que no venció; con dos vencidos, uno por ejecución, empezando por el de menor número', async () => {
+    const db = fakeDatabase({
+      loggedIn: loggedIn(),
+      logs: [log(1, EXPIRED), log(2, JUST_EXPIRED), log(3, NOT_YET), log(4, NOW), log(5)],
+    });
+    const deletion = fakeDeletion({ keys: [1, 2, 3, 4, 5].flatMap((number) => keysOf(number, 1)) });
+
+    const first = await run(db, fakeChildren(), { deletion });
+    expect(prefixesOf(deletion.calls)).toEqual(['logs/000001/']);
+    expect(retentionLine(first.lines)).toMatchObject({
+      report: { deleted: 1, log: 1, schema_dropped: true },
+    });
+
+    deletion.calls.length = 0;
+    const second = await run(db, fakeChildren(), { deletion });
+    expect(prefixesOf(deletion.calls)).toEqual(['logs/000002/']);
+    expect(retentionLine(second.lines)).toMatchObject({
+      report: { deleted: 1, log: 2, schema_dropped: true },
+    });
+
+    deletion.calls.length = 0;
+    const third = await run(db, fakeChildren(), { deletion });
+    expect(deletion.calls).toEqual([]);
+    expect(retentionLine(third.lines)).toMatchObject({ report: { log: null } });
+    expect(db.drops.map((drop) => drop.log)).toEqual([1, 2]);
+    expect([...deletion.stored]).toEqual([3, 4, 5].flatMap((number) => keysOf(number, 1)));
+  });
+
+  it('también vence el log activo de una captura detenida, el de mayor número con escrituras; el preparado queda', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, EXPIRED), log(2)] });
+    const deletion = fakeDeletion({ keys: [...keysOf(1, 2), ...keysOf(2, 1)] });
+    const { lines } = await run(db, fakeChildren(), { deletion });
+
+    expect(retentionLine(lines)).toMatchObject({
+      report: { deleted: 2, log: 1, schema_dropped: true },
+      status: 'completed',
+    });
+    expect([...deletion.stored]).toEqual(keysOf(2, 1));
+    expect(db.drops.map((drop) => drop.log)).toEqual([1]);
+  });
+
+  it('un objeto que la regla de bloqueo todavía protege queda para una ejecución siguiente, y el esquema no se borra hasta que se borra él', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, EXPIRED), log(2, NOW), log(3)] });
+    const locked = new Set([keysOf(1, 1, 1)[0] ?? '']);
+    const deletion = fakeDeletion({ keys: keysOf(1, 3), locked });
+
+    const first = await run(db, fakeChildren(), { deletion });
+    expect(retentionLine(first.lines)).toMatchObject({
+      report: { deleted: 2, locked: 1, log: 1, schema_dropped: false },
+      status: 'completed',
+    });
+    expect(first.alerts).toEqual([]);
+    // Con un objeto bloqueado no vuelve a listar desde el principio ni borra el esquema.
+    expect(deletion.calls.filter((call) => call.startsWith('list:'))).toEqual([
+      `list:logs/000001/:null:${String(RETENTION_PAGE_KEYS)}`,
+      `list:logs/000001/:sha256/0002:${String(RETENTION_PAGE_KEYS)}`,
+    ]);
+    expect(db.drops).toEqual([]);
+    expect([...deletion.stored]).toEqual(keysOf(1, 1, 1));
+
+    locked.clear();
+    const second = await run(db, fakeChildren(), { deletion });
+    expect(retentionLine(second.lines)).toMatchObject({
+      report: { deleted: 1, locked: 0, log: 1, schema_dropped: true },
+      status: 'completed',
+    });
+    expect(deletion.stored.size).toBe(0);
+    expect(db.drops.map((drop) => drop.log)).toEqual([1]);
+  });
+
+  it('pasa de página con la última clave de la anterior, también con claves bloqueadas al principio', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, EXPIRED), log(2, NOW), log(3)] });
+    const keys = keysOf(1, RETENTION_PAGE_KEYS + 1);
+    const deletion = fakeDeletion({ keys, locked: new Set([keys[0] ?? '']) });
+    const { lines } = await run(db, fakeChildren(), { deletion });
+
+    expect(deletion.calls.filter((call) => call.startsWith('list:'))).toEqual([
+      `list:logs/000001/:null:${String(RETENTION_PAGE_KEYS)}`,
+      `list:logs/000001/:sha256/0999:${String(RETENTION_PAGE_KEYS)}`,
+      `list:logs/000001/:sha256/1000:${String(RETENTION_PAGE_KEYS)}`,
+    ]);
+    expect(retentionLine(lines)).toMatchObject({
+      report: { deleted: RETENTION_PAGE_KEYS, locked: 1, log: 1, schema_dropped: false },
+    });
+  });
+
+  it('el esquema solo se borra con el listado del prefijo vacío desde el principio: si aparece un objeto, espera a la ejecución siguiente', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, EXPIRED), log(2, NOW), log(3)] });
+    const late = `${logLocation(1).prefix}sha256/0000`;
+    let added = false;
+    const deletion = fakeDeletion({
+      keys: keysOf(1, 2, 1),
+      onDelete: () => {
+        // Un objeto que se escribe mientras tanto, delante de la última clave listada.
+        if (!added) {
+          added = true;
+          deletion.stored.add(late);
+        }
+      },
+    });
+    const remainingAtDrop: number[] = [];
+    const drop = db.database.dropExpiredLog.bind(db.database);
+    db.database.dropExpiredLog = (target, now) => {
+      remainingAtDrop.push(deletion.stored.size);
+      return drop(target, now);
+    };
+
+    const first = await run(db, fakeChildren(), { deletion });
+    expect(retentionLine(first.lines)).toMatchObject({
+      report: { deleted: 2, locked: 0, log: 1, schema_dropped: false },
+      status: 'completed',
+    });
+    expect(deletion.calls.at(-2)).toBe('list:logs/000001/:null:1');
+    expect(db.drops).toEqual([]);
+
+    const second = await run(db, fakeChildren(), { deletion });
+    expect(retentionLine(second.lines)).toMatchObject({
+      report: { deleted: 1, log: 1, schema_dropped: true },
+    });
+    expect(remainingAtDrop).toEqual([0]);
+  });
+
+  it('si el almacenamiento no responde, el paso falla con el motivo saneado, no borra el esquema y la ejecución sigue; la siguiente continúa donde quedó', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, EXPIRED), log(2, NOW), log(3)] });
+    const timeout = Object.assign(new Error('connect ETIMEDOUT 10.0.0.9:443'), {
+      code: 'ETIMEDOUT',
+    });
+    let failing = true;
+    const deletion = fakeDeletion({
+      fail: (call) => (failing && call.endsWith('sha256/0001') ? timeout : undefined),
+      keys: keysOf(1, 3),
+    });
+
+    const first = await run(db, fakeChildren(), { deletion });
+    expect(retentionLine(first.lines)).toMatchObject({
+      report: { deleted: 2, locked: 0, log: 1, reason: 'ETIMEDOUT', schema_dropped: false },
+      status: 'failed',
+    });
+    expect(first.alerts).toEqual([
+      { event: 'operations_step_failed', reason: 'ETIMEDOUT', step: 'retention' },
+    ]);
+    expect(deletion.calls.at(-1)).toBe('close:logs/000001/');
+    expect(db.drops).toEqual([]);
+    expect(first.lines.find((line) => line['step'] === 'verification')).toMatchObject({
+      status: 'completed',
+    });
+    expect(first.lines.find((line) => line['step'] === 'space')).toMatchObject({
+      status: 'completed',
+    });
+    expect(first.result.status).toBe('failed');
+    expect(JSON.stringify([first.lines, first.alerts])).not.toMatch(
+      /10\.0\.0\.9|connect ETIMEDOUT/u,
+    );
+
+    failing = false;
+    const second = await run(db, fakeChildren(), { deletion });
+    expect(retentionLine(second.lines)).toMatchObject({
+      report: { deleted: 1, log: 1, schema_dropped: true },
+      status: 'completed',
+    });
+
+    const listing = fakeDeletion({ fail: (call) => (call === 'list' ? timeout : undefined) });
+    const other = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, EXPIRED), log(2, NOW)] });
+    const third = await run(other, fakeChildren(), { deletion: listing });
+    expect(retentionLine(third.lines)).toMatchObject({
+      report: { deleted: 0, log: 1, reason: 'ETIMEDOUT', schema_dropped: false },
+      status: 'failed',
+    });
+    expect(listing.calls).toEqual([
+      `list:logs/000001/:null:${String(RETENTION_PAGE_KEYS)}`,
+      'close:logs/000001/',
+    ]);
+  });
+
+  it(`para a los ${String(RETENTION_DEADLINE_MS / 1000)} s sin fallar: lo que queda sigue en la ejecución siguiente`, async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, EXPIRED), log(2, NOW), log(3)] });
+    let time = Date.parse(NOW);
+    const deletion = fakeDeletion({
+      keys: keysOf(1, RETENTION_PAGE_KEYS + 1),
+      onDelete: () => {
+        time += 70;
+      },
+    });
+    const delays: number[] = [];
+    const scheduler: Scheduler = {
+      schedule: (ms) => {
+        delays.push(ms);
+        return () => undefined;
+      },
+    };
+    const first = await run(db, fakeChildren(), {
+      deletion,
+      now: () => new Date(time).toISOString(),
+      scheduler,
+    });
+
+    // El listado y la primera página tienen los 60 s enteros; después de 70 s ya no queda plazo.
+    expect(delays.slice(0, 2)).toEqual([RETENTION_DEADLINE_MS, RETENTION_DEADLINE_MS]);
+    expect(retentionLine(first.lines)).toMatchObject({
+      report: {
+        deadline_reached: true,
+        deleted: RETENTION_PAGE_KEYS,
+        locked: 0,
+        log: 1,
+        schema_dropped: false,
+      },
+      status: 'completed',
+    });
+    expect(first.alerts).toEqual([]);
+    expect(db.drops).toEqual([]);
+
+    const second = await run(db, fakeChildren(), { deletion });
+    expect(retentionLine(second.lines)).toMatchObject({
+      report: { deleted: 1, log: 1, schema_dropped: true },
+    });
+  });
+
+  it('un borrado que no termina se corta al vencer el plazo: cierra los objetos del log y para sin fallar', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, EXPIRED), log(2, NOW), log(3)] });
+    const clock = new ManualClock(NOW);
+    const deletion = fakeDeletion({ keys: keysOf(1, 3), stall: true });
+    const running = run(db, fakeChildren(), {
+      deletion,
+      now: clock.now,
+      scheduler: clock.scheduler,
+    });
+    for (let i = 0; i < 100 && !deletion.calls.some((call) => call.startsWith('delete:')); i += 1) {
+      await flush();
+    }
+    expect(clock.pendingDelays()).toEqual([RETENTION_DEADLINE_MS]);
+    await clock.advance(RETENTION_DEADLINE_MS);
+    const { alerts, lines, result } = await running;
+
+    expect(deletion.calls.filter((call) => call.startsWith('close:'))).toEqual([
+      'close:logs/000001/',
+    ]);
+    expect(retentionLine(lines)).toMatchObject({
+      report: { deadline_reached: true, deleted: 0, locked: 0, log: 1, schema_dropped: false },
+      status: 'completed',
+    });
+    expect(alerts).toEqual([]);
+    expect(result.status).toBe('completed');
+    expect(db.drops).toEqual([]);
+    expect(clock.pendingDelays()).toEqual([]);
+  });
+
+  it('si al borrar el esquema el log ya no venció, el paso falla con log_not_expired; si el esquema ya no existe, termina sin borrarlo', async () => {
+    const changed = fakeDatabase({
+      dropResult: 'not_expired',
+      loggedIn: loggedIn(),
+      logs: [log(1, EXPIRED), log(2, NOW), log(3)],
+    });
+    const first = await run(changed, fakeChildren(), {
+      deletion: fakeDeletion({ keys: keysOf(1, 1) }),
+    });
+    expect(retentionLine(first.lines)).toMatchObject({
+      report: { deleted: 1, log: 1, reason: 'log_not_expired', schema_dropped: false },
+      status: 'failed',
+    });
+    expect(first.alerts).toEqual([
+      { event: 'operations_step_failed', reason: 'log_not_expired', step: 'retention' },
+    ]);
+
+    const absent = fakeDatabase({
+      dropResult: 'absent',
+      loggedIn: loggedIn(),
+      logs: [log(1, EXPIRED), log(2, NOW), log(3)],
+    });
+    const second = await run(absent, fakeChildren());
+    expect(retentionLine(second.lines)).toMatchObject({
+      report: { deleted: 0, log: 1, schema_dropped: false },
+      status: 'completed',
+    });
+  });
+
+  it('si PostgreSQL no responde al borrar el esquema, falla con su motivo, y la ejecución siguiente vuelve a listar el prefijo y lo borra', async () => {
+    const state: Parameters<typeof fakeDatabase>[0] = {
+      fail: { dropExpiredLog: coded('55P03') },
+      loggedIn: loggedIn(),
+      logs: [log(1, EXPIRED), log(2, NOW), log(3)],
+    };
+    const db = fakeDatabase(state);
+    const deletion = fakeDeletion({ keys: keysOf(1, 3) });
+    const first = await run(db, fakeChildren(), { deletion });
+    expect(retentionLine(first.lines)).toMatchObject({
+      report: { deleted: 3, log: 1, reason: '55P03', schema_dropped: false },
+      status: 'failed',
+    });
+
+    state.fail = {};
+    deletion.calls.length = 0;
+    const second = await run(db, fakeChildren(), { deletion });
+    expect(deletion.calls).toEqual([
+      `list:logs/000001/:null:${String(RETENTION_PAGE_KEYS)}`,
+      'list:logs/000001/:null:1',
+      'close:logs/000001/',
+    ]);
+    expect(retentionLine(second.lines)).toMatchObject({
+      report: { deleted: 0, log: 1, schema_dropped: true },
+      status: 'completed',
+    });
+  });
+
+  it('si PostgreSQL no responde al buscar los logs, falla sin abrir ningún objeto', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, EXPIRED), log(2, NOW)] });
+    const list = db.database.listLogs.bind(db.database);
+    let afterHealth = 0;
+    // Después de guardar la salud, el informe final lee los logs una vez, y la retención, la
+    // siguiente.
+    db.database.listLogs = () => {
+      if (db.calls.includes('report:2:health')) {
+        afterHealth += 1;
+        if (afterHealth === 2) {
+          return Promise.reject(coded('57P01'));
+        }
+      }
+      return list();
+    };
+    const deletion = fakeDeletion({ keys: keysOf(1, 1) });
+    const { lines } = await run(db, fakeChildren(), { deletion });
+
+    expect(retentionLine(lines)).toMatchObject({
+      report: { log: null, reason: '57P01' },
+      status: 'failed',
+    });
+    expect(deletion.calls).toEqual([]);
+  });
+});
+
 describe('verificationSlot: la ejecución del día (ADR-0018 §11, paso 4)', () => {
   it('es 12 h + ⌊m / 5⌋ de la hora UTC, de 0 a 287', () => {
     expect(verificationSlot('2026-03-02T00:00:00.000Z')).toBe(0);
@@ -1380,8 +1897,14 @@ describe('runOperations: la verificación por partes (ADR-0018 §11, paso 4)', (
       },
     });
 
-    // Cada lectura tiene lo que queda de los 60 s: 60 s la primera, 20 s la segunda.
-    expect(delays).toEqual([VERIFICATION_DEADLINE_MS, VERIFICATION_DEADLINE_MS - 40_000]);
+    // Cada lectura tiene lo que queda de los 60 s: 60 s la primera, 20 s la segunda. Antes, los dos
+    // listados de la retención del log 1, que venció, con su propio plazo.
+    expect(delays).toEqual([
+      RETENTION_DEADLINE_MS,
+      RETENTION_DEADLINE_MS,
+      VERIFICATION_DEADLINE_MS,
+      VERIFICATION_DEADLINE_MS - 40_000,
+    ]);
     expect(objects.calls.filter((call) => call.startsWith('get:'))).toHaveLength(2);
     expect(objects.calls.at(-1)).toBe('close:logs/000002/');
     expect(verificationLine(lines)).toMatchObject({
@@ -1533,6 +2056,10 @@ describe('operationsCommand', () => {
           opened = true;
           return fakeDatabase({ loggedIn: new Set(), logs: [] }).database;
         },
+        openDeletion: (_config, location) => {
+          opened = true;
+          return fakeDeletion().open(location);
+        },
         openObjects: (_config, location) => {
           opened = true;
           return fakeObjects().objects(location);
@@ -1571,6 +2098,7 @@ describe('operationsCommand', () => {
         nextId: () => uuid((sequence += 1)),
         now: () => NOW,
         openDatabase: () => db.database,
+        openDeletion: (_config, location) => fakeDeletion().open(location),
         openObjects: (_config, location) => fakeObjects().objects(location),
         runChild: fakeChildren().runChild,
         scheduler: IDLE_SCHEDULER,
@@ -1580,13 +2108,13 @@ describe('operationsCommand', () => {
     }
   });
 
-  it('abre los objetos de cada log con el token operaciones de la configuración', async () => {
+  it('abre los objetos de cada log, para leerlos y para borrarlos, con el token operaciones de la configuración', async () => {
     const db = fakeDatabase({
       loggedIn: new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']),
-      logs: [log(1, NOW)],
-      segments: { 1: [segmentRow(120)] },
+      logs: [log(1, '2026-01-15T00:00:00.000Z'), log(2, NOW)],
+      segments: { 2: [segmentRow(120)] },
     });
-    const opened: { log: string; objects: unknown }[] = [];
+    const opened: { log: string; objects: unknown; use: string }[] = [];
     let sequence = 0;
     await operationsCommand(ENV, {
       alert: () => undefined,
@@ -1594,14 +2122,25 @@ describe('operationsCommand', () => {
       nextId: () => uuid((sequence += 1)),
       now: () => NOW,
       openDatabase: () => db.database,
+      openDeletion: (config, location) => {
+        opened.push({ log: location.prefix, objects: config.operationsObjects, use: 'retention' });
+        return fakeDeletion().open(location);
+      },
       openObjects: (config, location) => {
-        opened.push({ log: location.prefix, objects: config.operationsObjects });
+        opened.push({
+          log: location.prefix,
+          objects: config.operationsObjects,
+          use: 'verification',
+        });
         return fakeObjects().objects(location);
       },
       runChild: fakeChildren().runChild,
       scheduler: IDLE_SCHEDULER,
     });
-    expect(opened).toEqual([{ log: 'logs/000001/', objects: CONFIG.operationsObjects }]);
+    expect(opened).toEqual([
+      { log: 'logs/000001/', objects: CONFIG.operationsObjects, use: 'retention' },
+      { log: 'logs/000002/', objects: CONFIG.operationsObjects, use: 'verification' },
+    ]);
   });
 });
 

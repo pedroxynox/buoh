@@ -22,6 +22,13 @@ import {
 } from './config.js';
 import { type OwnerDatabase, type OperationsReportRow } from './owner-database.js';
 import {
+  deleteKeys,
+  RETENTION_DEADLINE_MS,
+  RETENTION_PAGE_KEYS,
+  type DeletionProgress,
+  type LogDeletion,
+} from './retention.js';
+import {
   VERIFICATION_DEADLINE_MS,
   verificationSlot,
   verifySegment,
@@ -32,16 +39,17 @@ import {
 // Una ejecución de `buoh-operaciones` (ADR-0018 §11): los pasos en orden, cada uno con su informe.
 // Un paso que falla deja su alerta saneada y su informe, si PostgreSQL responde, y no impide los
 // siguientes. Están los roles y los logs, la salud con el informe final de un log cortado, la
-// verificación por partes y el espacio; la retención, el paso 3, llega con el PR 8b de §16.
+// retención, la verificación por partes y el espacio.
 
 /**
  * Los pasos de una ejecución, en orden. `final_health` es la segunda parte del paso 2 de §11: el
- * informe final de un log que terminó (§6, «Traspaso»).
+ * informe final de un log que terminó (§6, «Traspaso»). `retention` es el paso 3.
  */
 export const OPERATIONS_STEPS = [
   'roles_and_logs',
   'health',
   'final_health',
+  'retention',
   'verification',
   'space',
 ] as const;
@@ -70,6 +78,8 @@ export interface OperationsInput {
   readonly alert: OperationalAlert;
   readonly config: OperationsConfig;
   readonly database: OwnerDatabase;
+  /** Los objetos de un log para borrarlos, con el token `operaciones`: `openLogDeletion`. */
+  readonly deletion: (log: LogLocation) => LogDeletion;
   /** Recibe el stderr de cada proceso de `data:health` y de `db:migrate`, sus alertas saneadas. */
   readonly forwardChildStderr: (text: string) => void;
   /** UUIDv7 de la ejecución y de cada informe. */
@@ -79,7 +89,7 @@ export interface OperationsInput {
   /** Los objetos de un log con el token `operaciones`: `openLogObjects` en el servicio. */
   readonly objects: (log: LogLocation) => LogObjects;
   readonly runChild: RunChild;
-  /** El temporizador del plazo de la verificación. */
+  /** El temporizador de los plazos de la retención y de la verificación. */
   readonly scheduler: Scheduler;
 }
 
@@ -421,6 +431,104 @@ function failedHealth(log: LogLocation | null, fields: Report): StepOutcome {
 }
 
 /**
+ * Paso 3 (ADR-0018 §7 y §11): la retención. Del log vencido de menor número, uno por ejecución, borra
+ * con el token `operaciones` los objetos de su prefijo, por páginas de `RETENTION_PAGE_KEYS` claves
+ * y con `RETENTION_CONCURRENCY` borrados a la vez. Un objeto que la regla de bloqueo del bucket
+ * todavía protege queda para una ejecución siguiente (`locked`). Cuando no queda ninguno así y el
+ * listado del prefijo vuelve vacío, borra el esquema del log (`dropExpiredLog`), que vuelve a mirar en
+ * la misma transacción que sigue vencido. Al vencer `RETENTION_DEADLINE_MS` para sin fallar
+ * (`deadline_reached`), y lo que queda sigue en la ejecución siguiente: borrar un log lleva varias.
+ * Son fallos que PostgreSQL o el almacenamiento no respondan, con su motivo saneado, y que el log ya
+ * no haya vencido al borrar su esquema (`log_not_expired`), porque entonces se borraron objetos de un
+ * log que volvió a recibir escrituras. El informe se guarda en el log activo, solo si había un log
+ * vencido o si el paso falló.
+ */
+async function retention(input: OperationsInput): Promise<StepOutcome> {
+  const startedMs = Date.parse(input.now());
+  let target: LogLocation | undefined;
+  try {
+    const now = input.now();
+    target = (await input.database.listLogs())
+      .filter((log) => isLogExpired(log, now))
+      .map((log) => log.location)
+      .sort((left, right) => left.number - right.number)[0];
+  } catch (error) {
+    return {
+      log: null,
+      report: { log: null, reason: failureReason(error) },
+      status: 'failed',
+      store: true,
+    };
+  }
+  if (target === undefined) {
+    return { log: null, report: { log: null }, status: 'completed', store: false };
+  }
+  const expired = target;
+  const progress: DeletionProgress = { deleted: 0, locked: 0, stopped: false };
+  const outcome = (fields: Report = {}): StepOutcome => ({
+    log: null,
+    report: {
+      deleted: progress.deleted,
+      locked: progress.locked,
+      log: expired.number,
+      schema_dropped: false,
+      ...fields,
+    },
+    status: 'reason' in fields ? 'failed' : 'completed',
+    store: true,
+  });
+  /** `work` con lo que queda del plazo de la retención, o `null` si ya venció o vence antes. */
+  const timed = <T>(work: () => Promise<T>): Promise<T | null> => {
+    const left = RETENTION_DEADLINE_MS - (Date.parse(input.now()) - startedMs);
+    return left <= 0 ? Promise.resolve(null) : withinDeadline(input.scheduler, left, work());
+  };
+  const objects = input.deletion(expired);
+  try {
+    let startAfter: string | null = null;
+    for (;;) {
+      const after: string | null = startAfter;
+      const page: string[] | null = await timed(() => objects.list(after, RETENTION_PAGE_KEYS));
+      if (page === null) {
+        return outcome({ deadline_reached: true });
+      }
+      const last: string | undefined = page.at(-1);
+      if (last === undefined) {
+        break;
+      }
+      if ((await timed(() => deleteKeys(objects, page, progress))) === null) {
+        return outcome({ deadline_reached: true });
+      }
+      startAfter = last;
+    }
+    if (progress.locked > 0) {
+      return outcome();
+    }
+    // Solo con el listado del prefijo vacío desde el principio se borra el esquema (§7).
+    const left = await timed(() => objects.list(null, 1));
+    if (left === null) {
+      return outcome({ deadline_reached: true });
+    }
+    if (left.length > 0) {
+      return outcome();
+    }
+  } catch (error) {
+    return outcome({ reason: failureReason(error) });
+  } finally {
+    // Ningún borrado empieza otro, y los que siguen en marcha se cortan al cerrar sus conexiones.
+    progress.stopped = true;
+    objects.close();
+  }
+  try {
+    const dropped = await input.database.dropExpiredLog(expired, input.now());
+    return dropped === 'not_expired'
+      ? outcome({ reason: 'log_not_expired' })
+      : outcome({ schema_dropped: dropped === 'dropped' });
+  } catch (error) {
+    return outcome({ reason: failureReason(error) });
+  }
+}
+
+/**
  * Paso 4 (ADR-0018 §11): la verificación por partes, la periódica de ADR-0017 §4. Toma la ejecución
  * del día de la hora de inicio (`verificationSlot`) y, de cada log que se puede leer y no ha vencido,
  * los segmentos cerrados que le tocan, todos antes de leer ningún objeto. Después vuelve a leer sus
@@ -591,7 +699,8 @@ async function space(input: OperationsInput): Promise<StepOutcome> {
  * orden. Cada uno deja una línea JSON en stdout (`operations_step`), y uno que falla, además, la
  * alerta `operations_step_failed` con el primer motivo. El informe de cada paso se guarda en la
  * tabla `operations_reports` de su log (el de la salud) o del log activo después del paso, salvo
- * el del paso 1 cuando no cambió nada y el del espacio cuando ya se midió ese día. Si no se puede
+ * el del paso 1 cuando no cambió nada, el de la retención cuando no había ningún log vencido y el
+ * del espacio cuando ya se midió ese día. Si no se puede
  * guardar, deja la alerta `operations_report_unavailable` y la ejecución termina `failed`. La
  * última línea (`operations_run`) dice cómo terminó.
  */
@@ -603,6 +712,7 @@ export async function runOperations(input: OperationsInput): Promise<OperationsR
   const steps: Record<OperationsStep, () => Promise<StepOutcome>> = {
     final_health: () => finalHealth(input),
     health: () => health(input),
+    retention: () => retention(input),
     roles_and_logs: () => rolesAndLogs(input),
     space: () => space(input),
     verification: () => verification(input, startedAt),
@@ -704,10 +814,15 @@ async function storeReport(
 /** Lo que necesita `operationsCommand` además del entorno. */
 export interface OperationsDependencies extends Omit<
   OperationsInput,
-  'config' | 'database' | 'objects'
+  'config' | 'database' | 'deletion' | 'objects'
 > {
   /** Abre la base con la credencial dueña de la configuración: `openOwnerDatabase`. */
   readonly openDatabase: (config: OperationsConfig) => OwnerDatabase;
+  /**
+   * Abre los objetos de un log para borrarlos, con el token `operaciones` de la configuración:
+   * `openLogDeletion`.
+   */
+  readonly openDeletion: (config: OperationsConfig, log: LogLocation) => LogDeletion;
   /** Abre los objetos de un log con el token `operaciones` de la configuración: `openLogObjects`. */
   readonly openObjects: (config: OperationsConfig, log: LogLocation) => LogObjects;
 }
@@ -735,13 +850,14 @@ export async function operationsCommand(
     }
     throw error;
   }
-  const { openDatabase, openObjects, ...ports } = dependencies;
+  const { openDatabase, openDeletion, openObjects, ...ports } = dependencies;
   const database = openDatabase(config);
   try {
     const run = await runOperations({
       ...ports,
       config,
       database,
+      deletion: (log) => openDeletion(config, log),
       objects: (log) => openObjects(config, log),
     });
     return { exitCode: run.status === 'completed' ? 0 : 1, lines: run.lines };

@@ -243,7 +243,7 @@ export {
   openStores,
   type OpenStoresOptions,
 } from './runtime.js';
-export { S3ObjectStore } from './s3/object-store.js';
+export { createS3Client, isObjectLocked, S3ObjectStore } from './s3/object-store.js';
 export {
   CHILD_OUTPUT_LIMIT_BYTES,
   CHILD_TIMEOUT_MS,
@@ -261,14 +261,27 @@ export {
   type OperationsConfig,
 } from './operations/config.js';
 export {
+  DROP_LOG_LOCK_TIMEOUT_MS,
   OPERATIONS_CONNECTION_TIMEOUT_MS,
   OPERATIONS_QUERY_TIMEOUT_MS,
   openOwnerDatabase,
   type LoginCheck,
+  type LogSchemaDrop,
   type OperationsReportRow,
   type OwnerDatabase,
   type SpaceMeasure,
 } from './operations/owner-database.js';
+export {
+  deleteKeys,
+  logDeletion,
+  openLogDeletion,
+  RETENTION_CONCURRENCY,
+  RETENTION_DEADLINE_MS,
+  RETENTION_PAGE_KEYS,
+  type DeletionProgress,
+  type LogDeletion,
+  type ObjectDeletion,
+} from './operations/retention.js';
 export {
   nextLogToPrepare,
   OPERATIONS_STEPS,
