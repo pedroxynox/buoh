@@ -11,7 +11,9 @@ import {
 import {
   BuohLogo,
   BuohMark,
+  Callout,
   Card,
+  Field,
   FictitiousDataNotice,
   HealthBadge,
   MetricWithContext,
@@ -143,5 +145,48 @@ describe('componentes React', () => {
     expect(mono).toContain(LOGO_SYMBOL.mono);
     expect(mono).toContain('fill="currentColor"');
     expect(mono).not.toContain('var(--b-brand');
+  });
+
+  it('el campo une la etiqueta con el campo y conserva los atributos que recibe', () => {
+    const html = renderToStaticMarkup(
+      <Field id="usuario" label="Usuario" name="username" autoComplete="username" required />,
+    );
+    expect(html).toContain('for="usuario"');
+    expect(html).toContain('id="usuario"');
+    expect(html).toMatch(/autocomplete="username"/i);
+    expect(html).toContain('name="username"');
+    expect(html).toMatch(/required/);
+    expect(html).not.toContain('aria-invalid');
+  });
+
+  it('el campo con error se marca inválido y anuncia la pista y el error', () => {
+    const html = renderToStaticMarkup(
+      <Field
+        id="clave"
+        label="Contraseña"
+        type="password"
+        hint="Al menos 15 caracteres"
+        error="No coincide"
+      />,
+    );
+    expect(html).toContain('type="password"');
+    expect(html).toContain('aria-invalid="true"');
+    expect(html).toContain('aria-describedby="clave-hint clave-error"');
+    expect(html).toContain('id="clave-hint"');
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('No coincide');
+  });
+
+  it('el aviso en bloque lleva su tono, su icono y su texto', () => {
+    const html = renderToStaticMarkup(
+      <Callout tone="rojo" icon="alertTriangle" title="El enlace caducó">
+        Pide uno nuevo.
+      </Callout>,
+    );
+    expect(html).toContain('data-tone="rojo"');
+    expect(html).toContain('<svg');
+    expect(html).toContain('El enlace caducó');
+    expect(html).toContain('Pide uno nuevo.');
+    expect(renderToStaticMarkup(<Callout title="x" />)).not.toContain('data-tone');
   });
 });

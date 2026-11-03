@@ -7,5 +7,6 @@ export {
   PhaseLock,
 } from './Blocks.js';
 export type { EvidenceSource, PerformanceContext } from '../evidence.js';
+export { Callout, Field, type FieldProps } from './Form.js';
 export { Icon, type IconProps } from './Icon.js';
 export { BuohLogo, BuohMark, type BuohLogoProps, type BuohMarkProps } from './Logo.js';

@@ -21,6 +21,7 @@ export default defineConfig(
       '**/.next/**',
       '**/.expo/**',
       '**/out/**',
+      '**/out-api/**',
       '**/src-tauri/target/**',
       '**/src-tauri/gen/**',
       '**/next-env.d.ts',

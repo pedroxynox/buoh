@@ -15,6 +15,7 @@ node_modules/
 .turbo/
 .next/
 out/
+out-api/
 next-env.d.ts
 dist/
 build/

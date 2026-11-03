@@ -99,3 +99,15 @@ pnpm --filter @buoh/prototype-data run test    # comprueba la coherencia de los 
 - **Escritorio:** la misma estructura que la web, con ventanas que se pueden separar para seguir varios mercados. El prototipo de `apps/desktop` (V1.5, [ADR-0010](../arquitectura/adr/0010-prototipo-de-escritorio.md)) muestra la web en una ventana de Windows; las ventanas separables llegan con la app real.
 
 Ambos usan los mismos tokens de `packages/design-system`.
+
+## 8. La web servida por la API (F2.3)
+
+Desde la Fase 2 (F2.3), `apps/web` se exporta en dos variantes del mismo código, que elige una variable de compilación ([ADR-0019](../arquitectura/adr/0019-api-cuentas-y-auditoria.md) §9):
+
+- `apps/web/out`: el prototipo del escritorio de §7, con datos ficticios, sin formularios y sin llamar a la API. No incluye las pantallas de acceso ni de enlace.
+- `apps/web/out-api`: la que sirve la API. Añade, sobre la misma estructura de §2 y la misma línea visual, estas pantallas nuevas:
+  - **Inicio de sesión** (`/acceso`): usuario, contraseña y un código de 6 cifras en un solo formulario, con los atributos que esperan los gestores de contraseñas. Ante cualquier dato incorrecto, el mismo mensaje, sin decir cuál falló.
+  - **Enlace de alta** (`/enlace`): lee el token del fragmento de la dirección, muestra el QR del secreto y su texto, y pide la contraseña nueva y un código para terminar el alta o el restablecimiento. buoh nunca envía enlaces para entrar.
+  - **Menú de la sesión** en la barra superior: cerrar la sesión y cerrar las demás.
+
+Las secciones con datos reales llegan en F2.4; hasta entonces, `out-api` conserva la marca «Datos ficticios» y las insignias de modo y salud de la barra superior, como el prototipo. Los formularios usan los campos del sistema de diseño (`b-field`, `b-input`), y el QR se dibuja dentro de buoh, sin recursos de terceros.
