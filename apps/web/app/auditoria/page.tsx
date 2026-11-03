@@ -1,53 +1,21 @@
-import { Card, PhaseLock } from '@buoh/design-system/react';
 import type { Metadata } from 'next';
-import { PageHeader } from '../../src/components/AppShell';
-import { AUDIT, formatUtc } from '@buoh/prototype-data';
+import dynamic from 'next/dynamic';
+import { AuditoriaDesktop } from '../../src/components/AuditoriaDesktop';
 
 /**
- * Auditoría (concepto de interfaz §3). Las órdenes solo existirán desde Fase 4, por eso esa parte
- * va con candado y los eventos de hoy son de datos y estrategias.
+ * Auditoría (concepto de interfaz §3). El escritorio la dibuja con datos ficticios; la variante
+ * servida por la API pide los eventos reales de la cuenta (ADR-0019 §5 y §9). El empaquetador quita
+ * del escritorio el componente que llama a la API (`F2-UI-001`).
  */
 export const metadata: Metadata = { title: 'Auditoría' };
 
+const Auditoria =
+  process.env.NEXT_PUBLIC_BUOH_WEB_TARGET === 'api'
+    ? dynamic(() =>
+        import('../../src/components/AuditoriaReal').then((module) => module.AuditoriaReal),
+      )
+    : AuditoriaDesktop;
+
 export default function AuditoriaPage() {
-  return (
-    <>
-      <PageHeader
-        eyebrow="Auditoría"
-        title="¿Qué pasó, cuándo y quién lo hizo?"
-        summary="Un registro que solo crece: nada se edita ni se borra. Cada evento enlaza a su evidencia."
-      />
-
-      <Card title="Datos y estrategias" subtitle="Eventos recientes" headingLevel={2}>
-        <div className="w-table-wrap">
-          <table className="b-table">
-            <thead>
-              <tr>
-                <th scope="col">Cuándo</th>
-                <th scope="col">Quién</th>
-                <th scope="col">Evento</th>
-                <th scope="col">Referencia</th>
-              </tr>
-            </thead>
-            <tbody>
-              {AUDIT.map((row) => (
-                <tr key={`${row.whenUtc}-${row.reference}`}>
-                  <td className="b-num w-small">{formatUtc(row.whenUtc)}</td>
-                  <td>{row.actor}</td>
-                  <td>{row.event}</td>
-                  <td className="b-num w-small">{row.reference}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      <PhaseLock
-        phase="4"
-        title="Órdenes, respuestas y reconciliaciones"
-        description="Cada intento se registrará antes de enviarse, con su clave de idempotencia y su resultado."
-      />
-    </>
-  );
+  return <Auditoria />;
 }

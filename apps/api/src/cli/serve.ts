@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
+import { fileURLToPath } from 'node:url';
 
 import { createAccountService } from '../accounts/links.js';
 import { createRateLimiter } from '../accounts/limits.js';
@@ -16,6 +17,7 @@ import { migrationState } from '../postgres/readiness.js';
 import { createReadiness } from '../readiness.js';
 import { apiRoutes } from '../routes.js';
 import { serve, signalsOf } from '../serve.js';
+import { loadWebAssets } from '../web.js';
 
 /**
  * `node apps/api/dist/cli/serve.js`: arranca la API (ADR-0019 §10). Escribe una línea JSON por
@@ -89,6 +91,9 @@ if (config !== undefined) {
     limiter,
     failures,
   });
+  // La exportación `out-api` de la web, junto a la API en el repositorio; `apps/web/out-api` desde
+  // `apps/api/dist/cli/`. Sin ella, la API sirve solo JSON (el despliegue la compila, ADR-0019 §10).
+  const web = loadWebAssets(fileURLToPath(new URL('../../../web/out-api/', import.meta.url)));
   const app = buildApp({
     log,
     now: () => performance.now(),
@@ -96,6 +101,7 @@ if (config !== undefined) {
     origin: config.origin,
     routes: apiRoutes({ readiness, links, sessions, limiter, clock }),
     rateLimit: (address) => limiter.requestWait(address, clock()),
+    ...(web === null ? {} : { web }),
   });
   app.addHook('onClose', async () => {
     readiness.stop();

@@ -5,7 +5,7 @@ Prototipo navegable de la interfaz de buoh (`V1-UI-001`), con **datos ficticios*
 Desde F2.3 se exporta en dos variantes del mismo código ([ADR-0019](../../docs/arquitectura/adr/0019-api-cuentas-y-auditoria.md) §9), que elige la variable de compilación `NEXT_PUBLIC_BUOH_WEB_TARGET`:
 
 - `out`: el prototipo del escritorio, con datos ficticios, sin formularios y sin llamar a la API (`F2-UI-001`). No tiene cuentas, credenciales, conexión a fuentes ni brókeres, y ninguna pantalla envía órdenes. Es el que empaqueta el escritorio ([ADR-0010](../../docs/arquitectura/adr/0010-prototipo-de-escritorio.md)).
-- `out-api`: la que sirve la API (PR 6). Añade las pantallas de inicio de sesión (`/acceso`) y de enlace de alta (`/enlace`) y el menú de la sesión, que llaman a la API del mismo origen. El QR del enlace lo dibuja `uqr`, dentro de buoh y como SVG en línea.
+- `out-api`: la que sirve la API (PR 6). Añade las pantallas de inicio de sesión (`/acceso`) y de enlace de alta (`/enlace`), el menú de la sesión y la sección Auditoría con los eventos reales de la cuenta, que llaman a la API del mismo origen. El QR del enlace lo dibuja `uqr`, dentro de buoh y como SVG en línea.
 
 ## Comandos
 
