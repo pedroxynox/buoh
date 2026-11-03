@@ -16,11 +16,17 @@ export const COMMON_SECURITY_HEADERS: Readonly<Record<string, string>> = {
   'x-robots-tag': 'noindex, nofollow',
 };
 
+/**
+ * La política de contenido que no deja cargar ni ejecutar nada: la del JSON de la API y la de los
+ * recursos de la web que no son HTML (ADR-0019 §9).
+ */
+export const STRICT_CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'";
+
 /** Toda respuesta JSON de la API, también los errores: nada que cargar y sin caché (ADR-0019 §9). */
 export const JSON_RESPONSE_HEADERS: Readonly<Record<string, string>> = {
   ...COMMON_SECURITY_HEADERS,
   'cache-control': 'no-store',
-  'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
+  'content-security-policy': STRICT_CONTENT_SECURITY_POLICY,
 };
 
 export const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';

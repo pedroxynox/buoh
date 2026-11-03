@@ -441,6 +441,7 @@ describe('registro', () => {
       cookie: `__Host-Http-buoh_sesion=${SECRET}`,
       'user-agent': `navegador-${SECRET}`,
       'x-csrf-token': SECRET,
+      'cf-connecting-ip': CLIENT_ADDRESS,
       'x-forwarded-for': CLIENT_ADDRESS,
     };
     const responses = [

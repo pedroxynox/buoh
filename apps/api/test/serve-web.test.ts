@@ -26,6 +26,12 @@ const INDEX_CSP =
   "connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'; " +
   "frame-ancestors 'none'";
 
+/**
+ * La de los archivos que no son HTML: la del JSON, que estrecha la de §9 para que toda respuesta
+ * lleve una política (`F2-API-001`; precisión del PR 7a de ADR-0019 §9).
+ */
+const STRICT_CSP = "default-src 'none'; frame-ancestors 'none'";
+
 describe('inlineScriptHashes', () => {
   it('calcula el hash de cada script en línea y descarta los que tienen src', () => {
     const html =
@@ -109,18 +115,19 @@ describe('la API sirve la web (ADR-0019 §9)', () => {
     expect(scriptSrc?.[1]).not.toContain('unsafe-eval');
   });
 
-  it('los recursos con huella se cachean como inmutables y no llevan política de contenido', async () => {
+  it('los recursos con huella se cachean como inmutables, con la política estricta', async () => {
     const response = await app().inject({ method: 'GET', url: '/_next/static/chunks/a.js' });
     expect(response.statusCode).toBe(200);
     expect(response.headers['cache-control']).toBe('public, max-age=31536000, immutable');
-    expect(response.headers['content-security-policy']).toBeUndefined();
+    expect(response.headers['content-security-policy']).toBe(STRICT_CSP);
     expectCommon(response);
   });
 
-  it('los demás archivos sin huella no se cachean', async () => {
+  it('los demás archivos sin huella no se cachean, con la política estricta', async () => {
     const response = await app().inject({ method: 'GET', url: '/icon.svg' });
     expect(response.statusCode).toBe(200);
     expect(response.headers['cache-control']).toBe('no-cache');
+    expect(response.headers['content-security-policy']).toBe(STRICT_CSP);
     expectCommon(response);
   });
 

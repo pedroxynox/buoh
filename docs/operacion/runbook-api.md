@@ -85,6 +85,25 @@ curl -s -o /dev/null -w '%{http_code}\n' https://<dirección>/api/v1/desconocida
 ```
 
 - `/api/salud` responde `200` cuando la API responde y tiene sus migraciones; si le faltan, `503 not_ready`.
-- Toda respuesta lleva las cabeceras de seguridad de §9 (`Strict-Transport-Security`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `X-Frame-Options`, `X-Robots-Tag`); el HTML, su política de contenido con los hashes de sus scripts en línea; el JSON, `Content-Security-Policy: default-src 'none'` y `Cache-Control: no-store` (`F2-API-001`).
+- Toda respuesta lleva las cabeceras de seguridad de §9 (`Strict-Transport-Security`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `X-Frame-Options`, `X-Robots-Tag`); el HTML, su política de contenido con los hashes de sus scripts en línea; el JSON y los demás archivos de la web, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`; y el JSON, `Cache-Control: no-store` (`F2-API-001`).
 - Una ruta `/api/` que no existe responde `404 not_found` en JSON; cualquier otra ruta desconocida, el `404.html` de la web.
 - La comprobación completa de §13 incluye que ninguna respuesta ni ningún registro lleva la contraseña, el secreto TOTP, los códigos, el identificador de la sesión, el token CSRF, el del enlace ni las tres claves, cada uno solo en su canal (`F2-API-001`, `F2-AUTH-001`).
+
+### El límite por dirección
+
+La API cuenta los intentos fallidos por la dirección de `CF-Connecting-IP`, que pone Cloudflare, delante de Render (ADR-0019 §1). Render no documenta esa cabecera, así que esta comprobación se repite si Render cambia su red. Son doce inicios de sesión fallidos seguidos, cada uno con un nombre distinto que no existe, para que solo cuente el límite por dirección, y con un `X-Forwarded-For` y un `True-Client-IP` distintos:
+
+```sh
+for i in $(seq 1 12); do
+  curl -s -o /dev/null -w '%{http_code}\n' -X POST https://<dirección>/api/v1/sesion \
+    -H 'Origin: https://<dirección>' -H 'Content-Type: application/json' \
+    -H "X-Forwarded-For: 203.0.113.$i" -H "True-Client-IP: 203.0.113.$i" \
+    --data "{\"username\":\"prueba-limite-$i\",\"password\":\"no-es-una-contrasena\",\"code\":\"000000\"}"
+done
+```
+
+- Los diez primeros responden `401` (`invalid_credentials`), y los dos últimos, `429` (`rate_limited`, con `Retry-After`): cambiar esas cabeceras no esquiva el límite. Ninguno deja una cookie.
+- Mientras dura la espera, unos 15 minutos, el propietario entra desde su casa: dos redes distintas cuentan por separado (ADR-0019 §13).
+- Una petición que trae `CF-Connecting-IP` desde el cliente la rechaza Cloudflare con `403`, antes de llegar a la API.
+- Los intentos quedan en la auditoría como fallos sin cuenta, que la sección Auditoría del propietario no muestra.
+- Nunca con el nombre del propietario: sus fallos cuentan para su límite por nombre y para el tope de 100, que deshabilita su credencial (ADR-0019 §1).

@@ -7,13 +7,14 @@ import {
   htmlContentSecurityPolicy,
   IMMUTABLE_CACHE,
   NO_CACHE,
+  STRICT_CONTENT_SECURITY_POLICY,
 } from './headers.js';
 
 /** Un archivo de la web exportada, con su ruta relativa a la raíz y sus cabeceras ya fijadas. */
 export interface WebAsset {
   /** La ruta del archivo relativa a la raíz, con `/`, para `reply.sendFile`. */
   readonly relPath: string;
-  /** Sus cabeceras: las comunes, la política de contenido (HTML) y la caché. */
+  /** Sus cabeceras: las comunes, la política de contenido (la del HTML o la estricta) y la caché. */
   readonly headers: Readonly<Record<string, string>>;
 }
 
@@ -73,8 +74,14 @@ function headersFor(relPosix: string, html: string | null): Record<string, strin
       'content-security-policy': htmlContentSecurityPolicy(inlineScriptHashes(html)),
     };
   }
+  // Los demás archivos llevan la política estricta, que estrecha la de §9: en un script o una hoja de
+  // estilo que carga una página no cambia nada, y un SVG que se abre solo no puede ejecutar nada.
   const immutable = relPosix.startsWith(STATIC_PREFIX);
-  return { ...COMMON_SECURITY_HEADERS, 'cache-control': immutable ? IMMUTABLE_CACHE : NO_CACHE };
+  return {
+    ...COMMON_SECURITY_HEADERS,
+    'cache-control': immutable ? IMMUTABLE_CACHE : NO_CACHE,
+    'content-security-policy': STRICT_CONTENT_SECURITY_POLICY,
+  };
 }
 
 /** Las rutas de petición que atiende un archivo: el HTML de sección, con y sin barra final. */
@@ -91,8 +98,9 @@ function urlPathsFor(relPosix: string): readonly string[] {
 
 /**
  * Lee la web exportada de `root` (apps/web/out-api) y precalcula las cabeceras de cada archivo
- * (ADR-0019 §9): el HTML con su política de contenido y los hashes de sus scripts en línea, los
- * recursos de `_next/static/` con caché inmutable y los demás sin caché. Devuelve `null` si la
+ * (ADR-0019 §9): el HTML con su política de contenido y los hashes de sus scripts en línea, y los
+ * demás archivos con la política estricta; los recursos de `_next/static/` con caché inmutable y
+ * los demás sin caché. Devuelve `null` si la
  * carpeta no existe, para que la API sirva solo el JSON.
  */
 export function loadWebAssets(root: string): WebAssets | null {
