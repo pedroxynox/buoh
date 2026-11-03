@@ -198,6 +198,29 @@ async function createDatabase(server: Pool, database: string, migrated: boolean)
   pools.set(database, { admin, api });
 }
 
+/**
+ * Espera a que la base no tenga sesiones de clientes, para borrarla sin cortar ninguna: `pool.end()`
+ * termina antes de que el servidor cierre cada conexión, y `DROP DATABASE … WITH (FORCE)` mandaría a
+ * una que todavía no cerró un `57P01` que nadie escucha.
+ */
+async function waitForNoSessions(server: Pool, database: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const { rows } = await server.query<{ sessions: number }>(
+      `SELECT count(*)::int AS sessions FROM pg_stat_activity
+        WHERE datname = $1 AND backend_type = 'client backend'`,
+      [database],
+    );
+    if (rows[0]?.sessions === 0) {
+      return;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`La base ${database} sigue con sesiones.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 async function dropAll(server: Pool): Promise<void> {
   for (const database of DATABASES) {
     await server.query(`DROP DATABASE IF EXISTS ${database} WITH (FORCE)`);
@@ -222,6 +245,9 @@ afterAll(async () => {
     await admin.end();
   }
   if (platform !== undefined) {
+    for (const database of DATABASES) {
+      await waitForNoSessions(platform, database);
+    }
     await dropAll(platform);
     await platform.end();
   }
