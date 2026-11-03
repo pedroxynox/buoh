@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
 
+import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 
 import { isSameOriginJsonRequest } from './csrf.js';
@@ -18,6 +19,7 @@ import {
 import { JSON_CONTENT_TYPE, JSON_RESPONSE_HEADERS } from './headers.js';
 import { errorName, type ApiLog } from './log.js';
 import type { ApiRoute } from './routes.js';
+import type { WebAssets } from './web.js';
 import {
   ResponseContractError,
   zodSerializerCompiler,
@@ -48,9 +50,15 @@ export interface ApiAppOptions {
   readonly routes: readonly ApiRoute[];
   /**
    * El límite general de peticiones por dirección (ADR-0019 §1): los segundos que faltan, o 0 si la
-   * petición pasa. Se consulta en cada petición, antes de las comprobaciones de CSRF.
+   * petición pasa. Se consulta en cada petición a `/api/`, antes de las comprobaciones de CSRF; los
+   * recursos estáticos de la web, públicos y cacheados, no cuentan.
    */
   readonly rateLimit: (address: string) => number;
+  /**
+   * La web exportada que sirve la API en el mismo origen (ADR-0019 §9), ya leída con sus cabeceras.
+   * Sin ella, la API responde solo JSON, como el esqueleto y las pruebas que no sirven la web.
+   */
+  readonly web?: WebAssets;
 }
 
 /** Una petición HTTP/1.1 sin `Host` es un 400 (RFC 9112 §3.2). */
@@ -71,8 +79,11 @@ const EXPECTATION_FAILED = 417;
  * - cada petición deja una línea en el registro, con los campos de `ApiLogLine` y nada más.
  */
 export function buildApp(options: ApiAppOptions): FastifyInstance {
-  const { routes } = options;
+  const { routes, web } = options;
   const startedAt = new WeakMap<FastifyRequest, number>();
+  // Las respuestas de archivos estáticos ya llevan sus cabeceras (comunes, política de contenido y
+  // caché); `onSend` no les pone las del JSON.
+  const staticReplies = new WeakSet<FastifyReply>();
 
   const logRequest = (
     method: string,
@@ -160,10 +171,14 @@ export function buildApp(options: ApiAppOptions): FastifyInstance {
       sendError(reply, MISSING_HOST, request.id);
       return;
     }
-    const retryAfterSeconds = options.rateLimit(clientAddress(request));
-    if (retryAfterSeconds > 0) {
-      sendError(reply, { status: 429, code: 'rate_limited', retryAfterSeconds }, request.id);
-      return;
+    // El límite general cuenta las peticiones a `/api/`, no los recursos estáticos de la web, que
+    // son públicos, no llevan datos y se cachean (ADR-0019 §1 y §9).
+    if (pathOf(request.url).startsWith('/api/')) {
+      const retryAfterSeconds = options.rateLimit(clientAddress(request));
+      if (retryAfterSeconds > 0) {
+        sendError(reply, { status: 429, code: 'rate_limited', retryAfterSeconds }, request.id);
+        return;
+      }
     }
     // Las peticiones que cambian algo (`POST` y `DELETE`) exigen el origen propio antes de leer el
     // cuerpo: así un cuerpo de otro sitio nunca llega a analizarse. La tercera condición de CSRF, el
@@ -180,9 +195,15 @@ export function buildApp(options: ApiAppOptions): FastifyInstance {
   });
 
   // Solo los cuerpos que no son texto pasan por aquí, es decir, las salidas de las rutas. Los
-  // errores salen ya como texto validado (`errorBody`).
+  // errores salen ya como texto validado (`errorBody`), y los archivos estáticos son un flujo, que
+  // Fastify no serializa.
   app.addHook('preSerialization', (request, reply, payload, done) => {
-    if (request.routeOptions.config.apiRoute?.responses[reply.statusCode] === undefined) {
+    const route = request.routeOptions.config.apiRoute;
+    if (route === undefined) {
+      done(null, payload);
+      return;
+    }
+    if (route.responses[reply.statusCode] === undefined) {
       done(new ResponseContractError());
       return;
     }
@@ -190,7 +211,10 @@ export function buildApp(options: ApiAppOptions): FastifyInstance {
   });
 
   app.addHook('onSend', (_request, reply, payload, done) => {
-    reply.headers(JSON_RESPONSE_HEADERS);
+    // Un archivo estático ya tiene sus cabeceras; no lleva las del JSON (ADR-0019 §9).
+    if (!staticReplies.has(reply)) {
+      reply.headers(JSON_RESPONSE_HEADERS);
+    }
     done(null, payload);
   });
 
@@ -242,11 +266,60 @@ export function buildApp(options: ApiAppOptions): FastifyInstance {
     });
   }
 
+  if (web !== undefined) {
+    registerWeb(app, web, staticReplies);
+  }
+
   return app;
+}
+
+/**
+ * Sirve la web exportada en el mismo origen que `/api/` (ADR-0019 §9). `@fastify/static` solo añade
+ * `reply.sendFile` (`serve: false`): la ruta comodín resuelve cada petición contra el mapa de la web
+ * y le pone las cabeceras precalculadas de ese archivo. Una ruta `/api/` que ninguna ruta propia
+ * atendió es `not_found` en JSON; cualquier otra ruta desconocida es el `404.html` de la web.
+ */
+function registerWeb(
+  app: FastifyInstance,
+  web: WebAssets,
+  staticReplies: WeakSet<FastifyReply>,
+): void {
+  app.register(fastifyStatic, {
+    root: web.root,
+    serve: false,
+    cacheControl: false,
+    decorateReply: true,
+  });
+  app.route({
+    method: 'GET',
+    url: '/*',
+    handler: (request, reply) => {
+      const path = pathOf(request.url);
+      if (path.startsWith('/api/')) {
+        return sendError(reply, NOT_FOUND_FAILURE, request.id);
+      }
+      const asset = web.byPath.get(path);
+      if (asset !== undefined) {
+        staticReplies.add(reply);
+        return reply.headers(asset.headers).sendFile(asset.relPath);
+      }
+      if (web.notFound !== null) {
+        staticReplies.add(reply);
+        return reply.code(404).headers(web.notFound.headers).sendFile(web.notFound.relPath);
+      }
+      return sendError(reply, NOT_FOUND_FAILURE, request.id);
+    },
+  });
 }
 
 function sendError(reply: FastifyReply, failure: ApiFailure, requestId: string): FastifyReply {
   return reply.code(failure.status).type(JSON_CONTENT_TYPE).send(errorBody(failure, requestId));
+}
+
+/** La ruta de una URL sin su consulta, para distinguir `/api/` de la web estática. */
+function pathOf(url: string): string {
+  const query = url.indexOf('?');
+  return query === -1 ? url : url.slice(0, query);
 }
 
 /** Una petición HTTP/1.1 sin `Host`, la misma comprobación que hace Node. */

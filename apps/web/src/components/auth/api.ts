@@ -10,6 +10,8 @@
  */
 import type {
   ApiErrorCode,
+  AuditEvent,
+  AuditEventsResponse,
   LinkSecret,
   LinkUse,
   PasswordRejectionReason,
@@ -109,6 +111,9 @@ export const api = {
   /** Usa el enlace con la contraseña nueva y un código: da de alta o restablece (ADR-0019 §3). */
   useLink: (input: { token: string; password: string; code: string }): Promise<LinkUse> =>
     request<LinkUse>('POST', '/api/v1/enlace', { body: input }),
+  /** Las entradas de auditoría de la cuenta, de la más nueva a la más vieja (ADR-0019 §5). */
+  audit: (): Promise<readonly AuditEvent[]> =>
+    request<AuditEventsResponse>('GET', '/api/v1/auditoria').then((response) => response.events),
 } as const;
 
 const PASSWORD_REASONS: Readonly<Record<PasswordRejectionReason, string>> = {

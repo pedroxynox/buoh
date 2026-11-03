@@ -1,6 +1,6 @@
 # @buoh/api
 
-La API de buoh (Fastify), que se construye en F2.3 con la secuencia de [ADR-0019](../../docs/arquitectura/adr/0019-api-cuentas-y-auditoria.md) §14. Desde el PR 2 tiene su esqueleto: valida cada entrada y cada salida con los contratos de [`packages/contracts`](../../packages/contracts/), responde los errores con `ApiError`, pone las cabeceras de seguridad en todas las respuestas, escribe una línea JSON por petición y tiene la ruta de salud `GET /api/salud`. Desde el PR 3 tiene su esquema de PostgreSQL, `buoh_api`, con la tabla de la auditoría (`AuditEvent`), y su `db:migrate`. Desde el PR 4a tiene las cuentas, las credenciales y los enlaces de alta y de restablecimiento, con la orden `cuenta`. Desde el PR 4b tiene el inicio y el cierre de sesión, las sesiones de servidor con su cookie y su token CSRF, los límites de intentos, `cuenta cerrar-sesiones`, el cierre de las sesiones al restablecer y la sección de auditoría (`GET /api/v1/auditoria`). No está desplegada.
+La API de buoh (Fastify), que se construye en F2.3 con la secuencia de [ADR-0019](../../docs/arquitectura/adr/0019-api-cuentas-y-auditoria.md) §14. Desde el PR 2 tiene su esqueleto: valida cada entrada y cada salida con los contratos de [`packages/contracts`](../../packages/contracts/), responde los errores con `ApiError`, pone las cabeceras de seguridad en todas las respuestas, escribe una línea JSON por petición y tiene la ruta de salud `GET /api/salud`. Desde el PR 3 tiene su esquema de PostgreSQL, `buoh_api`, con la tabla de la auditoría (`AuditEvent`), y su `db:migrate`. Desde el PR 4a tiene las cuentas, las credenciales y los enlaces de alta y de restablecimiento, con la orden `cuenta`. Desde el PR 4b tiene el inicio y el cierre de sesión, las sesiones de servidor con su cookie y su token CSRF, los límites de intentos, `cuenta cerrar-sesiones`, el cierre de las sesiones al restablecer y la sección de auditoría (`GET /api/v1/auditoria`). Desde el PR 5b sirve la web exportada (`apps/web/out-api`) en el mismo origen que `/api/`, con las cabeceras de seguridad y la política de contenido de cada archivo, y calcula el hash de los scripts en línea de cada HTML (§9). No está desplegada.
 
 ## Comandos
 
@@ -79,7 +79,8 @@ Nunca escribe el mensaje de un error, que puede llevar el usuario, la base o el 
 ## Dónde está cada cosa
 
 - `src/routes.ts`: la tabla de rutas (`API_ROUTE_SPECS`), que registra Fastify y de la que sale el OpenAPI, y sus manejadores (`apiRoutes`). Una ruta no existe sin el esquema de su consulta, de su cuerpo si es `POST` y de cada respuesta.
-- `src/app.ts`: la aplicación: compiladores de Zod, errores, CSRF (`src/csrf.ts`), cabeceras y registro.
+- `src/app.ts`: la aplicación: compiladores de Zod, errores, CSRF (`src/csrf.ts`), cabeceras y registro, y la ruta comodín que sirve la web.
+- `src/headers.ts` y `src/web.ts`: las cabeceras de seguridad por tipo de respuesta, y la lectura de `apps/web/out-api` con la política de contenido y los hashes de cada HTML (§9).
 - `src/log.ts`: los campos del registro, una lista cerrada (ADR-0019 §11).
 - `src/config.ts`: la configuración; `src/readiness.ts` y `src/postgres/readiness.ts`, la espera de las migraciones.
 - `src/auth/`: la contraseña (`password-policy.ts`, `common-passwords.ts`, `password-hash.ts`), el TOTP (`totp.ts`, `base32.ts`), el secreto guardado (`seal.ts`), los tokens de los enlaces (`tokens.ts`) y las sesiones y su token CSRF (`session-token.ts`), todo con `node:crypto`.

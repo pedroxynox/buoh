@@ -90,4 +90,15 @@ describe('variante servida por la API (out-api)', () => {
     );
     expect(calling.length).toBeGreaterThan(0);
   });
+
+  it('la sección Auditoría es la variante real: pide los eventos a la API, no la tabla ficticia', () => {
+    const text = textOf(read(['auditoria', 'index.html']));
+    expect(text).toContain('Eventos de la cuenta');
+    // El título de la tabla ficticia del escritorio no aparece en la variante real.
+    expect(text).not.toContain('Datos y estrategias');
+    const calling = files(OUT_API, '.js').filter((script) =>
+      readFileSync(script, 'utf8').includes('/api/v1/auditoria'),
+    );
+    expect(calling.length).toBeGreaterThan(0);
+  });
 });

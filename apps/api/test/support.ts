@@ -9,6 +9,7 @@ import type { SessionService } from '../src/accounts/sessions.js';
 import { buildApp } from '../src/app.js';
 import type { ApiLogLine } from '../src/log.js';
 import { apiRoutes, type ApiRoute, type ApiRouteDeps } from '../src/routes.js';
+import type { WebAssets } from '../src/web.js';
 
 /**
  * Guardas de determinismo, como en las suites del dominio: la API no puede leer el reloj real, el
@@ -49,6 +50,18 @@ export function useDeterminismGuards(): void {
 export const EXPECTED_JSON_HEADERS: Readonly<Record<string, string>> = {
   'cache-control': 'no-store',
   'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
+  'cross-origin-opener-policy': 'same-origin',
+  'cross-origin-resource-policy': 'same-origin',
+  'permissions-policy': 'camera=(), geolocation=(), microphone=(), payment=(), usb=()',
+  'referrer-policy': 'no-referrer',
+  'strict-transport-security': 'max-age=31536000',
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'x-robots-tag': 'noindex, nofollow',
+};
+
+/** Las cabeceras comunes a toda respuesta, también los recursos estáticos (ADR-0019 §9). */
+export const EXPECTED_COMMON_HEADERS: Readonly<Record<string, string>> = {
   'cross-origin-opener-policy': 'same-origin',
   'cross-origin-resource-policy': 'same-origin',
   'permissions-policy': 'camera=(), geolocation=(), microphone=(), payment=(), usb=()',
@@ -107,6 +120,7 @@ export function readyRoutes(): readonly ApiRoute[] {
 export function testApp(
   routes: readonly ApiRoute[] = readyRoutes(),
   rateLimit: (address: string) => number = () => 0,
+  web?: WebAssets,
 ) {
   const lines: ApiLogLine[] = [];
   let clock = 1_000;
@@ -123,6 +137,7 @@ export function testApp(
     origin: TEST_ORIGIN,
     routes,
     rateLimit,
+    ...(web === undefined ? {} : { web }),
   });
   return { app, lines };
 }
