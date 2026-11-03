@@ -225,8 +225,13 @@ describe('CSS generado desde los tokens (V1-DS-001)', () => {
   });
 
   it('ningún texto usa opacidad: solo los controles desactivados', () => {
-    const rules = [...css.matchAll(/([^{}]+)\{[^}]*opacity:[^}]*\}/g)].map((m) => m[1]?.trim());
-    expect(rules).toEqual([".b-button:disabled, .b-button[aria-disabled='true']"]);
+    const rules = [...css.matchAll(/([^{}]+)\{[^}]*opacity:[^}]*\}/g)].map(
+      (m) => m[1]?.trim() ?? '',
+    );
+    expect(rules).toContain(".b-button:disabled, .b-button[aria-disabled='true']");
+    for (const selector of rules) {
+      expect(selector, selector).toMatch(/:disabled|\[aria-disabled='true'\]/);
+    }
   });
 
   it('es estable y desactiva el movimiento cuando el sistema lo pide', () => {

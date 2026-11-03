@@ -6,11 +6,20 @@ import {
   ModeBadge,
 } from '@buoh/design-system/react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import type { ReactNode } from 'react';
 import { GLOBAL_STATUS } from '@buoh/prototype-data';
 import { NAV_ITEMS } from '../navigation';
 import { MoreMenu } from './MoreMenu';
 import { NavLink } from './NavLink';
+
+// La variante de la API muestra el menú de la sesión; la del escritorio, solo la insignia estática
+// del propietario. La variable de compilación, que Next inlinea, deja que el empaquetador quite del
+// escritorio el menú y todo lo que llama a la API (ADR-0019 §9; `F2-UI-001`).
+const SessionMenu =
+  process.env.NEXT_PUBLIC_BUOH_WEB_TARGET === 'api'
+    ? dynamic(() => import('./SessionMenu').then((module) => module.SessionMenu))
+    : null;
 
 /** Barra superior: marca, aviso de datos ficticios, modo y salud por separado (concepto §2). */
 export function TopBar() {
@@ -25,10 +34,14 @@ export function TopBar() {
       <div className="w-topbar__status" role="group" aria-label="Estado global">
         <ModeBadge mode={GLOBAL_STATUS.mode} showDescription />
         <HealthBadge health={GLOBAL_STATUS.health} />
-        <span className="w-topbar__user">
-          <Icon name="user" />
-          <span className="w-topbar__user-name">Propietario</span>
-        </span>
+        {SessionMenu === null ? (
+          <span className="w-topbar__user">
+            <Icon name="user" />
+            <span className="w-topbar__user-name">Propietario</span>
+          </span>
+        ) : (
+          <SessionMenu />
+        )}
       </div>
     </header>
   );

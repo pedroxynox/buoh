@@ -2,25 +2,29 @@
 
 Prototipo navegable de la interfaz de buoh (`V1-UI-001`), con **datos ficticios**. Implementa el [concepto de interfaz](../../docs/diseno/concepto-de-interfaz.md) con el [sistema de diseño](../../packages/design-system/README.md), bajo las reglas de [ADR-0008](../../docs/arquitectura/adr/0008-linea-visual-marca-y-clientes-web.md).
 
-No tiene API, cuentas, credenciales, conexión a fuentes ni brókeres. Ninguna pantalla envía órdenes.
+Desde F2.3 se exporta en dos variantes del mismo código ([ADR-0019](../../docs/arquitectura/adr/0019-api-cuentas-y-auditoria.md) §9), que elige la variable de compilación `NEXT_PUBLIC_BUOH_WEB_TARGET`:
+
+- `out`: el prototipo del escritorio, con datos ficticios, sin formularios y sin llamar a la API (`F2-UI-001`). No tiene cuentas, credenciales, conexión a fuentes ni brókeres, y ninguna pantalla envía órdenes. Es el que empaqueta el escritorio ([ADR-0010](../../docs/arquitectura/adr/0010-prototipo-de-escritorio.md)).
+- `out-api`: la que sirve la API (PR 6). Añade las pantallas de inicio de sesión (`/acceso`) y de enlace de alta (`/enlace`) y el menú de la sesión, que llaman a la API del mismo origen. El QR del enlace lo dibuja `uqr`, dentro de buoh y como SVG en línea.
 
 ## Comandos
 
 ```text
-pnpm --filter @buoh/web run build      # Next.js 16 con exportación estática a out/
-pnpm --filter @buoh/web run test       # cada página exportada (lee el último build)
+pnpm --filter @buoh/web run build      # las dos exportaciones: out (escritorio) y out-api (API)
+pnpm --filter @buoh/web run test       # cada página de out y de out-api (lee el último build)
 pnpm --filter @buoh/web run typecheck
 ```
 
-`pnpm run test` y `pnpm run verify` construyen antes de probar. `build` desactiva la telemetría de Next.js y usa un identificador de build fijo, así que dos exportaciones del mismo commit tienen las mismas rutas. Las tipografías se sirven desde el propio sitio (Fontsource) y no hay recursos de terceros.
+`pnpm run test` y `pnpm run verify` construyen antes de probar. `scripts/build-exports.mjs` compila las dos variantes con un identificador de build fijo —así dos exportaciones del mismo commit tienen las mismas rutas— y quita de `out` las rutas de acceso y de enlace. Las tipografías se sirven desde el propio sitio (Fontsource) y no hay recursos de terceros.
 
 ## Estructura
 
 | Ruta | Qué contiene |
 |---|---|
-| `app/` | Una carpeta por sección, el marco (`layout.tsx`) y los estilos `w-*` (`globals.css`) |
-| `src/components/` | Marco con barra superior y navegación, gráficos SVG, tarjeta de señal y metadatos de datos |
-| `test/` | Comprobación de cada página de `out/` |
+| `app/` | Una carpeta por sección, las rutas `acceso/` y `enlace/` de `out-api`, el marco (`layout.tsx`) y los estilos `w-*` (`globals.css`) |
+| `src/components/` | Marco con barra superior y navegación, gráficos SVG, tarjeta de señal y metadatos de datos; el menú de la sesión (`SessionMenu.tsx`) y las pantallas servidas por la API (`auth/`) |
+| `scripts/` | `build-exports.mjs`: compila las dos variantes `out` y `out-api` |
+| `test/` | Comprobación de cada página de `out/` y de `out-api/`, y de que `out` no llama a la API |
 
 Los datos ficticios y sus pruebas de coherencia viven en [`@buoh/prototype-data`](../../packages/prototype-data/README.md), compartidos con el prototipo móvil.
 

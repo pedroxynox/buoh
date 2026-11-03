@@ -193,6 +193,7 @@ Cómo están hechos hoy los gráficos, y qué parte de estas reglas cumplen, est
 - Una insignia nunca desborda su contenedor: si falta espacio, su descripción pasa a otra línea y la etiqueta se mantiene entera.
 - Foco del teclado siempre visible, en tono cielo.
 - Áreas táctiles de al menos 44 × 44 px en móvil. La app de React Native usa los mismos tokens desde `@buoh/design-system`.
+- Los campos de formulario (`b-field` y `b-input`) unen su etiqueta con el campo (`for`), muestran el foco, miden al menos 44 px de alto en móvil y marcan un error con `aria-invalid` y un texto, nunca solo con color. Un aviso en bloque (`b-callout`) lleva su tono con icono y texto. Los usa la web servida por la API (ADR-0019 §9).
 - Ninguna información depende solo del color.
 
 ## 11. Estilo técnico y toque boreal
