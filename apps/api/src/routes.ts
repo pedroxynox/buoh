@@ -1,29 +1,50 @@
 import {
   apiHealthSchema,
+  auditEventsResponseSchema,
+  emptyRequestSchema,
   linkSecretRequestSchema,
   linkSecretSchema,
   linkUseRequestSchema,
   linkUseSchema,
+  sessionInfoSchema,
+  sessionLoginRequestSchema,
+  sessionsClosedResultSchema,
   type LinkSecretRequest,
   type LinkUseRequest,
+  type SessionLoginRequest,
 } from '@buoh/contracts';
 import type { FastifyRequest } from 'fastify';
 import { z, type ZodType } from 'zod';
 
-import { LinkError, PasswordRejectedError } from './accounts/errors.js';
+import {
+  LinkError,
+  LoginError,
+  PasswordRejectedError,
+  RateLimitedError,
+} from './accounts/errors.js';
 import type { LinkService } from './accounts/service.js';
+import {
+  SESSION_MAX_MS,
+  type AuthenticatedSession,
+  type SessionService,
+} from './accounts/sessions.js';
+import type { RateLimiter } from './accounts/limits.js';
 import { PasswordHasherBusyError } from './auth/password-hash.js';
-import { ApiRequestError, NOT_READY_FAILURE } from './errors.js';
+import { buildSessionCookie, clearSessionCookie, readSessionCookie } from './auth/session-token.js';
+import { ApiRequestError, CSRF_REJECTED_FAILURE, NOT_READY_FAILURE } from './errors.js';
 import type { Readiness } from './readiness.js';
 
 /**
- * Lo que devuelve el manejador de una ruta: el estado y el cuerpo, que validará su esquema. El
- * cuerpo es un objeto o una lista. Cualquier otro (un texto, un `Buffer`, un *stream* o ninguno)
- * es `internal`, porque Fastify lo enviaría sin pasar por el serializador.
+ * Lo que devuelve el manejador de una ruta: el estado, el cuerpo, que validará su esquema, y una
+ * cabecera `Set-Cookie` opcional (el inicio y el cierre de sesión). El cuerpo es un objeto o una
+ * lista. Cualquier otro (un texto, un `Buffer`, un *stream* o ninguno) es `internal`, porque Fastify
+ * lo enviaría sin pasar por el serializador.
  */
 export interface ApiRouteResult {
   readonly status: number;
   readonly body: unknown;
+  /** El valor de una cabecera `Set-Cookie`, si la respuesta pone o borra la cookie de la sesión. */
+  readonly setCookie?: string;
 }
 
 interface ApiRouteSpecBase {
@@ -43,12 +64,13 @@ interface ApiRouteSpecBase {
 
 /**
  * Una ruta de la API, sin su manejador. Fastify registra la tabla y el OpenAPI sale de ella
- * (ADR-0019 §6), así que una ruta no puede existir sin su contrato. Una ruta `POST` cambia algo:
- * lleva el esquema de su cuerpo y pasa las comprobaciones contra CSRF (`csrf.ts`).
+ * (ADR-0019 §6), así que una ruta no puede existir sin su contrato. Una ruta que cambia algo (`POST`
+ * o `DELETE`) lleva el esquema de su cuerpo y pasa las dos primeras comprobaciones contra CSRF antes
+ * de leerlo (`csrf.ts`); si tiene sesión, el manejador exige además el token CSRF.
  */
 export type ApiRouteSpec =
   | (ApiRouteSpecBase & { readonly method: 'GET'; readonly body?: undefined })
-  | (ApiRouteSpecBase & { readonly method: 'POST'; readonly body: ZodType });
+  | (ApiRouteSpecBase & { readonly method: 'POST' | 'DELETE'; readonly body: ZodType });
 
 /** Una ruta de la API con su manejador. */
 export type ApiRoute = ApiRouteSpec & {
@@ -64,6 +86,8 @@ const NOT_READY =
   'Faltan las migraciones de la API (not_ready), o PostgreSQL no responde (postgres_unavailable).';
 const CSRF =
   'La petición no llega de la propia web: Origin, Sec-Fetch-Site o Content-Type (csrf_rejected).';
+const UNAUTHENTICATED = 'La petición necesita una sesión y no la trae o no vale (unauthenticated).';
+const RATE_LIMITED = 'Hay que esperar, con los segundos que faltan (rate_limited).';
 
 const SALUD = {
   method: 'GET',
@@ -89,6 +113,7 @@ const ENLACE_SECRETO = {
     400: 'La petición no cumple su contrato (invalid_request), o el enlace no existe, venció, ya se usó o lo anuló otro (invalid_link).',
     403: CSRF,
     413: BODY_TOO_LARGE,
+    429: RATE_LIMITED,
     503: NOT_READY,
   },
 } as const satisfies ApiRouteSpec;
@@ -107,18 +132,93 @@ const ENLACE = {
     403: CSRF,
     413: BODY_TOO_LARGE,
     422: 'La contraseña nueva no cumple la política, con su motivo (password_rejected).',
-    429: 'Hay demasiadas contraseñas esperando su hash, con los segundos que faltan (rate_limited).',
+    429: RATE_LIMITED,
     503: NOT_READY,
   },
 } as const satisfies ApiRouteSpec;
 
-/** Las rutas de la API, en el orden en que se registran. De esta lista sale el OpenAPI. */
-export const API_ROUTE_SPECS: readonly ApiRouteSpec[] = [SALUD, ENLACE_SECRETO, ENLACE];
+const SESION = {
+  method: 'POST',
+  url: '/api/v1/sesion',
+  operationId: 'postSesion',
+  summary:
+    'Inicia sesión con el nombre, la contraseña y un código de 6 cifras; pone la cookie de la sesión y devuelve su token CSRF (ADR-0019 §1 y §2).',
+  querystring: NO_QUERY,
+  body: sessionLoginRequestSchema,
+  responses: { 201: sessionInfoSchema },
+  errors: {
+    400: 'La petición no cumple su contrato (invalid_request).',
+    401: 'El nombre, la contraseña o el código no valen (invalid_credentials).',
+    403: `${CSRF} O la credencial está deshabilitada por sus 100 fallos (credential_disabled).`,
+    413: BODY_TOO_LARGE,
+    429: RATE_LIMITED,
+    503: NOT_READY,
+  },
+} as const satisfies ApiRouteSpec;
 
-/** Lo que necesitan las rutas: si la API está lista y el servicio de las cuentas. */
+const SESION_INFO = {
+  method: 'GET',
+  url: '/api/v1/sesion',
+  operationId: 'getSesion',
+  summary:
+    'El token CSRF de la sesión actual, que la web recupera al abrir cada página (ADR-0019 §2).',
+  querystring: NO_QUERY,
+  responses: { 200: sessionInfoSchema },
+  errors: { 401: UNAUTHENTICATED, 503: NOT_READY },
+} as const satisfies ApiRouteSpec;
+
+const SESION_CIERRE = {
+  method: 'DELETE',
+  url: '/api/v1/sesion',
+  operationId: 'deleteSesion',
+  summary: 'Cierra la sesión actual y borra su cookie (ADR-0019 §2).',
+  querystring: NO_QUERY,
+  body: emptyRequestSchema,
+  responses: { 200: sessionsClosedResultSchema },
+  errors: { 401: UNAUTHENTICATED, 403: CSRF, 413: BODY_TOO_LARGE, 503: NOT_READY },
+} as const satisfies ApiRouteSpec;
+
+const SESIONES_CIERRE = {
+  method: 'DELETE',
+  url: '/api/v1/sesiones',
+  operationId: 'deleteSesiones',
+  summary: 'Cierra las demás sesiones de la cuenta, menos la actual (ADR-0019 §2).',
+  querystring: NO_QUERY,
+  body: emptyRequestSchema,
+  responses: { 200: sessionsClosedResultSchema },
+  errors: { 401: UNAUTHENTICATED, 403: CSRF, 413: BODY_TOO_LARGE, 503: NOT_READY },
+} as const satisfies ApiRouteSpec;
+
+const AUDITORIA = {
+  method: 'GET',
+  url: '/api/v1/auditoria',
+  operationId: 'getAuditoria',
+  summary: 'Las entradas de auditoría de la cuenta, de la más nueva a la más vieja (ADR-0019 §5).',
+  querystring: NO_QUERY,
+  responses: { 200: auditEventsResponseSchema },
+  errors: { 401: UNAUTHENTICATED, 503: NOT_READY },
+} as const satisfies ApiRouteSpec;
+
+/** Las rutas de la API, en el orden en que se registran. De esta lista sale el OpenAPI. */
+export const API_ROUTE_SPECS: readonly ApiRouteSpec[] = [
+  SALUD,
+  ENLACE_SECRETO,
+  ENLACE,
+  SESION,
+  SESION_INFO,
+  SESION_CIERRE,
+  SESIONES_CIERRE,
+  AUDITORIA,
+];
+
+/** Lo que necesitan las rutas: la espera, las cuentas, las sesiones, los límites y el reloj. */
 export interface ApiRouteDeps {
   readonly readiness: Readiness;
   readonly links: LinkService;
+  readonly sessions: SessionService;
+  readonly limiter: RateLimiter;
+  /** Milisegundos de pared, para el límite por dirección de los enlaces (ADR-0019 §1). */
+  readonly clock: () => number;
 }
 
 function requireReady(readiness: Readiness): void {
@@ -127,7 +227,26 @@ function requireReady(readiness: Readiness): void {
   }
 }
 
-/** Los fallos esperados de las cuentas, con su código (ADR-0019 §6). Los demás siguen igual. */
+/**
+ * La dirección del cliente (ADR-0019 §1): la última de `X-Forwarded-For`, la que añade el proxy de
+ * Render, nunca una que el cliente pueda elegir. Sin esa cabecera, la de la conexión.
+ */
+export function clientAddress(request: FastifyRequest): string {
+  const forwarded = request.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string') {
+    const parts = forwarded
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+    const last = parts[parts.length - 1];
+    if (last !== undefined) {
+      return last;
+    }
+  }
+  return request.ip;
+}
+
+/** Los fallos esperados de las cuentas y del inicio de sesión, con su código (ADR-0019 §6). */
 function asRequestError(error: unknown): unknown {
   if (error instanceof LinkError) {
     return new ApiRequestError({ status: 400, code: error.code });
@@ -137,6 +256,18 @@ function asRequestError(error: unknown): unknown {
   }
   if (error instanceof PasswordHasherBusyError) {
     return new ApiRequestError({ status: 429, code: 'rate_limited', retryAfterSeconds: 1 });
+  }
+  if (error instanceof RateLimitedError) {
+    return new ApiRequestError({
+      status: 429,
+      code: 'rate_limited',
+      retryAfterSeconds: error.retryAfterSeconds,
+    });
+  }
+  if (error instanceof LoginError) {
+    return error.code === 'credential_disabled'
+      ? new ApiRequestError({ status: 403, code: 'credential_disabled' })
+      : new ApiRequestError({ status: 401, code: 'invalid_credentials' });
   }
   return error;
 }
@@ -149,8 +280,54 @@ async function accountsCall<T>(call: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Una sesión válida de la cookie, o `unauthenticated`. Deja la cuenta para la línea del registro. */
+async function requireSession(
+  request: FastifyRequest,
+  deps: ApiRouteDeps,
+): Promise<AuthenticatedSession> {
+  const session = await deps.sessions.authenticate(readSessionCookie(request.headers.cookie));
+  if (session === null) {
+    throw new ApiRequestError({ status: 401, code: 'unauthenticated' });
+  }
+  request.buohAccountId = session.accountId;
+  return session;
+}
+
+/** La tercera condición contra CSRF: el token de la sesión en `X-CSRF-Token` (ADR-0019 §2). */
+function requireCsrf(
+  request: FastifyRequest,
+  session: AuthenticatedSession,
+  deps: ApiRouteDeps,
+): void {
+  if (!deps.sessions.validateCsrf(session.sessionSecret, request.headers['x-csrf-token'])) {
+    throw new ApiRequestError(CSRF_REJECTED_FAILURE);
+  }
+}
+
 /** La tabla de rutas con sus manejadores. */
 export function apiRoutes(deps: ApiRouteDeps): readonly ApiRoute[] {
+  /** Un enlace que no vale cuenta como un fallo por dirección (ADR-0019 §1). */
+  const linkCall = async <T>(call: () => Promise<T>, address: string, now: number): Promise<T> => {
+    try {
+      return await call();
+    } catch (error) {
+      if (error instanceof LinkError) {
+        deps.limiter.recordAddressFailure(address, now);
+      }
+      throw asRequestError(error);
+    }
+  };
+
+  const guardAddress = (request: FastifyRequest): { address: string; now: number } => {
+    const address = clientAddress(request);
+    const now = deps.clock();
+    const wait = deps.limiter.addressFailureWait(address, now);
+    if (wait > 0) {
+      throw new ApiRequestError({ status: 429, code: 'rate_limited', retryAfterSeconds: wait });
+    }
+    return { address, now };
+  };
+
   return [
     {
       ...SALUD,
@@ -163,8 +340,13 @@ export function apiRoutes(deps: ApiRouteDeps): readonly ApiRoute[] {
       ...ENLACE_SECRETO,
       handler: async (request) => {
         requireReady(deps.readiness);
+        const { address, now } = guardAddress(request);
         const body = request.body as LinkSecretRequest;
-        const secret = await accountsCall(() => deps.links.issueSecret({ token: body.token }));
+        const secret = await linkCall(
+          () => deps.links.issueSecret({ token: body.token }),
+          address,
+          now,
+        );
         return { status: 200, body: secret };
       },
     },
@@ -172,16 +354,89 @@ export function apiRoutes(deps: ApiRouteDeps): readonly ApiRoute[] {
       ...ENLACE,
       handler: async (request) => {
         requireReady(deps.readiness);
+        const { address, now } = guardAddress(request);
         const body = request.body as LinkUseRequest;
-        const result = await accountsCall(() =>
-          deps.links.useLink({
-            token: body.token,
+        const result = await linkCall(
+          () =>
+            deps.links.useLink({
+              token: body.token,
+              password: body.password,
+              code: body.code,
+              requestId: request.id,
+            }),
+          address,
+          now,
+        );
+        return { status: 200, body: result };
+      },
+    },
+    {
+      ...SESION,
+      handler: async (request) => {
+        requireReady(deps.readiness);
+        const body = request.body as SessionLoginRequest;
+        const { sessionSecret, csrfToken } = await accountsCall(() =>
+          deps.sessions.login({
+            username: body.username,
             password: body.password,
             code: body.code,
+            address: clientAddress(request),
             requestId: request.id,
           }),
         );
-        return { status: 200, body: result };
+        return {
+          status: 201,
+          body: { csrf_token: csrfToken },
+          setCookie: buildSessionCookie(sessionSecret, Math.floor(SESSION_MAX_MS / 1000)),
+        };
+      },
+    },
+    {
+      ...SESION_INFO,
+      handler: async (request) => {
+        requireReady(deps.readiness);
+        const session = await requireSession(request, deps);
+        // Abrir una página renueva la inactividad (ADR-0019 §2).
+        await deps.sessions.renewActivity(session);
+        return {
+          status: 200,
+          body: { csrf_token: deps.sessions.csrfToken(session.sessionSecret) },
+        };
+      },
+    },
+    {
+      ...SESION_CIERRE,
+      handler: async (request) => {
+        requireReady(deps.readiness);
+        const session = await requireSession(request, deps);
+        requireCsrf(request, session, deps);
+        const closed = await deps.sessions.logout({ session, requestId: request.id });
+        return { status: 200, body: { closed }, setCookie: clearSessionCookie() };
+      },
+    },
+    {
+      ...SESIONES_CIERRE,
+      handler: async (request) => {
+        requireReady(deps.readiness);
+        const session = await requireSession(request, deps);
+        requireCsrf(request, session, deps);
+        const closed = await deps.sessions.closeOthers({ session, requestId: request.id });
+        await deps.sessions.renewActivity(session);
+        return { status: 200, body: { closed } };
+      },
+    },
+    {
+      ...AUDITORIA,
+      handler: async (request) => {
+        requireReady(deps.readiness);
+        const session = await requireSession(request, deps);
+        // Una petición con el token CSRF válido es del propietario y renueva; una actualización
+        // automática (F2.4), sin token, no (ADR-0019 §2).
+        if (deps.sessions.validateCsrf(session.sessionSecret, request.headers['x-csrf-token'])) {
+          await deps.sessions.renewActivity(session);
+        }
+        const events = await deps.sessions.listAudit(session);
+        return { status: 200, body: { events } };
       },
     },
   ];

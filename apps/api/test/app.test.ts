@@ -152,7 +152,7 @@ describe('GET /api/salud', () => {
 describe('rutas que no existen', () => {
   it.each([
     ['GET', '/'],
-    ['GET', '/api/v1/sesion'],
+    ['GET', '/api/v1/desconocido'],
     ['GET', '/api/salud/'],
     ['POST', '/api/salud'],
     ['DELETE', '/api/salud'],

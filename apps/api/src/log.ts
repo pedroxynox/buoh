@@ -12,6 +12,8 @@ export type ApiLogLine =
       readonly status: number;
       readonly duration_ms: number;
       readonly request_id: string;
+      /** La cuenta de la sesión, solo cuando la petición venía autenticada (ADR-0019 §11). */
+      readonly account_id?: string;
     }
   | { readonly event: 'api_error'; readonly request_id: string; readonly error: string }
   | { readonly event: 'api_client_error'; readonly request_id: string; readonly error: string }

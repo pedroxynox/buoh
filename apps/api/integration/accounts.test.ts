@@ -24,6 +24,8 @@ import { loadPostgresConfig, type PostgresConfig } from '../src/postgres/config.
 import { migrate } from '../src/postgres/migrate.js';
 import { createPool, SERVICE_POOL_TIMEOUTS } from '../src/postgres/pool.js';
 import { migrationState } from '../src/postgres/readiness.js';
+import { createRateLimiter } from '../src/accounts/limits.js';
+import type { SessionService } from '../src/accounts/sessions.js';
 import { apiRoutes } from '../src/routes.js';
 
 /**
@@ -531,6 +533,7 @@ describe('el alta con su enlace (ADR-0019 §1 y §3)', () => {
         await during();
         return real.hash(password);
       },
+      verify: (hash, password) => real.verify(hash, password),
     });
     const requestId = '00000000-0000-4000-8000-000000000a02';
 
@@ -599,6 +602,7 @@ describe('el alta con su enlace (ADR-0019 §1 y §3)', () => {
           await bothHashed;
           return hash;
         },
+        verify: (hash, password) => real.verify(hash, password),
       };
     };
     const first = service(DATABASE, 'test', clock, barrierHasher()).accounts;
@@ -955,6 +959,7 @@ describe('en production, dos altas a la vez (ADR-0019 §3)', () => {
           await bothHashed;
           return hash;
         },
+        verify: (hash, password) => real.verify(hash, password),
       };
     };
     const first = service(RACE_DATABASE, 'production', clock, barrierHasher()).accounts;
@@ -1044,12 +1049,30 @@ describe('el recorrido completo por HTTP, con inject contra la base (ADR-0019 §
     const { accounts, clock } = service(DATABASE);
     const lines: ApiLogLine[] = [];
     let n = 0;
+    const unusedSessions: SessionService = {
+      login: () => Promise.reject(new Error('sin sesiones en esta prueba')),
+      authenticate: () => Promise.resolve(null),
+      renewActivity: () => Promise.resolve(),
+      logout: () => Promise.resolve(0),
+      closeOthers: () => Promise.resolve(0),
+      listAudit: () => Promise.resolve([]),
+      csrfToken: () => '0'.repeat(64),
+      validateCsrf: () => false,
+      flushPendingFailures: () => Promise.resolve(),
+    };
     const app = buildApp({
       log: (line) => lines.push(line),
       now: () => 0,
       requestId: () => `00000000-0000-4000-8000-${(n++).toString(16).padStart(12, '0')}`,
       origin: ORIGIN,
-      routes: apiRoutes({ readiness: { isReady: () => true }, links: accounts }),
+      routes: apiRoutes({
+        readiness: { isReady: () => true },
+        links: accounts,
+        sessions: unusedSessions,
+        limiter: createRateLimiter(),
+        clock: clock.now,
+      }),
+      rateLimit: () => 0,
     });
     const headers = { origin: ORIGIN, 'content-type': 'application/json' };
     const token = tokenOf(

@@ -8,6 +8,7 @@ import { PasswordHasherBusyError } from '../src/auth/password-hash.js';
 import { API_ROUTE_SPECS, apiRoutes } from '../src/routes.js';
 import {
   EXPECTED_JSON_HEADERS,
+  routeDeps,
   TEST_ORIGIN,
   testApp,
   testRequestId,
@@ -55,7 +56,7 @@ function appWith(
   ready = true,
 ): ReturnType<typeof testApp> & { calls: ReturnType<typeof fakeLinks>['calls'] } {
   const { links, calls } = fakeLinks(behavior);
-  const built = testApp(apiRoutes({ readiness: { isReady: () => ready }, links }));
+  const built = testApp(apiRoutes(routeDeps({ readiness: { isReady: () => ready }, links })));
   return { ...built, calls };
 }
 
@@ -93,7 +94,7 @@ function expectError(response: LightMyRequestResponse, status: number, code: str
 describe('la tabla de rutas', () => {
   it('sirve exactamente las rutas del OpenAPI, en su orden', () => {
     const { links } = fakeLinks({});
-    const served = apiRoutes({ readiness: { isReady: () => true }, links });
+    const served = apiRoutes(routeDeps({ readiness: { isReady: () => true }, links }));
     const withoutHandlers = served.map((route) =>
       Object.fromEntries(Object.entries(route).filter(([key]) => key !== 'handler')),
     );
@@ -102,6 +103,11 @@ describe('la tabla de rutas', () => {
       'GET /api/salud',
       'POST /api/v1/enlace/secreto',
       'POST /api/v1/enlace',
+      'POST /api/v1/sesion',
+      'GET /api/v1/sesion',
+      'DELETE /api/v1/sesion',
+      'DELETE /api/v1/sesiones',
+      'GET /api/v1/auditoria',
     ]);
   });
 });

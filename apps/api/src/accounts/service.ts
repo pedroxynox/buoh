@@ -41,4 +41,10 @@ export interface AccountCommandService {
     readonly username: string;
     readonly purpose: LinkPurpose;
   }): Promise<CreatedLink>;
+  /**
+   * `cerrar-sesiones`: cierra todas las sesiones abiertas de la cuenta y deja su entrada
+   * `sessions_closed` (ADR-0019 §2 y §3). Devuelve cuántas cerró. Lanza `AccountCommandError` con
+   * `account_not_found` si la cuenta no existe.
+   */
+  closeSessions(input: { readonly username: string }): Promise<number>;
 }

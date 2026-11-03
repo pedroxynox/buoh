@@ -1,13 +1,14 @@
 import { auditEventSchema, canonicalJson, type AuditEvent } from '@buoh/contracts';
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
 /**
  * Guarda una entrada de la auditoría (ADR-0019 §5) en `buoh_api.audit_events`: el documento en JCS
  * y las columnas que se consultan, que la base comprueba iguales a las del documento. La entrada se
- * valida antes con su contrato, así que nunca se guarda una que no lo cumple.
+ * valida antes con su contrato, así que nunca se guarda una que no lo cumple. Acepta un cliente de
+ * la transacción o el pool (los fallos agrupados se escriben fuera de transacción).
  */
 export async function insertAuditEvent(
-  client: Pick<PoolClient, 'query'>,
+  client: Pick<Pool | PoolClient, 'query'>,
   event: AuditEvent,
 ): Promise<void> {
   const parsed = auditEventSchema.parse(event);

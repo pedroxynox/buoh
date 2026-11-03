@@ -4,6 +4,7 @@ import type { Socket } from 'node:net';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 
 import { isSameOriginJsonRequest } from './csrf.js';
+import { clientAddress } from './routes.js';
 import {
   classifyError,
   clientErrorResponse,
@@ -28,6 +29,10 @@ declare module 'fastify' {
     /** La ruta de la tabla que atiende la petición, con su método. No existe en el 404. */
     readonly apiRoute?: ApiRoute;
   }
+  interface FastifyRequest {
+    /** La cuenta de la sesión, que un manejador autenticado deja para la línea del registro (§11). */
+    buohAccountId?: string;
+  }
 }
 
 /** Lo que cambia en las pruebas: el registro, el reloj, los identificadores, el origen y las rutas. */
@@ -41,6 +46,11 @@ export interface ApiAppOptions {
   readonly origin: string;
   /** La tabla de rutas con sus manejadores (`apiRoutes`). */
   readonly routes: readonly ApiRoute[];
+  /**
+   * El límite general de peticiones por dirección (ADR-0019 §1): los segundos que faltan, o 0 si la
+   * petición pasa. Se consulta en cada petición, antes de las comprobaciones de CSRF.
+   */
+  readonly rateLimit: (address: string) => number;
 }
 
 /** Una petición HTTP/1.1 sin `Host` es un 400 (RFC 9112 §3.2). */
@@ -70,6 +80,7 @@ export function buildApp(options: ApiAppOptions): FastifyInstance {
     status: number,
     started: number,
     requestId: string,
+    accountId?: string,
   ): void => {
     options.log({
       event: 'api_request',
@@ -78,6 +89,7 @@ export function buildApp(options: ApiAppOptions): FastifyInstance {
       status,
       duration_ms: Math.max(0, Math.round(options.now() - started)),
       request_id: requestId,
+      ...(accountId === undefined ? {} : { account_id: accountId }),
     });
   };
 
@@ -148,9 +160,17 @@ export function buildApp(options: ApiAppOptions): FastifyInstance {
       sendError(reply, MISSING_HOST, request.id);
       return;
     }
-    // Antes de leer el cuerpo: así un cuerpo de otro sitio nunca llega a analizarse.
+    const retryAfterSeconds = options.rateLimit(clientAddress(request));
+    if (retryAfterSeconds > 0) {
+      sendError(reply, { status: 429, code: 'rate_limited', retryAfterSeconds }, request.id);
+      return;
+    }
+    // Las peticiones que cambian algo (`POST` y `DELETE`) exigen el origen propio antes de leer el
+    // cuerpo: así un cuerpo de otro sitio nunca llega a analizarse. La tercera condición de CSRF, el
+    // token de la sesión, la comprueba el manejador (`routes.ts`).
+    const method = request.routeOptions.config.apiRoute?.method;
     if (
-      request.routeOptions.config.apiRoute?.method === 'POST' &&
+      (method === 'POST' || method === 'DELETE') &&
       !isSameOriginJsonRequest(request.headers, options.origin)
     ) {
       sendError(reply, CSRF_REJECTED_FAILURE, request.id);
@@ -182,6 +202,7 @@ export function buildApp(options: ApiAppOptions): FastifyInstance {
       reply.statusCode,
       started,
       request.id,
+      request.buohAccountId,
     );
     done();
   });
@@ -212,6 +233,9 @@ export function buildApp(options: ApiAppOptions): FastifyInstance {
         const result = await route.handler(request);
         if (!isMessageBody(result.body)) {
           throw new ResponseContractError();
+        }
+        if (result.setCookie !== undefined) {
+          reply.header('set-cookie', result.setCookie);
         }
         return reply.code(result.status).send(result.body);
       },

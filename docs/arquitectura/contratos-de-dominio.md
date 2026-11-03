@@ -652,7 +652,8 @@ Los mensajes de la API de buoh (`apps/api`, [ADR-0019](adr/0019-api-cuentas-y-au
 ApiError {
   error:
     | { code: "invalid_request" | "not_found" | "internal" | "csrf_rejected"
-              | "invalid_link" | "invalid_code" | "not_ready" | "postgres_unavailable",
+              | "invalid_link" | "invalid_code" | "not_ready" | "postgres_unavailable"
+              | "unauthenticated" | "invalid_credentials" | "credential_disabled",
         request_id: UUID }
     | { code: "rate_limited", request_id: UUID, retry_after_seconds: 1..3600 }
     | { code: "password_rejected", request_id: UUID,
@@ -673,6 +674,12 @@ LinkSecret {
 LinkUseRequest { token: LinkToken, password: texto de 1 a 1024 caracteres (puntos de código), bien formado, code: 6 cifras }   # POST /api/v1/enlace
 LinkUse { result: "account_enrolled" | "credential_reset" }
 
+SessionLoginRequest { username: Username, password: igual que la del enlace, code: 6 cifras }   # POST /api/v1/sesion
+SessionInfo { csrf_token: 64 hexadecimales }     # inicio de sesión (201) y GET /api/v1/sesion (200)
+EmptyRequest { }                                 # cuerpo de DELETE /api/v1/sesion y DELETE /api/v1/sesiones
+SessionsClosedResult { closed: 0..1000 }         # cuántas sesiones se cerraron
+AuditEvents { events: AuditEvent[] }             # GET /api/v1/auditoria
+
 Username = 3 a 32 caracteres de a-z, 0-9, "-" y "_"
 LinkToken = 32 bytes en base64url sin relleno: 43 caracteres, con una sola escritura
 ```
@@ -681,9 +688,11 @@ LinkToken = 32 bytes en base64url sin relleno: 43 caracteres, con una sola escri
 - La lista de códigos es cerrada (`API_ERROR_CODES`), y cada PR de ADR-0019 §14 suma los que produce. Es una unión por el código: solo `rate_limited` lleva los segundos que faltan, y solo `password_rejected`, su motivo.
   - Del esqueleto (PR 2). `invalid_request`: la petición no cumple su contrato, por ejemplo con un parámetro de consulta que la ruta no admite, o el servidor HTTP la rechazó antes de llegar a una ruta. `not_found`: ninguna ruta atiende ese método y esa dirección. `internal`: un fallo del servidor, también una respuesta que no cumple su contrato.
   - De los enlaces (PR 4a). `csrf_rejected` (403): una petición que cambia algo sin el `Origin`, el `Sec-Fetch-Site` o el `Content-Type` de la propia web. `invalid_link` (400): el enlace no existe, venció, ya se usó o lo anuló otro. `invalid_code` (400): el código no corresponde al último secreto TOTP del enlace. `password_rejected` (422): la contraseña nueva no cumple la política de ADR-0019 §1. `rate_limited` (429): hay que esperar. `not_ready` (503): faltan las migraciones de la API. `postgres_unavailable` (503): PostgreSQL no responde.
+  - De las sesiones (PR 4b). `unauthenticated` (401): la petición necesita una sesión y no la trae o no vale. `invalid_credentials` (401): el nombre, la contraseña o el código no valen, sin decir cuál. `credential_disabled` (403): la credencial está deshabilitada por sus 100 fallos, y solo lo recibe quien acierta la contraseña y el código.
 - `ApiHealth` es la respuesta de `GET /api/salud`, la ruta de salud de Render, cuando el proceso responde y tiene sus migraciones.
 - `LinkSecret` es la respuesta de `POST /api/v1/enlace/secreto`: un secreto TOTP nuevo para el enlace, una sola vez, que anula el anterior del mismo enlace (ADR-0019 §3). Su URI repite exactamente el usuario y el secreto: el esquema runtime lo comprueba, el JSON Schema del OpenAPI no.
 - `LinkUseRequest` es el cuerpo de `POST /api/v1/enlace`. La contraseña se rechaza en el contrato si no es texto Unicode bien formado, porque un sustituto suelto se convertiría en otro carácter al pasar a UTF-8; su política la decide después la API, con su motivo.
+- `SessionLoginRequest` es el cuerpo de `POST /api/v1/sesion` (PR 4b). Si el nombre, la contraseña y el código valen, la respuesta es 201 con `SessionInfo` y la cookie `__Host-Http-buoh_sesion` (ADR-0019 §2). `SessionInfo`, el cuerpo del inicio de sesión y de `GET /api/v1/sesion`, lleva solo el token CSRF, que la web manda en `X-CSRF-Token` en cada petición que cambia algo; el identificador de la sesión no sale del `Set-Cookie`. Los cierres, `DELETE /api/v1/sesion` (la actual) y `DELETE /api/v1/sesiones` (las demás), llevan el cuerpo vacío `EmptyRequest` y responden `SessionsClosedResult`. `GET /api/v1/auditoria` responde `AuditEvents`, solo con las entradas de la cuenta de la sesión, de la más nueva a la más vieja.
 
 ## `AuditEvent`
 
