@@ -1,7 +1,7 @@
 import { apiErrorSchema } from '@buoh/contracts';
 import { z, type ZodType } from 'zod';
 
-import type { ApiRoute } from './routes.js';
+import type { ApiRouteSpec } from './routes.js';
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 type JsonObject = Record<string, Json>;
@@ -10,17 +10,18 @@ const DEFS_REFERENCE = '#/$defs/';
 const COMPONENTS_REFERENCE = '#/components/schemas/';
 
 /** Las respuestas de error que puede dar cualquier ruta de la tabla (ADR-0019 §6). */
-const ERROR_RESPONSES = {
+const ERROR_RESPONSES: Readonly<Record<number, string>> = {
   400: 'La petición no cumple su contrato, también si trae parámetros de consulta que la ruta no admite.',
   500: 'Un fallo del servidor, también una respuesta que no cumple su contrato.',
-} as const;
+};
 
 /**
  * La descripción OpenAPI 3.1 de la API, desde la misma tabla de rutas que registra Fastify y desde
  * los contratos (ADR-0019 §6). Los esquemas salen de `z.toJSONSchema` en el dialecto 2020-12, el de
- * OpenAPI 3.1, y cada esquema con `id` va una sola vez en `components.schemas`.
+ * OpenAPI 3.1, y cada esquema con `id` va una sola vez en `components.schemas`. Un `POST` declara su
+ * cuerpo JSON, obligatorio, y cada ruta, sus errores además de 400 y 500, todos con `ApiError`.
  */
-export function buildOpenApiDocument(routes: readonly ApiRoute[]): JsonObject {
+export function buildOpenApiDocument(routes: readonly ApiRouteSpec[]): JsonObject {
   const components = new Map<string, Json>();
 
   const schemaOf = (schema: ZodType, io: 'input' | 'output'): Json => {
@@ -60,13 +61,21 @@ export function buildOpenApiDocument(routes: readonly ApiRoute[]): JsonObject {
     for (const [status, schema] of Object.entries(route.responses)) {
       responses[status] = { description: 'Respuesta correcta.', content: jsonContent(schema) };
     }
-    for (const [status, description] of Object.entries(ERROR_RESPONSES)) {
+    for (const [status, description] of Object.entries({ ...ERROR_RESPONSES, ...route.errors })) {
       responses[status] = { description, content: jsonContent(apiErrorSchema) };
     }
     const operation: JsonObject = {
       operationId: route.operationId,
       summary: route.summary,
       parameters: queryParameters(schemaOf(route.querystring, 'input')),
+      ...(route.body === undefined
+        ? {}
+        : {
+            requestBody: {
+              required: true,
+              content: { 'application/json': { schema: schemaOf(route.body, 'input') } },
+            },
+          }),
       responses,
     };
     const path = toOpenApiPath(route.url);

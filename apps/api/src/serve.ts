@@ -13,7 +13,7 @@ export interface ServeDeps {
     }) => Promise<unknown>;
     readonly close: () => Promise<unknown>;
   };
-  readonly config: ApiConfig;
+  readonly config: Pick<ApiConfig, 'host' | 'port'>;
   readonly log: ApiLog;
   readonly onSignal: (signal: StopSignal, listener: () => void) => void;
   readonly setExitCode: (code: number) => void;

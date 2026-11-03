@@ -1,6 +1,6 @@
 import { type Pool } from 'pg';
 
-import { ApiConfigError } from './config.js';
+import { ApiConfigError } from './environment.js';
 import { errorName } from './log.js';
 import { loadPostgresConfig, POSTGRES_IDENTIFIER, type PostgresConfig } from './postgres/config.js';
 import {

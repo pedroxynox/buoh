@@ -8,7 +8,7 @@ import { serve, signalsOf, type StopSignal } from '../src/serve.js';
 
 // Arranque y parada de la API (ADR-0019 §10): el SIGTERM de Render cierra el servidor.
 
-const CONFIG: ApiConfig = { environment: 'production', host: '0.0.0.0', port: 10_000 };
+const CONFIG: Pick<ApiConfig, 'host' | 'port'> = { host: '0.0.0.0', port: 10_000 };
 
 function harness(close: () => Promise<unknown> = () => Promise.resolve()) {
   const lines: ApiLogLine[] = [];

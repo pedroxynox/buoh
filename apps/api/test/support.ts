@@ -3,9 +3,10 @@ import { Duplex } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, vi } from 'vitest';
 
+import type { LinkService } from '../src/accounts/service.js';
 import { buildApp } from '../src/app.js';
 import type { ApiLogLine } from '../src/log.js';
-import type { ApiRoute } from '../src/routes.js';
+import { apiRoutes, type ApiRoute } from '../src/routes.js';
 
 /**
  * Guardas de determinismo, como en las suites del dominio: la API no puede leer el reloj real, el
@@ -61,8 +62,22 @@ export function testRequestId(n: number): string {
   return `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
 }
 
+/** El origen público de la API en las pruebas (`BUOH_API_ORIGIN`). */
+export const TEST_ORIGIN = 'https://buoh.test';
+
+/** Un servicio de cuentas que la prueba no debe usar: cualquier llamada falla. */
+const UNUSED_LINKS: LinkService = {
+  issueSecret: () => Promise.reject(new Error('El servicio de cuentas no se usa en esta prueba.')),
+  useLink: () => Promise.reject(new Error('El servicio de cuentas no se usa en esta prueba.')),
+};
+
+/** Las rutas de la API, ya lista y sin servicio de cuentas. */
+export function readyRoutes(): readonly ApiRoute[] {
+  return apiRoutes({ readiness: { isReady: () => true }, links: UNUSED_LINKS });
+}
+
 /** Una API de prueba, con un registro que se guarda, un reloj que avanza 5 ms y UUID fijos. */
-export function testApp(routes?: readonly ApiRoute[]) {
+export function testApp(routes: readonly ApiRoute[] = readyRoutes()) {
   const lines: ApiLogLine[] = [];
   let clock = 1_000;
   let nextId = 1;
@@ -75,7 +90,8 @@ export function testApp(routes?: readonly ApiRoute[]) {
       return clock;
     },
     requestId: () => testRequestId(nextId++),
-    ...(routes === undefined ? {} : { routes }),
+    origin: TEST_ORIGIN,
+    routes,
   });
   return { app, lines };
 }

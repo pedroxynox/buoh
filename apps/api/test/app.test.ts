@@ -3,8 +3,15 @@ import type { LightMyRequestResponse } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { API_ROUTES, NO_QUERY, type ApiRoute } from '../src/routes.js';
-import { EXPECTED_JSON_HEADERS, testApp, testRequestId, useDeterminismGuards } from './support.js';
+import { NO_QUERY, type ApiRoute } from '../src/routes.js';
+import {
+  EXPECTED_JSON_HEADERS,
+  readyRoutes,
+  TEST_ORIGIN,
+  testApp,
+  testRequestId,
+  useDeterminismGuards,
+} from './support.js';
 
 // La API de ADR-0019 §6, §9 y §11: contratos, errores, cabeceras y registros.
 useDeterminismGuards();
@@ -12,8 +19,12 @@ useDeterminismGuards();
 const SECRET = 'secreto-de-prueba-7f3a91';
 const CLIENT_ADDRESS = '203.0.113.7';
 
-/** Una ruta de prueba, con la consulta vacía y la respuesta de la salud. */
-function route(url: string, handler: ApiRoute['handler'], extra: Partial<ApiRoute> = {}): ApiRoute {
+/** Una ruta GET de prueba, con la consulta vacía y la respuesta de la salud. */
+function route(
+  url: string,
+  handler: ApiRoute['handler'],
+  extra: Partial<Pick<ApiRoute, 'operationId' | 'querystring' | 'responses'>> = {},
+): ApiRoute {
   return {
     method: 'GET',
     url,
@@ -32,7 +43,7 @@ function codedError(code: string, statusCode: number): Error {
 }
 
 const TEST_ROUTES: readonly ApiRoute[] = [
-  ...API_ROUTES,
+  ...readyRoutes(),
   route('/api/prueba/falla', () => {
     throw new Error(SECRET);
   }),
@@ -80,19 +91,21 @@ const TEST_ROUTES: readonly ApiRoute[] = [
 ];
 
 /**
- * Dos métodos en una misma URL, como tendrá `/api/v1/sesion` (ADR-0019 §2). La tabla solo admite
- * GET por ahora, así que el POST se declara a la fuerza: el GET que responde el 201 del POST no
- * puede salir con el contrato del POST.
+ * Dos métodos en una misma URL, como tendrá `/api/v1/sesion` (ADR-0019 §2): el GET que responde el
+ * 201 del POST no puede salir con el contrato del POST.
  */
 const TWO_METHOD_ROUTES: readonly ApiRoute[] = [
   route('/api/prueba/dos-metodos', () => ({ status: 201, body: { status: 'ok', extra: SECRET } })),
   {
-    ...route('/api/prueba/dos-metodos', () => ({ status: 201, body: { status: 'ok' } }), {
-      operationId: 'postDosMetodos',
-      responses: { 201: apiHealthSchema },
-    }),
     method: 'POST',
-  } as unknown as ApiRoute,
+    url: '/api/prueba/dos-metodos',
+    operationId: 'postDosMetodos',
+    summary: 'postDosMetodos',
+    querystring: NO_QUERY,
+    body: z.strictObject({}),
+    responses: { 201: apiHealthSchema },
+    handler: () => ({ status: 201, body: { status: 'ok' } }),
+  },
 ];
 
 function expectSecurityHeaders(response: LightMyRequestResponse): void {
@@ -334,7 +347,12 @@ describe('errores', () => {
     const get = await app.inject({ method: 'GET', url: '/api/prueba/dos-metodos' });
     expectError(get, 500, 'internal');
     expect(get.body).not.toContain(SECRET);
-    const post = await app.inject({ method: 'POST', url: '/api/prueba/dos-metodos' });
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/prueba/dos-metodos',
+      headers: { origin: TEST_ORIGIN, 'content-type': 'application/json' },
+      payload: '{}',
+    });
     expect(post.statusCode).toBe(201);
     expect(post.json()).toEqual({ status: 'ok' });
     expect(lines.filter((line) => line.event === 'api_request')).toMatchObject([

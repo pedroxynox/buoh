@@ -10,7 +10,7 @@
     "/api/salud": {
       "get": {
         "operationId": "getSalud",
-        "summary": "El proceso de la API responde (la ruta de salud de Render, ADR-0019 §7).",
+        "summary": "El proceso de la API responde y tiene sus migraciones (la ruta de salud de Render, ADR-0019 §7).",
         "parameters": [],
         "responses": {
           "200": {
@@ -42,6 +42,194 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Faltan las migraciones de la API (not_ready).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/enlace": {
+      "post": {
+        "operationId": "postEnlace",
+        "summary": "Usa un enlace con la contraseña nueva y un código de su último secreto TOTP: da de alta la cuenta o restablece su credencial (ADR-0019 §3).",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkUseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkUse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "La petición no cumple su contrato (invalid_request), el enlace no vale (invalid_link) o el código no corresponde a su último secreto TOTP (invalid_code).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "La petición no llega de la propia web: Origin, Sec-Fetch-Site o Content-Type (csrf_rejected).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "El cuerpo pasa del límite de 1 MiB (invalid_request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "La contraseña nueva no cumple la política, con su motivo (password_rejected).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Hay demasiadas contraseñas esperando su hash, con los segundos que faltan (rate_limited).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Un fallo del servidor, también una respuesta que no cumple su contrato.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Faltan las migraciones de la API (not_ready), o PostgreSQL no responde (postgres_unavailable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/enlace/secreto": {
+      "post": {
+        "operationId": "postEnlaceSecreto",
+        "summary": "Un secreto TOTP nuevo para un enlace de alta o de restablecimiento; el anterior deja de valer (ADR-0019 §3).",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkSecretRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkSecret"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "La petición no cumple su contrato (invalid_request), o el enlace no existe, venció, ya se usó o lo anuló otro (invalid_link).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "La petición no llega de la propia web: Origin, Sec-Fetch-Site o Content-Type (csrf_rejected).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "El cuerpo pasa del límite de 1 MiB (invalid_request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Un fallo del servidor, también una respuesta que no cumple su contrato.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Faltan las migraciones de la API (not_ready), o PostgreSQL no responde (postgres_unavailable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         }
       }
@@ -53,27 +241,90 @@
         "type": "object",
         "properties": {
           "error": {
-            "type": "object",
-            "properties": {
-              "code": {
-                "type": "string",
-                "enum": [
-                  "invalid_request",
-                  "not_found",
-                  "internal"
-                ]
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "enum": [
+                      "invalid_request",
+                      "not_found",
+                      "internal",
+                      "csrf_rejected",
+                      "invalid_link",
+                      "invalid_code",
+                      "not_ready",
+                      "postgres_unavailable"
+                    ]
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  }
+                },
+                "required": [
+                  "code",
+                  "request_id"
+                ],
+                "additionalProperties": false
               },
-              "request_id": {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "const": "rate_limited"
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "retry_after_seconds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3600
+                  }
+                },
+                "required": [
+                  "code",
+                  "request_id",
+                  "retry_after_seconds"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "const": "password_rejected"
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "too_short",
+                      "too_long",
+                      "common_password",
+                      "context_words"
+                    ]
+                  }
+                },
+                "required": [
+                  "code",
+                  "request_id",
+                  "reason"
+                ],
+                "additionalProperties": false
               }
-            },
-            "required": [
-              "code",
-              "request_id"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [
@@ -95,6 +346,110 @@
         ],
         "additionalProperties": false,
         "title": "ApiHealth"
+      },
+      "LinkSecret": {
+        "type": "object",
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "enrollment",
+              "reset"
+            ]
+          },
+          "username": {
+            "type": "string",
+            "pattern": "^[a-z0-9_-]{3,32}$"
+          },
+          "expires_at_utc": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+          },
+          "totp": {
+            "type": "object",
+            "properties": {
+              "secret": {
+                "type": "string",
+                "pattern": "^[A-Z2-7]{32}$"
+              },
+              "uri": {
+                "type": "string",
+                "format": "starts_with",
+                "pattern": "^otpauth:\\/\\/totp\\/buoh:.*"
+              }
+            },
+            "required": [
+              "secret",
+              "uri"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "purpose",
+          "username",
+          "expires_at_utc",
+          "totp"
+        ],
+        "additionalProperties": false,
+        "title": "LinkSecret"
+      },
+      "LinkSecretRequest": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "additionalProperties": false,
+        "title": "LinkSecretRequest"
+      },
+      "LinkUse": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "type": "string",
+            "enum": [
+              "account_enrolled",
+              "credential_reset"
+            ]
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "additionalProperties": false,
+        "title": "LinkUse"
+      },
+      "LinkUseRequest": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$"
+          }
+        },
+        "required": [
+          "token",
+          "password",
+          "code"
+        ],
+        "additionalProperties": false,
+        "title": "LinkUseRequest"
       }
     }
   }
