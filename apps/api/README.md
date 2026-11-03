@@ -55,6 +55,8 @@ Las rutas `POST` exigen el `Origin` de `BUOH_API_ORIGIN`, `Sec-Fetch-Site: same-
 | 1 | no se creó: el motivo y su código en stderr, como `account_already_enrolled`, `account_not_found`, `not_ready` o el SQLSTATE de PostgreSQL, nunca su mensaje |
 | 2 | un uso o una configuración que no valen, sin abrir la base |
 
+Son los códigos de `node dist/cli/cuenta.js`. Con `pnpm --filter @buoh/api run cuenta -- …`, pnpm devuelve 1 también en lugar del 2; el motivo sigue en stderr.
+
 ## `db:migrate`
 
 Aplica las migraciones pendientes de `migrations/` en orden, todas en una transacción, con un bloqueo para que dos procesos no migren a la vez, y crea el esquema `buoh_api` si no existe (ADR-0019 §7). Lee `BUOH_DEPLOYMENT_ENVIRONMENT` y `BUOH_POSTGRES_HOST`, `_PORT`, `_DB`, `_USER`, `_PASSWORD` y `_SSLMODE`, con los valores de los servicios locales si faltan, salvo la contraseña. En `production`, `BUOH_POSTGRES_SSLMODE` es `require` o `verify-full`, y `BUOH_POSTGRES_OWNER_ROLE` nombra el rol del que son el esquema y las tablas (`buoh_dueno`). Allí no lo corre nadie a mano: lo corre `buoh-operaciones`, en un proceso con solo la credencial dueña (runbook de ingesta, «Operaciones (`buoh-operaciones`)»).

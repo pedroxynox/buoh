@@ -716,6 +716,49 @@ describe('el alta con su enlace (ADR-0019 §1 y §3)', () => {
     );
   });
 
+  it('el trigger de write_order no usa una nextval de quien inserta, aunque pueda crear funciones', async () => {
+    // Un rol de la API con CREATE en un esquema, algo que buoh_api no tiene: su nextval(text)
+    // ganaría a pg_catalog.nextval(regclass) si la función del trigger usara su search_path.
+    const { admin } = poolsOf(DATABASE);
+    await admin.query('DROP SCHEMA IF EXISTS intruso CASCADE');
+    await admin.query('CREATE SCHEMA intruso');
+    await admin.query(`GRANT USAGE, CREATE ON SCHEMA intruso TO ${API_USER}`);
+    const intruder = new pg.Client({
+      ...local,
+      database: DATABASE,
+      password: apiPassword,
+      ssl: false,
+      user: API_USER,
+    });
+    await intruder.connect();
+    try {
+      await intruder.query(
+        `CREATE FUNCTION intruso.nextval(text) RETURNS bigint
+         LANGUAGE sql AS 'SELECT 9223372036854775807::bigint'`,
+      );
+      await intruder.query('SET search_path = intruso, buoh_api, public');
+      const accountId = '01900000-0000-7000-8000-0000000000d1';
+      await intruder.query(
+        `INSERT INTO buoh_api.accounts (account_id, username, created_at_utc)
+         VALUES ($1, 'intrusa_2', '2026-11-03T12:00:00.000Z')`,
+        [accountId],
+      );
+      const { rows } = await intruder.query<{ write_order: string }>(
+        `INSERT INTO buoh_api.account_links
+           (link_id, write_order, account_id, purpose, token_hmac, created_at_utc, expires_at_utc)
+         OVERRIDING SYSTEM VALUE
+         VALUES ($1, 9223372036854775807, $2, 'enrollment', $3,
+                 '2026-11-03T12:00:00.000Z', '2026-11-03T12:15:00.000Z')
+         RETURNING write_order::text`,
+        ['01900000-0000-7000-8000-0000000000d2', accountId, randomBytes(32)],
+      );
+      expect(rows[0]?.write_order).not.toBe('9223372036854775807');
+    } finally {
+      await intruder.end();
+      await admin.query('DROP SCHEMA intruso CASCADE');
+    }
+  });
+
   it('un enlace insertado con el rol de la API y el SHA-256 sin clave de su token no vale', async () => {
     const { accounts } = service(DATABASE);
     const { api } = poolsOf(DATABASE);

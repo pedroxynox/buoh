@@ -882,10 +882,37 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     ]) {
       expect(await asApi(text), text).toBeNull();
     }
+    // Con sus privilegios, buoh_api inserta en una tabla con el trigger de write_order, que necesita
+    // el uso de su secuencia, y aunque pida el máximo de bigint, la base guarda el de la secuencia.
+    expect(
+      await asApi(
+        `INSERT INTO buoh_api.accounts (account_id, username, created_at_utc)
+         VALUES ('01900000-0000-7000-8000-00000000a001', 'operaciones', '2026-11-03T10:00:00.000Z')`,
+      ),
+    ).toBeNull();
+    expect(
+      await asApi(
+        `INSERT INTO buoh_api.account_links
+           (link_id, write_order, account_id, purpose, token_hmac, created_at_utc, expires_at_utc)
+         OVERRIDING SYSTEM VALUE
+         VALUES ('01900000-0000-7000-8000-00000000c001', 9223372036854775807,
+                 '01900000-0000-7000-8000-00000000a001', 'enrollment', decode(repeat('ab', 32), 'hex'),
+                 '2026-11-03T10:00:00.000Z', '2026-11-03T10:15:00.000Z')`,
+      ),
+    ).toBeNull();
+    const { rows: orders } = await ready(admin).query<{ write_order: string }>(
+      'SELECT write_order::text AS write_order FROM buoh_api.account_links',
+    );
+    expect(orders).toHaveLength(1);
+    expect(orders[0]?.write_order).not.toBe('9223372036854775807');
     for (const text of [
       "INSERT INTO buoh_api.buoh_schema_migrations (name, sha256) VALUES ('0003_x.sql', 'x')",
       'CREATE TABLE buoh_api.intrusa (x int)',
       'CREATE SCHEMA intruso',
+      // Sin crear funciones en ningún esquema, buoh_api no puede poner una nextval propia delante
+      // de la del trigger de write_order (ADR-0019 §7).
+      "CREATE FUNCTION public.nextval(text) RETURNS bigint LANGUAGE sql AS 'SELECT 1::bigint'",
+      "CREATE FUNCTION buoh_api.nextval(text) RETURNS bigint LANGUAGE sql AS 'SELECT 1::bigint'",
       `SELECT count(*) FROM ${logLocation(3).schema}.operations_reports`,
     ]) {
       expect(await asApi(text), text).toBe('42501');

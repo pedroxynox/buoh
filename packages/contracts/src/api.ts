@@ -45,8 +45,9 @@ export const apiErrorCodeSchema = z.enum(API_ERROR_CODES);
 /**
  * Por qué se rechaza una contraseña nueva (ADR-0019 §1): menos de 15 caracteres o más de 128,
  * contados después de normalizarla a NFC; una contraseña común de la lista de bloqueo; o una que,
- * sin las palabras del contexto (`buoh`, `deriv` y el nombre de usuario con sus variantes), se
- * queda en menos de 15 caracteres.
+ * entera y sin distinguir mayúsculas, es una de las palabras del contexto: `buoh`, `deriv` o el
+ * nombre de usuario con sus variantes. Como pide NIST, se compara la contraseña entera, nunca las
+ * palabras que contiene.
  */
 export const PASSWORD_REJECTION_REASONS = [
   'too_short',

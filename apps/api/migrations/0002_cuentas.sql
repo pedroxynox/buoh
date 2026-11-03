@@ -95,12 +95,19 @@ CREATE TABLE totp_steps_used (
 -- VALUE, que no pide más privilegio que INSERT. Sin él, quien tenga la contraseña de buoh_api podría
 -- guardar una fila con el máximo de bigint, que ninguna posterior volvería a superar: ningún enlace
 -- nuevo valdría, y restablecer ya no recuperaría la cuenta. Corre con los privilegios de quien
--- inserta, que necesita el uso de la secuencia (grantApiPrivileges se lo da a buoh_api).
+-- inserta, que necesita el uso de la secuencia (grantApiPrivileges se lo da a buoh_api). Su
+-- search_path es fijo, y sus funciones van calificadas: si no, quien inserta y puede crear funciones
+-- en algún esquema pondría una nextval(text) propia por delante de pg_catalog.nextval(regclass).
 CREATE FUNCTION buoh_assign_write_order() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
 BEGIN
-  NEW.write_order := nextval(
-    pg_get_serial_sequence(quote_ident(TG_TABLE_SCHEMA) || '.' || quote_ident(TG_TABLE_NAME), 'write_order')
+  NEW.write_order := pg_catalog.nextval(
+    pg_catalog.pg_get_serial_sequence(
+      pg_catalog.quote_ident(TG_TABLE_SCHEMA) || '.' || pg_catalog.quote_ident(TG_TABLE_NAME),
+      'write_order'
+    )::regclass
   );
   RETURN NEW;
 END;
