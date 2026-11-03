@@ -12,6 +12,10 @@ const T0 = Date.parse('2026-11-03T12:00:00.000Z');
 const ACCOUNT = '01900000-0000-7000-8000-00000000a001';
 
 describe('createLoginFailureBuffer', () => {
+  it('agrupa en ventanas de 5 minutos (ADR-0019 §5)', () => {
+    expect(LOGIN_FAILURE_WINDOW_MS).toBe(5 * 60_000);
+  });
+
   it('acumula los fallos de una clase en su ventana sin escribir nada todavía', () => {
     const buffer = createLoginFailureBuffer();
     expect(buffer.add('unknown_username', null, T0)).toBeNull();

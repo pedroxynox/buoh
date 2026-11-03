@@ -5,6 +5,7 @@ import {
   BASE_WAIT_MS,
   createRateLimiter,
   escalatingWaitMs,
+  FIRST_FREE_FAILURES,
   GENERAL_REQUEST_LIMIT,
   GENERAL_REQUEST_WINDOW_MS,
   MAX_WAIT_MS,
@@ -18,6 +19,18 @@ const T0 = Date.parse('2026-11-03T12:00:00.000Z');
 const ADDR = '203.0.113.7';
 const OTHER = '198.51.100.9';
 const NAME = 'pedro';
+
+describe('los umbrales de los límites (ADR-0019 §1)', () => {
+  it('son los de la decisión, con valores fijos', () => {
+    expect(FIRST_FREE_FAILURES).toBe(4);
+    expect(BASE_WAIT_MS).toBe(30_000);
+    expect(MAX_WAIT_MS).toBe(60 * 60_000);
+    expect(NAME_THROTTLE_FAILURES).toBe(20);
+    expect(ADDRESS_FAILURE_LIMIT).toBe(10);
+    expect(GENERAL_REQUEST_LIMIT).toBe(120);
+    expect(GENERAL_REQUEST_WINDOW_MS).toBe(60_000);
+  });
+});
 
 describe('escalatingWaitMs', () => {
   it('no espera en los cuatro primeros fallos; el quinto espera 30 s, que se duplican hasta 1 hora', () => {

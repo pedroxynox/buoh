@@ -270,6 +270,15 @@ afterAll(async () => {
   }
 });
 
+describe('las duraciones y los topes de las sesiones (ADR-0019 §2)', () => {
+  it('son los de la decisión, con valores fijos', () => {
+    expect(SESSION_IDLE_MS).toBe(60 * 60_000);
+    expect(SESSION_MAX_MS).toBe(24 * 60 * 60_000);
+    expect(SESSION_LIMIT).toBe(10);
+    expect(ACTIVITY_MIN_INTERVAL_MS).toBe(60_000);
+  });
+});
+
 describe('inicio de sesión (ADR-0019 §1 y §2)', () => {
   it('entra con la contraseña y el código, crea la sesión y su session_started, y authenticate la valida', async () => {
     const b = bundle();
