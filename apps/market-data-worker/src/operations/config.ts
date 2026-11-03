@@ -32,6 +32,13 @@ const operationsEnvironmentSchema = z.object({
   BUOH_AGENTE_POSTGRES_PASSWORD: rolePassword,
   BUOH_INGESTA_POSTGRES_PASSWORD: rolePassword,
   BUOH_SALUD_POSTGRES_PASSWORD: rolePassword,
+  /**
+   * La contraseña de `buoh_api` (ADR-0019 §7), la que Render genera en `buoh-api` y le llega por
+   * `fromService`. La trajo el PR 6 de ADR-0019 §14, junto con la compilación de la API; antes iba
+   * en un objeto aparte (opcional), para que la prueba del Blueprint no la pidiera. Con ella, el
+   * paso 1 crea el rol de la API, migra su esquema y le da sus privilegios; sin ella, no toca la API.
+   */
+  BUOH_API_POSTGRES_PASSWORD: rolePassword.optional(),
   /** El token `salud` de R2, de solo lectura, para el proceso de `data:health` (§10). */
   BUOH_SALUD_S3_ACCESS_KEY_ID: nonEmpty,
   BUOH_SALUD_S3_BUCKET: bucket,
@@ -44,17 +51,6 @@ const operationsEnvironmentSchema = z.object({
   BUOH_OPERACIONES_S3_ENDPOINT: z.url(),
   BUOH_OPERACIONES_S3_REGION: nonEmpty,
   BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY: nonEmpty,
-});
-
-/**
- * Las variables que el servicio admite y que su Blueprint todavía no le da: la contraseña de
- * `buoh_api` llega con el PR 6 de ADR-0019 §14, con `fromService` desde `buoh-api`, junto con la
- * compilación de la API. Sin ella, el paso 1 no toca la API (ADR-0019 §7). Van en otro objeto para
- * que la prueba del Blueprint, que compara las variables de `render-datos.yaml` con las del primero,
- * no la pida antes, y esa prueba exige que cada una sea opcional.
- */
-const pendingEnvironmentSchema = z.object({
-  BUOH_API_POSTGRES_PASSWORD: rolePassword.optional(),
 });
 
 /** Las variables que el worker lee y que el servicio no tiene (ADR-0018 §11). */
@@ -89,23 +85,20 @@ export function loadOperationsConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): OperationsConfig {
   const parsed = operationsEnvironmentSchema.safeParse(env);
-  const pending = pendingEnvironmentSchema.safeParse(env);
   const rejected = new Set(
-    [parsed, pending].flatMap((result) =>
-      result.success ? [] : result.error.issues.map((issue) => String(issue.path[0])),
-    ),
+    parsed.success ? [] : parsed.error.issues.map((issue) => String(issue.path[0])),
   );
   for (const [name, value] of Object.entries(env)) {
     if (value !== undefined && WORKER_VARIABLES.test(name)) {
       rejected.add(name);
     }
   }
-  if (!parsed.success || !pending.success || rejected.size > 0) {
+  if (!parsed.success || rejected.size > 0) {
     throw new ConfigError([...rejected].sort());
   }
   const value = parsed.data;
   return {
-    apiPassword: pending.data.BUOH_API_POSTGRES_PASSWORD ?? null,
+    apiPassword: value.BUOH_API_POSTGRES_PASSWORD ?? null,
     healthObjects: {
       accessKeyId: value.BUOH_SALUD_S3_ACCESS_KEY_ID,
       bucket: value.BUOH_SALUD_S3_BUCKET,

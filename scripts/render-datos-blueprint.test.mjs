@@ -135,7 +135,6 @@ function parseBlueprint(text) {
 
 const blueprint = parseBlueprint(read('render-datos.yaml'));
 const rootPackage = JSON.parse(read('package.json'));
-const workerPackage = JSON.parse(read('apps/market-data-worker/package.json'));
 
 /**
  * Las claves `BUOH_*` del primer `z.object({ … })` que sigue a `marker` en una fuente del worker, cada
@@ -154,14 +153,78 @@ function schemaEntries(path, marker) {
 
 const schemaKeys = (path, marker) => schemaEntries(path, marker).map(([key]) => key);
 
-/** Los tamaños de V8 de `WORKER_NODE_FLAGS`, leídos de `src/node-flags.ts`. */
-function workerNodeFlags() {
-  const match = /WORKER_NODE_FLAGS = \[([^\]]+)\] as const;/.exec(
-    read('apps/market-data-worker/src/node-flags.ts'),
-  );
-  assert.ok(match, 'node-flags.ts define WORKER_NODE_FLAGS');
+/** Los tamaños de V8 de una constante `<NAME>_NODE_FLAGS`, leídos de `src/node-flags.ts`. */
+function nodeFlags(path, name) {
+  const match = new RegExp(`${name} = \\[([^\\]]+)\\] as const;`).exec(read(path));
+  assert.ok(match, `${path} define ${name}`);
   return [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
 }
+const workerNodeFlags = () =>
+  nodeFlags('apps/market-data-worker/src/node-flags.ts', 'WORKER_NODE_FLAGS');
+const apiNodeFlags = () => nodeFlags('apps/api/src/node-flags.ts', 'API_NODE_FLAGS');
+
+/**
+ * Los paquetes `packages/*` de los que depende un conjunto de apps, recursivo, ordenados: lo que un
+ * servicio recompila además de sus apps. Como el escritorio (ADR-0010), sigue `dependencies` y
+ * `devDependencies`, porque turbo compila también las de desarrollo del monorepo (`^build`).
+ */
+function packageDepsOf(appDirs) {
+  const packages = new Set();
+  const pending = appDirs.map((dir) => JSON.parse(read(`${dir}/package.json`)));
+  while (pending.length > 0) {
+    const manifest = pending.pop();
+    for (const name of [
+      ...Object.keys(manifest.dependencies ?? {}),
+      ...Object.keys(manifest.devDependencies ?? {}),
+    ]) {
+      const match = /^@buoh\/(.+)$/.exec(name);
+      if (
+        match === null ||
+        packages.has(match[1]) ||
+        !existsSync(join(root, `packages/${match[1]}`))
+      ) {
+        continue;
+      }
+      packages.add(match[1]);
+      pending.push(JSON.parse(read(`packages/${match[1]}/package.json`)));
+    }
+  }
+  return [...packages].sort().map((name) => `packages/${name}`);
+}
+
+/** El `buildFilter` que espera un servicio que compila `appDirs`: sus apps, sus paquetes y la raíz. */
+function expectedBuildFilter(appDirs) {
+  const deps = packageDepsOf(appDirs);
+  return {
+    paths: [
+      ...appDirs.map((dir) => `${dir}/**`),
+      ...deps.map((dir) => `${dir}/**`),
+      'package.json',
+      'pnpm-lock.yaml',
+      'pnpm-workspace.yaml',
+      '.npmrc',
+      '.node-version',
+      'tsconfig.base.json',
+      'render-datos.yaml',
+    ],
+    ignoredPaths: [
+      ...appDirs.flatMap((dir) =>
+        existsSync(join(root, `${dir}/integration`))
+          ? [`${dir}/test/**`, `${dir}/integration/**`]
+          : [`${dir}/test/**`],
+      ),
+      ...deps.map((dir) => `${dir}/test/**`),
+      '**/*.md',
+    ],
+  };
+}
+
+/** Las apps que compila cada servicio, en el orden de su `buildFilter`. */
+const SERVICE_APPS = {
+  'buoh-ingesta': ['apps/market-data-worker'],
+  'buoh-operaciones': ['apps/market-data-worker', 'apps/api'],
+  'buoh-api': ['apps/api', 'apps/web'],
+};
 
 const service = (name) => {
   const found = blueprint.services.filter((item) => item.name === name);
@@ -170,7 +233,7 @@ const service = (name) => {
 };
 const variables = (name) => new Map(service(name).envVars.map((item) => [item.key, item]));
 
-test('define la base, buoh-ingesta y buoh-operaciones, y nada más (ADR-0018 §2)', () => {
+test('define la base, buoh-ingesta, buoh-operaciones y buoh-api, y nada más (ADR-0018 §2; ADR-0019 §10)', () => {
   assert.deepEqual(Object.keys(blueprint).sort(), ['databases', 'services']);
   assert.deepEqual(
     blueprint.databases.map((item) => item.name),
@@ -181,6 +244,7 @@ test('define la base, buoh-ingesta y buoh-operaciones, y nada más (ADR-0018 §2
     [
       ['worker', 'buoh-ingesta'],
       ['cron', 'buoh-operaciones'],
+      ['web', 'buoh-api'],
     ],
   );
 });
@@ -212,7 +276,7 @@ test('la base: Basic-256mb con 1 GB, PostgreSQL 18, sin autoescalado, en virgini
   );
 });
 
-test('los dos servicios: Node, Starter, en virginia, sin disco y desplegados tras CI (§1 y §2)', () => {
+test('los tres servicios: Node, Starter, en virginia, sin disco y desplegados tras CI (§1 y §2; ADR-0019 §10)', () => {
   const common = [
     'autoDeployTrigger',
     'buildCommand',
@@ -226,12 +290,16 @@ test('los dos servicios: Node, Starter, en virginia, sin disco y desplegados tra
     'type',
   ];
   // Listas cerradas: un disco quitaría el despliegue sin corte, y `preDeployCommand` daría al
-  // worker las credenciales del rol dueño (ADR-0018, «Alternativas descartadas»).
+  // servicio las credenciales del rol dueño (ADR-0018, «Alternativas descartadas»).
   assert.deepEqual(
     Object.keys(service('buoh-ingesta')).sort(),
     [...common, 'maxShutdownDelaySeconds', 'numInstances'].sort(),
   );
   assert.deepEqual(Object.keys(service('buoh-operaciones')).sort(), [...common, 'schedule'].sort());
+  assert.deepEqual(
+    Object.keys(service('buoh-api')).sort(),
+    [...common, 'healthCheckPath', 'numInstances'].sort(),
+  );
   for (const item of blueprint.services) {
     assert.equal(item.runtime, 'node', item.name);
     assert.equal(item.plan, '0.5c-512mb', item.name);
@@ -242,56 +310,59 @@ test('los dos servicios: Node, Starter, en virginia, sin disco y desplegados tra
   assert.equal(service('buoh-ingesta').numInstances, 1);
   assert.equal(service('buoh-ingesta').maxShutdownDelaySeconds, 60);
   assert.equal(service('buoh-operaciones').schedule, '*/5 * * * *');
+  // La API: una instancia (sesiones y límites en memoria) y su ruta de salud (ADR-0019 §7 y §10).
+  assert.equal(service('buoh-api').numInstances, 1);
+  assert.equal(service('buoh-api').healthCheckPath, '/api/salud');
 });
 
-test('compilan el worker y sus paquetes con el Node y el pnpm fijados', () => {
+test('cada servicio compila sus apps y paquetes con el Node y el pnpm fijados', () => {
   const pnpm = rootPackage.packageManager;
   assert.match(pnpm, /^pnpm@\d+\.\d+\.\d+$/);
   assert.equal(read('.node-version').trim(), rootPackage.engines.node);
-  const expected =
-    `npx --yes ${pnpm} install --frozen-lockfile --filter "@buoh/market-data-worker..." && ` +
-    `npx --yes ${pnpm} --filter "@buoh/market-data-worker..." run build`;
-  for (const item of blueprint.services) {
-    assert.equal(item.buildCommand, expected, item.name);
-  }
+  const build = (...filters) => {
+    const spec = filters.map((name) => `--filter "${name}..."`).join(' ');
+    return `npx --yes ${pnpm} install --frozen-lockfile ${spec} && npx --yes ${pnpm} ${spec} run build`;
+  };
+  assert.equal(service('buoh-ingesta').buildCommand, build('@buoh/market-data-worker'));
+  // buoh-operaciones compila también la API, que migra en su paso 1 (ADR-0019 §7 y §14).
+  assert.equal(
+    service('buoh-operaciones').buildCommand,
+    build('@buoh/market-data-worker', '@buoh/api'),
+  );
+  // buoh-api compila la API y la web que sirve (ADR-0019 §9 y §10).
+  assert.equal(service('buoh-api').buildCommand, build('@buoh/api', '@buoh/web'));
 });
 
-test('arrancan con Node directamente y WORKER_NODE_FLAGS delante, sin pnpm (§3)', () => {
-  const flags = workerNodeFlags();
-  assert.deepEqual(flags, ['--max-semi-space-size=1', '--max-old-space-size=256']);
-  const command = (cli, args = '') =>
-    `node ${flags.join(' ')} apps/market-data-worker/dist/cli/${cli}.js${args}`;
-  assert.equal(service('buoh-ingesta').startCommand, command('ingest', ' --live --symbol R_100'));
-  assert.equal(service('buoh-operaciones').startCommand, command('operations'));
+test('arrancan con Node directamente y sus tamaños de V8 delante, sin pnpm (ADR-0018 §3; ADR-0019 §10)', () => {
+  const workerFlags = workerNodeFlags();
+  assert.deepEqual(workerFlags, ['--max-semi-space-size=1', '--max-old-space-size=256']);
+  const worker = (cli, args = '') =>
+    `node ${workerFlags.join(' ')} apps/market-data-worker/dist/cli/${cli}.js${args}`;
+  assert.equal(service('buoh-ingesta').startCommand, worker('ingest', ' --live --symbol R_100'));
+  assert.equal(service('buoh-operaciones').startCommand, worker('operations'));
+  const apiFlags = apiNodeFlags();
+  assert.deepEqual(apiFlags, ['--max-semi-space-size=1', '--max-old-space-size=256']);
+  assert.equal(
+    service('buoh-api').startCommand,
+    `node ${apiFlags.join(' ')} apps/api/dist/cli/serve.js`,
+  );
   for (const cli of ['ingest', 'operations']) {
     assert.ok(existsSync(join(root, `apps/market-data-worker/src/cli/${cli}.ts`)), cli);
   }
+  assert.ok(existsSync(join(root, 'apps/api/src/cli/serve.ts')));
 });
 
-test('recompilan cuando cambia el worker o un paquete del que depende', () => {
-  const workspaceDependencies = Object.keys(workerPackage.dependencies)
-    .filter((name) => name.startsWith('@buoh/'))
-    .map((name) => `packages/${name.slice('@buoh/'.length)}`);
-  assert.deepEqual(workspaceDependencies.sort(), ['packages/contracts', 'packages/domain']);
+test('cada servicio recompila cuando cambian sus apps o un paquete del que dependen', () => {
+  // La raíz de los paquetes del worker no cambia: contracts y domain (ancla del resto).
+  assert.deepEqual(packageDepsOf(['apps/market-data-worker']), [
+    'packages/contracts',
+    'packages/domain',
+  ]);
   for (const item of blueprint.services) {
+    const expected = expectedBuildFilter(SERVICE_APPS[item.name]);
     assert.deepEqual(Object.keys(item.buildFilter).sort(), ['ignoredPaths', 'paths'], item.name);
-    assert.deepEqual(item.buildFilter.paths, [
-      'apps/market-data-worker/**',
-      ...workspaceDependencies.map((path) => `${path}/**`),
-      'package.json',
-      'pnpm-lock.yaml',
-      'pnpm-workspace.yaml',
-      '.npmrc',
-      '.node-version',
-      'tsconfig.base.json',
-      'render-datos.yaml',
-    ]);
-    assert.deepEqual(item.buildFilter.ignoredPaths, [
-      'apps/market-data-worker/test/**',
-      'apps/market-data-worker/integration/**',
-      ...workspaceDependencies.map((path) => `${path}/test/**`),
-      '**/*.md',
-    ]);
+    assert.deepEqual(item.buildFilter.paths, expected.paths, item.name);
+    assert.deepEqual(item.buildFilter.ignoredPaths, expected.ignoredPaths, item.name);
   }
 });
 
@@ -353,18 +424,8 @@ test('buoh-operaciones: las variables de loadOperationsConfig, con la credencial
   const vars = variables('buoh-operaciones');
   assert.equal(vars.size, service('buoh-operaciones').envVars.length, 'sin claves repetidas');
   assert.deepEqual([...vars.keys()].sort(), expected.sort());
-  // Las variables que el servicio admite y que el Blueprint todavía no le da (ADR-0019 §7) van en
-  // otro objeto, que la comparación de arriba no lee: si el Blueprint da una, falla hasta que pasa
-  // al primero. Mientras tanto son opcionales, porque una obligatoria que el Blueprint no da pararía
-  // el servicio en cada ejecución.
-  const pending = schemaEntries(
-    'apps/market-data-worker/src/operations/config.ts',
-    'const pendingEnvironmentSchema',
-  );
-  assert.ok(pending.length > 0, 'pendingEnvironmentSchema tiene variables');
-  for (const [key, schema] of pending) {
-    assert.match(schema, /\.optional\(\),$/, `${key} es opcional`);
-  }
+  // El servicio no tiene ninguna variable con los nombres `BUOH_POSTGRES_*` ni `BUOH_S3_*` que lee
+  // el worker; la contraseña de `buoh_api` (`BUOH_API_POSTGRES_PASSWORD`) no coincide con ese patrón.
   for (const key of vars.keys()) {
     assert.doesNotMatch(key, /^BUOH_(?:POSTGRES|S3)_/, key);
   }
@@ -383,6 +444,12 @@ test('buoh-operaciones: las variables de loadOperationsConfig, con la credencial
     name: 'buoh-ingesta',
     type: 'worker',
   });
+  // La contraseña de buoh_api es la que Render genera para buoh-api (ADR-0019 §7 y §14, PR 6).
+  assert.deepEqual(vars.get('BUOH_API_POSTGRES_PASSWORD').fromService, {
+    envVarKey: 'BUOH_POSTGRES_PASSWORD',
+    name: 'buoh-api',
+    type: 'web',
+  });
   assert.equal(sourceOf(variables('buoh-ingesta').get('BUOH_POSTGRES_PASSWORD')), 'generateValue');
   for (const key of ['BUOH_SALUD_POSTGRES_PASSWORD', 'BUOH_AGENTE_POSTGRES_PASSWORD']) {
     assert.equal(sourceOf(vars.get(key)), 'generateValue', key);
@@ -396,6 +463,49 @@ test('buoh-operaciones: las variables de loadOperationsConfig, con la credencial
   }
   assert.equal(vars.get('BUOH_DEPLOYMENT_ENVIRONMENT').value, 'production');
   assert.equal(vars.get('BUOH_DUENO_POSTGRES_SSLMODE').value, 'require');
+});
+
+test('buoh-api: las variables de la API en production, con buoh_api y las tres claves (ADR-0019 §10)', () => {
+  const vars = variables('buoh-api');
+  assert.equal(vars.size, service('buoh-api').envVars.length, 'sin claves repetidas');
+  assert.deepEqual([...vars.keys()].sort(), [
+    'BUOH_API_ORIGIN',
+    'BUOH_API_PASSWORD_PEPPER',
+    'BUOH_API_TOKEN_KEY',
+    'BUOH_API_TOTP_KEY',
+    'BUOH_DEPLOYMENT_ENVIRONMENT',
+    'BUOH_POSTGRES_DB',
+    'BUOH_POSTGRES_HOST',
+    'BUOH_POSTGRES_PASSWORD',
+    'BUOH_POSTGRES_PORT',
+    'BUOH_POSTGRES_SSLMODE',
+    'BUOH_POSTGRES_USER',
+  ]);
+  const values = Object.fromEntries(
+    [...vars.values()].filter((item) => 'value' in item).map((item) => [item.key, item.value]),
+  );
+  assert.deepEqual(values, {
+    BUOH_API_ORIGIN: 'https://buoh-api.onrender.com',
+    BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+    BUOH_POSTGRES_SSLMODE: 'require',
+    BUOH_POSTGRES_USER: 'buoh_api',
+  });
+  for (const [key, property] of [
+    ['BUOH_POSTGRES_HOST', 'host'],
+    ['BUOH_POSTGRES_PORT', 'port'],
+    ['BUOH_POSTGRES_DB', 'database'],
+  ]) {
+    assert.deepEqual(vars.get(key).fromDatabase, { name: 'buoh-postgres', property }, key);
+  }
+  // La contraseña del rol y las tres claves del servidor las genera Render, fuera de la base (§1, §2).
+  for (const key of [
+    'BUOH_POSTGRES_PASSWORD',
+    'BUOH_API_PASSWORD_PEPPER',
+    'BUOH_API_TOTP_KEY',
+    'BUOH_API_TOKEN_KEY',
+  ]) {
+    assert.equal(sourceOf(vars.get(key)), 'generateValue', key);
+  }
 });
 
 test('ninguna contraseña, token ni endpoint de la cuenta lleva su valor en el archivo (§2 y §12)', () => {
