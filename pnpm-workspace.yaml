@@ -5,6 +5,12 @@ packages:
 engineStrict: true
 strictPeerDependencies: true
 
+# `ajv` trae `fast-uri` 3.1.8, con cuatro avisos de `pnpm audit` (dos moderados, dos bajos). Se fija
+# en 3.1.9, que los corrige (ADR-0019 §14, PR 6). Solo afecta a la copia de `ajv`: la del compilador
+# de Fastify va en la 4.x. Con los compiladores propios de la API, Ajv no procesa datos de peticiones.
+overrides:
+  ajv>fast-uri: 3.1.9
+
 allowBuilds:
   esbuild: true
 

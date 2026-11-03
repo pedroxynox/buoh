@@ -9,7 +9,7 @@
     "db:migrate": "node dist/cli/migrate.js",
     "openapi:check": "tsx scripts/generate-openapi.ts --check",
     "openapi:generate": "tsx scripts/generate-openapi.ts",
-    "start": "node dist/cli/serve.js",
+    "start": "node --max-semi-space-size=1 --max-old-space-size=256 dist/cli/serve.js",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -17,7 +17,7 @@
   "dependencies": {
     "@buoh/contracts": "workspace:*",
     "@fastify/static": "10.1.8",
-    "fastify": "5.12.7",
+    "fastify": "5.12.8",
     "pg": "8.23.1",
     "zod": "4.6.7"
   },
