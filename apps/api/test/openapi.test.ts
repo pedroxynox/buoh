@@ -90,9 +90,30 @@ describe('buildOpenApiDocument', () => {
       '400',
       '403',
       '413',
+      '429',
       '500',
       '503',
     ]);
+    expect(statuses('/api/v1/sesion', 'post')).toEqual([
+      '201',
+      '400',
+      '401',
+      '403',
+      '413',
+      '429',
+      '500',
+      '503',
+    ]);
+    expect(statuses('/api/v1/sesion', 'delete')).toEqual([
+      '200',
+      '400',
+      '401',
+      '403',
+      '413',
+      '500',
+      '503',
+    ]);
+    expect(statuses('/api/v1/auditoria', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/enlace', 'post')).toEqual([
       '200',
       '400',
@@ -118,10 +139,16 @@ describe('buildOpenApiDocument', () => {
     expect(Object.keys(document.components.schemas)).toEqual([
       'ApiError',
       'ApiHealth',
+      'AuditEvent',
+      'AuditEvents',
+      'EmptyRequest',
       'LinkSecret',
       'LinkSecretRequest',
       'LinkUse',
       'LinkUseRequest',
+      'SessionInfo',
+      'SessionLoginRequest',
+      'SessionsClosedResult',
     ]);
     const health = validatorFor('ApiHealth');
     expect(health({ status: 'ok' })).toBe(true);

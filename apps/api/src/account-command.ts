@@ -24,18 +24,35 @@ export interface AccountCommandResult {
 }
 
 const USAGE =
-  'Uso: cuenta alta <usuario> | cuenta restablecer <usuario>. El usuario tiene de 3 a 32 caracteres: minúsculas sin acentos, cifras, - y _.';
+  'Uso: cuenta alta <usuario> | cuenta restablecer <usuario> | cuenta cerrar-sesiones <usuario>. El usuario tiene de 3 a 32 caracteres: minúsculas sin acentos, cifras, - y _.';
 
-const PURPOSES: Readonly<Record<string, LinkPurpose>> = {
-  alta: 'enrollment',
-  restablecer: 'reset',
-};
+/** Lo que pide cada orden: un enlace de alta o de restablecimiento, o cerrar las sesiones. */
+type AccountAction =
+  { readonly kind: 'link'; readonly purpose: LinkPurpose } | { readonly kind: 'close-sessions' };
 
-const failed = (message: string): AccountCommandResult => ({
-  exitCode: 1,
-  stdout: '',
-  stderr: `No se creó el enlace: ${message}.\n`,
-});
+function parseAction(command: string | undefined): AccountAction | null {
+  if (command === 'alta') {
+    return { kind: 'link', purpose: 'enrollment' };
+  }
+  if (command === 'restablecer') {
+    return { kind: 'link', purpose: 'reset' };
+  }
+  if (command === 'cerrar-sesiones') {
+    return { kind: 'close-sessions' };
+  }
+  return null;
+}
+
+/** Cuántas sesiones cerró `cerrar-sesiones`, para quien la ejecuta. */
+function closedSessionsMessage(username: string, closed: number): string {
+  if (closed === 0) {
+    return `La cuenta «${username}» no tenía sesiones abiertas.`;
+  }
+  if (closed === 1) {
+    return `Se cerró 1 sesión de la cuenta «${username}».`;
+  }
+  return `Se cerraron ${String(closed)} sesiones de la cuenta «${username}».`;
+}
 
 /** El motivo de un fallo, para quien ejecuta la orden: un código, nunca el mensaje del error. */
 function failureMessage(error: unknown, username: string): string {
@@ -62,14 +79,16 @@ function failureMessage(error: unknown, username: string): string {
 }
 
 /**
- * La orden `cuenta` (ADR-0019 §3), que el propietario ejecuta en la consola de `buoh-api`, con el
- * entorno del servicio:
+ * La orden `cuenta` (ADR-0019 §2 y §3), que el propietario ejecuta en la consola de `buoh-api`, con
+ * el entorno del servicio:
  * - `alta <usuario>` crea el enlace de alta: la cuenta, sin credencial, si no existe;
- * - `restablecer <usuario>` crea el enlace para poner una contraseña y un código nuevos.
+ * - `restablecer <usuario>` crea el enlace para poner una contraseña y un código nuevos;
+ * - `cerrar-sesiones <usuario>` cierra todas las sesiones abiertas de la cuenta.
  *
  * Cada enlace vale 15 minutos y una sola vez, y anula el anterior de la cuenta. Su dirección, con el
- * token, solo sale aquí, en stdout, en su propia línea. Salida 0: el enlace; 1: no se creó, con el
- * motivo y su código en stderr; 2: un uso o una configuración que no valen, sin abrir la base.
+ * token, solo sale aquí, en stdout, en su propia línea. Salida 0: el enlace o cuántas sesiones se
+ * cerraron; 1: no se pudo, con el motivo y su código en stderr; 2: un uso o una configuración que no
+ * valen, sin abrir la base.
  */
 export async function accountCommand(
   argv: readonly string[],
@@ -79,9 +98,9 @@ export async function accountCommand(
   // `pnpm --filter @buoh/api run cuenta -- alta <usuario>` pasa el `--` al script: se quita uno, y
   // solo delante.
   const [command, username, ...rest] = argv[0] === '--' ? argv.slice(1) : argv;
-  const purpose = command === undefined ? undefined : PURPOSES[command];
+  const action = parseAction(command);
   if (
-    purpose === undefined ||
+    action === null ||
     username === undefined ||
     rest.length > 0 ||
     !usernameSchema.safeParse(username).success
@@ -97,6 +116,13 @@ export async function accountCommand(
     }
     throw error;
   }
+  const prefix =
+    action.kind === 'close-sessions' ? 'No se cerraron las sesiones' : 'No se creó el enlace';
+  const failed = (message: string): AccountCommandResult => ({
+    exitCode: 1,
+    stdout: '',
+    stderr: `${prefix}: ${message}.\n`,
+  });
   const opened = deps.open(config);
   try {
     const state = await opened.migrationState();
@@ -110,9 +136,13 @@ export async function accountCommand(
         'una migración aplicada de la API no coincide con la de esta versión (migration_changed)',
       );
     }
-    const link = await opened.service.createLink({ username, purpose });
+    if (action.kind === 'close-sessions') {
+      const closed = await opened.service.closeSessions({ username });
+      return { exitCode: 0, stdout: `${closedSessionsMessage(username, closed)}\n`, stderr: '' };
+    }
+    const link = await opened.service.createLink({ username, purpose: action.purpose });
     const description =
-      purpose === 'enrollment'
+      action.purpose === 'enrollment'
         ? `Enlace de alta de la cuenta «${username}», de un solo uso, válido hasta ${link.expiresAtUtc}:`
         : `Enlace de restablecimiento de la cuenta «${username}», de un solo uso, válido hasta ${link.expiresAtUtc}. Al usarlo, la contraseña y el código actuales dejan de valer:`;
     return { exitCode: 0, stdout: `${description}\n${link.url}\n`, stderr: '' };

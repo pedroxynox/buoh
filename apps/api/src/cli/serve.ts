@@ -2,6 +2,9 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 
 import { createAccountService } from '../accounts/links.js';
+import { createRateLimiter } from '../accounts/limits.js';
+import { createLoginFailureBuffer } from '../accounts/login-failures.js';
+import { createSessionService } from '../accounts/sessions.js';
 import { buildApp } from '../app.js';
 import { loadCommonPasswords } from '../auth/common-passwords.js';
 import { createPasswordHasher } from '../auth/password-hash.js';
@@ -55,30 +58,48 @@ if (config !== undefined) {
     },
     log,
   });
+  // El hasher y el generador de identificadores se comparten entre las cuentas y las sesiones: así
+  // la cola de los hashes es una sola (ADR-0019 §1) y los UUIDv7 crecen siempre dentro del proceso.
+  const hasher = createPasswordHasher({
+    pepper: config.keys.passwordPepper,
+    maxWaiting: HASHES_WAITING,
+    randomBytes,
+  });
+  const newId = createUuidV7Generator({ now: clock, randomBytes });
+  const limiter = createRateLimiter();
+  const failures = createLoginFailureBuffer();
   const links = createAccountService({
     pool,
     environment: config.environment,
     origin: config.origin,
     keys: config.keys,
-    hasher: createPasswordHasher({
-      pepper: config.keys.passwordPepper,
-      maxWaiting: HASHES_WAITING,
-      randomBytes,
-    }),
+    hasher,
     commonPasswords: loadCommonPasswords(),
     clock,
     randomBytes,
-    newId: createUuidV7Generator({ now: clock, randomBytes }),
+    newId,
+  });
+  const sessions = createSessionService({
+    pool,
+    keys: config.keys,
+    hasher,
+    clock,
+    randomBytes,
+    newId,
+    limiter,
+    failures,
   });
   const app = buildApp({
     log,
     now: () => performance.now(),
     requestId: () => randomUUID(),
     origin: config.origin,
-    routes: apiRoutes({ readiness, links }),
+    routes: apiRoutes({ readiness, links, sessions, limiter, clock }),
+    rateLimit: (address) => limiter.requestWait(address, clock()),
   });
   app.addHook('onClose', async () => {
     readiness.stop();
+    await sessions.flushPendingFailures().catch(() => undefined);
     await pool.end();
   });
   readiness.start();

@@ -3,10 +3,12 @@ import { Duplex } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, vi } from 'vitest';
 
+import { createRateLimiter } from '../src/accounts/limits.js';
 import type { LinkService } from '../src/accounts/service.js';
+import type { SessionService } from '../src/accounts/sessions.js';
 import { buildApp } from '../src/app.js';
 import type { ApiLogLine } from '../src/log.js';
-import { apiRoutes, type ApiRoute } from '../src/routes.js';
+import { apiRoutes, type ApiRoute, type ApiRouteDeps } from '../src/routes.js';
 
 /**
  * Guardas de determinismo, como en las suites del dominio: la API no puede leer el reloj real, el
@@ -71,13 +73,41 @@ const UNUSED_LINKS: LinkService = {
   useLink: () => Promise.reject(new Error('El servicio de cuentas no se usa en esta prueba.')),
 };
 
-/** Las rutas de la API, ya lista y sin servicio de cuentas. */
+/** Un servicio de sesiones que la prueba no ejercita: sin sesión válida y sin token. */
+const UNUSED_SESSIONS: SessionService = {
+  login: () => Promise.reject(new Error('El servicio de sesiones no se usa en esta prueba.')),
+  authenticate: () => Promise.resolve(null),
+  renewActivity: () => Promise.resolve(),
+  logout: () => Promise.resolve(0),
+  closeOthers: () => Promise.resolve(0),
+  listAudit: () => Promise.resolve([]),
+  csrfToken: () => '0'.repeat(64),
+  validateCsrf: () => false,
+  flushPendingFailures: () => Promise.resolve(),
+};
+
+/** Las dependencias de las rutas, con servicios que esta prueba no ejercita salvo lo que cambie. */
+export function routeDeps(overrides: Partial<ApiRouteDeps> = {}): ApiRouteDeps {
+  return {
+    readiness: { isReady: () => true },
+    links: UNUSED_LINKS,
+    sessions: UNUSED_SESSIONS,
+    limiter: createRateLimiter(),
+    clock: () => Date.now(),
+    ...overrides,
+  };
+}
+
+/** Las rutas de la API, ya lista y con servicios que esta prueba no ejercita. */
 export function readyRoutes(): readonly ApiRoute[] {
-  return apiRoutes({ readiness: { isReady: () => true }, links: UNUSED_LINKS });
+  return apiRoutes(routeDeps());
 }
 
 /** Una API de prueba, con un registro que se guarda, un reloj que avanza 5 ms y UUID fijos. */
-export function testApp(routes: readonly ApiRoute[] = readyRoutes()) {
+export function testApp(
+  routes: readonly ApiRoute[] = readyRoutes(),
+  rateLimit: (address: string) => number = () => 0,
+) {
   const lines: ApiLogLine[] = [];
   let clock = 1_000;
   let nextId = 1;
@@ -92,6 +122,7 @@ export function testApp(routes: readonly ApiRoute[] = readyRoutes()) {
     requestId: () => testRequestId(nextId++),
     origin: TEST_ORIGIN,
     routes,
+    rateLimit,
   });
   return { app, lines };
 }

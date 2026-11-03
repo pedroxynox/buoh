@@ -24,6 +24,7 @@ const URL_WITH_TOKEN = 'https://buoh.test/enlace/#AAECAwQFBgcICQoLDA0ODxAREhMUFR
 function deps(behavior: {
   readonly state?: MigrationState | Error;
   readonly createLink?: AccountCommandService['createLink'];
+  readonly closeSessions?: AccountCommandService['closeSessions'];
 }) {
   const calls: unknown[] = [];
   let closed = 0;
@@ -47,6 +48,10 @@ function deps(behavior: {
                 expiresAtUtc: '2026-11-03T12:15:00.000Z',
               })
             );
+          },
+          closeSessions: (input) => {
+            calls.push({ closeSessions: input.username });
+            return behavior.closeSessions?.(input) ?? Promise.resolve(0);
           },
         },
         close: () => {
@@ -104,7 +109,8 @@ describe('accountCommand', () => {
     [['alta']],
     [['alta', 'pedro', 'otra']],
     [['borrar', 'pedro']],
-    [['cerrar-sesiones', 'pedro']],
+    [['cerrar-sesiones']],
+    [['cerrar-sesiones', 'pedro', 'otra']],
     [['alta', 'Pedro']],
     [['alta', 'pé']],
     [['alta', 'p'.repeat(33)]],
@@ -114,9 +120,51 @@ describe('accountCommand', () => {
       exitCode: 2,
       stdout: '',
       stderr:
-        'Uso: cuenta alta <usuario> | cuenta restablecer <usuario>. El usuario tiene de 3 a 32 caracteres: minúsculas sin acentos, cifras, - y _.\n',
+        'Uso: cuenta alta <usuario> | cuenta restablecer <usuario> | cuenta cerrar-sesiones <usuario>. El usuario tiene de 3 a 32 caracteres: minúsculas sin acentos, cifras, - y _.\n',
     });
     expect(fake.calls).toEqual([]);
+  });
+
+  it('cerrar-sesiones cierra las sesiones y dice cuántas, con el singular y el plural', async () => {
+    for (const [closed, message] of [
+      [0, 'La cuenta «pedro» no tenía sesiones abiertas.'],
+      [1, 'Se cerró 1 sesión de la cuenta «pedro».'],
+      [3, 'Se cerraron 3 sesiones de la cuenta «pedro».'],
+    ] as const) {
+      const fake = deps({ closeSessions: () => Promise.resolve(closed) });
+      expect(await accountCommand(['cerrar-sesiones', 'pedro'], ENV, fake.value)).toEqual({
+        exitCode: 0,
+        stdout: `${message}\n`,
+        stderr: '',
+      });
+      expect(fake.calls).toEqual([
+        { origin: 'https://buoh.test', user: 'buoh' },
+        { closeSessions: 'pedro' },
+      ]);
+      expect(fake.closed()).toBe(1);
+    }
+  });
+
+  it('cerrar-sesiones de una cuenta que no existe sale con 1 y lo explica', async () => {
+    const fake = deps({
+      closeSessions: () => Promise.reject(new AccountCommandError('account_not_found')),
+    });
+    expect(await accountCommand(['cerrar-sesiones', 'pedro'], ENV, fake.value)).toEqual({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'No se cerraron las sesiones: no existe la cuenta «pedro» (account_not_found).\n',
+    });
+    expect(fake.closed()).toBe(1);
+  });
+
+  it('cerrar-sesiones sin las migraciones de la API sale con 1 sin tocar las sesiones', async () => {
+    const fake = deps({ state: 'migrations_pending' });
+    const result = await accountCommand(['cerrar-sesiones', 'pedro'], ENV, fake.value);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe(
+      'No se cerraron las sesiones: faltan las migraciones de la API; buoh-operaciones las aplica cada 5 minutos (not_ready).\n',
+    );
+    expect(fake.calls).toHaveLength(1);
   });
 
   it('una configuración inválida sale con 2 y los nombres de las variables, nunca sus valores', async () => {

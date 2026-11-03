@@ -10,6 +10,7 @@ import { loadCommonPasswords } from '../src/auth/common-passwords.js';
 import {
   argon2idTag,
   createPasswordHasher,
+  DUMMY_PASSWORD_HASH,
   PasswordHasherBusyError,
   type Argon2Function,
 } from '../src/auth/password-hash.js';
@@ -283,5 +284,90 @@ describe('createPasswordHasher', () => {
     expect(() =>
       createPasswordHasher({ pepper: Buffer.alloc(16), maxWaiting: 1, randomBytes: () => SALT }),
     ).toThrow(TypeError);
+  });
+});
+
+describe('createPasswordHasher: verify (ADR-0019 §1)', () => {
+  const PEPPER = Buffer.alloc(32, 0x70);
+  const SALT = Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex');
+
+  it('acepta la contraseña correcta y rechaza otra, con Argon2id real', async () => {
+    const hasher = createPasswordHasher({ pepper: PEPPER, maxWaiting: 4, randomBytes: () => SALT });
+    const hash = await hasher.hash('una contraseña larga de prueba');
+    expect(await hasher.verify(hash, 'una contraseña larga de prueba')).toBe(true);
+    expect(await hasher.verify(hash, 'una contraseña larga de PRUEBA')).toBe(false);
+    // La misma contraseña escrita en NFD vale: verify también normaliza a NFC.
+    expect(await hasher.verify(hash, 'una contrasen\u0303a larga de prueba')).toBe(true);
+    // Otra clave del servidor no abre el hash.
+    const other = createPasswordHasher({
+      pepper: Buffer.alloc(32, 0x71),
+      maxWaiting: 4,
+      randomBytes: () => SALT,
+    });
+    expect(await other.verify(hash, 'una contraseña larga de prueba')).toBe(false);
+  });
+
+  it('el hash de ejemplo de un nombre que no existe da false pero calcula igual', async () => {
+    let calls = 0;
+    const argon2: Argon2Function = () => {
+      calls += 1;
+      return Promise.resolve(Buffer.alloc(32, 0x09));
+    };
+    const hasher = createPasswordHasher({
+      pepper: PEPPER,
+      maxWaiting: 4,
+      randomBytes: () => SALT,
+      argon2,
+    });
+    expect(await hasher.verify(DUMMY_PASSWORD_HASH, 'cualquier contraseña larga')).toBe(false);
+    expect(calls).toBe(1);
+  });
+
+  it('un hash mal formado o con parámetros fuera de rango da false sin lanzar, y calcula igual', async () => {
+    let calls = 0;
+    const argon2: Argon2Function = () => {
+      calls += 1;
+      return Promise.resolve(Buffer.alloc(32, 0x01));
+    };
+    const hasher = createPasswordHasher({
+      pepper: PEPPER,
+      maxWaiting: 4,
+      randomBytes: () => SALT,
+      argon2,
+    });
+    const bad = [
+      'no-es-un-phc',
+      `$argon2i$v=19$m=65536,t=3,p=1$${'A'.repeat(22)}$${'A'.repeat(43)}`,
+      '$argon2id$v=19$m=65536,t=3,p=1$short$short',
+      `$argon2id$v=19$m=999999999,t=3,p=1$${'A'.repeat(22)}$${'A'.repeat(43)}`,
+      `$argon2id$v=19$m=65536,t=99,p=1$${'A'.repeat(22)}$${'A'.repeat(43)}`,
+    ];
+    for (const value of bad) {
+      expect(await hasher.verify(value, 'una contraseña larga'), value).toBe(false);
+    }
+    expect(calls).toBe(bad.length);
+  });
+
+  it('comparte la cola de los hashes: con uno en curso y la cola llena, rechaza', async () => {
+    const resolvers: (() => void)[] = [];
+    const argon2: Argon2Function = () =>
+      new Promise((resolve) => {
+        resolvers.push(() => {
+          resolve(Buffer.alloc(32));
+        });
+      });
+    const hasher = createPasswordHasher({
+      pepper: PEPPER,
+      maxWaiting: 0,
+      randomBytes: () => SALT,
+      argon2,
+    });
+    const running = hasher.hash('primera contraseña larga');
+    await Promise.resolve();
+    await expect(hasher.verify(DUMMY_PASSWORD_HASH, 'x')).rejects.toBeInstanceOf(
+      PasswordHasherBusyError,
+    );
+    resolvers[0]?.();
+    await running;
   });
 });

@@ -5,11 +5,16 @@ import {
   apiErrorCodeSchema,
   apiErrorSchema,
   apiHealthSchema,
+  auditEventsResponseSchema,
+  emptyRequestSchema,
   linkSecretRequestSchema,
   linkSecretSchema,
   linkUseRequestSchema,
   linkUseSchema,
   PASSWORD_REJECTION_REASONS,
+  sessionInfoSchema,
+  sessionLoginRequestSchema,
+  sessionsClosedResultSchema,
   usernameSchema,
 } from '../src/index.js';
 
@@ -35,6 +40,9 @@ describe('ApiError', () => {
       'invalid_code',
       'not_ready',
       'postgres_unavailable',
+      'unauthenticated',
+      'invalid_credentials',
+      'credential_disabled',
     ] as const) {
       expect(apiErrorSchema.parse({ error: { code, request_id: REQUEST_ID } })).toEqual({
         error: { code, request_id: REQUEST_ID },
@@ -42,7 +50,7 @@ describe('ApiError', () => {
     }
   });
 
-  it('cierra la lista de códigos: los del esqueleto y los del PR 4a, en ese orden', () => {
+  it('cierra la lista de códigos: los del esqueleto, los del PR 4a y los del PR 4b, en ese orden', () => {
     expect(API_ERROR_CODES).toEqual([
       'invalid_request',
       'not_found',
@@ -54,9 +62,12 @@ describe('ApiError', () => {
       'rate_limited',
       'not_ready',
       'postgres_unavailable',
+      'unauthenticated',
+      'invalid_credentials',
+      'credential_disabled',
     ]);
     expect(apiErrorCodeSchema.options).toEqual(API_ERROR_CODES);
-    for (const code of ['unauthenticated', 'invalid_credentials', 'forbidden', 'INTERNAL', '']) {
+    for (const code of ['forbidden', 'logged_out', 'INTERNAL', 'invalid-credentials', '']) {
       expect(accepts(apiErrorSchema, { error: { code, request_id: REQUEST_ID } }), code).toBe(
         false,
       );
@@ -270,5 +281,76 @@ describe('POST /api/v1/enlace', () => {
     for (const value of [{ result: 'session_started' }, {}, { result: 'account_enrolled', x: 1 }]) {
       expect(accepts(linkUseSchema, value)).toBe(false);
     }
+  });
+});
+
+describe('POST /api/v1/sesion y GET /api/v1/sesion (ADR-0019 §1 y §2)', () => {
+  const login = { username: 'pedro', password: 'una contraseña larga de prueba', code: '012345' };
+  const CSRF = 'a'.repeat(64);
+
+  it('el inicio de sesión lleva el nombre, la contraseña y un código de 6 cifras', () => {
+    expect(sessionLoginRequestSchema.parse(login)).toEqual(login);
+    for (const code of ['12345', '1234567', '12345a', '١٢٣٤٥٦', '']) {
+      expect(accepts(sessionLoginRequestSchema, { ...login, code }), code).toBe(false);
+    }
+    for (const username of ['ab', 'Pedro', 'pedro perez', '']) {
+      expect(accepts(sessionLoginRequestSchema, { ...login, username }), username).toBe(false);
+    }
+    expect(accepts(sessionLoginRequestSchema, { ...login, password: '' })).toBe(false);
+    expect(accepts(sessionLoginRequestSchema, { ...login, password: 'x'.repeat(1025) })).toBe(
+      false,
+    );
+    expect(accepts(sessionLoginRequestSchema, { ...login, password: 'x \ud800 y' })).toBe(false);
+    expect(accepts(sessionLoginRequestSchema, { ...login, token: 'x' })).toBe(false);
+  });
+
+  it('la respuesta lleva solo el token CSRF, 64 hexadecimales en minúscula', () => {
+    expect(sessionInfoSchema.parse({ csrf_token: CSRF })).toEqual({ csrf_token: CSRF });
+    for (const token of [
+      CSRF.toUpperCase(),
+      CSRF.slice(0, 63),
+      `${CSRF}a`,
+      `${CSRF.slice(0, 62)}zz`,
+      '',
+    ]) {
+      expect(accepts(sessionInfoSchema, { csrf_token: token }), token).toBe(false);
+    }
+    expect(accepts(sessionInfoSchema, { csrf_token: CSRF, extra: 1 })).toBe(false);
+    expect(accepts(sessionInfoSchema, {})).toBe(false);
+  });
+
+  it('el cuerpo de un cierre es un objeto vacío, y su respuesta dice cuántas se cerraron', () => {
+    expect(emptyRequestSchema.parse({})).toEqual({});
+    expect(accepts(emptyRequestSchema, { x: 1 })).toBe(false);
+    for (const closed of [0, 1, 9, 1000]) {
+      expect(sessionsClosedResultSchema.parse({ closed })).toEqual({ closed });
+    }
+    for (const closed of [-1, 1.5, 1001, '1', null]) {
+      expect(accepts(sessionsClosedResultSchema, { closed }), String(closed)).toBe(false);
+    }
+  });
+});
+
+describe('GET /api/v1/auditoria (ADR-0019 §5)', () => {
+  const event = {
+    schema_version: '1.0.0',
+    audit_event_id: '01900000-0000-7000-8000-000000000001',
+    occurred_at_utc: '2026-11-03T12:00:00.000Z',
+    account_id: '01900000-0000-7000-8000-00000000a001',
+    actor: 'account',
+    action: 'session_started',
+    reason: 'password_and_totp',
+    objects: [{ kind: 'session', id: '01900000-0000-7000-8000-00000000b001' }],
+    request_id: REQUEST_ID,
+  };
+
+  it('es una lista de entradas de auditoría', () => {
+    expect(auditEventsResponseSchema.parse({ events: [event] })).toEqual({ events: [event] });
+    expect(auditEventsResponseSchema.parse({ events: [] })).toEqual({ events: [] });
+    expect(accepts(auditEventsResponseSchema, { events: [{ ...event, action: 'otra' }] })).toBe(
+      false,
+    );
+    expect(accepts(auditEventsResponseSchema, { events: event })).toBe(false);
+    expect(accepts(auditEventsResponseSchema, { events: [event], extra: 1 })).toBe(false);
   });
 });

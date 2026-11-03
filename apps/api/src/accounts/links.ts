@@ -1,4 +1,4 @@
-import { totpUri, type AuditEvent, type AuditObject, type LinkSecret } from '@buoh/contracts';
+import { totpUri, type AuditObject, type LinkSecret } from '@buoh/contracts';
 import type { Pool } from 'pg';
 
 import { insertAuditEvent } from '../audit.js';
@@ -11,6 +11,7 @@ import { matchTotpCode, TOTP_SECRET_BYTES } from '../auth/totp.js';
 import type { ApiKeys } from '../config.js';
 import type { ApiEnvironment } from '../environment.js';
 import { withTransaction } from '../postgres/transaction.js';
+import { auditEvent, auditObjects, type AuditFields } from './audit-helpers.js';
 import { AccountCommandError, LinkError, PasswordRejectedError } from './errors.js';
 import type { AccountCommandService, LinkService } from './service.js';
 import {
@@ -23,9 +24,12 @@ import {
   insertCredentialDisablement,
   insertLink,
   insertLinkSecret,
+  insertSessionClosure,
   insertTotpStepUsed,
   latestLinkSecret,
   lockAccounts,
+  lockAccountSessions,
+  openSessions,
   type LinkRow,
 } from './store.js';
 
@@ -48,21 +52,6 @@ export interface AccountServiceDeps {
 }
 
 const iso = (ms: number): string => new Date(ms).toISOString();
-
-/** Los campos de una entrada de auditoría, salvo su versión, su identificador y su hora. */
-type WithoutIdentity<T> = T extends unknown
-  ? Omit<T, 'schema_version' | 'audit_event_id' | 'occurred_at_utc'>
-  : never;
-type AuditFields = WithoutIdentity<AuditEvent>;
-
-/** Los objetos de una entrada de auditoría, en el orden del contrato: por clase y por identificador. */
-function auditObjects(...objects: AuditObject[]): AuditObject[] {
-  return objects.sort((a, b) => {
-    const left = `${a.kind}:${a.id}`;
-    const right = `${b.kind}:${b.id}`;
-    return left < right ? -1 : left > right ? 1 : 0;
-  });
-}
 
 /**
  * Si un enlace vale (ADR-0019 §3): es el último de su cuenta, no se usó y no venció. Uno de alta
@@ -87,12 +76,7 @@ export function createAccountService(
   deps: AccountServiceDeps,
 ): LinkService & AccountCommandService {
   /** Una entrada de auditoría con su identificador nuevo y su hora. */
-  const event = (fields: AuditFields, nowUtc: string): AuditEvent => ({
-    schema_version: '1.0.0',
-    audit_event_id: deps.newId(),
-    occurred_at_utc: nowUtc,
-    ...fields,
-  });
+  const event = (fields: AuditFields, nowUtc: string) => auditEvent(deps.newId, fields, nowUtc);
 
   return {
     async createLink({ username, purpose }) {
@@ -147,6 +131,46 @@ export function createAccountService(
           ),
         );
         return { purpose, username, url: `${deps.origin}/enlace/#${token}`, expiresAtUtc };
+      });
+    },
+
+    async closeSessions({ username }) {
+      return withTransaction(deps.pool, async (client) => {
+        const accountRow = await findAccount(client, username);
+        if (accountRow === null) {
+          throw new AccountCommandError('account_not_found');
+        }
+        await lockAccountSessions(client, accountRow.accountId);
+        const now = deps.clock();
+        const nowUtc = iso(now);
+        const open = await openSessions(client, accountRow.accountId, nowUtc);
+        for (const sessionId of open) {
+          await insertSessionClosure(client, {
+            sessionId,
+            reason: 'operator_command',
+            closedAtUtc: nowUtc,
+          });
+        }
+        if (open.length > 0) {
+          await insertAuditEvent(
+            client,
+            event(
+              {
+                account_id: accountRow.accountId,
+                actor: 'operator',
+                action: 'sessions_closed',
+                reason: 'operator_command',
+                objects: auditObjects(
+                  { kind: 'account', id: accountRow.accountId },
+                  ...open.map((id) => ({ kind: 'session' as const, id })),
+                ),
+                request_id: null,
+              },
+              nowUtc,
+            ),
+          );
+        }
+        return open.length;
       });
     },
 
@@ -246,6 +270,16 @@ export function createAccountService(
           });
         }
         const account: AuditObject = { kind: 'account', id: current.accountId };
+        // El restablecimiento cierra todas las sesiones de la cuenta (ADR-0019 §2 y §3).
+        const closedSessions =
+          current.purpose === 'reset' ? await openSessions(client, current.accountId, nowUtc) : [];
+        for (const sessionId of closedSessions) {
+          await insertSessionClosure(client, {
+            sessionId,
+            reason: 'credential_reset',
+            closedAtUtc: nowUtc,
+          });
+        }
         await insertAuditEvent(
           client,
           event(
@@ -295,6 +329,25 @@ export function createAccountService(
             nowUtc,
           ),
         );
+        if (closedSessions.length > 0) {
+          await insertAuditEvent(
+            client,
+            event(
+              {
+                account_id: current.accountId,
+                actor: 'system',
+                action: 'sessions_closed',
+                reason: 'credential_reset',
+                objects: auditObjects(
+                  account,
+                  ...closedSessions.map((id) => ({ kind: 'session' as const, id })),
+                ),
+                request_id: requestId,
+              },
+              nowUtc,
+            ),
+          );
+        }
         return { result: 'credential_reset' as const };
       });
     },

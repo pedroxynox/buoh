@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { auditEventStructuralSchema } from './audit.js';
 import { utcTimestampMsSchema } from './scalars.js';
 
 /**
@@ -26,6 +27,13 @@ import { utcTimestampMsSchema } from './scalars.js';
  * - `rate_limited`: hay que esperar, con los segundos que faltan;
  * - `not_ready`: faltan las migraciones de la API (§7);
  * - `postgres_unavailable`: PostgreSQL no responde.
+ *
+ * Los de las sesiones y el inicio de sesión (PR 4b):
+ * - `unauthenticated`: la petición necesita una sesión y no la trae, o la que trae no vale (§2);
+ * - `invalid_credentials`: el nombre, la contraseña o el código no valen; la respuesta nunca dice
+ *   cuál (§1);
+ * - `credential_disabled`: la credencial está deshabilitada por sus 100 fallos; solo lo recibe quien
+ *   acierta la contraseña y el código (§1).
  */
 export const API_ERROR_CODES = [
   'invalid_request',
@@ -38,6 +46,9 @@ export const API_ERROR_CODES = [
   'rate_limited',
   'not_ready',
   'postgres_unavailable',
+  'unauthenticated',
+  'invalid_credentials',
+  'credential_disabled',
 ] as const;
 
 export const apiErrorCodeSchema = z.enum(API_ERROR_CODES);
@@ -71,6 +82,9 @@ const plainErrorSchema = z.strictObject({
     'invalid_code',
     'not_ready',
     'postgres_unavailable',
+    'unauthenticated',
+    'invalid_credentials',
+    'credential_disabled',
   ]),
   request_id: requestIdSchema,
 });
@@ -174,23 +188,26 @@ export function totpUri(username: string, secret: string): string {
 }
 
 /**
+ * La contraseña que llega en una petición: el uso de un enlace (`POST /api/v1/enlace`) y el inicio
+ * de sesión (`POST /api/v1/sesion`). Admite hasta 1024 caracteres, contados por punto de código,
+ * como en Zod y en el JSON Schema, y tiene que ser texto Unicode bien formado: un sustituto suelto
+ * se convertiría en otro carácter al pasar a UTF-8. La política de §1, con su motivo, decide después
+ * si vale (en el alta y el restablecimiento), y en el inicio de sesión solo cuenta si acierta.
+ */
+export const passwordFieldSchema = z
+  .string()
+  .min(1)
+  .max(1024)
+  .refine((value) => value.isWellFormed(), 'La contraseña debe ser texto Unicode bien formado.');
+
+/**
  * `POST /api/v1/enlace`: usa el enlace con la contraseña nueva y un código del último secreto TOTP
- * que dio `POST /api/v1/enlace/secreto` (ADR-0019 §3). La contraseña admite hasta 1024 caracteres,
- * contados por punto de código, como en Zod y en el JSON Schema, y tiene que ser texto Unicode bien
- * formado: un sustituto suelto se convertiría en otro carácter al pasar a UTF-8. La política, con su
- * motivo, decide después si vale.
+ * que dio `POST /api/v1/enlace/secreto` (ADR-0019 §3).
  */
 export const linkUseRequestSchema = z
   .strictObject({
     token: linkTokenSchema,
-    password: z
-      .string()
-      .min(1)
-      .max(1024)
-      .refine(
-        (value) => value.isWellFormed(),
-        'La contraseña debe ser texto Unicode bien formado.',
-      ),
+    password: passwordFieldSchema,
     code: totpCodeSchema,
   })
   .meta({ id: 'LinkUseRequest', title: 'LinkUseRequest' });
@@ -202,6 +219,55 @@ export const linkUseSchema = z
   })
   .meta({ id: 'LinkUse', title: 'LinkUse' });
 
+// --- PR 4b: sesiones, cierre y auditoría (ADR-0019 §2 y §5) ---
+
+/** El token CSRF de una sesión: el HMAC-SHA-256 de su identificador, en hexadecimal (ADR-0019 §2). */
+export const csrfTokenSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * `POST /api/v1/sesion`: inicia sesión con el nombre de usuario, la contraseña y un código de 6
+ * cifras (ADR-0019 §1 y §2), los tres en el mismo formulario. Ante cualquier dato incorrecto, la
+ * respuesta es siempre `invalid_credentials`, sin decir cuál falló.
+ */
+export const sessionLoginRequestSchema = z
+  .strictObject({
+    username: usernameSchema,
+    password: passwordFieldSchema,
+    code: totpCodeSchema,
+  })
+  .meta({ id: 'SessionLoginRequest', title: 'SessionLoginRequest' });
+
+/**
+ * La respuesta del inicio de sesión y de `GET /api/v1/sesion`: el token CSRF de la sesión, que la
+ * web manda en `X-CSRF-Token` en cada petición que cambia algo (ADR-0019 §2). El identificador de la
+ * sesión no va aquí: viaja en la cookie `__Host-Http-buoh_sesion`, que el navegador no deja leer
+ * desde JavaScript. La web lo recupera con `GET /api/v1/sesion` al abrir cada página.
+ */
+export const sessionInfoSchema = z
+  .strictObject({ csrf_token: csrfTokenSchema })
+  .meta({ id: 'SessionInfo', title: 'SessionInfo' });
+
+/** El cuerpo vacío de una petición que solo necesita la sesión y el token CSRF (los cierres). */
+export const emptyRequestSchema = z
+  .strictObject({})
+  .meta({ id: 'EmptyRequest', title: 'EmptyRequest' });
+
+/**
+ * La respuesta de un cierre: cuántas sesiones se cerraron (ADR-0019 §2). «Cerrar sesión» cierra la
+ * actual (1), y «Cerrar las demás sesiones», las otras (de 0 a 9).
+ */
+export const sessionsClosedResultSchema = z
+  .strictObject({ closed: z.number().int().min(0).max(1000) })
+  .meta({ id: 'SessionsClosedResult', title: 'SessionsClosedResult' });
+
+/**
+ * La respuesta de `GET /api/v1/auditoria`: las entradas de la cuenta de la sesión, de la más nueva a
+ * la más vieja (ADR-0019 §5). Nunca trae entradas sin cuenta ni las de otra cuenta.
+ */
+export const auditEventsResponseSchema = z
+  .strictObject({ events: z.array(auditEventStructuralSchema) })
+  .meta({ id: 'AuditEvents', title: 'AuditEvents' });
+
 export type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
 export type ApiHealth = z.infer<typeof apiHealthSchema>;
@@ -211,3 +277,7 @@ export type LinkSecretRequest = z.infer<typeof linkSecretRequestSchema>;
 export type LinkSecret = z.infer<typeof linkSecretSchema>;
 export type LinkUseRequest = z.infer<typeof linkUseRequestSchema>;
 export type LinkUse = z.infer<typeof linkUseSchema>;
+export type SessionLoginRequest = z.infer<typeof sessionLoginRequestSchema>;
+export type SessionInfo = z.infer<typeof sessionInfoSchema>;
+export type SessionsClosedResult = z.infer<typeof sessionsClosedResultSchema>;
+export type AuditEventsResponse = z.infer<typeof auditEventsResponseSchema>;
