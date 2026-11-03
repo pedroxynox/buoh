@@ -104,14 +104,16 @@ services:
     region: virginia
     # Cada 5 minutos, en UTC, una ejecución a la vez (ADR-0018 §11).
     schedule: '*/5 * * * *'
+    # Compila también la API (apps/api): su paso 1 migra el esquema buoh_api (ADR-0019 §7 y §14).
     buildCommand: >-
-      npx --yes pnpm@12.14.0 install --frozen-lockfile --filter "@buoh/market-data-worker..." &&
-      npx --yes pnpm@12.14.0 --filter "@buoh/market-data-worker..." run build
+      npx --yes pnpm@12.14.0 install --frozen-lockfile --filter "@buoh/market-data-worker..." --filter "@buoh/api..." &&
+      npx --yes pnpm@12.14.0 --filter "@buoh/market-data-worker..." --filter "@buoh/api..." run build
     startCommand: node --max-semi-space-size=1 --max-old-space-size=256 apps/market-data-worker/dist/cli/operations.js
     autoDeployTrigger: checksPass
     buildFilter:
       paths:
         - apps/market-data-worker/**
+        - apps/api/**
         - packages/contracts/**
         - packages/domain/**
         - package.json
@@ -124,6 +126,8 @@ services:
       ignoredPaths:
         - apps/market-data-worker/test/**
         - apps/market-data-worker/integration/**
+        - apps/api/test/**
+        - apps/api/integration/**
         - packages/contracts/test/**
         - packages/domain/test/**
         - '**/*.md'
@@ -161,6 +165,13 @@ services:
           type: worker
           name: buoh-ingesta
           envVarKey: BUOH_POSTGRES_PASSWORD
+      # La contraseña de buoh_api, la que genera buoh-api: con ella el paso 1 crea el rol y migra el
+      # esquema de la API (ADR-0019 §7 y §14, PR 6).
+      - key: BUOH_API_POSTGRES_PASSWORD
+        fromService:
+          type: web
+          name: buoh-api
+          envVarKey: BUOH_POSTGRES_PASSWORD
       - key: BUOH_SALUD_POSTGRES_PASSWORD
         generateValue: true
       - key: BUOH_AGENTE_POSTGRES_PASSWORD
@@ -187,3 +198,78 @@ services:
         sync: false
       - key: BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY
         sync: false
+
+  - type: web
+    name: buoh-api
+    runtime: node
+    plan: 0.5c-512mb
+    region: virginia
+    # Una sola instancia: las sesiones y los límites viven en su memoria (ADR-0019 §1 y §2).
+    numInstances: 1
+    # La ruta de salud de Render: 200 cuando el proceso responde y tiene sus migraciones (ADR-0019 §7).
+    healthCheckPath: /api/salud
+    # Compila la API y la exportación out-api de la web, que la API sirve (ADR-0019 §9 y §10).
+    buildCommand: >-
+      npx --yes pnpm@12.14.0 install --frozen-lockfile --filter "@buoh/api..." --filter "@buoh/web..." &&
+      npx --yes pnpm@12.14.0 --filter "@buoh/api..." --filter "@buoh/web..." run build
+    # Node directamente, con los tamaños de V8 de API_NODE_FLAGS delante, para que el SIGTERM de
+    # Render llegue a la API (ADR-0019 §10; medición en docs/operacion/evidencia-memoria-f2-3.md).
+    startCommand: node --max-semi-space-size=1 --max-old-space-size=256 apps/api/dist/cli/serve.js
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - apps/api/**
+        - apps/web/**
+        - packages/contracts/**
+        - packages/design-system/**
+        - packages/prototype-data/**
+        - package.json
+        - pnpm-lock.yaml
+        - pnpm-workspace.yaml
+        - .npmrc
+        - .node-version
+        - tsconfig.base.json
+        - render-datos.yaml
+      ignoredPaths:
+        - apps/api/test/**
+        - apps/api/integration/**
+        - apps/web/test/**
+        - packages/contracts/test/**
+        - packages/design-system/test/**
+        - packages/prototype-data/test/**
+        - '**/*.md'
+    envVars:
+      - key: BUOH_DEPLOYMENT_ENVIRONMENT
+        value: production
+      # El origen público exacto: el de los enlaces y el único que puede cambiar algo (CSRF, §2). Si
+      # Render da otra dirección porque el nombre está ocupado, se ajusta aquí (runbook de la API).
+      - key: BUOH_API_ORIGIN
+        value: https://buoh-api.onrender.com
+      - key: BUOH_POSTGRES_HOST
+        fromDatabase:
+          name: buoh-postgres
+          property: host
+      - key: BUOH_POSTGRES_PORT
+        fromDatabase:
+          name: buoh-postgres
+          property: port
+      - key: BUOH_POSTGRES_DB
+        fromDatabase:
+          name: buoh-postgres
+          property: database
+      - key: BUOH_POSTGRES_USER
+        value: buoh_api
+      # La contraseña de buoh_api: la genera Render, y buoh-operaciones la pone al rol (ADR-0019 §7).
+      - key: BUOH_POSTGRES_PASSWORD
+        generateValue: true
+      # Dirección interna, con un certificado autofirmado: cifrado sin verificarlo (ADR-0018 §9).
+      - key: BUOH_POSTGRES_SSLMODE
+        value: require
+      # Las tres claves del servidor, de 256 bits que genera Render y viven fuera de la base, para la
+      # contraseña (pepper), el secreto TOTP y los tokens de sesiones, CSRF y enlaces (ADR-0019 §1, §2).
+      - key: BUOH_API_PASSWORD_PEPPER
+        generateValue: true
+      - key: BUOH_API_TOTP_KEY
+        generateValue: true
+      - key: BUOH_API_TOKEN_KEY
+        generateValue: true
