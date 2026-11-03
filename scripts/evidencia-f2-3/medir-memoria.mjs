@@ -12,7 +12,8 @@
 // `cuenta`, usa su enlace (contraseña y código: Argon2id real, el pico de memoria), inicia sesión
 // (Argon2id de nuevo), lee la sesión y la auditoría y pide dos páginas estáticas. Mide el máximo de
 // memoria residente del proceso de la API (`VmHWM` de `/proc/<pid>/status`) en cada serie y cuenta el
-// mayor. Al terminar para la API y borra el esquema. Cifras en MiB de 1 048 576 bytes.
+// mayor. Al terminar para la API; no borra el esquema, porque el arnés levanta una base nueva y
+// cada ejecución usa usuarios con un sufijo propio. Cifras en MiB de 1 048 576 bytes.
 //
 // No usa datos de mercado ni red externa. Las claves del servidor se generan al vuelo y viajan solo
 // por el entorno del proceso hijo; este script nunca las escribe. La salida es una línea JSON con los
