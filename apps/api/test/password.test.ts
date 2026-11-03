@@ -66,37 +66,42 @@ describe('checkPassword: lista de bloqueo', () => {
 });
 
 describe('checkPassword: palabras del contexto', () => {
-  it('buoh, deriv y el nombre de usuario con sus variantes no cuentan para los 15', () => {
+  // Como NIST SP 800-63B-4 §3.1.1.2, con la lista: se compara la contraseña entera, nunca las
+  // palabras que contiene.
+  const LONG = 'pedro_perez_lopez';
+
+  it('rechaza la contraseña que es, entera, el nombre de usuario o una de sus variantes', () => {
     for (const password of [
-      'buohbuohbuohbuoh1',
-      'DerivDerivDeriv2026',
-      'pedro_perez-pedro_perez',
-      'pedroperez!2026!pedroperez',
-      'pedro perez pedro perez',
-      'pedro-perez/2026',
-      'perez.pedro.2026.buoh',
+      'pedro_perez_lopez',
+      'PEDRO_PEREZ_LOPEZ',
+      'pedroperezlopez',
+      'Pedro Perez Lopez',
+      'pedro-perez-lopez',
     ]) {
-      expect(check(password), password).toEqual({ ok: false, reason: 'context_words' });
+      expect(check(password, LONG), password).toEqual({ ok: false, reason: 'context_words' });
     }
+    // Una parte del nombre de 15 caracteres o más también es una variante.
+    expect(check('perezgonzalezlopez', 'perezgonzalezlopez_2')).toEqual({
+      ok: false,
+      reason: 'context_words',
+    });
   });
 
-  it('el límite: sin las palabras del contexto, 15 caracteres valen y 14 no', () => {
-    expect(check(`buoh${FIFTEEN}`)).toEqual({ ok: true, normalized: `buoh${FIFTEEN}` });
-    expect(check(`buoh${FIFTEEN.slice(0, 14)}`)).toEqual({ ok: false, reason: 'context_words' });
-  });
-
-  it('con 15 caracteres o más fuera de esas palabras, la contraseña vale', () => {
-    for (const password of [
-      'mi contraseña de buoh es larga',
-      'I trade derivatives on weekends',
-      `pedro ${FIFTEEN}`,
-    ]) {
-      expect(check(password), password).toEqual({ ok: true, normalized: password });
+  it('no rechaza una contraseña solo porque contenga esas palabras', () => {
+    for (const [password, username] of [
+      ['buohbuohbuohbuoh1', 'pedro_perez'],
+      ['DerivDerivDeriv2026', 'pedro_perez'],
+      ['pedro_perez-pedro_perez', 'pedro_perez'],
+      ['pedro_perez_lopez 2026', LONG],
+      ['mi contraseña de buoh es larga', 'pedro_perez'],
+      ['I trade derivatives on weekends', 'pedro_perez'],
+    ] as const) {
+      expect(check(password, username), password).toEqual({ ok: true, normalized: password });
     }
   });
 
   it('las variantes salen del nombre de cada cuenta', () => {
-    expect(check('anaanaanaanaanaana', 'ana_lopez')).toEqual({
+    expect(check('anaanaanaanaanaana', 'anaanaanaanaanaana')).toEqual({
       ok: false,
       reason: 'context_words',
     });

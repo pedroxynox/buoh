@@ -79,8 +79,9 @@ CREATE TABLE credential_disablements (
     CHECK (disabled_at_utc ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$')
 );
 
--- Los pasos TOTP aceptados de cada credencial: cada paso vale una sola vez, y nunca uno anterior al
--- último aceptado (ADR-0019 §1). La clave primaria lo garantiza también con dos peticiones a la vez.
+-- Los pasos TOTP aceptados de cada credencial (ADR-0019 §1). La clave primaria garantiza que cada
+-- paso se usa una sola vez por credencial, también con dos peticiones a la vez. Que nunca valga uno
+-- anterior al último aceptado lo comprueba la API, con el mayor paso de la credencial.
 CREATE TABLE totp_steps_used (
   credential_id uuid NOT NULL REFERENCES credentials (credential_id),
   totp_step bigint NOT NULL CHECK (totp_step >= 0),
@@ -88,6 +89,32 @@ CREATE TABLE totp_steps_used (
     CHECK (used_at_utc ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$'),
   PRIMARY KEY (credential_id, totp_step)
 );
+
+-- write_order decide qué fila es la última, así que lo asigna siempre la base: este trigger toma el
+-- valor siguiente de la secuencia de la columna, aunque el INSERT traiga otro con OVERRIDING SYSTEM
+-- VALUE, que no pide más privilegio que INSERT. Sin él, quien tenga la contraseña de buoh_api podría
+-- guardar una fila con el máximo de bigint, que ninguna posterior volvería a superar: ningún enlace
+-- nuevo valdría, y restablecer ya no recuperaría la cuenta. Corre con los privilegios de quien
+-- inserta, que necesita el uso de la secuencia (grantApiPrivileges se lo da a buoh_api).
+CREATE FUNCTION buoh_assign_write_order() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.write_order := nextval(
+    pg_get_serial_sequence(quote_ident(TG_TABLE_SCHEMA) || '.' || quote_ident(TG_TABLE_NAME), 'write_order')
+  );
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER account_links_write_order
+  BEFORE INSERT ON account_links
+  FOR EACH ROW EXECUTE FUNCTION buoh_assign_write_order();
+CREATE TRIGGER link_totp_secrets_write_order
+  BEFORE INSERT ON link_totp_secrets
+  FOR EACH ROW EXECUTE FUNCTION buoh_assign_write_order();
+CREATE TRIGGER credentials_write_order
+  BEFORE INSERT ON credentials
+  FOR EACH ROW EXECUTE FUNCTION buoh_assign_write_order();
 
 CREATE TRIGGER accounts_append_only
   BEFORE UPDATE OR DELETE ON accounts

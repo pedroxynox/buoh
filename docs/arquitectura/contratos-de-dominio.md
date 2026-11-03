@@ -670,7 +670,7 @@ LinkSecret {
   expires_at_utc: UtcTimestampMs,                # el vencimiento del enlace
   totp: { secret: Base32 (32 caracteres), uri: "otpauth://totp/buoh:<username>?secret=<secret>&issuer=buoh&algorithm=SHA1&digits=6&period=30" }
 }
-LinkUseRequest { token: LinkToken, password: texto de 1 a 1024 unidades, bien formado, code: 6 cifras }   # POST /api/v1/enlace
+LinkUseRequest { token: LinkToken, password: texto de 1 a 1024 caracteres (puntos de código), bien formado, code: 6 cifras }   # POST /api/v1/enlace
 LinkUse { result: "account_enrolled" | "credential_reset" }
 
 Username = 3 a 32 caracteres de a-z, 0-9, "-" y "_"

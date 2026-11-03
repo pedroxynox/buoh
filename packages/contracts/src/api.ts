@@ -174,9 +174,10 @@ export function totpUri(username: string, secret: string): string {
 
 /**
  * `POST /api/v1/enlace`: usa el enlace con la contraseña nueva y un código del último secreto TOTP
- * que dio `POST /api/v1/enlace/secreto` (ADR-0019 §3). La contraseña admite hasta 1024 unidades de
- * texto, y tiene que ser texto Unicode bien formado: un sustituto suelto se convertiría en otro
- * carácter al pasar a UTF-8. La política, con su motivo, decide después si vale.
+ * que dio `POST /api/v1/enlace/secreto` (ADR-0019 §3). La contraseña admite hasta 1024 caracteres,
+ * contados por punto de código, como en Zod y en el JSON Schema, y tiene que ser texto Unicode bien
+ * formado: un sustituto suelto se convertiría en otro carácter al pasar a UTF-8. La política, con su
+ * motivo, decide después si vale.
  */
 export const linkUseRequestSchema = z
   .strictObject({

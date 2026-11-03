@@ -85,11 +85,19 @@ describe('buildOpenApiDocument', () => {
     const statuses = (url: string, method: string) =>
       Object.keys(operation(url, method).responses).sort();
     expect(statuses('/api/salud', 'get')).toEqual(['200', '400', '500', '503']);
-    expect(statuses('/api/v1/enlace/secreto', 'post')).toEqual(['200', '400', '403', '500', '503']);
+    expect(statuses('/api/v1/enlace/secreto', 'post')).toEqual([
+      '200',
+      '400',
+      '403',
+      '413',
+      '500',
+      '503',
+    ]);
     expect(statuses('/api/v1/enlace', 'post')).toEqual([
       '200',
       '400',
       '403',
+      '413',
       '422',
       '429',
       '500',

@@ -58,6 +58,8 @@ export type ApiRoute = ApiRouteSpec & {
 /** Una consulta vacía: cualquier parámetro de consulta es `invalid_request`. */
 export const NO_QUERY = z.strictObject({});
 
+/** Fastify rechaza un cuerpo de más de su límite, 1 MiB, antes de validarlo. */
+const BODY_TOO_LARGE = 'El cuerpo pasa del límite de 1 MiB (invalid_request).';
 const NOT_READY =
   'Faltan las migraciones de la API (not_ready), o PostgreSQL no responde (postgres_unavailable).';
 const CSRF =
@@ -86,6 +88,7 @@ const ENLACE_SECRETO = {
   errors: {
     400: 'La petición no cumple su contrato (invalid_request), o el enlace no existe, venció, ya se usó o lo anuló otro (invalid_link).',
     403: CSRF,
+    413: BODY_TOO_LARGE,
     503: NOT_READY,
   },
 } as const satisfies ApiRouteSpec;
@@ -102,6 +105,7 @@ const ENLACE = {
   errors: {
     400: 'La petición no cumple su contrato (invalid_request), el enlace no vale (invalid_link) o el código no corresponde a su último secreto TOTP (invalid_code).',
     403: CSRF,
+    413: BODY_TOO_LARGE,
     422: 'La contraseña nueva no cumple la política, con su motivo (password_rejected).',
     429: 'Hay demasiadas contraseñas esperando su hash, con los segundos que faltan (rate_limited).',
     503: NOT_READY,

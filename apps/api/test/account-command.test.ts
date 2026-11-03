@@ -74,6 +74,20 @@ describe('accountCommand', () => {
     expect(fake.closed()).toBe(1);
   });
 
+  it('acepta el -- que pasa pnpm delante de los argumentos (pnpm --filter @buoh/api run cuenta -- alta …)', async () => {
+    const fake = deps({});
+    const result = await accountCommand(['--', 'alta', 'pedro'], ENV, fake.value);
+    expect(result.exitCode).toBe(0);
+    expect(fake.calls[1]).toEqual({ username: 'pedro', purpose: 'enrollment' });
+    // Solo uno, y solo delante.
+    for (const args of [
+      ['--', '--', 'alta', 'pedro'],
+      ['alta', '--', 'pedro'],
+    ]) {
+      expect((await accountCommand(args, ENV, deps({}).value)).exitCode, args.join(' ')).toBe(2);
+    }
+  });
+
   it('restablecer escribe el enlace de restablecimiento', async () => {
     const fake = deps({});
     const result = await accountCommand(['restablecer', 'pedro'], ENV, fake.value);

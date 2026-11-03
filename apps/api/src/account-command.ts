@@ -76,7 +76,9 @@ export async function accountCommand(
   env: Readonly<Record<string, string | undefined>>,
   deps: AccountCommandDeps,
 ): Promise<AccountCommandResult> {
-  const [command, username, ...rest] = argv;
+  // `pnpm --filter @buoh/api run cuenta -- alta <usuario>` pasa el `--` al script: se quita uno, y
+  // solo delante.
+  const [command, username, ...rest] = argv[0] === '--' ? argv.slice(1) : argv;
   const purpose = command === undefined ? undefined : PURPOSES[command];
   if (
     purpose === undefined ||

@@ -39,8 +39,10 @@ import { apiRoutes } from '../src/routes.js';
 const DATABASE = 'buoh_integration_api_cuentas';
 const PRODUCTION_DATABASE = 'buoh_integration_api_cuentas_prod';
 const EMPTY_DATABASE = 'buoh_integration_api_cuentas_vacia';
+/** Una base de production para las altas a la vez, sin ninguna cuenta dada de alta. */
+const RACE_DATABASE = 'buoh_integration_api_cuentas_prod_carrera';
 const API_USER = 'buoh_integration_api_cuentas_api';
-const DATABASES = [DATABASE, PRODUCTION_DATABASE, EMPTY_DATABASE];
+const DATABASES = [DATABASE, PRODUCTION_DATABASE, RACE_DATABASE, EMPTY_DATABASE];
 const apiPassword = randomBytes(24).toString('hex');
 const KEYS = {
   passwordPepper: randomBytes(32),
@@ -210,6 +212,7 @@ beforeAll(async () => {
   await platform.query(`CREATE ROLE ${API_USER} LOGIN PASSWORD ${pg.escapeLiteral(apiPassword)}`);
   await createDatabase(platform, DATABASE, true);
   await createDatabase(platform, PRODUCTION_DATABASE, true);
+  await createDatabase(platform, RACE_DATABASE, true);
   await createDatabase(platform, EMPTY_DATABASE, false);
 });
 
@@ -410,7 +413,7 @@ describe('el alta con su enlace (ADR-0019 §1 y §3)', () => {
   it('una contraseña que no vale o un código malo no gastan el enlace', async () => {
     const { accounts, clock } = service(DATABASE);
     const token = tokenOf(
-      (await accounts.createLink({ username: 'dani', purpose: 'enrollment' })).url,
+      (await accounts.createLink({ username: 'daniela_martinez', purpose: 'enrollment' })).url,
     );
     const secret = await accounts.issueSecret({ token });
     const requestId = '00000000-0000-4000-8000-0000000000d1';
@@ -418,7 +421,8 @@ describe('el alta con su enlace (ADR-0019 §1 y §3)', () => {
     for (const [password, reason] of [
       ['corta', 'too_short'],
       ['1qaz2wsx3edc4rfv', 'common_password'],
-      ['dani-dani-dani-dani', 'context_words'],
+      // La contraseña entera es el nombre de usuario, con espacios en lugar de _.
+      ['Daniela Martinez', 'context_words'],
     ] as const) {
       const error = await rejection(accounts.useLink({ token, password, code, requestId }));
       expect(error, password).toBeInstanceOf(PasswordRejectedError);
@@ -595,6 +599,97 @@ describe('el alta con su enlace (ADR-0019 §1 y §3)', () => {
     expect(rows).toEqual([{ n: 1 }]);
   });
 
+  it('el rol de la API no elige write_order: filas con el máximo no dejan sin valor lo que viene detrás', async () => {
+    const { accounts, clock } = service(DATABASE);
+    const { api, admin } = poolsOf(DATABASE);
+    const enrollment = tokenOf(
+      (await accounts.createLink({ username: 'mara', purpose: 'enrollment' })).url,
+    );
+    const first = await accounts.issueSecret({ token: enrollment });
+    await accounts.useLink({
+      token: enrollment,
+      password: PASSWORD,
+      code: codeFor(first, clock.now()),
+      requestId: '00000000-0000-4000-8000-000000000a10',
+    });
+    const { rows: account } = await admin.query<{ account_id: string }>(
+      "SELECT account_id FROM buoh_api.accounts WHERE username = 'mara'",
+    );
+    const accountId = account[0]?.account_id ?? '';
+    const MAX = '9223372036854775807';
+    // Un enlace, su secreto y una credencial falsos, con el máximo de bigint en write_order.
+    const forgedLink = '01900000-0000-7000-8000-0000000000c1';
+    const forgedCredential = '01900000-0000-7000-8000-0000000000c2';
+    for (const [text, values] of [
+      [
+        `INSERT INTO buoh_api.account_links
+           (link_id, write_order, account_id, purpose, token_hmac, created_at_utc, expires_at_utc)
+         OVERRIDING SYSTEM VALUE
+         VALUES ($1, $2, $3, 'reset', $4, '2026-11-03T12:00:00.000Z', '2099-01-01T00:00:00.000Z')`,
+        [forgedLink, MAX, accountId, randomBytes(32)],
+      ],
+      [
+        `INSERT INTO buoh_api.link_totp_secrets
+           (credential_id, write_order, link_id, totp_secret_sealed, created_at_utc)
+         OVERRIDING SYSTEM VALUE
+         VALUES ($1, $2, $3, $4, '2026-11-03T12:00:00.000Z')`,
+        [forgedCredential, MAX, forgedLink, Buffer.concat([Buffer.from([1]), randomBytes(48)])],
+      ],
+      [
+        `INSERT INTO buoh_api.credentials
+           (credential_id, write_order, account_id, link_id, password_hash, created_at_utc)
+         OVERRIDING SYSTEM VALUE
+         VALUES ($1, $2, $3, $4, $5, '2026-11-03T12:00:00.000Z')`,
+        [
+          forgedCredential,
+          MAX,
+          accountId,
+          forgedLink,
+          `$argon2id$v=19$m=65536,t=3,p=1$${'A'.repeat(22)}$${'A'.repeat(43)}`,
+        ],
+      ],
+    ] as const) {
+      expect(await sqlState(api, text, [...values]), text).toBeNull();
+    }
+    // La base les dio el valor siguiente de su secuencia, no el que llegó en el INSERT.
+    const { rows: orders } = await admin.query<{ max: string }>(
+      `SELECT max(write_order)::text AS max FROM (
+         SELECT write_order FROM buoh_api.account_links
+         UNION ALL SELECT write_order FROM buoh_api.link_totp_secrets
+         UNION ALL SELECT write_order FROM buoh_api.credentials) AS orders`,
+    );
+    expect(orders[0]?.max).not.toBe(MAX);
+
+    // El restablecimiento que viene después sigue valiendo, y su credencial queda como la vigente.
+    clock.advance(60_000);
+    const reset = tokenOf((await accounts.createLink({ username: 'mara', purpose: 'reset' })).url);
+    const secret = await accounts.issueSecret({ token: reset });
+    expect(
+      await accounts.useLink({
+        token: reset,
+        password: 'otra contraseña larga y nueva',
+        code: codeFor(secret, clock.now()),
+        requestId: '00000000-0000-4000-8000-000000000a11',
+      }),
+    ).toEqual({ result: 'credential_reset' });
+    const { rows: current } = await admin.query<{ link_id: string }>(
+      `SELECT c.link_id FROM buoh_api.credentials c
+         JOIN buoh_api.account_links l ON l.link_id = c.link_id
+        WHERE c.account_id = $1 ORDER BY c.write_order DESC LIMIT 1`,
+      [accountId],
+    );
+    expect(current).toHaveLength(1);
+    expect(current[0]?.link_id).not.toBe(forgedLink);
+    expect(linkTokenDigest(KEYS.tokenKey, reset)).toEqual(
+      (
+        await admin.query<{ token_hmac: Buffer }>(
+          'SELECT token_hmac FROM buoh_api.account_links WHERE link_id = $1',
+          [current[0]?.link_id],
+        )
+      ).rows[0]?.token_hmac,
+    );
+  });
+
   it('un enlace insertado con el rol de la API y el SHA-256 sin clave de su token no vale', async () => {
     const { accounts } = service(DATABASE);
     const { api } = poolsOf(DATABASE);
@@ -765,6 +860,65 @@ describe('en production (ADR-0019 §3)', () => {
   });
 });
 
+describe('en production, dos altas a la vez (ADR-0019 §3)', () => {
+  it('con dos enlaces de alta de cuentas distintas usados a la vez, solo una queda dada de alta', async () => {
+    // Como en la prueba de los dos usos a la vez: dos servicios con su cola de hashes y una barrera,
+    // así que solo el bloqueo y la nueva lectura de las otras cuentas impiden las dos altas.
+    const clock = testClock();
+    let arrived = 0;
+    let release: () => void = () => undefined;
+    const bothHashed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const barrierHasher = (): PasswordHasher => {
+      const real = createPasswordHasher({
+        pepper: KEYS.passwordPepper,
+        maxWaiting: 8,
+        randomBytes,
+      });
+      return {
+        hash: async (password) => {
+          const hash = await real.hash(password);
+          arrived += 1;
+          if (arrived === 2) {
+            release();
+          }
+          await bothHashed;
+          return hash;
+        },
+      };
+    };
+    const first = service(RACE_DATABASE, 'production', clock, barrierHasher()).accounts;
+    const second = service(RACE_DATABASE, 'production', clock, barrierHasher()).accounts;
+    const nora = tokenOf((await first.createLink({ username: 'nora', purpose: 'enrollment' })).url);
+    const omar = tokenOf((await first.createLink({ username: 'omar', purpose: 'enrollment' })).url);
+    const noraSecret = await first.issueSecret({ token: nora });
+    const omarSecret = await first.issueSecret({ token: omar });
+    const results = await Promise.allSettled([
+      first.useLink({
+        token: nora,
+        password: PASSWORD,
+        code: codeFor(noraSecret, clock.now()),
+        requestId: '00000000-0000-4000-8000-000000000e01',
+      }),
+      second.useLink({
+        token: omar,
+        password: PASSWORD,
+        code: codeFor(omarSecret, clock.now()),
+        requestId: '00000000-0000-4000-8000-000000000e02',
+      }),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result) => result.status === 'rejected');
+    expect(rejected?.reason).toBeInstanceOf(LinkError);
+    expect((rejected?.reason as LinkError).code).toBe('invalid_link');
+    const { rows } = await poolsOf(RACE_DATABASE).admin.query<{ n: number }>(
+      'SELECT count(DISTINCT account_id)::int AS n FROM buoh_api.credentials',
+    );
+    expect(rows).toEqual([{ n: 1 }]);
+  });
+});
+
 describe('las tablas de las cuentas son append-only (ADR-0019 §7)', () => {
   /** Una columna de cada tabla, para un UPDATE que no cambia nada. */
   const COLUMN: Readonly<Record<string, string>> = {
@@ -840,22 +994,21 @@ describe('el recorrido completo por HTTP, con inject contra la base (ADR-0019 §
     });
     expect(secretResponse.statusCode).toBe(200);
     const secret = linkSecretSchema.parse(secretResponse.json());
+    // Los dos códigos enviados, el bueno y el malo, también son secretos de la petición.
+    const goodCode = codeFor(secret, clock.now());
+    const badCode = goodCode === '000000' ? '000001' : '000000';
     const bad = await app.inject({
       method: 'POST',
       url: '/api/v1/enlace',
       headers,
-      payload: JSON.stringify({
-        token,
-        password: PASSWORD,
-        code: '000000' === codeFor(secret, clock.now()) ? '000001' : '000000',
-      }),
+      payload: JSON.stringify({ token, password: PASSWORD, code: badCode }),
     });
     expect(bad.statusCode).toBe(400);
     const use = await app.inject({
       method: 'POST',
       url: '/api/v1/enlace',
       headers,
-      payload: JSON.stringify({ token, password: PASSWORD, code: codeFor(secret, clock.now()) }),
+      payload: JSON.stringify({ token, password: PASSWORD, code: goodCode }),
     });
     expect(use.statusCode).toBe(200);
     expect(use.json()).toEqual({ result: 'account_enrolled' });
@@ -873,14 +1026,15 @@ describe('el recorrido completo por HTTP, con inject contra la base (ADR-0019 §
       key.toString('base64'),
       key.toString('hex'),
     ]);
-    for (const value of [token, PASSWORD, secret.totp.secret, ...keys]) {
+    const codes = [goodCode, badCode].map((code) => JSON.stringify(code));
+    for (const value of [token, PASSWORD, secret.totp.secret, ...codes, ...keys]) {
       expect(logged).not.toContain(value);
       for (const response of [bad, use, again]) {
         expect(response.body).not.toContain(value);
         expect(JSON.stringify(response.headers)).not.toContain(value);
       }
     }
-    for (const value of [token, PASSWORD, ...keys]) {
+    for (const value of [token, PASSWORD, ...codes, ...keys]) {
       expect(secretResponse.body).not.toContain(value);
     }
     // En la auditoría, ninguno de ellos.
@@ -888,7 +1042,7 @@ describe('el recorrido completo por HTTP, con inject contra la base (ADR-0019 §
       'SELECT event_jcs FROM buoh_api.audit_events',
     );
     const audit = JSON.stringify(rows);
-    for (const value of [token, PASSWORD, secret.totp.secret, ...keys]) {
+    for (const value of [token, PASSWORD, secret.totp.secret, ...codes, ...keys]) {
       expect(audit).not.toContain(value);
     }
   });

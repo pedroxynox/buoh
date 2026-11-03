@@ -3,8 +3,9 @@ import type { PasswordRejectionReason } from '@buoh/contracts';
 /**
  * La política de la contraseña de buoh (ADR-0019 §1; NIST SP 800-63B-4, §3.1.1): de 15 a 128
  * caracteres, contados después de normalizarla a NFC, uno por punto de código; sin reglas de
- * composición; fuera de la lista de bloqueo, sin distinguir mayúsculas; y con 15 caracteres o más
- * que no sean palabras del contexto: `buoh`, `deriv` y el nombre de usuario con sus variantes.
+ * composición; y fuera de la lista de bloqueo, que suma a las contraseñas comunes las palabras del
+ * contexto: `buoh`, `deriv` y el nombre de usuario con sus variantes. Como pide NIST (§3.1.1.2), se
+ * compara la contraseña entera, sin distinguir mayúsculas, y nunca las palabras que contiene.
  */
 export const PASSWORD_MIN_CHARACTERS = 15;
 export const PASSWORD_MAX_CHARACTERS = 128;
@@ -21,28 +22,26 @@ export function codePointLength(text: string): number {
   return Array.from(text).length;
 }
 
-/** Las palabras que no cuentan para la longitud: las del servicio y las del nombre de usuario. */
-function contextWords(username: string): string[] {
-  const words = new Set(['buoh', 'deriv']);
-  for (const variant of [
+/**
+ * Las palabras del contexto: las del servicio y el nombre de usuario, también sin `-` ni `_`, con
+ * espacios en su lugar o con uno cambiado por el otro, y cada parte del nombre.
+ */
+function contextWords(username: string): ReadonlySet<string> {
+  return new Set([
+    'buoh',
+    'deriv',
     username,
     username.replace(/[-_]/gu, ''),
     username.replace(/[-_]/gu, ' '),
     username.replace(/_/gu, '-'),
     username.replace(/-/gu, '_'),
     ...username.split(/[-_]/u),
-  ]) {
-    if (variant.length >= 3) {
-      words.add(variant);
-    }
-  }
-  // Las más largas primero, para que una variante entera no se quede a medias.
-  return [...words].sort((a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0));
+  ]);
 }
 
 /**
  * Comprueba una contraseña nueva. Devuelve la contraseña en NFC, la que se guarda, o el primer
- * motivo por el que no vale, en este orden: la longitud, la lista de bloqueo y el contexto.
+ * motivo por el que no vale, en este orden: la longitud, las contraseñas comunes y el contexto.
  */
 export function checkPassword(
   password: string,
@@ -60,11 +59,7 @@ export function checkPassword(
   if (context.commonPasswords.has(lowered)) {
     return { ok: false, reason: 'common_password' };
   }
-  let rest = lowered;
-  for (const word of contextWords(context.username)) {
-    rest = rest.split(word).join('');
-  }
-  if (codePointLength(rest) < PASSWORD_MIN_CHARACTERS) {
+  if (contextWords(context.username).has(lowered)) {
     return { ok: false, reason: 'context_words' };
   }
   return { ok: true, normalized };

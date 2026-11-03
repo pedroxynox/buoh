@@ -102,6 +102,16 @@
               }
             }
           },
+          "413": {
+            "description": "El cuerpo pasa del límite de 1 MiB (invalid_request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
           "422": {
             "description": "La contraseña nueva no cumple la política, con su motivo (password_rejected).",
             "content": {
@@ -183,6 +193,16 @@
           },
           "403": {
             "description": "La petición no llega de la propia web: Origin, Sec-Fetch-Site o Content-Type (csrf_rejected).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "El cuerpo pasa del límite de 1 MiB (invalid_request).",
             "content": {
               "application/json": {
                 "schema": {

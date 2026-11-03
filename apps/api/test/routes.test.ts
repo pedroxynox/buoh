@@ -194,6 +194,18 @@ describe('CSRF sin sesión: Origin, Sec-Fetch-Site y Content-Type (ADR-0019 §2)
     expect(calls).toHaveLength(1);
   });
 
+  it('un cuerpo de más de 1 MiB responde 413 invalid_request sin llamar al servicio', async () => {
+    const { app, calls } = appWith();
+    for (const url of ['/api/v1/enlace/secreto', '/api/v1/enlace']) {
+      expectError(
+        await post(app, url, { token: TOKEN, password: 'x'.repeat(1024 * 1024), code: '123456' }),
+        413,
+        'invalid_request',
+      );
+    }
+    expect(calls).toEqual([]);
+  });
+
   it('no envía cabeceras CORS', async () => {
     const { app } = appWith();
     const response = await post(app, '/api/v1/enlace/secreto', { token: TOKEN });
