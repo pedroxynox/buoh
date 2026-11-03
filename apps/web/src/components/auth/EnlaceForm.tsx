@@ -7,8 +7,10 @@ import { useEffect, useRef, useState } from 'react';
 import { api, ApiCallError, describeFailure } from './api';
 import { Qr } from './Qr';
 
-/** Un token de enlace es 43 caracteres base64url (ADR-0019 §3); el servidor lo valida de verdad. */
-const LINK_TOKEN = /^[A-Za-z0-9_-]{43}$/u;
+// Un token de enlace son 32 bytes en base64url, en su forma canónica: 42 caracteres y un último
+// cuyo valor es múltiplo de 4 (`linkTokenSchema` de los contratos, ADR-0019 §3). El servidor lo
+// valida de verdad; esta comprobación da el mensaje de «enlace no válido» antes de pedir nada.
+const LINK_TOKEN = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/u;
 
 function messageOf(caught: unknown): string {
   return caught instanceof ApiCallError

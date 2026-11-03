@@ -152,5 +152,10 @@ export function describeFailure(failure: ApiFailure): string {
       ? 'La contraseña no cumple la política.'
       : PASSWORD_REASONS[failure.reason];
   }
-  return FAILURE_MESSAGES[failure.code];
+  // Un código fuera del contrato (una versión futura de la API) cae en el mensaje genérico, nunca
+  // en un texto vacío.
+  return (
+    (FAILURE_MESSAGES as Record<string, string | undefined>)[failure.code] ??
+    FAILURE_MESSAGES.unexpected
+  );
 }
