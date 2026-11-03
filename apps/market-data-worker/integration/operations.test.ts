@@ -820,7 +820,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     expect(first.alerts).toEqual([]);
     expect(first.step('roles_and_logs')).toMatchObject({
       report: {
-        api_migrated: ['0001_auditoria.sql'],
+        api_migrated: ['0001_auditoria.sql', '0002_cuentas.sql'],
         failures: [],
         passwords_set: [API_ROLE],
       },
@@ -834,11 +834,19 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
         ORDER BY name`,
       [API_ROLE],
     );
-    expect(owners).toEqual([
-      { name: 'audit_events', owner: POSTGRES_ROLES.owner },
-      { name: 'buoh_api', owner: POSTGRES_ROLES.owner },
-      { name: 'buoh_schema_migrations', owner: POSTGRES_ROLES.owner },
-    ]);
+    expect(owners).toEqual(
+      [
+        'account_links',
+        'accounts',
+        'audit_events',
+        'buoh_api',
+        'buoh_schema_migrations',
+        'credential_disablements',
+        'credentials',
+        'link_totp_secrets',
+        'totp_steps_used',
+      ].map((name) => ({ name, owner: POSTGRES_ROLES.owner })),
+    );
 
     // buoh_api lee e inserta en sus tablas, y nada más.
     const asApi = (text: string, values: unknown[] = []) =>
@@ -875,31 +883,50 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       expect(await asApi(text), text).toBeNull();
     }
     for (const text of [
-      "UPDATE buoh_api.audit_events SET action = 'session_closed'",
-      'DELETE FROM buoh_api.audit_events',
-      'TRUNCATE buoh_api.audit_events',
-      "INSERT INTO buoh_api.buoh_schema_migrations (name, sha256) VALUES ('0002_x.sql', 'x')",
-      "UPDATE buoh_api.buoh_schema_migrations SET sha256 = 'x'",
-      'DELETE FROM buoh_api.buoh_schema_migrations',
-      'TRUNCATE buoh_api.buoh_schema_migrations',
-      'ALTER TABLE buoh_api.buoh_schema_migrations ADD COLUMN intrusa int',
-      'DROP TABLE buoh_api.buoh_schema_migrations',
+      "INSERT INTO buoh_api.buoh_schema_migrations (name, sha256) VALUES ('0003_x.sql', 'x')",
       'CREATE TABLE buoh_api.intrusa (x int)',
-      'ALTER TABLE buoh_api.audit_events ADD COLUMN intrusa int',
-      'DROP TABLE buoh_api.audit_events',
       'CREATE SCHEMA intruso',
       `SELECT count(*) FROM ${logLocation(3).schema}.operations_reports`,
     ]) {
       expect(await asApi(text), text).toBe('42501');
     }
-    // buoh_lectura, con buoh_salud y buoh_agente, no lee nada de buoh_api.
-    for (const [user, password] of [
-      [POSTGRES_ROLES.health, passwords.health],
-      [POSTGRES_ROLES.agent, passwords.agent],
-    ] as const) {
-      expect(await sqlStateAs(user, password, 'SELECT count(*) FROM buoh_api.audit_events')).toBe(
-        '42501',
+    // En cada tabla de la API, también las de las cuentas (migración 0002), buoh_api lee e inserta,
+    // salvo en la de migraciones, que solo lee, y nunca modifica, borra ni cambia la tabla; y
+    // buoh_lectura, con buoh_salud y buoh_agente, no la lee.
+    const { rows: tables } = await ready(admin).query<{ name: string; first_column: string }>(
+      `SELECT c.relname AS name, a.attname AS first_column
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = 1
+        WHERE n.nspname = $1 AND c.relkind = 'r' ORDER BY c.relname`,
+      [API_ROLE],
+    );
+    expect(tables).toHaveLength(8);
+    for (const { name, first_column: column } of tables) {
+      const table = `buoh_api.${name}`;
+      expect(await asApi(`SELECT count(*) FROM ${table}`), table).toBeNull();
+      const { rows: insert } = await ready(admin).query<{ allowed: boolean }>(
+        "SELECT has_table_privilege($1, $2, 'INSERT') AS allowed",
+        [API_ROLE, table],
       );
+      expect(insert, table).toEqual([{ allowed: name !== 'buoh_schema_migrations' }]);
+      for (const text of [
+        `UPDATE ${table} SET ${column} = ${column}`,
+        `DELETE FROM ${table}`,
+        `TRUNCATE ${table}`,
+        `ALTER TABLE ${table} ADD COLUMN intrusa int`,
+        `DROP TABLE ${table}`,
+      ]) {
+        expect(await asApi(text), text).toBe('42501');
+      }
+      for (const [user, password] of [
+        [POSTGRES_ROLES.health, passwords.health],
+        [POSTGRES_ROLES.agent, passwords.agent],
+      ] as const) {
+        expect(await sqlStateAs(user, password, `SELECT count(*) FROM ${table}`), table).toBe(
+          '42501',
+        );
+      }
     }
 
     // La ejecución siguiente no cambia nada.

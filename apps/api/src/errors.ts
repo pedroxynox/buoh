@@ -1,25 +1,62 @@
 import { STATUS_CODES } from 'node:http';
 
-import { apiErrorSchema, type ApiErrorCode } from '@buoh/contracts';
+import { apiErrorSchema, type ApiErrorCode, type PasswordRejectionReason } from '@buoh/contracts';
 
 import { JSON_CONTENT_TYPE, JSON_RESPONSE_HEADERS } from './headers.js';
+import { isPostgresUnavailable } from './postgres/errors.js';
 
-/** Un fallo clasificado: el estado HTTP y el código de su contrato (ADR-0019 §6). */
-export interface ApiFailure {
-  readonly status: number;
-  readonly code: ApiErrorCode;
-}
+/** Los códigos de error que no llevan más campos (ADR-0019 §6). */
+export type PlainApiErrorCode = Exclude<ApiErrorCode, 'rate_limited' | 'password_rejected'>;
+
+/**
+ * Un fallo clasificado: el estado HTTP y el código de su contrato (ADR-0019 §6). `rate_limited`
+ * lleva además los segundos que faltan, y `password_rejected`, su motivo.
+ */
+export type ApiFailure =
+  | { readonly status: number; readonly code: PlainApiErrorCode }
+  | { readonly status: 429; readonly code: 'rate_limited'; readonly retryAfterSeconds: number }
+  | {
+      readonly status: 422;
+      readonly code: 'password_rejected';
+      readonly reason: PasswordRejectionReason;
+    };
 
 export const INTERNAL_FAILURE: ApiFailure = { status: 500, code: 'internal' };
 export const NOT_FOUND_FAILURE: ApiFailure = { status: 404, code: 'not_found' };
+export const CSRF_REJECTED_FAILURE: ApiFailure = { status: 403, code: 'csrf_rejected' };
+export const NOT_READY_FAILURE: ApiFailure = { status: 503, code: 'not_ready' };
+export const POSTGRES_UNAVAILABLE_FAILURE: ApiFailure = {
+  status: 503,
+  code: 'postgres_unavailable',
+};
 
 /**
- * Clasifica el error de una petición. Solo confía en el estado de los errores de Fastify, cuyo
- * código empieza por `FST_`, como la validación de la entrada (`FST_ERR_VALIDATION`), un cuerpo
- * demasiado grande o un tipo de contenido que no se admite. Cualquier otro error es `internal`,
- * aunque traiga su propio `statusCode`.
+ * Un fallo esperado que una ruta responde con su código, como `invalid_link` o `not_ready`. Su
+ * mensaje es fijo y nunca sale: la respuesta solo lleva su código.
+ */
+export class ApiRequestError extends Error {
+  readonly failure: ApiFailure;
+
+  constructor(failure: ApiFailure) {
+    super(`La petición terminó con ${failure.code}.`);
+    this.name = 'ApiRequestError';
+    this.failure = failure;
+  }
+}
+
+/**
+ * Clasifica el error de una petición:
+ * - un `ApiRequestError` tiene su propio fallo;
+ * - de los errores de Fastify, cuyo código empieza por `FST_`, como la validación de la entrada
+ *   (`FST_ERR_VALIDATION`), un cuerpo demasiado grande o un tipo de contenido que no se admite,
+ *   solo se fía de un estado 4xx: `invalid_request`, o `not_found` con un 404;
+ * - un error con el que PostgreSQL no se puede usar es `postgres_unavailable` (503);
+ * - cualquier otro es `internal`, aunque traiga su propio `statusCode`.
  */
 export function classifyError(error: unknown): ApiFailure {
+  if (error instanceof ApiRequestError) {
+    return error.failure;
+  }
   if (error instanceof Error) {
     const { code, statusCode } = error as { code?: unknown; statusCode?: unknown };
     if (
@@ -34,12 +71,30 @@ export function classifyError(error: unknown): ApiFailure {
         : { status: statusCode, code: 'invalid_request' };
     }
   }
+  if (isPostgresUnavailable(error)) {
+    return POSTGRES_UNAVAILABLE_FAILURE;
+  }
   return INTERNAL_FAILURE;
 }
 
+/** Si el fallo deja su línea `api_error`: los que no son de la petición, sino del servidor. */
+export function isServerFailure(failure: ApiFailure): boolean {
+  return failure.code === 'internal' || failure.code === 'postgres_unavailable';
+}
+
 /** El cuerpo JSON de un error, validado con su contrato. */
-export function errorBody(code: ApiErrorCode, requestId: string): string {
-  return JSON.stringify(apiErrorSchema.parse({ error: { code, request_id: requestId } }));
+export function errorBody(failure: ApiFailure, requestId: string): string {
+  const error =
+    failure.code === 'rate_limited'
+      ? {
+          code: failure.code,
+          request_id: requestId,
+          retry_after_seconds: failure.retryAfterSeconds,
+        }
+      : failure.code === 'password_rejected'
+        ? { code: failure.code, request_id: requestId, reason: failure.reason }
+        : { code: failure.code, request_id: requestId };
+  return JSON.stringify(apiErrorSchema.parse({ error }));
 }
 
 /** Un error `invalid_request` que la API escribe fuera de los ganchos de Fastify. */
@@ -54,7 +109,7 @@ export interface RawErrorResponse {
  * Fastify: lleva aquí las cabeceras de seguridad.
  */
 export function rawErrorResponse(status: number, requestId: string): RawErrorResponse {
-  const body = errorBody('invalid_request', requestId);
+  const body = errorBody({ status, code: 'invalid_request' }, requestId);
   return {
     status,
     headers: {

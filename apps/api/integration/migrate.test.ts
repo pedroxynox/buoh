@@ -186,8 +186,11 @@ describe('db:migrate de la API (ADR-0019 §7)', () => {
     const applied = [first.parsed, second.parsed]
       .map((line) => (line as { applied: string[] }).applied)
       .sort((a, b) => a.length - b.length);
-    expect(applied).toEqual([[], ['0001_auditoria.sql']]);
-    expect(first.parsed).toMatchObject({ current: ['0001_auditoria.sql'], status: 'migrated' });
+    expect(applied).toEqual([[], ['0001_auditoria.sql', '0002_cuentas.sql']]);
+    expect(first.parsed).toMatchObject({
+      current: ['0001_auditoria.sql', '0002_cuentas.sql'],
+      status: 'migrated',
+    });
 
     const { rows: schema } = await ready(admin).query<{ owner: string }>(
       'SELECT nspowner::regrole::text AS owner FROM pg_namespace WHERE nspname = $1',
@@ -200,8 +203,14 @@ describe('db:migrate de la API (ADR-0019 §7)', () => {
       [API_SCHEMA],
     );
     expect(tables).toEqual([
+      { owner: OWNER, table: 'account_links' },
+      { owner: OWNER, table: 'accounts' },
       { owner: OWNER, table: 'audit_events' },
       { owner: OWNER, table: 'buoh_schema_migrations' },
+      { owner: OWNER, table: 'credential_disablements' },
+      { owner: OWNER, table: 'credentials' },
+      { owner: OWNER, table: 'link_totp_secrets' },
+      { owner: OWNER, table: 'totp_steps_used' },
     ]);
     const { rows: functions } = await ready(admin).query<{ owner: string }>(
       `SELECT p.proowner::regrole::text AS owner FROM pg_proc p
@@ -248,7 +257,8 @@ describe('db:migrate de la API (ADR-0019 §7)', () => {
     expect(runCli(migrateEnvironment(RENDER_USER, passwords.render))).toEqual({
       status: 0,
       stderr: '',
-      stdout: '{"applied":[],"current":["0001_auditoria.sql"],"status":"migrated"}\n',
+      stdout:
+        '{"applied":[],"current":["0001_auditoria.sql","0002_cuentas.sql"],"status":"migrated"}\n',
     });
     expect(runCli(migrateEnvironment(RENDER_USER, secret()))).toEqual({
       status: 1,

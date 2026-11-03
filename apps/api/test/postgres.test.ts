@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import { ApiConfigError } from '../src/config.js';
 import { API_SCHEMA, loadPostgresConfig } from '../src/postgres/config.js';
-import { createPool, POOL_MAX_CONNECTIONS, postgresSslOption } from '../src/postgres/pool.js';
+import { isPostgresUnavailable } from '../src/postgres/errors.js';
+import {
+  createPool,
+  POOL_MAX_CONNECTIONS,
+  postgresSslOption,
+  SERVICE_POOL_TIMEOUTS,
+} from '../src/postgres/pool.js';
 
 // La conexión de la API a PostgreSQL (ADR-0019 §7): cifrada en `production`, con un pool de 3 sobre
 // el esquema `buoh_api`, y errores de configuración con nombres, nunca valores.
@@ -134,5 +140,94 @@ describe('createPool', () => {
     expect(postgresSslOption('disable')).toEqual({ ssl: false });
     expect(postgresSslOption('require')).toEqual({ ssl: { rejectUnauthorized: false } });
     expect(postgresSslOption('verify-full')).toEqual({ ssl: true });
+  });
+});
+
+describe('createPool con los plazos del servicio', () => {
+  const config = {
+    database: 'buoh',
+    host: '127.0.0.1',
+    password: SECRET,
+    port: 5432,
+    sslMode: 'require',
+    user: 'buoh_api',
+  } as const;
+
+  it('la API y la orden cuenta esperan una conexión 5 s, una consulta 10 s y una transacción parada 30 s', async () => {
+    expect(SERVICE_POOL_TIMEOUTS).toEqual({
+      connectionTimeoutMillis: 5000,
+      statement_timeout: 10_000,
+      idle_in_transaction_session_timeout: 30_000,
+    });
+    const pool = createPool(config, SERVICE_POOL_TIMEOUTS);
+    try {
+      expect(pool.options).toMatchObject({
+        connectionTimeoutMillis: 5000,
+        statement_timeout: 10_000,
+        idle_in_transaction_session_timeout: 30_000,
+        max: 3,
+      });
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it('db:migrate no lleva esos plazos: su bloqueo puede esperar a otra migración', async () => {
+    const pool = createPool(config);
+    try {
+      expect(pool.options).not.toHaveProperty('statement_timeout');
+      expect(pool.options).not.toHaveProperty('connectionTimeoutMillis');
+    } finally {
+      await pool.end();
+    }
+  });
+});
+
+describe('isPostgresUnavailable', () => {
+  const coded = (code: string) => Object.assign(new Error(`mensaje con datos ${code}`), { code });
+
+  it('reconoce que PostgreSQL no responde: la red, la conexión, la autenticación y la parada del servidor', () => {
+    for (const code of [
+      'ECONNREFUSED',
+      'ECONNRESET',
+      'ETIMEDOUT',
+      'ENOTFOUND',
+      'EAI_AGAIN',
+      'EHOSTUNREACH',
+      'ENETUNREACH',
+      'EPIPE',
+      '08006',
+      '08001',
+      '28P01',
+      '28000',
+      '53300',
+      '57P01',
+      '57P02',
+      '57P03',
+      '57014',
+    ]) {
+      expect(isPostgresUnavailable(coded(code)), code).toBe(true);
+    }
+    for (const message of [
+      'Connection terminated',
+      'Connection terminated unexpectedly',
+      'Client has encountered a connection error and is not queryable',
+      'Client was closed and is not queryable',
+      'Query read timeout',
+      'timeout exceeded when trying to connect',
+      'timeout expired',
+      'The server does not support SSL connections',
+    ]) {
+      expect(isPostgresUnavailable(new Error(message)), message).toBe(true);
+    }
+  });
+
+  it('no confunde con eso un error de la consulta ni un fallo propio', () => {
+    for (const code of ['42501', '23505', '22P02', '42P01', '23001', 'E_PROPIO']) {
+      expect(isPostgresUnavailable(coded(code)), code).toBe(false);
+    }
+    for (const error of [new Error('otra cosa'), new TypeError('x'), 'ECONNREFUSED', null]) {
+      expect(isPostgresUnavailable(error)).toBe(false);
+    }
   });
 });

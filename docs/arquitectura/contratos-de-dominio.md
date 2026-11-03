@@ -650,20 +650,40 @@ Los mensajes de la API de buoh (`apps/api`, [ADR-0019](adr/0019-api-cuentas-y-au
 
 ```text
 ApiError {
-  error: {
-    code: "invalid_request" | "not_found" | "internal",
-    request_id: UUID
-  }
+  error:
+    | { code: "invalid_request" | "not_found" | "internal" | "csrf_rejected"
+              | "invalid_link" | "invalid_code" | "not_ready" | "postgres_unavailable",
+        request_id: UUID }
+    | { code: "rate_limited", request_id: UUID, retry_after_seconds: 1..3600 }
+    | { code: "password_rejected", request_id: UUID,
+        reason: "too_short" | "too_long" | "common_password" | "context_words" }
 }
 
 ApiHealth {
   status: "ok"
 }
+
+LinkSecretRequest { token: LinkToken }           # POST /api/v1/enlace/secreto
+LinkSecret {
+  purpose: "enrollment" | "reset",
+  username: Username,
+  expires_at_utc: UtcTimestampMs,                # el vencimiento del enlace
+  totp: { secret: Base32 (32 caracteres), uri: "otpauth://totp/buoh:<username>?secret=<secret>&issuer=buoh&algorithm=SHA1&digits=6&period=30" }
+}
+LinkUseRequest { token: LinkToken, password: texto de 1 a 1024 unidades, bien formado, code: 6 cifras }   # POST /api/v1/enlace
+LinkUse { result: "account_enrolled" | "credential_reset" }
+
+Username = 3 a 32 caracteres de a-z, 0-9, "-" y "_"
+LinkToken = 32 bytes en base64url sin relleno: 43 caracteres, con una sola escritura
 ```
 
 - `ApiError` es el cuerpo de toda respuesta de error. No admite un mensaje, una traza ni otros campos: un error interno nunca sale con su mensaje. `request_id` es el UUID que la API genera para cada petición; nunca el que envía el cliente.
-- La lista de códigos es cerrada, y cada PR de ADR-0019 §14 suma los que produce. `invalid_request`: la petición no cumple su contrato, por ejemplo con un parámetro de consulta que la ruta no admite, o el servidor HTTP la rechazó antes de llegar a una ruta. `not_found`: ninguna ruta atiende ese método y esa dirección. `internal`: un fallo del servidor, también una respuesta que no cumple su contrato.
-- `ApiHealth` es la respuesta de `GET /api/salud`, la ruta de salud de Render, cuando el proceso responde.
+- La lista de códigos es cerrada (`API_ERROR_CODES`), y cada PR de ADR-0019 §14 suma los que produce. Es una unión por el código: solo `rate_limited` lleva los segundos que faltan, y solo `password_rejected`, su motivo.
+  - Del esqueleto (PR 2). `invalid_request`: la petición no cumple su contrato, por ejemplo con un parámetro de consulta que la ruta no admite, o el servidor HTTP la rechazó antes de llegar a una ruta. `not_found`: ninguna ruta atiende ese método y esa dirección. `internal`: un fallo del servidor, también una respuesta que no cumple su contrato.
+  - De los enlaces (PR 4a). `csrf_rejected` (403): una petición que cambia algo sin el `Origin`, el `Sec-Fetch-Site` o el `Content-Type` de la propia web. `invalid_link` (400): el enlace no existe, venció, ya se usó o lo anuló otro. `invalid_code` (400): el código no corresponde al último secreto TOTP del enlace. `password_rejected` (422): la contraseña nueva no cumple la política de ADR-0019 §1. `rate_limited` (429): hay que esperar. `not_ready` (503): faltan las migraciones de la API. `postgres_unavailable` (503): PostgreSQL no responde.
+- `ApiHealth` es la respuesta de `GET /api/salud`, la ruta de salud de Render, cuando el proceso responde y tiene sus migraciones.
+- `LinkSecret` es la respuesta de `POST /api/v1/enlace/secreto`: un secreto TOTP nuevo para el enlace, una sola vez, que anula el anterior del mismo enlace (ADR-0019 §3). Su URI repite exactamente el usuario y el secreto: el esquema runtime lo comprueba, el JSON Schema del OpenAPI no.
+- `LinkUseRequest` es el cuerpo de `POST /api/v1/enlace`. La contraseña se rechaza en el contrato si no es texto Unicode bien formado, porque un sustituto suelto se convertiría en otro carácter al pasar a UTF-8; su política la decide después la API, con su motivo.
 
 ## `AuditEvent`
 

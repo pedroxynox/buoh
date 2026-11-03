@@ -19,7 +19,7 @@ import {
 // Las migraciones de la API (ADR-0019 §7) sin PostgreSQL: un cliente que anota cada consulta. La
 // prueba contra PostgreSQL está en integration/migrate.test.ts.
 
-const MIGRATION_NAMES = ['0001_auditoria.sql'];
+const MIGRATION_NAMES = ['0001_auditoria.sql', '0002_cuentas.sql'];
 
 interface Recorded {
   readonly text: string;
@@ -142,9 +142,9 @@ describe('migrate', () => {
   it('una migración aplicada que la API no conoce, o cuyo contenido cambió, aborta sin aplicar nada', async () => {
     for (const [rows, reason, migration] of [
       [
-        [...(await applied()), { name: '0002_otra.sql', sha256: '0'.repeat(64) }],
+        [...(await applied()), { name: '0003_otra.sql', sha256: '0'.repeat(64) }],
         'migration_unknown',
-        '0002_otra.sql',
+        '0003_otra.sql',
       ],
       [
         [{ name: '0001_auditoria.sql', sha256: '0'.repeat(64) }],

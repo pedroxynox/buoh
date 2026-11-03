@@ -3,18 +3,20 @@ import type { Socket } from 'node:net';
 
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 
+import { isSameOriginJsonRequest } from './csrf.js';
 import {
   classifyError,
   clientErrorResponse,
+  CSRF_REJECTED_FAILURE,
   errorBody,
-  INTERNAL_FAILURE,
+  isServerFailure,
   NOT_FOUND_FAILURE,
   rawErrorResponse,
   type ApiFailure,
 } from './errors.js';
 import { JSON_CONTENT_TYPE, JSON_RESPONSE_HEADERS } from './headers.js';
 import { errorName, type ApiLog } from './log.js';
-import { API_ROUTES, type ApiRoute } from './routes.js';
+import type { ApiRoute } from './routes.js';
 import {
   ResponseContractError,
   zodSerializerCompiler,
@@ -28,14 +30,17 @@ declare module 'fastify' {
   }
 }
 
-/** Lo que cambia en las pruebas: el registro, el reloj, los identificadores y las rutas. */
+/** Lo que cambia en las pruebas: el registro, el reloj, los identificadores, el origen y las rutas. */
 export interface ApiAppOptions {
   readonly log: ApiLog;
   /** Milisegundos de un reloj monótono, para la duración de cada petición. */
   readonly now: () => number;
   /** El identificador de cada petición, un UUID que genera la API, nunca el cliente. */
   readonly requestId: () => string;
-  readonly routes?: readonly ApiRoute[];
+  /** El origen público de la API (`BUOH_API_ORIGIN`), el único que puede cambiar algo (CSRF). */
+  readonly origin: string;
+  /** La tabla de rutas con sus manejadores (`apiRoutes`). */
+  readonly routes: readonly ApiRoute[];
 }
 
 /** Una petición HTTP/1.1 sin `Host` es un 400 (RFC 9112 §3.2). */
@@ -48,13 +53,15 @@ const EXPECTATION_FAILED = 417;
  * - valida cada entrada y cada salida con los contratos (`zod-compiler.ts`). Una respuesta con un
  *   estado que su ruta no declara, o con un cuerpo que no es un objeto ni una lista, es `internal`;
  * - todo error responde con `ApiError`, sin el mensaje ni la traza;
+ * - una ruta `POST` cambia algo, así que antes de leer su cuerpo exige el `Origin`, el
+ *   `Sec-Fetch-Site` y el `Content-Type` de la propia web (`csrf.ts`), o responde `csrf_rejected`;
  * - toda respuesta lleva las cabeceras de seguridad de `headers.ts`, también los errores, el 404 y
  *   las que no pasan por los ganchos de Fastify: la del servidor HTTP antes de crear la petición,
  *   la de una ruta que Fastify no puede leer y la de un `Expect` desconocido;
  * - cada petición deja una línea en el registro, con los campos de `ApiLogLine` y nada más.
  */
 export function buildApp(options: ApiAppOptions): FastifyInstance {
-  const routes = options.routes ?? API_ROUTES;
+  const { routes } = options;
   const startedAt = new WeakMap<FastifyRequest, number>();
 
   const logRequest = (
@@ -107,7 +114,7 @@ export function buildApp(options: ApiAppOptions): FastifyInstance {
     frameworkErrors: (error, request, reply) => {
       const started = options.now();
       const failure = classifyError(error);
-      if (failure === INTERNAL_FAILURE) {
+      if (isServerFailure(failure)) {
         options.log({ event: 'api_error', request_id: request.id, error: errorName(error) });
       }
       sendError(reply.headers(JSON_RESPONSE_HEADERS), failure, request.id);
@@ -139,6 +146,14 @@ export function buildApp(options: ApiAppOptions): FastifyInstance {
     if (lacksHost(request.raw)) {
       // Responder desde el gancho, sin llamar a `done`, deja la petición sin llegar a la ruta.
       sendError(reply, MISSING_HOST, request.id);
+      return;
+    }
+    // Antes de leer el cuerpo: así un cuerpo de otro sitio nunca llega a analizarse.
+    if (
+      request.routeOptions.config.apiRoute?.method === 'POST' &&
+      !isSameOriginJsonRequest(request.headers, options.origin)
+    ) {
+      sendError(reply, CSRF_REJECTED_FAILURE, request.id);
       return;
     }
     done();
@@ -173,7 +188,7 @@ export function buildApp(options: ApiAppOptions): FastifyInstance {
 
   app.setErrorHandler((error, request, reply) => {
     const failure = classifyError(error);
-    if (failure === INTERNAL_FAILURE) {
+    if (isServerFailure(failure)) {
       options.log({ event: 'api_error', request_id: request.id, error: errorName(error) });
     }
     return sendError(reply, failure, request.id);
@@ -188,7 +203,11 @@ export function buildApp(options: ApiAppOptions): FastifyInstance {
       // Los ganchos leen la ruta de la petición de aquí, también en el HEAD que Fastify añade a
       // cada GET, y no de su URL, que pueden compartir dos métodos.
       config: { apiRoute: route },
-      schema: { querystring: route.querystring, response: route.responses },
+      schema: {
+        querystring: route.querystring,
+        ...(route.body === undefined ? {} : { body: route.body }),
+        response: route.responses,
+      },
       handler: async (request, reply) => {
         const result = await route.handler(request);
         if (!isMessageBody(result.body)) {
@@ -203,10 +222,7 @@ export function buildApp(options: ApiAppOptions): FastifyInstance {
 }
 
 function sendError(reply: FastifyReply, failure: ApiFailure, requestId: string): FastifyReply {
-  return reply
-    .code(failure.status)
-    .type(JSON_CONTENT_TYPE)
-    .send(errorBody(failure.code, requestId));
+  return reply.code(failure.status).type(JSON_CONTENT_TYPE).send(errorBody(failure, requestId));
 }
 
 /** Una petición HTTP/1.1 sin `Host`, la misma comprobación que hace Node. */

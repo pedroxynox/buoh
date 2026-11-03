@@ -4,12 +4,30 @@
  * JSON Schema de generated/ salen de los esquemas `…Structural` con `pnpm run schemas:generate`.
  */
 export {
+  API_ERROR_CODES,
   apiErrorCodeSchema,
   apiErrorSchema,
   apiHealthSchema,
+  linkPurposeSchema,
+  linkSecretRequestSchema,
+  linkSecretSchema,
+  linkTokenSchema,
+  linkUseRequestSchema,
+  linkUseSchema,
+  PASSWORD_REJECTION_REASONS,
+  passwordRejectionReasonSchema,
+  totpCodeSchema,
+  totpUri,
+  usernameSchema,
   type ApiError,
   type ApiErrorCode,
   type ApiHealth,
+  type LinkPurpose,
+  type LinkSecret,
+  type LinkSecretRequest,
+  type LinkUse,
+  type LinkUseRequest,
+  type PasswordRejectionReason,
 } from './api.js';
 export {
   AUDIT_ACTIONS,

@@ -1,9 +1,17 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 
+import { createAccountService } from '../accounts/links.js';
 import { buildApp } from '../app.js';
+import { loadCommonPasswords } from '../auth/common-passwords.js';
+import { createPasswordHasher } from '../auth/password-hash.js';
 import { ApiConfigError, loadApiConfig } from '../config.js';
+import { createUuidV7Generator } from '../ids.js';
 import { errorName, jsonLines } from '../log.js';
+import { createPool, SERVICE_POOL_TIMEOUTS } from '../postgres/pool.js';
+import { migrationState } from '../postgres/readiness.js';
+import { createReadiness } from '../readiness.js';
+import { apiRoutes } from '../routes.js';
 import { serve, signalsOf } from '../serve.js';
 
 /**
@@ -13,6 +21,11 @@ import { serve, signalsOf } from '../serve.js';
  */
 const log = jsonLines((text) => process.stdout.write(text));
 const errorLog = jsonLines((text) => process.stderr.write(text));
+
+/** Cada cuánto vuelve a mirar sus migraciones mientras faltan (ADR-0019 §7). */
+const READINESS_INTERVAL_MS = 5000;
+/** Contraseñas que esperan su hash con una en curso (ADR-0019 §1); la siguiente es `rate_limited`. */
+const HASHES_WAITING = 4;
 
 let config;
 try {
@@ -26,11 +39,49 @@ try {
 }
 
 if (config !== undefined) {
+  const pool = createPool(config.postgres, SERVICE_POOL_TIMEOUTS);
+  // El error de una conexión inactiva del pool no tumba la API: la consulta siguiente falla con
+  // él, y la petición responde postgres_unavailable.
+  pool.on('error', () => undefined);
+  const clock = () => Date.now();
+  const readiness = createReadiness({
+    check: () => migrationState(pool),
+    intervalMs: READINESS_INTERVAL_MS,
+    schedule: (run, ms) => {
+      const timer = setTimeout(run, ms);
+      return () => {
+        clearTimeout(timer);
+      };
+    },
+    log,
+  });
+  const links = createAccountService({
+    pool,
+    environment: config.environment,
+    origin: config.origin,
+    keys: config.keys,
+    hasher: createPasswordHasher({
+      pepper: config.keys.passwordPepper,
+      maxWaiting: HASHES_WAITING,
+      randomBytes,
+    }),
+    commonPasswords: loadCommonPasswords(),
+    clock,
+    randomBytes,
+    newId: createUuidV7Generator({ now: clock, randomBytes }),
+  });
   const app = buildApp({
     log,
     now: () => performance.now(),
     requestId: () => randomUUID(),
+    origin: config.origin,
+    routes: apiRoutes({ readiness, links }),
   });
+  app.addHook('onClose', async () => {
+    readiness.stop();
+    await pool.end();
+  });
+  readiness.start();
   try {
     await serve({
       app,

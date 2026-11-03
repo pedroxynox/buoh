@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { ApiConfigError, apiEnvironmentSchema, type ApiEnvironment } from '../config.js';
+import { ApiConfigError, apiEnvironmentSchema, type ApiEnvironment } from '../environment.js';
 
 /** El esquema de la API en `buoh-postgres` (ADR-0019 §7), aparte de los logs. Su dueño es `buoh_dueno`. */
 export const API_SCHEMA = 'buoh_api';

@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildOpenApiDocument } from '../src/openapi.js';
-import { API_ROUTES } from '../src/routes.js';
+import { API_ROUTE_SPECS } from '../src/routes.js';
 
 /**
  * `pnpm run openapi:generate` escribe `generated/openapi.json` desde la tabla de rutas y los
@@ -13,7 +13,7 @@ import { API_ROUTES } from '../src/routes.js';
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const output = resolve(packageRoot, 'generated/openapi.json');
 const checkOnly = process.argv.includes('--check');
-const content = `${JSON.stringify(buildOpenApiDocument(API_ROUTES), null, 2)}\n`;
+const content = `${JSON.stringify(buildOpenApiDocument(API_ROUTE_SPECS), null, 2)}\n`;
 
 if (checkOnly) {
   let current: string | null = null;

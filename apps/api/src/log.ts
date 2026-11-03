@@ -17,6 +17,13 @@ export type ApiLogLine =
   | { readonly event: 'api_client_error'; readonly request_id: string; readonly error: string }
   /** Los nombres de las variables de entorno rechazadas, nunca sus valores. */
   | { readonly event: 'api_config_error'; readonly variables: readonly string[] }
+  /** La API todavía no tiene sus migraciones (ADR-0019 §7), con el código del error, si lo hay. */
+  | {
+      readonly event: 'api_waiting';
+      readonly reason: 'migrations_pending' | 'migration_changed';
+    }
+  | { readonly event: 'api_waiting'; readonly reason: 'postgres_error'; readonly error: string }
+  | { readonly event: 'api_ready' }
   | { readonly event: 'api_listening'; readonly port: number }
   | { readonly event: 'api_listen_failed'; readonly error: string }
   | { readonly event: 'api_stopping'; readonly signal: string }
