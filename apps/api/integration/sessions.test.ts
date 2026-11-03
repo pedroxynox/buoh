@@ -4,7 +4,7 @@ import { auditEventSchema, type AuditEvent, type LinkSecret } from '@buoh/contra
 import pg, { type Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { AccountCommandError, LoginError } from '../src/accounts/errors.js';
+import { AccountCommandError, LoginError, RateLimitedError } from '../src/accounts/errors.js';
 import { createAccountService } from '../src/accounts/links.js';
 import { createRateLimiter } from '../src/accounts/limits.js';
 import { createLoginFailureBuffer } from '../src/accounts/login-failures.js';
@@ -208,6 +208,17 @@ async function auditOf(accountId: string | null): Promise<AuditEvent[]> {
     [accountId],
   );
   return rows.map((row) => auditEventSchema.parse(JSON.parse(row.event_jcs)));
+}
+
+/** El código con que falló un intento: `rate_limited`, o el de `LoginError`. */
+function codeOf(error: unknown): string {
+  if (error instanceof RateLimitedError) {
+    return 'rate_limited';
+  }
+  if (error instanceof LoginError) {
+    return error.code;
+  }
+  return `otro:${String(error)}`;
 }
 
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
@@ -644,6 +655,36 @@ describe('aislamiento entre cuentas (ADR-0019 §4 y §5)', () => {
     expect(anaEvents.some((e) => e.account_id === beto.accountId)).toBe(false);
     // Ninguna ve la entrada agrupada sin cuenta.
     expect([...anaEvents, ...betoEvents].some((e) => e.account_id === null)).toBe(false);
+  });
+});
+
+describe('un nombre que existe y uno que no (ADR-0019 §1 y §13)', () => {
+  it('reciben la misma respuesta en cada intento, también en el sexto y el vigesimoprimero', async () => {
+    const b = bundle();
+    await enroll(b, 'siexiste');
+    // Una secuencia rápida (sin avanzar el reloj) desde una dirección por nombre: los cinco
+    // primeros fallan, y del sexto en adelante los frena la espera por nombre y dirección, igual
+    // para la cuenta que existe (su contraseña es mala) y para el nombre que no existe.
+    const attempt = (username: string, address: string) =>
+      rejection(
+        b.sessions.login({
+          username,
+          password: 'otra contraseña mala larga 1',
+          code: '000000',
+          address,
+          requestId: reqId(),
+        }),
+      );
+    const exists: string[] = [];
+    const unknown: string[] = [];
+    for (let i = 1; i <= 21; i += 1) {
+      exists.push(codeOf(await attempt('siexiste', '198.51.100.70')));
+      unknown.push(codeOf(await attempt('nnoexiste', '198.51.100.71')));
+    }
+    expect(exists).toEqual(unknown);
+    expect(exists.slice(0, 5)).toEqual(Array.from({ length: 5 }, () => 'invalid_credentials'));
+    expect(exists[5]).toBe('rate_limited');
+    expect(exists[20]).toBe('rate_limited');
   });
 });
 
