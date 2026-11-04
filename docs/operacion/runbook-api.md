@@ -91,19 +91,35 @@ curl -s -o /dev/null -w '%{http_code}\n' https://<dirección>/api/v1/desconocida
 
 ### El límite por dirección
 
-La API cuenta los intentos fallidos por la dirección de `CF-Connecting-IP`, que pone Cloudflare, delante de Render (ADR-0019 §1). Render no documenta esa cabecera, así que esta comprobación se repite si Render cambia su red. Son doce inicios de sesión fallidos seguidos, cada uno con un nombre distinto que no existe, para que solo cuente el límite por dirección, y con un `X-Forwarded-For` y un `True-Client-IP` distintos:
+La API cuenta los intentos fallidos y las peticiones por la dirección de `CF-Connecting-IP`, que pone Cloudflare, delante de Render (ADR-0019 §1). Si esa cabecera falta, cuenta la de la conexión, que en Render es un proxy suyo, y los límites dejarían de contar por cliente sin que nada lo avise. Render no documenta la cabecera, así que estas dos comprobaciones se repiten en cada evidencia.
+
+**Los intentos fallidos.** Son doce inicios de sesión fallidos seguidos, cada uno con un nombre distinto que no existe, para que solo cuente el límite por dirección, y con un `X-Forwarded-For` y un `True-Client-IP` distintos. El último lleva además una `CF-Connecting-IP` vacía, que Cloudflare deja pasar:
 
 ```sh
-for i in $(seq 1 12); do
-  curl -s -o /dev/null -w '%{http_code}\n' -X POST https://<dirección>/api/v1/sesion \
+intento() {
+  curl -s -D /tmp/cabeceras -o /tmp/cuerpo -w '%{http_code} ' -X POST https://<dirección>/api/v1/sesion \
     -H 'Origin: https://<dirección>' -H 'Content-Type: application/json' \
-    -H "X-Forwarded-For: 203.0.113.$i" -H "True-Client-IP: 203.0.113.$i" \
-    --data "{\"username\":\"prueba-limite-$i\",\"password\":\"no-es-una-contrasena\",\"code\":\"000000\"}"
-done
+    -H "X-Forwarded-For: 203.0.113.$1" -H "True-Client-IP: 203.0.113.$1" "${@:2}" \
+    --data "{\"username\":\"prueba-limite-$1\",\"password\":\"no-es-una-contrasena\",\"code\":\"000000\"}"
+  echo "$(cat /tmp/cuerpo) set-cookie: $(grep -ci '^set-cookie' /tmp/cabeceras)"
+}
+for i in $(seq 1 11); do intento "$i"; done
+intento 12 -H 'CF-Connecting-IP;'
 ```
 
-- Los diez primeros responden `401` (`invalid_credentials`), y los dos últimos, `429` (`rate_limited`, con `Retry-After`): cambiar esas cabeceras no esquiva el límite. Ninguno deja una cookie.
+- Los diez primeros responden `401` con `invalid_credentials`, y los dos últimos, `429` con `rate_limited` y los segundos que faltan en `retry_after_seconds`: cambiar esas cabeceras, o mandar `CF-Connecting-IP` vacía, no esquiva el límite. Ninguno trae `set-cookie`.
+- Un `401` en el último diría que la cabecera vacía saca al cliente de su límite: entonces la regla de §1 se corrige antes de seguir.
 - Mientras dura la espera, unos 15 minutos, el propietario entra desde su casa: dos redes distintas cuentan por separado (ADR-0019 §13).
-- Una petición que trae `CF-Connecting-IP` desde el cliente la rechaza Cloudflare con `403`, antes de llegar a la API.
+- Una petición que trae `CF-Connecting-IP` con un valor la rechaza Cloudflare con `403`, antes de llegar a la API.
 - Los intentos quedan en la auditoría como fallos sin cuenta, que la sección Auditoría del propietario no muestra.
 - Nunca con el nombre del propietario: sus fallos cuentan para su límite por nombre y para el tope de 100, que deshabilita su credencial (ADR-0019 §1).
+
+**El límite general**, de 120 peticiones por minuto, se comprueba solo con GET, sin crear ninguna entrada en la auditoría. Las 121 peticiones tienen que caber en un minuto:
+
+```sh
+for i in $(seq 1 121); do
+  curl -s -o /dev/null -w '%{http_code}\n' https://<dirección>/api/salud
+done | sort | uniq -c
+```
+
+Tienen que salir 120 `200` y un `429`. Con 121 `200`, el límite no cuenta por cliente.

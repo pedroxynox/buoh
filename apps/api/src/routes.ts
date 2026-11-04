@@ -231,7 +231,8 @@ function requireReady(readiness: Readiness): void {
 /**
  * La dirección del cliente (ADR-0019 §1): la de `CF-Connecting-IP`, que pone Cloudflare delante de
  * Render con la dirección que se le conecta, y que el cliente no puede elegir: Cloudflare rechaza la
- * petición que ya la trae. Si falta, o no es una sola dirección IP, la de la conexión.
+ * petición que ya la trae con un valor. Si falta, o no es una sola dirección IP, la de la conexión,
+ * que en Render es un proxy suyo: el runbook de la API comprueba que no pase en producción.
  * `X-Forwarded-For` no cuenta: sus primeras direcciones las elige el cliente, y en Render la última
  * es una interna que cambia en cada petición.
  */
