@@ -12,9 +12,11 @@ El Blueprint del sistema de datos es `render-datos.yaml`; qué define está en [
 ## Desplegar
 
 1. Fusiona en `main` el PR de despliegue. Cuando CI pase, Render sincroniza el Blueprint y crea el servicio `buoh-api`. En su primer cron, `buoh-operaciones` crea el rol `buoh_api`, migra su esquema y le pone la contraseña que Render generó (ADR-0019 §7); hasta entonces, `GET /api/salud` responde `503 not_ready`.
-2. En el panel de `buoh-api`, espera a que el despliegue termine y la salud (`/api/salud`) quede verde. La dirección aparece en la página del servicio, con la forma `https://buoh-api….onrender.com`.
-3. **Si Render dio una dirección distinta de `https://buoh-api.onrender.com`** (porque el nombre estaba ocupado), cambia `BUOH_API_ORIGIN` en `render-datos.yaml` a esa dirección exacta (sin barra final) y vuelve a fusionar: el `Origin` tiene que coincidir, o la web no puede cambiar nada (CSRF, ADR-0019 §2). Pásale la dirección al agente.
-4. El agente comprueba desde fuera lo que pide ADR-0019 §13 (abajo, «Comprobar desde fuera»).
+2. **Mira si el Blueprint dejó algo pendiente.** En el panel, abre **Blueprints**, el del sistema de datos, y pulsa **Manual Sync**. Si aparece un cambio con un botón **Approve**, apruébalo. El 2026-11-03, Render creó `buoh-api` pero dejó así la variable `BUOH_API_POSTGRES_PASSWORD` de `buoh-operaciones`, y sin ella `buoh-operaciones` no prepara la base de la API ([evidencia](evidencia-api-f2-3.md)).
+3. En el panel de `buoh-api`, espera a que el despliegue termine y la salud (`/api/salud`) quede verde. La dirección aparece en la página del servicio, con la forma `https://buoh-api….onrender.com`.
+   - **Si termina en `Timed Out`** (Render espera 15 minutos a que `/api/salud` responda `200`): aprueba primero lo pendiente del paso 2. Después, en `buoh-operaciones`, pulsa **Trigger Run** y espera a que termine en verde. Por último, en `buoh-api`, pulsa **Manual Deploy** y después **Deploy latest commit**.
+4. **Si Render dio una dirección distinta de `https://buoh-api.onrender.com`** (porque el nombre estaba ocupado), cambia `BUOH_API_ORIGIN` en `render-datos.yaml` a esa dirección exacta (sin barra final) y vuelve a fusionar: el `Origin` tiene que coincidir, o la web no puede cambiar nada (CSRF, ADR-0019 §2). Pásale la dirección al agente.
+5. El agente comprueba desde fuera lo que pide ADR-0019 §13 (abajo, «Comprobar desde fuera»).
 
 ## Dar de alta tu cuenta (enseguida, justo después de desplegar)
 
@@ -27,7 +29,7 @@ Hazlo **cuanto antes**. Hasta que tu cuenta esté dada de alta, alguien con la c
    node apps/api/dist/cli/cuenta.js alta <tu-usuario>
    ```
 
-   El usuario tiene de 3 a 32 caracteres: minúsculas sin acentos, cifras, `-` y `_`. Escribe en pantalla lo que es el enlace, su vencimiento y su dirección, `https://<dirección>/enlace/#<token>`. Nadie más ve ese token: la base solo guarda su huella. Vale **15 minutos** y un solo uso.
+   Cambia `<tu-usuario>` por tu nombre, **sin** los signos `<` y `>`: con el nombre `ejemplo-1`, sería `node apps/api/dist/cli/cuenta.js alta ejemplo-1`. Que no sea tu nombre público, para que nadie lo adivine (ADR-0019 §1). Con esos signos, bash responde `syntax error near unexpected token 'newline'`. Si al pegar aparece `^[[200~` delante de la orden, bórralo o escribe la orden a mano. El usuario tiene de 3 a 32 caracteres: minúsculas sin acentos, cifras, `-` y `_`. Escribe en pantalla lo que es el enlace, su vencimiento y su dirección, `https://<dirección>/enlace/#<token>`. Nadie más ve ese token: la base solo guarda su huella. Vale **15 minutos** y un solo uso.
 3. Abre esa dirección en tu navegador. Escanea el **QR** con tu app de autenticación (o escribe el código a mano), elige una **contraseña** de al menos 15 caracteres y confirma con un **código de 6 cifras**.
 4. El alta no abre sesión: ve a `https://<dirección>/acceso` e inicia sesión.
 
@@ -47,7 +49,7 @@ En `production`, `alta` solo crea el enlace si todavía no hay ninguna cuenta da
    node apps/api/dist/cli/cuenta.js restablecer <tu-usuario>
    ```
 
-   Da un enlace nuevo, como el del alta.
+   Con tu nombre en lugar de `<tu-usuario>`, sin los signos `<` y `>`, como en el alta. Da un enlace nuevo, como el del alta.
 2. Úsalo igual: contraseña y código nuevos. Al terminar, la credencial anterior queda deshabilitada y se cierran **todas** tus sesiones.
 
 Si pierdes también el acceso a la Shell, entra por la base: con la credencial dueña puedes borrar la cuenta y volver a empezar, pero es el último recurso.
