@@ -6,6 +6,8 @@ Este documento no trae secretos, ni la dirección de salida del sandbox, ni el n
 
 ## El despliegue (PR 6b)
 
+Las horas de este cuadro salen de la fusión en GitHub y de los registros y las pantallas de Render que copió el propietario. El `502` con `no-deploy` lo comprobó el agente desde fuera.
+
 | Hora (UTC) | Qué pasó |
 |---|---|
 | 2026-11-03 18:21 | El propietario fusiona el PR #85 (`a0f1a29`). CI pasa, y Render crea `buoh-api`. |
@@ -25,7 +27,7 @@ Render dio la dirección normal, `https://buoh-api.onrender.com`, así que `BUOH
 
 ## Comprobaciones desde fuera
 
-La primera pasada fue el 2026-11-03, con `main` en `a0f1a29`, y la segunda el 2026-11-04, con el PR 7a (#86, `b638c4c`) en producción desde las 00:59 UTC. Ese despliegue se detectó por la política de contenido nueva en `/icon.svg`.
+La primera pasada fue el 2026-11-03, con `main` en `a0f1a29`, y la segunda el 2026-11-04, con el PR 7a (#86, `b638c4c`) en producción. El agente vio la versión nueva a las 00:59:44 UTC, cuando `/icon.svg` empezó a traer la política de contenido estricta; antes de esa hora, la consultaba cada 20 segundos.
 
 | Comprobación (§13) | Antes del 7a | Con el 7a |
 |---|---|---|
@@ -37,7 +39,7 @@ La primera pasada fue el 2026-11-03, con `main` en `a0f1a29`, y la segunda el 20
 | Un inicio de sesión fallido no deja ninguna cookie | ningún `Set-Cookie` en 24 | ningún `Set-Cookie` en 26 |
 | CSRF: sin `Origin`, con otro `Origin` y con `text/plain` | `403 csrf_rejected` las tres | `403 csrf_rejected` las tres |
 | Cambiar `X-Forwarded-For` en cada intento no esquiva el límite por dirección | **falla**: 24 fallos seguidos, todos `401` | **pasa**: 10 `401` y después `429`, también con `True-Client-IP` distinto y con `CF-Connecting-IP` vacía |
-| El límite general, 121 GET a `/api/salud` en un minuto | **falla**: en la revisión del 7a, 125 seguidos, todos `200` | **pasa**: 120 `200` y un `429` (de 01:01:04 a 01:01:12) |
+| El límite general, 121 GET a `/api/salud` en un minuto | **falla**: en la revisión del 7a, 125 seguidos, todos `200` | **pasa**: 120 `200` y un `429` (de 01:01:04 a 01:01:12), y lo mismo cuando lo repitió la revisión del 7b |
 | Una `CF-Connecting-IP` con valor enviada por el cliente | `403` de Cloudflare («error code: 1000») | `403` de Cloudflare («error code: 1000») |
 | Dos redes distintas cuentan por separado | — | **pasa** (abajo) |
 
