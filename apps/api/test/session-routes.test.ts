@@ -111,7 +111,8 @@ describe('POST /api/v1/sesion (inicio de sesión)', () => {
       '/api/v1/sesion',
       {
         ...JSON_HEADERS,
-        'x-forwarded-for': `10.0.0.1, ${ADDRESS}`,
+        'cf-connecting-ip': ADDRESS,
+        'x-forwarded-for': `198.51.100.9, ${ADDRESS}, 10.31.76.3`,
       },
       body,
     );
@@ -321,5 +322,79 @@ describe('el límite general de peticiones', () => {
     expect(response.json()).toEqual({
       error: { code: 'rate_limited', request_id: testRequestId(1), retry_after_seconds: 7 },
     });
+  });
+});
+
+// La dirección del cliente (ADR-0019 §1, precisión del PR 7a): la de `CF-Connecting-IP`, que pone
+// Cloudflare delante de Render; si falta o no es una sola dirección IP, la de la conexión.
+// `X-Forwarded-For` nunca la decide: en producción llega como «lo que mandó el cliente, el cliente,
+// Cloudflare, una dirección interna de Render que cambia en cada petición», así que ni su primera
+// ni su última dirección sirven. Las direcciones son de documentación (RFC 5737 y RFC 3849).
+describe('la dirección del cliente (ADR-0019 §1)', () => {
+  const body = JSON.stringify({ username: 'pedro', password: PASSWORD, code: '123456' });
+  const CONNECTION = '192.0.2.44';
+  const RENDER_CHAIN = `198.51.100.9, ${ADDRESS}, 104.22.104.103, 10.31.76.3`;
+
+  /** Un inicio de sesión con esas cabeceras desde `CONNECTION`: la dirección que recibe el servicio. */
+  async function loginAddress(headers: Record<string, string>): Promise<unknown> {
+    const { app, calls } = appWith();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/sesion',
+      headers: { ...JSON_HEADERS, ...headers },
+      payload: body,
+      remoteAddress: CONNECTION,
+    });
+    expect(response.statusCode).toBe(201);
+    const login = calls.find((call) => call.method === 'login');
+    return (login?.arg as { address?: unknown } | undefined)?.address;
+  }
+
+  /** Una petición a `/api/salud` con esas cabeceras desde `CONNECTION`: la que cuenta el límite general. */
+  async function generalLimitAddress(headers: Record<string, string>): Promise<string[]> {
+    const seen: string[] = [];
+    const { app } = appWith({}, (address) => {
+      seen.push(address);
+      return 0;
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/salud',
+      headers,
+      remoteAddress: CONNECTION,
+    });
+    expect(response.statusCode).toBe(200);
+    return seen;
+  }
+
+  it('es la de CF-Connecting-IP, con IPv4 o IPv6, aunque X-Forwarded-For diga otra cosa', async () => {
+    expect(
+      await loginAddress({ 'cf-connecting-ip': ADDRESS, 'x-forwarded-for': RENDER_CHAIN }),
+    ).toBe(ADDRESS);
+    expect(
+      await loginAddress({ 'cf-connecting-ip': '2001:db8::7', 'x-forwarded-for': '203.0.113.99' }),
+    ).toBe('2001:db8::7');
+  });
+
+  it('sin CF-Connecting-IP es la de la conexión, nunca una de X-Forwarded-For', async () => {
+    expect(await loginAddress({})).toBe(CONNECTION);
+    expect(await loginAddress({ 'x-forwarded-for': RENDER_CHAIN })).toBe(CONNECTION);
+    expect(await loginAddress({ 'x-forwarded-for': '203.0.113.99' })).toBe(CONNECTION);
+  });
+
+  it('si CF-Connecting-IP no es una sola dirección IP, es la de la conexión', async () => {
+    for (const value of ['', 'no-es-una-ip', `${ADDRESS}, 198.51.100.9`, '203.0.113.300']) {
+      expect(
+        await loginAddress({ 'cf-connecting-ip': value, 'x-forwarded-for': RENDER_CHAIN }),
+        value,
+      ).toBe(CONNECTION);
+    }
+  });
+
+  it('el límite general cuenta la misma dirección', async () => {
+    expect(
+      await generalLimitAddress({ 'cf-connecting-ip': ADDRESS, 'x-forwarded-for': RENDER_CHAIN }),
+    ).toEqual([ADDRESS]);
+    expect(await generalLimitAddress({ 'x-forwarded-for': RENDER_CHAIN })).toEqual([CONNECTION]);
   });
 });

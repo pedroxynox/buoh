@@ -350,3 +350,54 @@ describe('POST /api/v1/enlace', () => {
     expect(JSON.stringify(lines) + response.body).not.toContain(PASSWORD);
   });
 });
+
+// Los enlaces cuentan sus fallos por la dirección del cliente (ADR-0019 §1, precisión del PR 7a):
+// la de `CF-Connecting-IP`, nunca una de `X-Forwarded-For`, y si falta, la de la conexión. Con el
+// limitador de verdad: 10 fallos cada 15 minutos por dirección.
+describe('los enlaces y la dirección del cliente (ADR-0019 §1)', () => {
+  const CONNECTION = '192.0.2.44';
+
+  function linkApp() {
+    const { links } = fakeLinks({
+      issueSecret: () => Promise.reject(new LinkError('invalid_link')),
+    });
+    return testApp(
+      apiRoutes(routeDeps({ readiness: { isReady: () => true }, links, clock: () => 1_000_000 })),
+    ).app;
+  }
+
+  function secretFrom(app: ReturnType<typeof linkApp>, headers: Record<string, string>) {
+    return app.inject({
+      method: 'POST',
+      url: '/api/v1/enlace/secreto',
+      headers: { ...SAME_ORIGIN, ...headers },
+      payload: JSON.stringify({ token: TOKEN }),
+      remoteAddress: CONNECTION,
+    });
+  }
+
+  it('diez enlaces que no valen desde una dirección la hacen esperar, aunque cambie X-Forwarded-For', async () => {
+    const app = linkApp();
+    for (let i = 1; i <= 10; i += 1) {
+      expectError(
+        await secretFrom(app, {
+          'cf-connecting-ip': '203.0.113.7',
+          'x-forwarded-for': `198.51.100.${String(i)}, 10.31.76.${String(i)}`,
+        }),
+        400,
+        'invalid_link',
+      );
+    }
+    expectError(
+      await secretFrom(app, {
+        'cf-connecting-ip': '203.0.113.7',
+        'x-forwarded-for': '198.51.100.99',
+      }),
+      429,
+      'rate_limited',
+    );
+    // Otra dirección, y la de la conexión cuando falta la cabecera, cuentan aparte.
+    expectError(await secretFrom(app, { 'cf-connecting-ip': '203.0.113.8' }), 400, 'invalid_link');
+    expectError(await secretFrom(app, {}), 400, 'invalid_link');
+  });
+});

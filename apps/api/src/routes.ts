@@ -14,6 +14,7 @@ import {
   type SessionLoginRequest,
 } from '@buoh/contracts';
 import type { FastifyRequest } from 'fastify';
+import { isIP } from 'node:net';
 import { z, type ZodType } from 'zod';
 
 import {
@@ -228,20 +229,17 @@ function requireReady(readiness: Readiness): void {
 }
 
 /**
- * La dirección del cliente (ADR-0019 §1): la última de `X-Forwarded-For`, la que añade el proxy de
- * Render, nunca una que el cliente pueda elegir. Sin esa cabecera, la de la conexión.
+ * La dirección del cliente (ADR-0019 §1): la de `CF-Connecting-IP`, que pone Cloudflare delante de
+ * Render con la dirección que se le conecta, y que el cliente no puede elegir: Cloudflare rechaza la
+ * petición que ya la trae con un valor. Si falta, o no es una sola dirección IP, la de la conexión,
+ * que en Render es un proxy suyo: el runbook de la API comprueba que no pase en producción.
+ * `X-Forwarded-For` no cuenta: sus primeras direcciones las elige el cliente, y en Render la última
+ * es una interna que cambia en cada petición.
  */
 export function clientAddress(request: FastifyRequest): string {
-  const forwarded = request.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    const parts = forwarded
-      .split(',')
-      .map((part) => part.trim())
-      .filter((part) => part.length > 0);
-    const last = parts[parts.length - 1];
-    if (last !== undefined) {
-      return last;
-    }
+  const connecting = request.headers['cf-connecting-ip'];
+  if (typeof connecting === 'string' && isIP(connecting) !== 0) {
+    return connecting;
   }
   return request.ip;
 }
