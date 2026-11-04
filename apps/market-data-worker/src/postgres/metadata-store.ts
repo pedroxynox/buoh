@@ -8,8 +8,8 @@ import {
 import pg from 'pg';
 
 import { PublicationConflictError, PublicationError } from '../errors.js';
-import { type CommitPublicationInput, type MetadataStore } from '../ports.js';
-import { type WorkerConfig } from '../config.js';
+import type { CommitPublicationInput, MetadataStore } from '../ports.js';
+import type { WorkerConfig } from '../config.js';
 
 const UNIQUE_VIOLATION = '23505';
 const ONE_ACTIVE_INDEX = 'published_manifest_records_one_active';

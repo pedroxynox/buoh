@@ -1,13 +1,13 @@
-import { type Scheduler } from './deriv/ports.js';
+import type { Scheduler } from './deriv/ports.js';
 import {
   SourceLockUnavailableError,
   type SessionLock,
   type SessionLockProvider,
 } from './deriv/session.js';
-import { type LogCutReads } from './log-cut.js';
-import { type OperationalAlert } from './operational/registry.js';
+import type { LogCutReads } from './log-cut.js';
+import type { OperationalAlert } from './operational/registry.js';
 import { failureReason } from './source-log/source-event-log.js';
-import { type LogLocation } from './successive-logs.js';
+import type { LogLocation } from './successive-logs.js';
 
 // La espera del arranque de `ingest` en `production` (ADR-0018 §4): antes de capturar, espera sin
 // escribir nada hasta que PostgreSQL acepte su credencial, haya un log preparado con todas sus

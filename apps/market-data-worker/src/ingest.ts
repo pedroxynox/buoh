@@ -1,15 +1,11 @@
-import { type HistoryRecoveryResult } from '@buoh/contracts';
+import type { HistoryRecoveryResult } from '@buoh/contracts';
 
 import { ConfigError, loadConfig, type WorkerConfig } from './config.js';
-import { type DerivSchemaSummary } from './deriv/adapter.js';
-import { type HistoryRecoveryOutcome } from './deriv/history-recovery.js';
-import {
-  type CatalogStore,
-  type RequestedResponseIncidentStore,
-  type Scheduler,
-} from './deriv/ports.js';
+import type { DerivSchemaSummary } from './deriv/adapter.js';
+import type { HistoryRecoveryOutcome } from './deriv/history-recovery.js';
+import type { CatalogStore, RequestedResponseIncidentStore, Scheduler } from './deriv/ports.js';
 import { DERIV_CONNECTOR_VERSION, DERIV_SOURCE } from './deriv/profile.js';
-import { type ExpectedSchemaArchive } from './deriv/schema-archive.js';
+import type { ExpectedSchemaArchive } from './deriv/schema-release.js';
 import {
   startDerivSession,
   type DerivSessionConnection,
@@ -17,7 +13,7 @@ import {
   type SessionLock,
   type SessionLockProvider,
 } from './deriv/session.js';
-import { type SocketFactory } from './deriv/socket.js';
+import type { SocketFactory } from './deriv/socket.js';
 import { checkIngestConfig, IngestConfigError, parseIngestArgs } from './ingest-args.js';
 import {
   locateCaptureLog,
@@ -32,16 +28,16 @@ import {
   type StartupReads,
   type StartupWaitResult,
 } from './ingest-startup.js';
-import { type IngestionStatusStore } from './ingestion/status.js';
+import type { IngestionStatusStore } from './ingestion/status.js';
 import {
   OperationalRegistry,
   stderrAlert,
   type OperationalAlert,
   type OperationalStore,
 } from './operational/registry.js';
-import { type ObjectStore } from './ports.js';
+import type { ObjectStore } from './ports.js';
 import { UsageError } from './replay-args.js';
-import { type SourceLogStore } from './source-log/ports.js';
+import type { SourceLogStore } from './source-log/ports.js';
 import {
   failureReason,
   type OpenSourceEventLogInput,

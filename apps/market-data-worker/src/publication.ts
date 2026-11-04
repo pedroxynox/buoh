@@ -8,7 +8,7 @@ import {
 import { createStorageEncoder, storageContentType } from './encoding.js';
 import { PublicationConflictError, PublicationError } from './errors.js';
 import { contentKey, keyFromUri, manifestKey, objectUri } from './object-keys.js';
-import { type MetadataStore, type ObjectStore } from './ports.js';
+import type { MetadataStore, ObjectStore } from './ports.js';
 
 export interface PublishDatasetInput {
   readonly environment: DeploymentEnvironment;

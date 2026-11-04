@@ -6,8 +6,8 @@ import {
 } from '@buoh/domain';
 
 import { checkpointRow } from '../../src/source-log/live-checkpoint.js';
-import { type StoredLiveCheckpoint } from '../../src/source-log/ports.js';
-import { type SourceEventLog } from '../../src/source-log/source-event-log.js';
+import type { StoredLiveCheckpoint } from '../../src/source-log/ports.js';
+import type { SourceEventLog } from '../../src/source-log/source-event-log.js';
 
 /**
  * Las filas de los puntos de control de los segmentos cerrados del log, como las escribe `ingest`

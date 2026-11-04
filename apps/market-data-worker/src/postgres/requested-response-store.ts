@@ -1,5 +1,5 @@
 import { canonicalJson, type DataQualityIncident, type JsonValue } from '@buoh/contracts';
-import { type Pool } from 'pg';
+import type { Pool } from 'pg';
 
 import {
   parseRequestedResponseIncident,

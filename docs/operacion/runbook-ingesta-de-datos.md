@@ -135,7 +135,7 @@ Desde F1.4b, el transporte de Deriv aplica dos límites antes del ingestor: el d
 
 ### Carga de los esquemas de Deriv
 
-Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §2), el worker sabe cargar el `schemas.zip` de la release fijada en ADR-0004 §2 (`apps/market-data-worker/src/deriv/schema-archive.ts`). Lo descarga de su release en GitHub, porque buoh no guarda esos esquemas en Git. El adaptador lo carga al arrancar, antes de abrir el WebSocket: aplica el tiempo máximo de 30 000 ms con su temporizador inyectado y no se conecta si la carga falla. La carga comprueba, en este orden:
+Desde F1.4b ([ADR-0012](../arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §2), el worker sabe cargar el `schemas.zip` de la release fijada en ADR-0004 §2 (`apps/market-data-worker/src/deriv/schema-archive.ts`). La release fijada, con el SHA-256 del archivo y de cada entrada, está en `src/deriv/schema-release.ts` desde el primer PR de F2.4, que la separó de `fflate` para la ruta `lectura` ([ADR-0019](../arquitectura/adr/0019-api-cuentas-y-auditoria.md) §8). Lo descarga de su release en GitHub, porque buoh no guarda esos esquemas en Git. El adaptador lo carga al arrancar, antes de abrir el WebSocket: aplica el tiempo máximo de 30 000 ms con su temporizador inyectado y no se conecta si la carga falla. La carga comprueba, en este orden:
 
 1. la descarga: como mucho 5 242 880 bytes. Un `Content-Length` mayor se rechaza sin leer el cuerpo, y una descarga sin él se corta en cuanto lo supera;
 2. el SHA-256 del archivo, antes de abrirlo;

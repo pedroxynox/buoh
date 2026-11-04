@@ -16,7 +16,7 @@ import { spawnSync } from 'node:child_process';
 import { connect, createServer, type AddressInfo, type Socket } from 'node:net';
 import { resolve } from 'node:path';
 
-import { type Pool } from 'pg';
+import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';

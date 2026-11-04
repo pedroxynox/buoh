@@ -20,16 +20,16 @@ import {
   type IngestionHeartbeat,
   type IngestionStatusStore,
 } from '../ingestion/status.js';
-import { type OperationalStore } from '../operational/registry.js';
-import { type ObjectStore } from '../ports.js';
-import {
-  type ClosedSourceSegment,
-  type LiveCheckpointCandidate,
-  type LiveCheckpointInsert,
-  type SourceEventIndexRow,
-  type SourceLogState,
-  type SourceLogStore,
-  type StoredLiveCheckpoint,
+import type { OperationalStore } from '../operational/registry.js';
+import type { ObjectStore } from '../ports.js';
+import type {
+  ClosedSourceSegment,
+  LiveCheckpointCandidate,
+  LiveCheckpointInsert,
+  SourceEventIndexRow,
+  SourceLogState,
+  SourceLogStore,
+  StoredLiveCheckpoint,
 } from '../source-log/ports.js';
 
 /**

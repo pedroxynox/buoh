@@ -63,11 +63,11 @@ import {
   WORKER_NODE_FLAGS,
 } from '../../apps/market-data-worker/dist/index.js';
 import { createDerivMeasurementProfile } from '../../apps/market-data-worker/dist/deriv/profile.js';
+import { openSchemaArchive } from '../../apps/market-data-worker/dist/deriv/schema-archive.js';
 import {
   DERIV_SCHEMA_RELEASE,
-  openSchemaArchive,
-} from '../../apps/market-data-worker/dist/deriv/schema-archive.js';
-import { SOURCE_SCHEMA_ENTRY } from '../../apps/market-data-worker/dist/deriv/session.js';
+  SOURCE_SCHEMA_ENTRY,
+} from '../../apps/market-data-worker/dist/deriv/schema-release.js';
 import { SYMBOL, writeCaptureLog } from './deriv-sintetico.mjs';
 
 const requireFromWorker = createRequire(

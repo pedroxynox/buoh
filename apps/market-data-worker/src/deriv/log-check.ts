@@ -1,7 +1,7 @@
-import { type IngestionCursor, type LiveDerivationState, type SourceEvent } from '@buoh/contracts';
+import type { IngestionCursor, LiveDerivationState, SourceEvent } from '@buoh/contracts';
 import { foldLiveDerivation, liveDerivationView, type PipelineProfile } from '@buoh/domain';
 
-import { type LiveCheckpointLookup } from '../source-log/live-checkpoint.js';
+import type { LiveCheckpointLookup } from '../source-log/live-checkpoint.js';
 import { liveWatermark, readSinceCheckpoint } from '../source-log/live-reader.js';
 import { failureReason, type SourceEventLog } from '../source-log/source-event-log.js';
 

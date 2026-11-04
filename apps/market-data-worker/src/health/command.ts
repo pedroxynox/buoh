@@ -1,7 +1,7 @@
 import { ConfigError, loadConfig, type WorkerConfig } from '../config.js';
-import { type Scheduler } from '../deriv/ports.js';
+import type { Scheduler } from '../deriv/ports.js';
 import { DERIV_SOURCE } from '../deriv/profile.js';
-import { type ExpectedSchemaArchive } from '../deriv/schema-archive.js';
+import type { ExpectedSchemaArchive } from '../deriv/schema-release.js';
 import { HEALTH_USAGE, parseHealthArgs } from '../health-args.js';
 import { UsageError } from '../replay-args.js';
 import { failureReason } from '../source-log/source-event-log.js';

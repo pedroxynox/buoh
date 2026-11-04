@@ -1,9 +1,9 @@
-import {
-  type ConditionType,
-  type HealthReport,
-  type IngestionCursor,
-  type LiveDerivationState,
-  type ServiceHealth,
+import type {
+  ConditionType,
+  HealthReport,
+  IngestionCursor,
+  LiveDerivationState,
+  ServiceHealth,
 } from '@buoh/contracts';
 import {
   deriveLiveHealthReport,
@@ -15,7 +15,7 @@ import {
 } from '@buoh/domain';
 
 import { checkFoldedContent, isOtherSymbolSeen, type CheckedFold } from '../deriv/log-check.js';
-import { type IngestionHeartbeat } from '../ingestion/status.js';
+import type { IngestionHeartbeat } from '../ingestion/status.js';
 import { unrecordedClose } from '../source-log/previous-connection.js';
 
 /**

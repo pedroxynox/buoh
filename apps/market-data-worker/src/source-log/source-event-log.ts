@@ -15,14 +15,14 @@ import {
 import { createStorageEncoder } from '../encoding.js';
 import { ObjectReadError } from '../errors.js';
 import { contentKey } from '../object-keys.js';
-import { type ObjectStore } from '../ports.js';
-import {
-  type ClosedSourceSegment,
-  type LiveCheckpointCandidate,
-  type LiveCheckpointInsert,
-  type SourceEventIndexRow,
-  type SourceLogStore,
-  type StoredLiveCheckpoint,
+import type { ObjectStore } from '../ports.js';
+import type {
+  ClosedSourceSegment,
+  LiveCheckpointCandidate,
+  LiveCheckpointInsert,
+  SourceEventIndexRow,
+  SourceLogStore,
+  StoredLiveCheckpoint,
 } from './ports.js';
 
 /** Etapa de `PersistenceStage` que falló en el log. */

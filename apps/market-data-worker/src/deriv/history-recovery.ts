@@ -1,4 +1,4 @@
-import { type HistoryRecoveryResult } from '@buoh/contracts';
+import type { HistoryRecoveryResult } from '@buoh/contracts';
 import {
   canonicalQuoteDecimal,
   checkRequestedResponse,
@@ -8,7 +8,7 @@ import {
   type RequestedResponseInvalidReason,
 } from '@buoh/domain';
 
-import { type Scheduler } from './ports.js';
+import type { Scheduler } from './ports.js';
 import { EXPECTED_MSG_TYPE } from './requests.js';
 
 // Recuperación de historia (ADR-0015 §4). Las partes puras: el rango que se pide, la lectura de cada

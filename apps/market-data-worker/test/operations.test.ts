@@ -44,7 +44,7 @@ import {
   type RunChild,
   type SpaceMeasure,
 } from '../src/index.js';
-import { type Scheduler } from '../src/deriv/ports.js';
+import type { Scheduler } from '../src/deriv/ports.js';
 import { uuid } from './support/connection-harness.js';
 import { flush, ManualClock } from './support/deriv-fixtures.js';
 

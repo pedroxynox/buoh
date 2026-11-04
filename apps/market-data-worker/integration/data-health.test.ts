@@ -5,11 +5,11 @@ import {
   type HealthReport,
   type SourceEvent,
 } from '@buoh/contracts';
-import { type Pool } from 'pg';
+import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
-import { type ExpectedSchemaArchive } from '../src/deriv/schema-archive.js';
+import type { ExpectedSchemaArchive } from '../src/deriv/schema-release.js';
 import {
   contentKey,
   createPool,

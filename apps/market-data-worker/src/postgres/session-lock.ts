@@ -1,4 +1,4 @@
-import { type WorkerConfig } from '../config.js';
+import type { WorkerConfig } from '../config.js';
 import {
   SourceLockUnavailableError,
   type SessionLock,

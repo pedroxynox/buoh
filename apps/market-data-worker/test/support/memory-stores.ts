@@ -1,17 +1,14 @@
-import {
-  type DataQualityIncident,
-  type DeploymentEnvironment,
-  type OperationalConditionEvent,
-  type PublishedManifestRecord,
-  type SourceCatalogSnapshot,
+import type {
+  DataQualityIncident,
+  DeploymentEnvironment,
+  OperationalConditionEvent,
+  PublishedManifestRecord,
+  SourceCatalogSnapshot,
 } from '@buoh/contracts';
 
-import { type CatalogVersion } from '../../src/deriv/ports.js';
+import type { CatalogVersion } from '../../src/deriv/ports.js';
 import { PublicationConflictError, PublicationError } from '../../src/errors.js';
-import {
-  type IngestionCursorVersion,
-  type IngestionHeartbeat,
-} from '../../src/ingestion/status.js';
+import type { IngestionCursorVersion, IngestionHeartbeat } from '../../src/ingestion/status.js';
 import {
   InMemoryCatalogStore,
   InMemoryIngestionStatusStore,
@@ -20,13 +17,13 @@ import {
   InMemoryRequestedResponseIncidentStore,
   InMemorySourceLogStore,
 } from '../../src/memory/stores.js';
-import { type CommitPublicationInput, type MetadataStore } from '../../src/ports.js';
-import {
-  type ClosedSourceSegment,
-  type LiveCheckpointCandidate,
-  type LiveCheckpointInsert,
-  type SourceEventIndexRow,
-  type StoredLiveCheckpoint,
+import type { CommitPublicationInput, MetadataStore } from '../../src/ports.js';
+import type {
+  ClosedSourceSegment,
+  LiveCheckpointCandidate,
+  LiveCheckpointInsert,
+  SourceEventIndexRow,
+  StoredLiveCheckpoint,
 } from '../../src/source-log/ports.js';
 
 /**

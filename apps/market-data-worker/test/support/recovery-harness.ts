@@ -1,7 +1,7 @@
 import { connectionClosedSchema, connectionOpenedSchema, type SourceEvent } from '@buoh/contracts';
 import { vi } from 'vitest';
 
-import { type HistoryRecoveryRequest } from '../../src/deriv/history-recovery.js';
+import type { HistoryRecoveryRequest } from '../../src/deriv/history-recovery.js';
 import { createDerivMeasurementProfile, DERIV_SOURCE } from '../../src/deriv/profile.js';
 import { buildRawSourceFrame } from '../../src/ingestion/raw-first-ingestor.js';
 import {
@@ -12,7 +12,7 @@ import {
   type ConnectionHarnessOptions,
 } from './connection-harness.js';
 import { derivMessages } from './deriv-fixtures.js';
-import { type MemoryObjectStore } from './memory-stores.js';
+import type { MemoryObjectStore } from './memory-stores.js';
 
 // Un hueco que recuperar (ADR-0015 §4): la conexión anterior del log, cerrada sin pedirlo, y una
 // conexión nueva que la supera, suscrita, con su primer tick posterior al cierre ya durable. Ningún

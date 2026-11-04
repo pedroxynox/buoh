@@ -3,13 +3,13 @@ import { gunzipSync } from 'node:zlib';
 import { sha256Hex } from '@buoh/contracts';
 import { SEGMENT_POLICY } from '@buoh/domain';
 
-import { type WorkerConfig } from '../config.js';
+import type { WorkerConfig } from '../config.js';
 import { ObjectReadError } from '../errors.js';
 import { contentKey } from '../object-keys.js';
 import { HEALTH_CONNECTION_TIMEOUT_MS, HEALTH_REQUEST_TIMEOUT_MS } from '../runtime.js';
 import { S3ObjectStore } from '../s3/object-store.js';
-import { type ClosedSourceSegment } from '../source-log/ports.js';
-import { type LogLocation } from '../successive-logs.js';
+import type { ClosedSourceSegment } from '../source-log/ports.js';
+import type { LogLocation } from '../successive-logs.js';
 
 // La verificación por partes de `buoh-operaciones` (ADR-0018 §11, paso 4): la verificación
 // periódica de ADR-0017 §4. Cada ejecución vuelve a leer los segmentos cerrados que le tocan de los

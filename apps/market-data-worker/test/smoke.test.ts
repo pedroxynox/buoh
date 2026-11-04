@@ -1,7 +1,7 @@
 import { deriveCatalogContentSha256 } from '@buoh/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { type HistoryRecoveryOutcome } from '../src/deriv/history-recovery.js';
+import type { HistoryRecoveryOutcome } from '../src/deriv/history-recovery.js';
 import { DERIV_CONNECTOR_VERSION, DERIV_SOURCE } from '../src/deriv/profile.js';
 import {
   distribution,

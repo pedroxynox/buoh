@@ -1,7 +1,7 @@
-import { type IngestionCursor } from '@buoh/contracts';
+import type { IngestionCursor } from '@buoh/contracts';
 import { expect, it } from 'vitest';
 
-import { type IngestionHeartbeat, type IngestionStatusStore } from '../../src/ingestion/status.js';
+import type { IngestionHeartbeat, IngestionStatusStore } from '../../src/ingestion/status.js';
 
 // Las reglas de los almacenes del cursor y del latido (ADR-0015 §6), comunes al de memoria y al de
 // PostgreSQL: así los dos aceptan y rechazan lo mismo. Cada prueba usa sus propias fuentes, porque

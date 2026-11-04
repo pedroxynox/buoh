@@ -1,6 +1,6 @@
-import { type Pool } from 'pg';
+import type { Pool } from 'pg';
 
-import { type WorkerConfig } from './config.js';
+import type { WorkerConfig } from './config.js';
 
 // Los logs sucesivos de producción (ADR-0018 §6 y §7): cada log tiene un número, su esquema de
 // PostgreSQL y su prefijo en el bucket de la captura, y el log activo se busca, sin tabla de

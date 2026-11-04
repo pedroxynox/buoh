@@ -2,7 +2,7 @@ import { parseArgs } from 'node:util';
 
 import { datasetIdSchema } from '@buoh/contracts';
 
-import { type ReplayMode } from './replay.js';
+import type { ReplayMode } from './replay.js';
 
 export class UsageError extends Error {
   constructor(message: string) {

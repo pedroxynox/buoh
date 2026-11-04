@@ -1,13 +1,13 @@
-import { type Pool } from 'pg';
+import type { Pool } from 'pg';
 
-import {
-  type ClosedSourceSegment,
-  type LiveCheckpointCandidate,
-  type LiveCheckpointInsert,
-  type SourceEventIndexRow,
-  type SourceLogState,
-  type SourceLogStore,
-  type StoredLiveCheckpoint,
+import type {
+  ClosedSourceSegment,
+  LiveCheckpointCandidate,
+  LiveCheckpointInsert,
+  SourceEventIndexRow,
+  SourceLogState,
+  SourceLogStore,
+  StoredLiveCheckpoint,
 } from '../source-log/ports.js';
 
 interface IndexRecord {

@@ -4,10 +4,10 @@
  * posterior, un segmento cerrado cada vez. La sesión de ingesta los usa en el arranque, en la
  * reparación de cierres y en la vigilancia de huecos.
  */
-import { type LiveDerivationState, type SourceEvent } from '@buoh/contracts';
+import type { LiveDerivationState, SourceEvent } from '@buoh/contracts';
 import { foldLiveDerivation, type LiveDerivationView } from '@buoh/domain';
 
-import { type LiveCheckpointBase, type LiveCheckpointLookup } from './live-checkpoint.js';
+import type { LiveCheckpointBase, LiveCheckpointLookup } from './live-checkpoint.js';
 import { previousConnection, type PreviousConnection } from './previous-connection.js';
 import { LogNotDerivableError, type SourceEventLog } from './source-event-log.js';
 

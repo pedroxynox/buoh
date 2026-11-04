@@ -1,8 +1,8 @@
-import { type LiveDerivationView } from '@buoh/domain';
+import type { LiveDerivationView } from '@buoh/domain';
 
-import { type Scheduler } from './deriv/ports.js';
-import { type SessionLock } from './deriv/session.js';
-import { type OperationalAlert } from './operational/registry.js';
+import type { Scheduler } from './deriv/ports.js';
+import type { SessionLock } from './deriv/session.js';
+import type { OperationalAlert } from './operational/registry.js';
 import { failureReason } from './source-log/source-event-log.js';
 import { logLocation, MAX_LOG_NUMBER, type LogLocation } from './successive-logs.js';
 

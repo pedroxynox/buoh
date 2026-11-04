@@ -1,11 +1,11 @@
 import { sha256Hex } from '@buoh/contracts';
 import { expect, it } from 'vitest';
 
-import {
-  type ClosedSourceSegment,
-  type SourceEventIndexRow,
-  type SourceLogStore,
-  type StoredLiveCheckpoint,
+import type {
+  ClosedSourceSegment,
+  SourceEventIndexRow,
+  SourceLogStore,
+  StoredLiveCheckpoint,
 } from '../../src/source-log/ports.js';
 
 // Las reglas del almacén de los puntos de control del estado vivo (migración `0005`, ADR-0017 §5 y

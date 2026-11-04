@@ -1,6 +1,6 @@
 import { canonicalJson, type JsonValue } from '@buoh/contracts';
 
-import { type DerivSchemaSet } from './schema-archive.js';
+import type { DerivSchemaSet } from './schema-archive.js';
 
 /** Ticks que pide cada página de `ticks_history` (ADR-0015 §4). */
 export const HISTORY_PAGE_COUNT = 1000;

@@ -32,6 +32,7 @@ Desde 2026-10-25, pnpm ejecuta los scripts con su emulador de shell (`shellEmula
 - Zod 4 es la única fuente de estructura runtime y usa su [conversión nativa a JSON Schema](https://zod.dev/json-schema).
 - `canonicalize` implementa JSON Canonicalization Scheme para identidades independientes del lenguaje.
 - Vitest ejecuta pruebas offline; ESLint usa configuración plana y reglas TypeScript con tipos; Prettier limita formato a código/configuración y no toca vectores firmados.
+- Desde F2.4, ESLint exige en `apps/market-data-worker` que una importación que solo trae tipos se escriba `import type` (`@typescript-eslint/no-import-type-side-effects`). Con `verbatimModuleSyntax`, `import { type A } from 'm'` deja en el JavaScript un `import {} from 'm'` que carga el módulo entero, y la ruta `@buoh/market-data-worker/lectura` no puede cargar `ws`, `fflate` ni `node:child_process` ([ADR-0019](0019-api-cuentas-y-auditoria.md) §8).
 - Turborepo coordina `build`, `typecheck` y `test` sin introducir servicios.
 - pnpm permite scripts de instalación únicamente para `esbuild`, dependencia transitiva necesaria para el toolchain; cualquier permiso adicional requiere revisión explícita.
 

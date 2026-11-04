@@ -5,7 +5,7 @@ import {
   type SyntheticStimulus,
 } from '@buoh/domain';
 
-import { type RawFirstIngestor } from './ingestion/raw-first-ingestor.js';
+import type { RawFirstIngestor } from './ingestion/raw-first-ingestor.js';
 
 export interface SyntheticDriverHooks {
   /** `persistence_fault_armed`: control del harness; quien prueba arma el fallo en su almacén. */

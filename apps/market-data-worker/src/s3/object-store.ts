@@ -6,9 +6,9 @@ import {
   S3ServiceException,
 } from '@aws-sdk/client-s3';
 
-import { type WorkerConfig } from '../config.js';
+import type { WorkerConfig } from '../config.js';
 import { ObjectReadError } from '../errors.js';
-import { type ObjectStore } from '../ports.js';
+import type { ObjectStore } from '../ports.js';
 
 function statusOf(error: unknown): number | undefined {
   return error instanceof S3ServiceException ? error.$metadata.httpStatusCode : undefined;

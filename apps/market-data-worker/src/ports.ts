@@ -1,8 +1,8 @@
-import {
-  type DataQualityIncident,
-  type DatasetManifestCore,
-  type DeploymentEnvironment,
-  type PublishedManifestRecord,
+import type {
+  DataQualityIncident,
+  DatasetManifestCore,
+  DeploymentEnvironment,
+  PublishedManifestRecord,
 } from '@buoh/contracts';
 
 /**

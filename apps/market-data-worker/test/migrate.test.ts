@@ -1,4 +1,4 @@
-import { type Pool } from 'pg';
+import type { Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
 
 import { pendingMigrations } from '../src/index.js';

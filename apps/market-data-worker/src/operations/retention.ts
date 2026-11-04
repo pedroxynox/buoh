@@ -1,9 +1,9 @@
 import { DeleteObjectCommand, ListObjectsV2Command, type S3Client } from '@aws-sdk/client-s3';
 
-import { type WorkerConfig } from '../config.js';
+import type { WorkerConfig } from '../config.js';
 import { HEALTH_CONNECTION_TIMEOUT_MS, HEALTH_REQUEST_TIMEOUT_MS } from '../runtime.js';
 import { createS3Client, isObjectLocked } from '../s3/object-store.js';
-import { type LogLocation } from '../successive-logs.js';
+import type { LogLocation } from '../successive-logs.js';
 
 // La retención de `buoh-operaciones` (ADR-0018 §7 y §11, paso 3): borra el log que venció, primero
 // los objetos de su prefijo, por partes, y, cuando el listado del prefijo vuelve vacío, su esquema.

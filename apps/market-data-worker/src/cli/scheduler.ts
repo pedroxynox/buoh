@@ -1,4 +1,4 @@
-import { type Scheduler } from '../deriv/ports.js';
+import type { Scheduler } from '../deriv/ports.js';
 
 /**
  * Temporizador real; solo los comandos operativos lo usan (ADR-0004 §4): `smoke`, `ingest`,

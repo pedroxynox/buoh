@@ -1,4 +1,4 @@
-import { type IngestionCursor, type SourceEvent } from '@buoh/contracts';
+import type { IngestionCursor, SourceEvent } from '@buoh/contracts';
 import { liveDerivationView, sourceEventTime, type LiveDerivationView } from '@buoh/domain';
 
 import { ObjectReadError } from '../errors.js';
@@ -10,7 +10,7 @@ import {
 } from '../ingestion/status.js';
 import { contentKey } from '../object-keys.js';
 import { stderrAlert, type OperationalAlert } from '../operational/registry.js';
-import { type ObjectStore } from '../ports.js';
+import type { ObjectStore } from '../ports.js';
 import {
   LiveCheckpointLookup,
   LiveCheckpointWriter,
@@ -33,20 +33,16 @@ import {
   type DerivPreparation,
   type DerivSchemaSummary,
 } from './adapter.js';
-import {
-  type DerivConnection,
-  type DerivConnectionResult,
-  type DerivSessionEnd,
-} from './connection.js';
+import type { DerivConnection, DerivConnectionResult, DerivSessionEnd } from './connection.js';
 import { GapWatch, type GapWatchFailure } from './gap-watch.js';
-import { type HistoryRecoveryOutcome } from './history-recovery.js';
+import type { HistoryRecoveryOutcome } from './history-recovery.js';
 import {
   checkLogSinceCheckpoint,
   type StartupCheck,
   type StartupLog,
   type StoredCursors,
 } from './log-check.js';
-import { DERIV_SCHEMA_RELEASE, schemaEntryName } from './schema-archive.js';
+import { DERIV_SCHEMA_RELEASE, SOURCE_SCHEMA_ENTRY } from './schema-release.js';
 
 /** El bloqueo de la fuente que tiene la sesión (ADR-0012 §9): `SourceLock` en PostgreSQL. */
 export interface SessionLock {
@@ -199,12 +195,6 @@ export interface DerivSessionInput extends Pick<
    */
   readonly writeLiveCheckpoints?: boolean;
 }
-
-/**
- * La entrada de la release que es el esquema de fuente del perfil de medición (`profile.ts`): la que
- * la sesión guarda y `data:health` lee (ADR-0015 §7 y §8).
- */
-export const SOURCE_SCHEMA_ENTRY = schemaEntryName('ticks', 'response');
 
 /** Motivo del corte del smoke de reconexión (ADR-0015 §9). */
 export const SMOKE_INTERRUPT_REASON = 'smoke_interrupt';

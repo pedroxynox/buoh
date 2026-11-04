@@ -1,4 +1,4 @@
-import { type SegmentCloseReason } from '@buoh/domain';
+import type { SegmentCloseReason } from '@buoh/domain';
 
 /** Fila de `source_event_index`: un source event durable y la clave de su objeto. */
 export interface SourceEventIndexRow {

@@ -1,4 +1,4 @@
-import { type SourceEvent } from '@buoh/contracts';
+import type { SourceEvent } from '@buoh/contracts';
 import { createPipelineProfile, deriveMarketData, ingestSyntheticStimuli } from '@buoh/domain';
 
 import {

@@ -1,10 +1,10 @@
-import { type MarketTick } from '@buoh/contracts';
-import { type LiveDerivationView } from '@buoh/domain';
+import type { MarketTick } from '@buoh/contracts';
+import type { LiveDerivationView } from '@buoh/domain';
 
-import { type OperationalAlert } from '../operational/registry.js';
+import type { OperationalAlert } from '../operational/registry.js';
 import { LogIntegrityError, LogReadError } from '../source-log/source-event-log.js';
-import { type HistoryRecoveryOutcome, type HistoryRecoveryRequest } from './history-recovery.js';
-import { type Scheduler } from './ports.js';
+import type { HistoryRecoveryOutcome, HistoryRecoveryRequest } from './history-recovery.js';
+import type { Scheduler } from './ports.js';
 
 /**
  * Espera entre el primer tick durable posterior al cierre y la petición de historia: la historia

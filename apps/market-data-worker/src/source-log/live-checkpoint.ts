@@ -21,12 +21,12 @@ import {
 } from '@buoh/domain';
 
 import { LiveCheckpointConflictError } from '../errors.js';
-import { type OperationalAlert } from '../operational/registry.js';
-import {
-  type ClosedSourceSegment,
-  type LiveCheckpointCandidate,
-  type LiveCheckpointInsert,
-  type StoredLiveCheckpoint,
+import type { OperationalAlert } from '../operational/registry.js';
+import type {
+  ClosedSourceSegment,
+  LiveCheckpointCandidate,
+  LiveCheckpointInsert,
+  StoredLiveCheckpoint,
 } from './ports.js';
 import {
   failureReason,

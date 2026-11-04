@@ -17,7 +17,7 @@ import {
   sourceEventTime,
   type SourceLimitViolation,
 } from '@buoh/domain';
-import { type z } from 'zod';
+import type { z } from 'zod';
 
 import { failureReason, sourceEventId } from '../source-log/source-event-log.js';
 

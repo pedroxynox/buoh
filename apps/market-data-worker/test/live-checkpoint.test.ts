@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
 import { buildRawSourceFrame } from '../src/ingestion/raw-first-ingestor.js';
 import { contentKey } from '../src/object-keys.js';
-import { type OperationalAlert } from '../src/operational/registry.js';
+import type { OperationalAlert } from '../src/operational/registry.js';
 import { lockedSourceLogStore } from '../src/postgres/source-lock.js';
 import {
   checkpointRow,
@@ -27,7 +27,7 @@ import {
   liveCheckpointVersionsSha256,
   type LiveCheckpointFailure,
 } from '../src/source-log/live-checkpoint.js';
-import { type LiveCheckpointCandidate } from '../src/source-log/ports.js';
+import type { LiveCheckpointCandidate } from '../src/source-log/ports.js';
 import { SourceEventLog } from '../src/source-log/source-event-log.js';
 import { START_EPOCH, syntheticSchemas, uuid } from './support/connection-harness.js';
 import { derivMessages } from './support/deriv-fixtures.js';

@@ -1,4 +1,4 @@
-import { type Pool } from 'pg';
+import type { Pool } from 'pg';
 
 /** Cada cuánto se vuelve a mirar `pg_stat_activity`. */
 const POLL_MS = 20;
