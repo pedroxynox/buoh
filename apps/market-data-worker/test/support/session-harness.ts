@@ -1,5 +1,5 @@
-import { type IngestionCursor, type SourceEvent } from '@buoh/contracts';
-import { type InvalidFrameReason, type UnflaggedTick } from '@buoh/domain';
+import type { IngestionCursor, SourceEvent } from '@buoh/contracts';
+import type { InvalidFrameReason, UnflaggedTick } from '@buoh/domain';
 
 import { DERIV_SOURCE } from '../../src/deriv/profile.js';
 import {

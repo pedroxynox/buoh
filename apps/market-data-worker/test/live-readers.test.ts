@@ -1,8 +1,4 @@
-import {
-  type IngestionCursor,
-  type LiveDerivationCheckpoint,
-  type SourceEvent,
-} from '@buoh/contracts';
+import type { IngestionCursor, LiveDerivationCheckpoint, SourceEvent } from '@buoh/contracts';
 import {
   buildLiveDerivationCheckpoint,
   deriveHealthReport,
@@ -32,9 +28,9 @@ import {
   type ObservedSource,
 } from '../src/health/evaluate.js';
 import { readObservedLog } from '../src/health/observe.js';
-import { type IngestionHeartbeat } from '../src/ingestion/status.js';
+import type { IngestionHeartbeat } from '../src/ingestion/status.js';
 import { contentKey } from '../src/object-keys.js';
-import { type OperationalAlert } from '../src/operational/registry.js';
+import type { OperationalAlert } from '../src/operational/registry.js';
 import {
   checkpointRow,
   LiveCheckpointLookup,
@@ -45,7 +41,7 @@ import {
   readLiveState,
   readPreviousConnection,
 } from '../src/source-log/live-reader.js';
-import { type StoredLiveCheckpoint } from '../src/source-log/ports.js';
+import type { StoredLiveCheckpoint } from '../src/source-log/ports.js';
 import { previousConnection, unrecordedClose } from '../src/source-log/previous-connection.js';
 import {
   failureReason,

@@ -12,6 +12,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./lectura": {
+      "types": "./dist/lectura.d.ts",
+      "import": "./dist/lectura.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {

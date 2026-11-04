@@ -21,7 +21,7 @@ import {
   type CaptureLog,
   type LogLocation,
 } from '../successive-logs.js';
-import { type OperationsConfig } from './config.js';
+import type { OperationsConfig } from './config.js';
 import { VERIFICATION_SLOTS, type DueSegment } from './verification.js';
 
 /** Contraseña rechazada (`invalid_password`): el rol no puede iniciar sesión con ella. */

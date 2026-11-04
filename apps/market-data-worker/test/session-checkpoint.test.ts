@@ -11,7 +11,7 @@ import { contentKey } from '../src/object-keys.js';
 import { checkpointRow } from '../src/source-log/live-checkpoint.js';
 import { settle, START_EPOCH, syntheticSchemas, uuid } from './support/connection-harness.js';
 import { derivMessages, type FakeDerivSocket } from './support/deriv-fixtures.js';
-import { type MemoryObjectStore } from './support/memory-stores.js';
+import type { MemoryObjectStore } from './support/memory-stores.js';
 import {
   previousConnectionEvents,
   S,

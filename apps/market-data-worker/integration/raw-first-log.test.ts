@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
-import { type SourceEvent } from '@buoh/contracts';
+import type { SourceEvent } from '@buoh/contracts';
 import { sourceEventTime } from '@buoh/domain';
-import { type Pool } from 'pg';
+import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {

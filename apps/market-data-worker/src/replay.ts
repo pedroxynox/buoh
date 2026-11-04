@@ -31,7 +31,7 @@ import { z } from 'zod';
 import { decodeObject } from './encoding.js';
 import { ObjectReadError, ReplayError, type ReplayErrorCode } from './errors.js';
 import { contentKey, keyFromUri } from './object-keys.js';
-import { type MetadataStore, type ObjectStore } from './ports.js';
+import type { MetadataStore, ObjectStore } from './ports.js';
 
 /** Límites internos de lectura del replay; nunca se carga contenido por encima de ellos. */
 export const MAX_MANIFEST_DOCUMENT_BYTES = 16 * 1024 * 1024;

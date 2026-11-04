@@ -1,4 +1,4 @@
-import { type LiveDerivationView } from '@buoh/domain';
+import type { LiveDerivationView } from '@buoh/domain';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -16,7 +16,7 @@ import {
   type LogLocation,
   type OperationalAlert,
 } from '../src/index.js';
-import { type SessionLock } from '../src/deriv/session.js';
+import type { SessionLock } from '../src/deriv/session.js';
 import { settle } from './support/connection-harness.js';
 import { ManualClock } from './support/deriv-fixtures.js';
 

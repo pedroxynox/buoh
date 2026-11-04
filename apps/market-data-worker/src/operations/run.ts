@@ -1,8 +1,8 @@
 import { healthReportSchema, type HealthReport, type JsonValue } from '@buoh/contracts';
 
 import { ConfigError } from '../config.js';
-import { type Scheduler } from '../deriv/ports.js';
-import { type OperationalAlert } from '../operational/registry.js';
+import type { Scheduler } from '../deriv/ports.js';
+import type { OperationalAlert } from '../operational/registry.js';
 import { API_ROLE, LOGIN_ROLES, type PasswordRole } from '../postgres/roles.js';
 import { failureReason } from '../source-log/source-event-log.js';
 import {
@@ -13,7 +13,7 @@ import {
   type CaptureLog,
   type LogLocation,
 } from '../successive-logs.js';
-import { type RunChild } from './child.js';
+import type { RunChild } from './child.js';
 import {
   apiMigrateEnvironment,
   healthEnvironment,
@@ -21,7 +21,7 @@ import {
   migrateEnvironment,
   type OperationsConfig,
 } from './config.js';
-import { type OwnerDatabase, type OperationsReportRow } from './owner-database.js';
+import type { OwnerDatabase, OperationsReportRow } from './owner-database.js';
 import {
   deleteKeys,
   RETENTION_DEADLINE_MS,

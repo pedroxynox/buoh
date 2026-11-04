@@ -29,11 +29,8 @@ import {
   DERIV_SOURCE,
 } from '../src/deriv/profile.js';
 import { encodeRequest } from '../src/deriv/requests.js';
-import {
-  openSchemaArchive,
-  type DerivSchemaSet,
-  type SchemaEntryName,
-} from '../src/deriv/schema-archive.js';
+import { openSchemaArchive, type DerivSchemaSet } from '../src/deriv/schema-archive.js';
+import type { SchemaEntryName } from '../src/deriv/schema-release.js';
 import { CONNECT_TIMEOUT_MS, declaredMessageLength } from '../src/deriv/socket.js';
 import {
   buildRawSourceFrame,

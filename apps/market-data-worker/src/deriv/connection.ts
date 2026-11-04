@@ -28,7 +28,7 @@ import {
   type RawFirstIngestor,
   type ReceiveOutcome,
 } from '../ingestion/raw-first-ingestor.js';
-import { type OperationalAlert } from '../operational/registry.js';
+import type { OperationalAlert } from '../operational/registry.js';
 import { failureReason } from '../source-log/source-event-log.js';
 import {
   historyRange,
@@ -40,14 +40,14 @@ import {
   type HistoryRecoveryRequest,
 } from './history-recovery.js';
 import { IngestQueue } from './ingest-queue.js';
-import {
-  type CatalogStore,
-  type CatalogVersion,
-  type RequestedResponseIncidentStore,
-  type Scheduler,
+import type {
+  CatalogStore,
+  CatalogVersion,
+  RequestedResponseIncidentStore,
+  Scheduler,
 } from './ports.js';
 import { encodeRequest, EXPECTED_MSG_TYPE, type DerivRequest } from './requests.js';
-import { type DerivSchemaSet } from './schema-archive.js';
+import type { DerivSchemaSet } from './schema-archive.js';
 import {
   CONNECT_TIMEOUT_MS,
   type DerivSocket,

@@ -1,4 +1,4 @@
-import { type SourceEvent } from '@buoh/contracts';
+import type { SourceEvent } from '@buoh/contracts';
 import {
   createCatalogResponseSchema,
   type InvalidFrameReason,
@@ -11,11 +11,8 @@ import {
   DERIV_PUBLIC_ENDPOINT,
   DERIV_SOURCE,
 } from '../../src/deriv/profile.js';
-import {
-  openSchemaArchive,
-  type DerivSchemaSet,
-  type SchemaEntryName,
-} from '../../src/deriv/schema-archive.js';
+import { openSchemaArchive, type DerivSchemaSet } from '../../src/deriv/schema-archive.js';
+import type { SchemaEntryName } from '../../src/deriv/schema-release.js';
 import { RawFirstIngestor } from '../../src/ingestion/raw-first-ingestor.js';
 import { OperationalRegistry, type OperationalAlert } from '../../src/operational/registry.js';
 import { SourceEventLog } from '../../src/source-log/source-event-log.js';

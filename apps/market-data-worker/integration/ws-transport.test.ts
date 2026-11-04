@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
-import { type AddressInfo, type Socket } from 'node:net';
+import type { AddressInfo, Socket } from 'node:net';
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 
 import { runDerivAdapter } from '../src/deriv/adapter.js';
-import { type Scheduler } from '../src/deriv/ports.js';
+import type { Scheduler } from '../src/deriv/ports.js';
 import { DERIV_PUBLIC_ENDPOINT, DERIV_SOURCE } from '../src/deriv/profile.js';
 import { openWsSocket, WS_CLIENT_OPTIONS, type SocketSignal } from '../src/deriv/socket.js';
 import { OperationalRegistry } from '../src/operational/registry.js';

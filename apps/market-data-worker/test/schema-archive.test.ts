@@ -4,15 +4,17 @@ import { strToU8, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  DERIV_OPERATIONS,
   downloadSchemaArchive,
   loadDerivSchemas,
   openSchemaArchive,
+  type SchemaLoadResult,
+} from '../src/deriv/schema-archive.js';
+import {
+  DERIV_OPERATIONS,
   schemaEntryName,
   type ExpectedSchemaArchive,
   type SchemaEntryName,
-  type SchemaLoadResult,
-} from '../src/deriv/schema-archive.js';
+} from '../src/deriv/schema-release.js';
 import { OperationalRegistry } from '../src/operational/registry.js';
 import { MemoryOperationalStore } from './support/memory-stores.js';
 

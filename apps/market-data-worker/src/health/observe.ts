@@ -3,26 +3,29 @@ import { SOURCE_LIMITS, type PipelineProfile } from '@buoh/domain';
 
 import { checkFoldedContent, foldSinceCheckpoint } from '../deriv/log-check.js';
 import { createDerivMeasurementProfileFromSourceSchema, DERIV_SOURCE } from '../deriv/profile.js';
-import { DERIV_SCHEMA_RELEASE, type ExpectedSchemaArchive } from '../deriv/schema-archive.js';
-import { SOURCE_SCHEMA_ENTRY } from '../deriv/session.js';
+import {
+  DERIV_SCHEMA_RELEASE,
+  SOURCE_SCHEMA_ENTRY,
+  type ExpectedSchemaArchive,
+} from '../deriv/schema-release.js';
 import { ObjectReadError } from '../errors.js';
-import { type IngestionStatusStore } from '../ingestion/status.js';
+import type { IngestionStatusStore } from '../ingestion/status.js';
 import { contentKey } from '../object-keys.js';
 import {
   OperationalRegistry,
   type OperationalAlert,
   type OperationalStore,
 } from '../operational/registry.js';
-import { type ObjectStore } from '../ports.js';
+import type { ObjectStore } from '../ports.js';
 import { LiveCheckpointLookup } from '../source-log/live-checkpoint.js';
-import { type SourceLogStore } from '../source-log/ports.js';
+import type { SourceLogStore } from '../source-log/ports.js';
 import {
   failureReason,
   LogIntegrityError,
   LogReadError,
   SourceEventLog,
 } from '../source-log/source-event-log.js';
-import { type HealthObservation, type ObservedLog } from './evaluate.js';
+import type { HealthObservation, ObservedLog } from './evaluate.js';
 
 /**
  * Lo que lee `data:health` (ADR-0015 §8, «Entradas»), en el esquema PostgreSQL y el bucket de la

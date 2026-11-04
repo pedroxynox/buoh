@@ -13,7 +13,7 @@ import {
   syntheticSchemaArchive,
   type FakeDerivSocket,
 } from './support/deriv-fixtures.js';
-import { type MemoryObjectStore } from './support/memory-stores.js';
+import type { MemoryObjectStore } from './support/memory-stores.js';
 import {
   holdObjectWrites,
   PREVIOUS,

@@ -16,8 +16,8 @@ import {
   type UnflaggedTick,
 } from '@buoh/domain';
 
-import { type OperationalRegistry } from '../operational/registry.js';
-import { type ClosedSourceSegment } from '../source-log/ports.js';
+import type { OperationalRegistry } from '../operational/registry.js';
+import type { ClosedSourceSegment } from '../source-log/ports.js';
 import {
   previousConnection,
   unrecordedClose,

@@ -2,15 +2,15 @@ import { createHash } from 'node:crypto';
 
 import { strToU8, zipSync } from 'fflate';
 
-import { type Scheduler } from '../../src/deriv/ports.js';
+import type { Scheduler } from '../../src/deriv/ports.js';
 import {
   DERIV_OPERATIONS,
   schemaEntryName,
   type DerivOperation,
   type ExpectedSchemaArchive,
   type SchemaEntryName,
-} from '../../src/deriv/schema-archive.js';
-import { type DerivSocket, type SocketSignal } from '../../src/deriv/socket.js';
+} from '../../src/deriv/schema-release.js';
+import type { DerivSocket, SocketSignal } from '../../src/deriv/socket.js';
 
 /**
  * Esquemas draft-04 sintéticos de buoh, con la forma que lee el adaptador. No son los de Deriv: su

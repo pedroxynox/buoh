@@ -63,6 +63,15 @@ export default defineConfig(
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
     },
   },
+  // Worker (ADR-0019 §8): con `verbatimModuleSyntax`, `import { type A } from 'm'` deja
+  // `import {} from 'm'` en el JavaScript, que carga el módulo entero, y `import type` no deja nada.
+  // Así la ruta `@buoh/market-data-worker/lectura` no carga lo que solo nombra por sus tipos.
+  {
+    files: ['apps/market-data-worker/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-import-type-side-effects': 'error',
+    },
+  },
   // Interfaces web (ADR-0008): React en navegador.
   {
     files: ['**/*.tsx', 'apps/web/**/*.ts', 'apps/site/**/*.ts'],

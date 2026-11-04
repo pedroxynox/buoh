@@ -1,7 +1,7 @@
 import { gunzipSync, gzipSync } from 'node:zlib';
 
-import { type StorageObjectRef } from '@buoh/contracts';
-import { type ObjectEncoder } from '@buoh/domain';
+import type { StorageObjectRef } from '@buoh/contracts';
+import type { ObjectEncoder } from '@buoh/domain';
 
 /** Segmento raw sin comprimir (ADR-0004 §7); también acota la descompresión en replay. */
 export const MAX_SOURCE_SEGMENT_BYTES = 67_108_864;

@@ -7,7 +7,7 @@ import {
   type QualityProfile,
 } from '@buoh/domain';
 
-import { type DerivSchemaSet } from './schema-archive.js';
+import type { DerivSchemaSet } from './schema-archive.js';
 
 /**
  * Identidad de la fuente (ADR-0012 §1). Cambiar peticiones, límites o transporte crea otro conector:

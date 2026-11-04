@@ -1,5 +1,5 @@
-import { type SourceEvent } from '@buoh/contracts';
-import { type Pool } from 'pg';
+import type { SourceEvent } from '@buoh/contracts';
+import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {

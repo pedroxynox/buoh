@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 
 import pg from 'pg';
 
-import { type WorkerConfig } from '../config.js';
-import { type SourceLogStore } from '../source-log/ports.js';
+import type { WorkerConfig } from '../config.js';
+import type { SourceLogStore } from '../source-log/ports.js';
 import { postgresSslOption } from './metadata-store.js';
 
 /** Código del error de una escritura del log sin el bloqueo de su fuente. */

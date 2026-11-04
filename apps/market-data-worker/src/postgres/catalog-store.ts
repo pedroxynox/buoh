@@ -5,11 +5,11 @@ import {
   type SourceCatalogSnapshot,
 } from '@buoh/contracts';
 import { utf8 } from '@buoh/domain';
-import { type Pool } from 'pg';
+import type { Pool } from 'pg';
 
-import { type CatalogStore, type CatalogVersion } from '../deriv/ports.js';
+import type { CatalogStore, CatalogVersion } from '../deriv/ports.js';
 import { contentKey } from '../object-keys.js';
-import { type ObjectStore } from '../ports.js';
+import type { ObjectStore } from '../ports.js';
 import { writeVerified } from '../source-log/source-event-log.js';
 
 interface VersionRow {

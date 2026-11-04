@@ -12,7 +12,7 @@ import { contentKey } from '../src/object-keys.js';
 import { LogIntegrityError, SourceEventLog } from '../src/source-log/source-event-log.js';
 import { settle, START_EPOCH, uuid } from './support/connection-harness.js';
 import { derivMessages } from './support/deriv-fixtures.js';
-import { type MemoryObjectStore, type MemorySourceLogStore } from './support/memory-stores.js';
+import type { MemoryObjectStore, MemorySourceLogStore } from './support/memory-stores.js';
 import { PREVIOUS, previousConnectionEvents } from './support/recovery-harness.js';
 import { LOCK_BUG, sessionHarness, type SessionRun } from './support/session-harness.js';
 

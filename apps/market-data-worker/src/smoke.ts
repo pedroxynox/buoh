@@ -1,10 +1,10 @@
-import { type ConnectionClosed, type HistoryRecoveryResult } from '@buoh/contracts';
-import { type InvalidFrameReason } from '@buoh/domain';
+import type { ConnectionClosed, HistoryRecoveryResult } from '@buoh/contracts';
+import type { InvalidFrameReason } from '@buoh/domain';
 
-import { type HistoryRecoveryOutcome } from './deriv/history-recovery.js';
-import { type Scheduler } from './deriv/ports.js';
+import type { HistoryRecoveryOutcome } from './deriv/history-recovery.js';
+import type { Scheduler } from './deriv/ports.js';
 import { DERIV_CONNECTOR_VERSION, DERIV_SOURCE } from './deriv/profile.js';
-import { type ExpectedSchemaArchive } from './deriv/schema-archive.js';
+import type { ExpectedSchemaArchive } from './deriv/schema-release.js';
 import {
   SMOKE_INTERRUPT_REASON,
   startDerivSession,
@@ -12,7 +12,7 @@ import {
   type DerivSessionResult,
   type SessionLockProvider,
 } from './deriv/session.js';
-import { type SocketFactory } from './deriv/socket.js';
+import type { SocketFactory } from './deriv/socket.js';
 import {
   InMemoryCatalogStore,
   InMemoryObjectStore,

@@ -1,5 +1,5 @@
 import { canonicalJson, type IngestionCursor } from '@buoh/contracts';
-import { type Pool } from 'pg';
+import type { Pool } from 'pg';
 
 import {
   ingestionHeartbeatSchema,

@@ -22,7 +22,7 @@ import {
   type ObservedSource,
 } from '../src/health/evaluate.js';
 import { buildRawSourceFrame } from '../src/ingestion/raw-first-ingestor.js';
-import { type IngestionHeartbeat } from '../src/ingestion/status.js';
+import type { IngestionHeartbeat } from '../src/ingestion/status.js';
 import { sourceEventId } from '../src/source-log/source-event-log.js';
 import { syntheticSchemas, uuid } from './support/connection-harness.js';
 import { derivMessages } from './support/deriv-fixtures.js';

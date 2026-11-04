@@ -1,4 +1,4 @@
-import { type IngestionCursor, type SourceEvent } from '@buoh/contracts';
+import type { IngestionCursor, SourceEvent } from '@buoh/contracts';
 import {
   buildLiveDerivationCheckpoint,
   emptyLiveDerivationState,
@@ -10,10 +10,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDerivMeasurementProfile } from '../src/deriv/profile.js';
 import { contentKey } from '../src/object-keys.js';
 import { checkpointRow } from '../src/source-log/live-checkpoint.js';
-import { type StoredLiveCheckpoint } from '../src/source-log/ports.js';
+import type { StoredLiveCheckpoint } from '../src/source-log/ports.js';
 import { settle, START, syntheticSchemas, uuid } from './support/connection-harness.js';
 import { derivMessages, type FakeDerivSocket } from './support/deriv-fixtures.js';
-import { type MemorySourceLogStore } from './support/memory-stores.js';
+import type { MemorySourceLogStore } from './support/memory-stores.js';
 import {
   E,
   PREVIOUS,

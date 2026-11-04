@@ -6,7 +6,7 @@ import {
 } from '@buoh/domain';
 import { createServer, type AddressInfo } from 'node:net';
 
-import { type Pool, type PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';

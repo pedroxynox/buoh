@@ -6,19 +6,19 @@ import {
   type OperationalAlert,
   type OperationalRegistry,
 } from '../operational/registry.js';
-import { type SourceEventLog } from '../source-log/source-event-log.js';
+import type { SourceEventLog } from '../source-log/source-event-log.js';
 import { DerivConnection, type DerivConnectionResult, type DerivSessionEnd } from './connection.js';
-import { type CatalogStore, type RequestedResponseIncidentStore, type Scheduler } from './ports.js';
+import type { CatalogStore, RequestedResponseIncidentStore, Scheduler } from './ports.js';
 import { createDerivMeasurementProfile, DERIV_PUBLIC_ENDPOINT } from './profile.js';
 import { encodeRequest, type DerivRequest } from './requests.js';
 import {
   loadDerivSchemas,
   SCHEMA_DOWNLOAD_TIMEOUT_MS,
   type DerivSchemaSet,
-  type ExpectedSchemaArchive,
   type SchemaLoadResult,
 } from './schema-archive.js';
-import { type SocketFactory } from './socket.js';
+import type { ExpectedSchemaArchive } from './schema-release.js';
+import type { SocketFactory } from './socket.js';
 
 export interface DerivAdapterInput {
   /**

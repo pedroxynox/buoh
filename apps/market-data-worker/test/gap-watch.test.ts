@@ -1,4 +1,4 @@
-import { type PendingGap } from '@buoh/domain';
+import type { PendingGap } from '@buoh/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -7,7 +7,7 @@ import {
   type GapWatchFailure,
   type GapWatchInput,
 } from '../src/deriv/gap-watch.js';
-import { type HistoryRecoveryRequest } from '../src/deriv/history-recovery.js';
+import type { HistoryRecoveryRequest } from '../src/deriv/history-recovery.js';
 import { LogIntegrityError, LogNotDerivableError } from '../src/source-log/source-event-log.js';
 import { START } from './support/connection-harness.js';
 import { flush, ManualClock } from './support/deriv-fixtures.js';

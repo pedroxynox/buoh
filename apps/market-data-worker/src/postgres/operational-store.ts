@@ -5,9 +5,9 @@ import {
   type DataQualityIncident,
   type OperationalConditionEvent,
 } from '@buoh/contracts';
-import { type Pool } from 'pg';
+import type { Pool } from 'pg';
 
-import { type OperationalStore } from '../operational/registry.js';
+import type { OperationalStore } from '../operational/registry.js';
 
 /** Registro operativo sobre PostgreSQL estándar (tablas `operational_*`). */
 export class PostgresOperationalStore implements OperationalStore {

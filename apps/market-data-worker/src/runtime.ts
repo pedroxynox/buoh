@@ -1,6 +1,6 @@
-import { type WorkerConfig } from './config.js';
-import { type HealthCommandStores } from './health/command.js';
-import { type StartupReads } from './ingest-startup.js';
+import type { WorkerConfig } from './config.js';
+import type { HealthCommandStores } from './health/command.js';
+import type { StartupReads } from './ingest-startup.js';
 import { stderrAlert, type OperationalAlert } from './operational/registry.js';
 import { PostgresCatalogStore } from './postgres/catalog-store.js';
 import { PostgresIngestionStatusStore } from './postgres/ingestion-status-store.js';

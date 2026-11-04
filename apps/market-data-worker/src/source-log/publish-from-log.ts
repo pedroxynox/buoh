@@ -1,7 +1,7 @@
-import { type DatasetPublication } from '@buoh/domain';
+import type { DatasetPublication } from '@buoh/domain';
 
 import { publishDataset, type PublishDatasetInput } from '../publication.js';
-import { type SourceEventLog } from './source-event-log.js';
+import type { SourceEventLog } from './source-event-log.js';
 
 export interface PublishFromLogInput extends Omit<PublishDatasetInput, 'segments'> {
   /** Primer y último segmento cerrado del log que forman el dataset (rango contiguo). */

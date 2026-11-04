@@ -5,7 +5,7 @@ import { gunzipSync } from 'node:zlib';
 
 import { datasetManifestCoreSchema, EMPTY_SEQUENCE_SHA256 } from '@buoh/contracts';
 import { buildDatasetPublication } from '@buoh/domain';
-import { type Pool } from 'pg';
+import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
