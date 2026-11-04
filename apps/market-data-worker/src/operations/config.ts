@@ -39,6 +39,13 @@ const operationsEnvironmentSchema = z.object({
    * paso 1 crea el rol de la API, migra su esquema y le da sus privilegios; sin ella, no toca la API.
    */
   BUOH_API_POSTGRES_PASSWORD: rolePassword.optional(),
+  /**
+   * La contraseña de `buoh_api_lectura` (ADR-0019 §7 y §8), la que Render genera en `buoh-api` y le
+   * llega por `fromService`, desde el primer PR de las lecturas de F2.4. Es opcional, como la de
+   * `buoh_api`: con ella, el paso 1 crea el rol de lectura de la API y le pone esa contraseña; sin
+   * ella, no lo toca.
+   */
+  BUOH_API_LECTURA_POSTGRES_PASSWORD: rolePassword.optional(),
   /** El token `salud` de R2, de solo lectura, para el proceso de `data:health` (§10). */
   BUOH_SALUD_S3_ACCESS_KEY_ID: nonEmpty,
   BUOH_SALUD_S3_BUCKET: bucket,
@@ -62,6 +69,11 @@ export interface OperationsConfig {
    * tiene: entonces el paso 1 no crea el rol ni migra el esquema de la API.
    */
   readonly apiPassword: string | null;
+  /**
+   * La contraseña que debe tener `buoh_api_lectura` (ADR-0019 §7 y §8), o `null` mientras el
+   * servicio no la tiene: entonces el paso 1 no crea el rol de lectura de la API.
+   */
+  readonly apiReaderPassword: string | null;
   /** La conexión dueña, con el esquema `public`: los de los logs van con su nombre. */
   readonly owner: WorkerConfig['postgres'];
   /** La contraseña que debe tener cada rol de ejecución que inicia sesión. */
@@ -99,6 +111,7 @@ export function loadOperationsConfig(
   const value = parsed.data;
   return {
     apiPassword: value.BUOH_API_POSTGRES_PASSWORD ?? null,
+    apiReaderPassword: value.BUOH_API_LECTURA_POSTGRES_PASSWORD ?? null,
     healthObjects: {
       accessKeyId: value.BUOH_SALUD_S3_ACCESS_KEY_ID,
       bucket: value.BUOH_SALUD_S3_BUCKET,

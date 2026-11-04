@@ -1,6 +1,7 @@
 import {
   apiHealthSchema,
   auditEventsResponseSchema,
+  dataHealthSchema,
   emptyRequestSchema,
   linkSecretRequestSchema,
   linkSecretSchema,
@@ -32,6 +33,7 @@ import {
 import type { RateLimiter } from './accounts/limits.js';
 import { PasswordHasherBusyError } from './auth/password-hash.js';
 import { buildSessionCookie, clearSessionCookie, readSessionCookie } from './auth/session-token.js';
+import type { DataReader } from './data/reader.js';
 import { ApiRequestError, CSRF_REJECTED_FAILURE, NOT_READY_FAILURE } from './errors.js';
 import type { Readiness } from './readiness.js';
 
@@ -200,6 +202,20 @@ const AUDITORIA = {
   errors: { 401: UNAUTHENTICATED, 503: NOT_READY },
 } as const satisfies ApiRouteSpec;
 
+const DATOS_SALUD = {
+  method: 'GET',
+  url: '/api/v1/datos/salud',
+  operationId: 'getDatosSalud',
+  summary:
+    'La salud de los datos: el log activo y la última observación que guardó buoh-operaciones en él, con su hora (ADR-0019 §8).',
+  querystring: NO_QUERY,
+  responses: { 200: dataHealthSchema },
+  errors: {
+    401: UNAUTHENTICATED,
+    503: 'Faltan las migraciones de la API o la credencial de lectura de los datos (not_ready), o PostgreSQL no responde (postgres_unavailable).',
+  },
+} as const satisfies ApiRouteSpec;
+
 /** Las rutas de la API, en el orden en que se registran. De esta lista sale el OpenAPI. */
 export const API_ROUTE_SPECS: readonly ApiRouteSpec[] = [
   SALUD,
@@ -210,9 +226,13 @@ export const API_ROUTE_SPECS: readonly ApiRouteSpec[] = [
   SESION_CIERRE,
   SESIONES_CIERRE,
   AUDITORIA,
+  DATOS_SALUD,
 ];
 
-/** Lo que necesitan las rutas: la espera, las cuentas, las sesiones, los límites y el reloj. */
+/**
+ * Lo que necesitan las rutas: la espera, las cuentas, las sesiones, los límites, el reloj y las
+ * lecturas del sistema de datos.
+ */
 export interface ApiRouteDeps {
   readonly readiness: Readiness;
   readonly links: LinkService;
@@ -220,6 +240,11 @@ export interface ApiRouteDeps {
   readonly limiter: RateLimiter;
   /** Milisegundos de pared, para el límite por dirección de los enlaces (ADR-0019 §1). */
   readonly clock: () => number;
+  /**
+   * Las lecturas del sistema de datos, con `buoh_api_lectura` (ADR-0019 §8), o `null` sin su
+   * credencial: entonces sus rutas responden `not_ready`.
+   */
+  readonly data: DataReader | null;
 }
 
 function requireReady(readiness: Readiness): void {
@@ -299,6 +324,20 @@ function requireCsrf(
 ): void {
   if (!deps.sessions.validateCsrf(session.sessionSecret, request.headers['x-csrf-token'])) {
     throw new ApiRequestError(CSRF_REJECTED_FAILURE);
+  }
+}
+
+/**
+ * En una ruta de lectura, una petición con el token CSRF válido es del propietario y renueva la
+ * inactividad de la sesión; una actualización automática, sin el token, no (ADR-0019 §2).
+ */
+async function renewIfOwnerRequest(
+  request: FastifyRequest,
+  session: AuthenticatedSession,
+  deps: ApiRouteDeps,
+): Promise<void> {
+  if (deps.sessions.validateCsrf(session.sessionSecret, request.headers['x-csrf-token'])) {
+    await deps.sessions.renewActivity(session);
   }
 }
 
@@ -428,13 +467,22 @@ export function apiRoutes(deps: ApiRouteDeps): readonly ApiRoute[] {
       handler: async (request) => {
         requireReady(deps.readiness);
         const session = await requireSession(request, deps);
-        // Una petición con el token CSRF válido es del propietario y renueva; una actualización
-        // automática (F2.4), sin token, no (ADR-0019 §2).
-        if (deps.sessions.validateCsrf(session.sessionSecret, request.headers['x-csrf-token'])) {
-          await deps.sessions.renewActivity(session);
-        }
+        await renewIfOwnerRequest(request, session, deps);
         const events = await deps.sessions.listAudit(session);
         return { status: 200, body: { events } };
+      },
+    },
+    {
+      ...DATOS_SALUD,
+      handler: async (request) => {
+        requireReady(deps.readiness);
+        // Los datos del sistema no son de una cuenta, pero solo los lee una sesión (ADR-0019 §8).
+        const session = await requireSession(request, deps);
+        await renewIfOwnerRequest(request, session, deps);
+        if (deps.data === null) {
+          throw new ApiRequestError(NOT_READY_FAILURE);
+        }
+        return { status: 200, body: await deps.data.health() };
       },
     },
   ];

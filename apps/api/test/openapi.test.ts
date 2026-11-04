@@ -114,6 +114,7 @@ describe('buildOpenApiDocument', () => {
       '503',
     ]);
     expect(statuses('/api/v1/auditoria', 'get')).toEqual(['200', '400', '401', '500', '503']);
+    expect(statuses('/api/v1/datos/salud', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/enlace', 'post')).toEqual([
       '200',
       '400',
@@ -141,7 +142,9 @@ describe('buildOpenApiDocument', () => {
       'ApiHealth',
       'AuditEvent',
       'AuditEvents',
+      'DataHealth',
       'EmptyRequest',
+      'HealthReport',
       'LinkSecret',
       'LinkSecretRequest',
       'LinkUse',
@@ -169,6 +172,57 @@ describe('buildOpenApiDocument', () => {
     const use = validatorFor('LinkUseRequest');
     expect(use({ token: 'A'.repeat(43), password: 'x', code: '123456' })).toBe(true);
     expect(use({ token: 'A'.repeat(43), password: 'x', code: '12345' })).toBe(false);
+    const data = validatorFor('DataHealth');
+    const observed = '2026-11-04T12:55:31.204Z';
+    const report = {
+      backlog_bytes: 0,
+      backlog_count: 0,
+      connection_state: 'connected',
+      execution_mode: 'disabled',
+      last_event_time_utc: '2026-11-04T12:55:29.000Z',
+      last_observation_id: '01900000-0000-7000-8000-000000000001',
+      last_published_dataset_id: null,
+      last_received_at_utc: '2026-11-04T12:55:29.412Z',
+      open_condition_types: [],
+      schema_version: '1.0.0',
+      service_health: 'healthy',
+      source: 'deriv_options',
+    };
+    const completed = { status: 'completed', observed_at_utc: observed, report, alerts: [] };
+    const failed = {
+      status: 'failed',
+      observed_at_utc: observed,
+      reason: 'child_timeout',
+      code: null,
+    };
+    expect(data({ log: null, observation: null })).toBe(true);
+    expect(data({ log: 2, observation: completed })).toBe(true);
+    expect(
+      data({
+        log: 2,
+        observation: {
+          ...completed,
+          alerts: [{ event: 'data_health_storage_unavailable', reason: null }],
+        },
+      }),
+    ).toBe(true);
+    expect(data({ log: 2, observation: failed })).toBe(true);
+    expect(
+      data({
+        log: 2,
+        observation: { ...failed, reason: 'health_command_failed', code: 'ConfigError' },
+      }),
+    ).toBe(true);
+    expect(data({ log: 2, observation: { ...failed, reason: 'connect ECONNREFUSED' } })).toBe(
+      false,
+    );
+    expect(data({ log: 2, observation: { ...completed, report: { ...report, x: 1 } } })).toBe(
+      false,
+    );
+    expect(
+      data({ log: 2, observation: { status: 'completed', observed_at_utc: observed, report } }),
+    ).toBe(false);
+    expect(data({ log: 0, observation: null })).toBe(false);
   });
 
   it('coincide con apps/api/generated/openapi.json', () => {

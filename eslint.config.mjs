@@ -74,6 +74,26 @@ export default defineConfig(
       '@typescript-eslint/no-import-type-side-effects': 'error',
     },
   },
+  // API (ADR-0019 §8): el código del worker solo entra por su ruta de lectura, que no carga `ws`,
+  // `fflate` ni `node:child_process`. Sus pruebas de integración sí usan el punto de entrada principal,
+  // para crear los logs con sus migraciones.
+  {
+    files: ['apps/api/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@buoh/market-data-worker',
+              message:
+                'La API lee el sistema de datos por @buoh/market-data-worker/lectura (ADR-0019 §8).',
+            },
+          ],
+        },
+      ],
+    },
+  },
   // Interfaces web (ADR-0008): React en navegador.
   {
     files: ['**/*.tsx', 'apps/web/**/*.ts', 'apps/site/**/*.ts'],

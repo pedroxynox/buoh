@@ -107,6 +107,7 @@ export function routeDeps(overrides: Partial<ApiRouteDeps> = {}): ApiRouteDeps {
     sessions: UNUSED_SESSIONS,
     limiter: createRateLimiter(),
     clock: () => Date.now(),
+    data: null,
     ...overrides,
   };
 }

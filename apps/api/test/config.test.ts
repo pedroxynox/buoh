@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { ApiConfigError, DEFAULT_PORT, loadApiConfig } from '../src/config.js';
+import {
+  API_READER_POSTGRES_USER,
+  ApiConfigError,
+  DEFAULT_PORT,
+  loadApiConfig,
+} from '../src/config.js';
 
 // La configuración de la API (ADR-0019 §7 y §10): sin `staging`, el origen público, las tres
 // claves de 32 bytes que genera Render, la conexión como buoh_api en production y errores con
@@ -64,7 +69,53 @@ describe('loadApiConfig', () => {
         sslMode: 'require',
         user: 'buoh_api',
       },
+      reader: null,
     });
+  });
+
+  it('con la contraseña de buoh_api_lectura, la conexión de lectura es la misma base como ese usuario (ADR-0019 §8)', () => {
+    expect(API_READER_POSTGRES_USER).toBe('buoh_api_lectura');
+    const config = loadApiConfig({
+      ...PRODUCTION_ENV,
+      BUOH_API_LECTURA_POSTGRES_PASSWORD: 'lectura-de-render',
+    });
+    expect(config.reader).toEqual({
+      database: 'buoh',
+      host: 'dpg-interno',
+      password: 'lectura-de-render',
+      port: 5432,
+      sslMode: 'require',
+      user: 'buoh_api_lectura',
+    });
+    // La de buoh_api no cambia.
+    expect(config.postgres).toMatchObject({ password: 'contraseña-local', user: 'buoh_api' });
+    // Fuera de production, igual: el usuario es siempre buoh_api_lectura.
+    expect(
+      loadApiConfig({ ...TEST_ENV, BUOH_API_LECTURA_POSTGRES_PASSWORD: 'lectura-local' }).reader,
+    ).toEqual({
+      database: 'buoh',
+      host: '127.0.0.1',
+      password: 'lectura-local',
+      port: 5432,
+      sslMode: 'disable',
+      user: 'buoh_api_lectura',
+    });
+  });
+
+  it('sin la contraseña de buoh_api_lectura la API arranca sin conexión de lectura, y vacía la rechaza sin su valor', () => {
+    expect(loadApiConfig(TEST_ENV).reader).toBeNull();
+    expect(loadApiConfig(PRODUCTION_ENV).reader).toBeNull();
+    expect(rejected({ ...PRODUCTION_ENV, BUOH_API_LECTURA_POSTGRES_PASSWORD: '' })).toEqual([
+      'BUOH_API_LECTURA_POSTGRES_PASSWORD',
+    ]);
+    // Un usuario de lectura en el entorno no cuenta: no hay variable para elegirlo.
+    expect(
+      loadApiConfig({
+        ...TEST_ENV,
+        BUOH_API_LECTURA_POSTGRES_PASSWORD: 'lectura-local',
+        BUOH_API_LECTURA_POSTGRES_USER: 'buoh',
+      }).reader?.user,
+    ).toBe('buoh_api_lectura');
   });
 
   it('fuera de production escucha en 127.0.0.1, admite http y usa los servicios locales', () => {

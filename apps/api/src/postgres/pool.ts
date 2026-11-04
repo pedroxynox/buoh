@@ -40,6 +40,34 @@ export function postgresSslOption(mode: PostgresSslMode): {
   }
 }
 
+/**
+ * Las opciones de cada sesión del pool de lectura (ADR-0019 §8): sin esquema propio en el
+ * `search_path`, porque cada consulta nombra el esquema de su log, y en solo lectura. Lo que deja a
+ * `buoh_api_lectura` sin escribir son sus privilegios; `default_transaction_read_only` es una
+ * segunda barrera, que rechaza una escritura (`25006`) antes de mirarlos.
+ */
+export const READER_SESSION_OPTIONS =
+  '-c search_path=pg_catalog -c default_transaction_read_only=on';
+
+/**
+ * El pool de las lecturas del sistema de datos (ADR-0019 §8), con `buoh_api_lectura`: como mucho 3
+ * conexiones, los plazos de la API, su cifrado explícito y las opciones de `READER_SESSION_OPTIONS`.
+ * Es aparte del de `buoh_api`, así que una lectura lenta de los logs no ocupa sus conexiones.
+ */
+export function createReaderPool(config: PostgresConfig): pg.Pool {
+  return new pg.Pool({
+    ...postgresSslOption(config.sslMode),
+    ...SERVICE_POOL_TIMEOUTS,
+    database: config.database,
+    host: config.host,
+    max: POOL_MAX_CONNECTIONS,
+    options: READER_SESSION_OPTIONS,
+    password: config.password,
+    port: config.port,
+    user: config.user,
+  });
+}
+
 /** Un pool de la API, sobre su esquema (`search_path`) y con su cifrado explícito. */
 export function createPool(
   config: PostgresConfig,

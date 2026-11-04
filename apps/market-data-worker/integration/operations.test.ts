@@ -7,9 +7,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { DERIV_SOURCE } from '../src/deriv/profile.js';
 import {
+  API_READER_ROLE,
   API_ROLE,
   createPool,
   DROP_LOG_LOCK_TIMEOUT_MS,
+  findActiveLog,
   healthCommand,
   LOGIN_ROLES,
   loadConfig,
@@ -24,7 +26,9 @@ import {
   openOwnerDatabase,
   openStores,
   operationsCommand,
+  parseStoredHealthObservation,
   POSTGRES_ROLES,
+  readLatestStoredHealth,
   runNodeScript,
   S3ObjectStore,
   SourceEventLog,
@@ -61,6 +65,7 @@ const RENDER_USER = 'buoh_integration_ops_render';
 const TEST_ROLES = [
   ...LOGIN_ROLES,
   API_ROLE,
+  API_READER_ROLE,
   POSTGRES_ROLES.reader,
   POSTGRES_ROLES.owner,
   RENDER_USER,
@@ -76,6 +81,7 @@ const passwords = {
   api: secret(),
   health: secret(),
   ingest: secret(),
+  reader: secret(),
   render: secret(),
 };
 let local: WorkerConfig;
@@ -960,6 +966,121 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     }
 
     // La ejecución siguiente no cambia nada.
+    const second = await operations(env);
+    expect(second.step('roles_and_logs')).toMatchObject({
+      report: { api_migrated: [], failures: [], passwords_set: [] },
+      status: 'completed',
+    });
+  });
+
+  it('con la contraseña de buoh_api_lectura, el paso 1 crea el rol, miembro de buoh_lectura y de nada más, que lee la salud del log activo y no escribe ni lee buoh_api (ADR-0019 §7 y §8)', async () => {
+    const roleOf = async () => {
+      const { rows } = await ready(admin).query<{
+        can_login: boolean;
+        create_role: boolean;
+        memberships: string[];
+        superuser: boolean;
+      }>(
+        `SELECT r.rolcanlogin AS can_login, r.rolcreaterole AS create_role, r.rolsuper AS superuser,
+                ARRAY(SELECT g.rolname::text FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid
+                       WHERE m.member = r.oid ORDER BY g.rolname) AS memberships
+           FROM pg_roles r WHERE r.rolname = $1`,
+        [API_READER_ROLE],
+      );
+      return rows;
+    };
+    // Hasta aquí, sin su contraseña, el servicio no creó el rol.
+    expect(await roleOf()).toEqual([]);
+
+    const env = {
+      ...operationsEnvironment(),
+      BUOH_API_LECTURA_POSTGRES_PASSWORD: passwords.reader,
+      BUOH_API_POSTGRES_PASSWORD: passwords.api,
+    };
+    const first = await operations(env);
+    expect(first.alerts).toEqual([]);
+    expect(first.step('roles_and_logs')).toMatchObject({
+      report: { api_migrated: [], failures: [], passwords_set: [API_READER_ROLE] },
+      status: 'completed',
+    });
+    expect(await roleOf()).toEqual([
+      {
+        can_login: true,
+        create_role: false,
+        memberships: [POSTGRES_ROLES.reader],
+        superuser: false,
+      },
+    ]);
+
+    // Con las opciones de sesión del pool de lectura de la API: sin esquema por defecto y en solo
+    // lectura. Busca el log activo y lee el mismo último informe de la salud que ve el dueño.
+    const reader = new pg.Pool({
+      database: DATABASE,
+      host: local.postgres.host,
+      max: 1,
+      options: '-c search_path=pg_catalog -c default_transaction_read_only=on',
+      password: passwords.reader,
+      port: local.postgres.port,
+      ssl: false,
+      user: API_READER_ROLE,
+    });
+    try {
+      const active = await findActiveLog(reader, { now: clock.now, source: DERIV_SOURCE });
+      if (active === null) {
+        throw new TypeError('Sin log activo.');
+      }
+      const { rows: latest } = await ready(admin).query<{
+        observed_at_utc: string;
+        report_jcs: string;
+        status: string;
+      }>(
+        `SELECT status, observed_at_utc, report_jcs FROM ${active.schema}.operations_reports
+          WHERE step = 'health' ORDER BY report_id DESC LIMIT 1`,
+      );
+      expect(latest).toHaveLength(1);
+      const [expected] = latest;
+      if (expected === undefined) {
+        throw new TypeError('Sin informe de la salud.');
+      }
+      expect(await readLatestStoredHealth(reader, active)).toEqual(
+        parseStoredHealthObservation(expected),
+      );
+      expect(await readLatestStoredHealth(reader, active)).toMatchObject({ status: 'completed' });
+      // La sesión de solo lectura rechaza cualquier escritura antes de mirar los privilegios.
+      const readOnly = await reader
+        .query(
+          `INSERT INTO ${active.schema}.operations_reports
+             SELECT * FROM ${active.schema}.operations_reports LIMIT 0`,
+        )
+        .then(
+          () => null,
+          (error: unknown) => String((error as { code?: unknown }).code),
+        );
+      expect(readOnly).toBe('25006');
+
+      // Sin esas opciones, sus privilegios: lee las tablas del log, y nada más.
+      const asReader = (text: string) => sqlStateAs(API_READER_ROLE, passwords.reader, text);
+      const schema = active.schema;
+      expect(await asReader(`SELECT count(*) FROM ${schema}.source_event_index`)).toBeNull();
+      expect(await asReader(`SELECT count(*) FROM ${schema}.operations_reports`)).toBeNull();
+      for (const text of [
+        `INSERT INTO ${schema}.operations_reports SELECT * FROM ${schema}.operations_reports LIMIT 0`,
+        `UPDATE ${schema}.ingestion_heartbeats SET source = source`,
+        `DELETE FROM ${schema}.operations_reports`,
+        `TRUNCATE ${schema}.operations_reports`,
+        `CREATE TABLE ${schema}.intrusa (x int)`,
+        'CREATE SCHEMA intruso',
+        'SELECT count(*) FROM buoh_api.audit_events',
+        'SELECT count(*) FROM buoh_api.credentials',
+        'SELECT count(*) FROM buoh_api.sessions',
+      ]) {
+        expect(await asReader(text), text).toBe('42501');
+      }
+    } finally {
+      await reader.end();
+    }
+
+    // La ejecución siguiente solo comprueba su contraseña.
     const second = await operations(env);
     expect(second.step('roles_and_logs')).toMatchObject({
       report: { api_migrated: [], failures: [], passwords_set: [] },

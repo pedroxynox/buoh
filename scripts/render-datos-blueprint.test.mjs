@@ -219,12 +219,40 @@ function expectedBuildFilter(appDirs) {
   };
 }
 
-/** Las apps que compila cada servicio, en el orden de su `buildFilter`. */
+/**
+ * Las apps que compila cada servicio, en el orden de su `buildFilter`. Desde F2.4, `buoh-api` compila
+ * también el worker, del que lee por la ruta `@buoh/market-data-worker/lectura` (ADR-0019 §8).
+ */
 const SERVICE_APPS = {
   'buoh-ingesta': ['apps/market-data-worker'],
   'buoh-operaciones': ['apps/market-data-worker', 'apps/api'],
-  'buoh-api': ['apps/api', 'apps/web'],
+  'buoh-api': ['apps/api', 'apps/web', 'apps/market-data-worker'],
 };
+
+/**
+ * Las apps de `apps/*` de las que dependen las de un servicio, recursivo, ordenadas: como
+ * `packageDepsOf`, pero para una app que importa otra, como la API al worker.
+ */
+function appDepsOf(appDirs) {
+  const apps = new Set();
+  const pending = [...appDirs];
+  while (pending.length > 0) {
+    const manifest = JSON.parse(read(`${pending.pop()}/package.json`));
+    for (const name of [
+      ...Object.keys(manifest.dependencies ?? {}),
+      ...Object.keys(manifest.devDependencies ?? {}),
+    ]) {
+      const match = /^@buoh\/(.+)$/.exec(name);
+      const dir = match === null ? null : `apps/${match[1]}`;
+      if (dir === null || apps.has(dir) || !existsSync(join(root, dir))) {
+        continue;
+      }
+      apps.add(dir);
+      pending.push(dir);
+    }
+  }
+  return [...apps].sort();
+}
 
 const service = (name) => {
   const found = blueprint.services.filter((item) => item.name === name);
@@ -366,6 +394,16 @@ test('cada servicio recompila cuando cambian sus apps o un paquete del que depen
   }
 });
 
+test('cada servicio incluye las apps de las que dependen las suyas: si no, un cambio en ellas no lo desplegaría', () => {
+  assert.deepEqual(appDepsOf(['apps/api']), ['apps/market-data-worker']);
+  assert.deepEqual(appDepsOf(['apps/market-data-worker']), []);
+  for (const [name, apps] of Object.entries(SERVICE_APPS)) {
+    for (const dep of appDepsOf(apps)) {
+      assert.ok(apps.includes(dep), `${name}: falta ${dep}`);
+    }
+  }
+});
+
 /** De dónde sale una variable: `value`, `sync: false`, `generateValue`, `fromDatabase` o `fromService`. */
 function sourceOf(variable) {
   const sources = Object.keys(variable).filter((key) => key !== 'key');
@@ -450,6 +488,16 @@ test('buoh-operaciones: las variables de loadOperationsConfig, con la credencial
     name: 'buoh-api',
     type: 'web',
   });
+  // Y la de buoh_api_lectura, la que Render genera para buoh-api con su propio nombre (ADR-0019 §8).
+  assert.deepEqual(vars.get('BUOH_API_LECTURA_POSTGRES_PASSWORD').fromService, {
+    envVarKey: 'BUOH_API_LECTURA_POSTGRES_PASSWORD',
+    name: 'buoh-api',
+    type: 'web',
+  });
+  assert.equal(
+    sourceOf(variables('buoh-api').get('BUOH_API_LECTURA_POSTGRES_PASSWORD')),
+    'generateValue',
+  );
   assert.equal(sourceOf(variables('buoh-ingesta').get('BUOH_POSTGRES_PASSWORD')), 'generateValue');
   for (const key of ['BUOH_SALUD_POSTGRES_PASSWORD', 'BUOH_AGENTE_POSTGRES_PASSWORD']) {
     assert.equal(sourceOf(vars.get(key)), 'generateValue', key);
@@ -465,10 +513,11 @@ test('buoh-operaciones: las variables de loadOperationsConfig, con la credencial
   assert.equal(vars.get('BUOH_DUENO_POSTGRES_SSLMODE').value, 'require');
 });
 
-test('buoh-api: las variables de la API en production, con buoh_api y las tres claves (ADR-0019 §10)', () => {
+test('buoh-api: las variables de la API en production, con buoh_api, la contraseña de buoh_api_lectura y las tres claves (ADR-0019 §8 y §10)', () => {
   const vars = variables('buoh-api');
   assert.equal(vars.size, service('buoh-api').envVars.length, 'sin claves repetidas');
   assert.deepEqual([...vars.keys()].sort(), [
+    'BUOH_API_LECTURA_POSTGRES_PASSWORD',
     'BUOH_API_ORIGIN',
     'BUOH_API_PASSWORD_PEPPER',
     'BUOH_API_TOKEN_KEY',
@@ -497,9 +546,12 @@ test('buoh-api: las variables de la API en production, con buoh_api y las tres c
   ]) {
     assert.deepEqual(vars.get(key).fromDatabase, { name: 'buoh-postgres', property }, key);
   }
-  // La contraseña del rol y las tres claves del servidor las genera Render, fuera de la base (§1, §2).
+  // Las contraseñas de los dos roles y las tres claves del servidor las genera Render, fuera de la
+  // base (§1, §2 y §8). El usuario de lectura no es una variable: siempre es buoh_api_lectura.
+  assert.ok(!vars.has('BUOH_API_LECTURA_POSTGRES_USER'));
   for (const key of [
     'BUOH_POSTGRES_PASSWORD',
+    'BUOH_API_LECTURA_POSTGRES_PASSWORD',
     'BUOH_API_PASSWORD_PEPPER',
     'BUOH_API_TOTP_KEY',
     'BUOH_API_TOKEN_KEY',

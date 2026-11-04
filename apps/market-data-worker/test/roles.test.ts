@@ -4,8 +4,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   AGENT_CONNECTION_LIMIT,
+  API_READER_ROLE,
   API_ROLE,
   API_SCHEMA,
+  ensureApiReaderRole,
   ensureApiRole,
   ensureRuntimeRoles,
   grantApiPrivileges,
@@ -225,6 +227,55 @@ describe('el rol y los privilegios de la API (ADR-0019 §7)', () => {
     await setRolePassword(client, API_ROLE, password);
     expect(queries[1]).toBe('SET LOCAL ROLE "buoh_dueno"');
     expect(queries[2]).toMatch(/^ALTER ROLE "buoh_api" PASSWORD 'SCRAM-SHA-256\$4096:/u);
+    expect(queries.join('\n')).not.toContain(password);
+  });
+});
+
+describe('el rol de lectura de la API (ADR-0019 §7 y §8)', () => {
+  const normalized = (queries: readonly string[]) =>
+    queries.map((text) => text.replace(/\s+/gu, ' ').trim());
+
+  it('ensureApiReaderRole crea buoh_api_lectura como buoh_dueno, con inicio de sesión, sin crear roles y miembro de buoh_lectura', async () => {
+    const { client, queries } = fakeClient();
+    await ensureApiReaderRole(client);
+    expect(API_READER_ROLE).toBe('buoh_api_lectura');
+    expect(normalized(queries)).toEqual([
+      'BEGIN',
+      'SET LOCAL ROLE "buoh_dueno"',
+      'SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AS exists',
+      'CREATE ROLE "buoh_api_lectura" LOGIN NOCREATEROLE',
+      'GRANT "buoh_lectura" TO "buoh_api_lectura"',
+      'COMMIT',
+    ]);
+  });
+
+  it('si ya existe, le vuelve a fijar sus atributos y su pertenencia, sin ningún privilegio propio', async () => {
+    const { client, queries } = fakeClient((text) =>
+      text.startsWith('SELECT EXISTS') ? { rows: [{ exists: true }] } : { rows: [] },
+    );
+    await ensureApiReaderRole(client);
+    expect(queries).toContain('ALTER ROLE "buoh_api_lectura" LOGIN NOCREATEROLE');
+    expect(queries).toContain('GRANT "buoh_lectura" TO "buoh_api_lectura"');
+    expect(queries.join('\n')).not.toMatch(/ON SCHEMA|ON ALL|buoh_api"|INSERT|CREATEROLE /u);
+  });
+
+  it('un fallo deshace la transacción entera', async () => {
+    const { client, queries } = fakeClient((text) => {
+      if (text.startsWith('GRANT')) {
+        throw Object.assign(new Error('permission denied'), { code: '42501' });
+      }
+      return { rows: [] };
+    });
+    await expect(ensureApiReaderRole(client)).rejects.toMatchObject({ code: '42501' });
+    expect(queries.at(-1)).toBe('ROLLBACK');
+  });
+
+  it('setRolePassword admite buoh_api_lectura', async () => {
+    const password = 'lectura-sintetica-0123456789';
+    const { client, queries } = fakeClient();
+    await setRolePassword(client, API_READER_ROLE, password);
+    expect(queries[1]).toBe('SET LOCAL ROLE "buoh_dueno"');
+    expect(queries[2]).toMatch(/^ALTER ROLE "buoh_api_lectura" PASSWORD 'SCRAM-SHA-256\$4096:/u);
     expect(queries.join('\n')).not.toContain(password);
   });
 });

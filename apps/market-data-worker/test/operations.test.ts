@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { gzipSync } from 'node:zlib';
 
-import { sha256Hex, type HealthReport } from '@buoh/contracts';
+import { canonicalJson, sha256Hex, type HealthReport } from '@buoh/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -20,6 +20,7 @@ import {
   ObjectReadError,
   OPERATIONS_STEPS,
   operationsCommand,
+  parseStoredHealthObservation,
   RETENTION_DEADLINE_MS,
   RETENTION_PAGE_KEYS,
   runNodeScript,
@@ -83,6 +84,21 @@ const CONFIG = loadOperationsConfig(ENV);
 /** La contraseña de `buoh_api`, que el Blueprint le da a `buoh-operaciones` desde el PR 6 de ADR-0019 §14. */
 const API_PASSWORD = 'api-sintetica-0123456789';
 const API_CONFIG = loadOperationsConfig({ ...ENV, BUOH_API_POSTGRES_PASSWORD: API_PASSWORD });
+/**
+ * La contraseña de `buoh_api_lectura`, que el Blueprint le da a `buoh-operaciones` desde el primer PR
+ * de las lecturas de F2.4 (ADR-0019 §8).
+ */
+const READER_PASSWORD = 'lectura-sintetica-0123456789';
+const READER_CONFIG = loadOperationsConfig({
+  ...ENV,
+  BUOH_API_LECTURA_POSTGRES_PASSWORD: READER_PASSWORD,
+});
+/** Con las dos contraseñas de la API, como en producción desde ese PR. */
+const API_AND_READER_CONFIG = loadOperationsConfig({
+  ...ENV,
+  BUOH_API_LECTURA_POSTGRES_PASSWORD: READER_PASSWORD,
+  BUOH_API_POSTGRES_PASSWORD: API_PASSWORD,
+});
 const NOW = '2026-03-02T10:00:00.000Z';
 
 /** Un temporizador que nunca vence: los plazos de la verificación no cuentan en esas pruebas. */
@@ -135,6 +151,7 @@ describe('loadOperationsConfig (ADR-0018 §11)', () => {
   it('lee la credencial dueña, las contraseñas de los roles y los tokens salud y operaciones con sus propios nombres', () => {
     expect(CONFIG).toEqual({
       apiPassword: null,
+      apiReaderPassword: null,
       healthObjects: {
         accessKeyId: 'clave-salud-sintetica',
         bucket: 'buoh-captura',
@@ -218,6 +235,21 @@ describe('loadOperationsConfig (ADR-0018 §11)', () => {
     );
   });
 
+  it('la contraseña de buoh_api_lectura es opcional, con las reglas de las demás (ADR-0019 §8)', () => {
+    expect(READER_CONFIG).toEqual({ ...CONFIG, apiReaderPassword: READER_PASSWORD });
+    expect(API_AND_READER_CONFIG).toEqual({
+      ...CONFIG,
+      apiPassword: API_PASSWORD,
+      apiReaderPassword: READER_PASSWORD,
+    });
+    expect(rejected({ ...ENV, BUOH_API_LECTURA_POSTGRES_PASSWORD: 'corta' })).toEqual([
+      'BUOH_API_LECTURA_POSTGRES_PASSWORD',
+    ]);
+    expect(
+      rejected({ ...ENV, BUOH_API_LECTURA_POSTGRES_PASSWORD: 'con espacios dentro 123' }),
+    ).toEqual(['BUOH_API_LECTURA_POSTGRES_PASSWORD']);
+  });
+
   it('una variable BUOH_POSTGRES_* o BUOH_S3_* presente se rechaza: el servicio no tiene ninguna', () => {
     expect(
       rejected({
@@ -292,6 +324,17 @@ describe('el entorno explícito de cada proceso (ADR-0018 §11)', () => {
       'secreto-operaciones-sintetico',
     ]) {
       expect(Object.values(env)).not.toContain(secret);
+    }
+  });
+
+  it('ningún proceso recibe las contraseñas de buoh_api ni de buoh_api_lectura', () => {
+    for (const env of [
+      migrateEnvironment(API_AND_READER_CONFIG, 'buoh_log_000001'),
+      apiMigrateEnvironment(API_AND_READER_CONFIG),
+      healthEnvironment(API_AND_READER_CONFIG),
+    ]) {
+      expect(Object.values(env)).not.toContain(API_PASSWORD);
+      expect(Object.values(env)).not.toContain(READER_PASSWORD);
     }
   });
 
@@ -388,6 +431,10 @@ function fakeDatabase(state: {
         state.logs.splice(index, 1);
         return 'dropped';
       });
+    },
+    ensureApiReaderRole: () => {
+      calls.push('api_reader_role');
+      return answer('ensureApiReaderRole', () => undefined);
     },
     ensureApiRole: () => {
       calls.push('api_role');
@@ -1024,6 +1071,104 @@ describe('runOperations: el esquema y el rol de la API en el paso 1 (ADR-0019 §
   });
 });
 
+describe('runOperations: el rol de lectura de la API en el paso 1 (ADR-0019 §7 y §8)', () => {
+  /** Los logs 1, escrito, y 2, vacío: el paso 1 no prepara ninguno. */
+  const ready = (loggedIn: readonly string[] = ['buoh_ingesta', 'buoh_salud', 'buoh_agente']) =>
+    fakeDatabase({ loggedIn: new Set(loggedIn), logs: [log(1, NOW), log(2)] });
+
+  it('sin la contraseña de buoh_api_lectura no crea el rol ni le pone ninguna', async () => {
+    const db = ready();
+    await run(db, fakeChildren(), { config: API_CONFIG });
+    expect(db.calls).not.toContain('api_reader_role');
+    expect(db.calls.filter((call) => call.endsWith('buoh_api_lectura'))).toEqual([]);
+  });
+
+  it('con ella, después de los logs crea o ajusta el rol y le pone la contraseña, sin tocar la API', async () => {
+    const db = ready();
+    const children = fakeChildren();
+    const { lines, result } = await run(db, children, { config: READER_CONFIG });
+    expect(db.calls.slice(0, 13)).toEqual([
+      'roles',
+      'list',
+      'grant:1',
+      'grant:2',
+      'list',
+      'api_reader_role',
+      'login:buoh_ingesta',
+      'login:buoh_salud',
+      'login:buoh_agente',
+      'login:buoh_api_lectura',
+      'password:buoh_api_lectura',
+      'list',
+      'report:1:roles_and_logs',
+    ]);
+    expect(children.runs.map((item) => item.child)).not.toContain('api_migrate');
+    expect(result.status).toBe('completed');
+    const report = {
+      failures: [],
+      migrated: [],
+      passwords_set: ['buoh_api_lectura'],
+      passwords_unchecked: [],
+      prepared: null,
+    };
+    expect(lines[0]).toMatchObject({ report, status: 'completed', step: 'roles_and_logs' });
+    expect(db.reports[0]?.row.report).toEqual(report);
+  });
+
+  it('con las dos contraseñas de la API, el rol de lectura va después de preparar buoh_api, y su contraseña, después de la de buoh_api', async () => {
+    const db = ready();
+    const { result } = await run(db, fakeChildren(), { config: API_AND_READER_CONFIG });
+    expect(db.calls.slice(5, 14)).toEqual([
+      'api_role',
+      'api_grant',
+      'api_reader_role',
+      'login:buoh_ingesta',
+      'login:buoh_salud',
+      'login:buoh_agente',
+      'login:buoh_api',
+      'password:buoh_api',
+      'login:buoh_api_lectura',
+    ]);
+    expect(db.calls[14]).toBe('password:buoh_api_lectura');
+    expect(result.status).toBe('completed');
+  });
+
+  it('con todo hecho, solo comprueba su contraseña, y no guarda el informe del paso 1', async () => {
+    const db = ready(['buoh_ingesta', 'buoh_salud', 'buoh_agente', 'buoh_api_lectura']);
+    const { lines } = await run(db, fakeChildren(), { config: READER_CONFIG });
+    expect(db.calls).toContain('api_reader_role');
+    expect(db.calls).toContain('login:buoh_api_lectura');
+    expect(db.calls).not.toContain('password:buoh_api_lectura');
+    expect(db.reports.map(({ row }) => row.step)).not.toContain('roles_and_logs');
+    expect(lines[0]).toMatchObject({
+      report: { failures: [], passwords_set: [] },
+      status: 'completed',
+    });
+  });
+
+  it('sin el rol no le pone la contraseña; el paso termina failed con api_reader_role y lo demás sigue', async () => {
+    const db = fakeDatabase({
+      fail: { ensureApiReaderRole: coded('42501') },
+      loggedIn: new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']),
+      logs: [log(1, NOW), log(2)],
+    });
+    const { lines, result } = await run(db, fakeChildren(), { config: API_AND_READER_CONFIG });
+    expect(db.calls).not.toContain('login:buoh_api_lectura');
+    // La API y los demás roles siguen.
+    expect(db.calls).toContain('password:buoh_api');
+    expect(db.calls).toContain('login:buoh_agente');
+    expect(lines[0]).toMatchObject({
+      report: {
+        failures: [{ action: 'api_reader_role', reason: '42501' }],
+        passwords_set: ['buoh_api'],
+      },
+      status: 'failed',
+    });
+    expect(lines.map((line) => line['step'])).toContain('space');
+    expect(result.status).toBe('failed');
+  });
+});
+
 describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §11)', () => {
   it('una migración rechazada deja el paso failed con el motivo saneado de db:migrate, sin privilegios para ese log, y sigue con los demás, las contraseñas y la salud', async () => {
     const db = fakeDatabase({
@@ -1289,6 +1434,58 @@ describe('runOperations: la salud (ADR-0018 §11, paso 2)', () => {
         .filter(({ row }) => row.step === 'health')
         .map(({ log: number, row }) => [number, row.status]),
     ).toEqual([[1, 'failed']]);
+  });
+
+  it('lo que guarda se lee como la salud del log (ADR-0019 §8): el HealthReport si terminó, y el motivo si falló', async () => {
+    /** La observación de la fila de la salud del log 1, con el informe en JCS, como en PostgreSQL. */
+    const stored = async (answer: Partial<ChildResult>) => {
+      const db = ready();
+      await run(
+        db,
+        fakeChildren((child) => (child === 'health' ? answer : {})),
+      );
+      const health = db.reports.filter(({ row }) => row.step === 'health');
+      const [entry] = health;
+      expect(health).toHaveLength(1);
+      if (entry === undefined) {
+        throw new TypeError('Sin informe de la salud.');
+      }
+      return parseStoredHealthObservation({
+        observed_at_utc: entry.row.observed_at_utc,
+        report_jcs: canonicalJson(entry.row.report),
+        status: entry.row.status,
+      });
+    };
+    expect(
+      await stored({
+        stderr:
+          '{"event":"data_health_storage_unavailable","reason":"connect ECONNREFUSED 10.0.0.5"}\n',
+      }),
+    ).toEqual({
+      alerts: [{ event: 'data_health_storage_unavailable', reason: null }],
+      observedAtUtc: NOW,
+      report: REPORT,
+      status: 'completed',
+    });
+    expect(
+      await stored({
+        exitCode: 2,
+        stderr:
+          '{"code":"ConfigError","message":"Configuración inválida o ausente: X.","status":"failed"}\n',
+        stdout: '',
+      }),
+    ).toEqual({
+      code: 'ConfigError',
+      observedAtUtc: NOW,
+      reason: 'health_command_failed',
+      status: 'failed',
+    });
+    expect(await stored({ exitCode: null, stdout: '', timedOut: true })).toEqual({
+      code: null,
+      observedAtUtc: NOW,
+      reason: 'child_timeout',
+      status: 'failed',
+    });
   });
 
   it('sin log activo, falla con log_not_prepared sin correr data:health', async () => {
