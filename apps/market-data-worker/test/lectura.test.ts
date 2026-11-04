@@ -9,8 +9,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 // de datos la API y el motor, sin cargar `ws`, `fflate` ni `node:child_process`. Se prueba sobre el
 // JavaScript compilado, el que carga quien la importa: un proceso de Node aparte, con un entorno
 // vacío, la importa por el nombre del paquete con un gancho de resolución (`module.registerHooks`)
-// que anota la URL de cada módulo que se resuelve, por `import` o por `require`. El mismo proceso
-// con el punto de entrada principal, que sí los carga, demuestra que el gancho los ve.
+// que anota la URL de cada módulo que se resuelve, por `import` o por `require`. La misma sonda, en
+// otro proceso, con el punto de entrada principal, que sí los carga, demuestra que el gancho los ve.
 
 const PACKAGE_ROOT = resolve(import.meta.dirname, '..');
 const LECTURA_JS = resolve(PACKAGE_ROOT, 'dist/lectura.js');
