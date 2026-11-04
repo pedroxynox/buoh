@@ -276,10 +276,11 @@ export const auditEventsResponseSchema = z
 const MAX_LOG_NUMBER = 999_999;
 
 /**
- * Un motivo saneado de un informe de `buoh-operaciones` (ADR-0018 §11): letras, cifras, `_`, `.` y
- * `-`, de 1 a 64, como `child_timeout`, `health_command_failed` o un SQLSTATE. Nunca un mensaje.
+ * Un código saneado de un informe de `buoh-operaciones` (ADR-0018 §11): letras, cifras, `_`, `.` y
+ * `-`, de 1 a 64, como `child_timeout`, `health_command_failed`, `ConfigError` o un SQLSTATE. Nunca
+ * un mensaje.
  */
-const operationsReasonSchema = z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/u);
+const operationsCodeSchema = z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/u);
 
 /**
  * La respuesta de `GET /api/v1/datos/salud` (ADR-0019 §8): la salud de los datos, la última
@@ -288,8 +289,11 @@ const operationsReasonSchema = z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/u);
  * - `log`: el número del log activo, o `null` si no hay ninguno; entonces tampoco hay observación.
  * - `observation`: la última del log activo, o `null` si todavía no tiene ninguna, como justo
  *   después del corte semanal. Si la última falló, una anterior que terminó no la sustituye.
- *   `completed` lleva el `HealthReport`, que puede no ser `healthy`; `failed`, el motivo por el que
- *   la salud no se pudo observar.
+ *   - `completed` lleva el `HealthReport`, que puede no ser `healthy`, y las alertas que dejó
+ *     `data:health`, con su evento y su motivo saneados: son la causa de un `paused` o un `failed`
+ *     cuando no pudo observar el log, como `data_health_storage_unavailable`.
+ *   - `failed` lleva el motivo por el que la salud no se pudo observar y, con
+ *     `health_command_failed`, el código de la línea de error de `data:health`, o `null`.
  */
 export const dataHealthSchema = z
   .strictObject({
@@ -301,11 +305,18 @@ export const dataHealthSchema = z
           observed_at_utc: utcTimestampMsSchema,
           // El esquema con sus reglas: el OpenAPI lo nombra HealthReport, como el estructural.
           report: healthReportSchema,
+          alerts: z.array(
+            z.strictObject({
+              event: operationsCodeSchema,
+              reason: operationsCodeSchema.nullable(),
+            }),
+          ),
         }),
         z.strictObject({
           status: z.literal('failed'),
           observed_at_utc: utcTimestampMsSchema,
-          reason: operationsReasonSchema,
+          reason: operationsCodeSchema,
+          code: operationsCodeSchema.nullable(),
         }),
       ])
       .nullable(),

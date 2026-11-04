@@ -1,8 +1,9 @@
 import type { DataHealth } from '@buoh/contracts';
 import {
   DERIV_SOURCE,
-  findActiveLog,
+  listCaptureLogs,
   readLatestStoredHealth,
+  selectActiveLog,
   type StoredHealthObservation,
 } from '@buoh/market-data-worker/lectura';
 import type { Pool } from 'pg';
@@ -15,8 +16,9 @@ import type { Pool } from 'pg';
 export interface DataReader {
   /**
    * La salud de los datos: el log activo de la captura de Deriv y la última observación que guardó
-   * `buoh-operaciones` en él (`DataHealth`). Rechaza con el error de PostgreSQL si no responde, y con
-   * `StoredHealthError` si el informe guardado no tiene su forma.
+   * `buoh-operaciones` en él (`DataHealth`). Rechaza con el error de PostgreSQL si no responde, con
+   * `StoredHealthError` si el informe guardado no tiene su forma, y con `LogsUnreadableError` si hay
+   * logs y el rol no puede leer ninguno.
    */
   health(): Promise<DataHealth>;
 }
@@ -28,23 +30,44 @@ export interface DataReaderDeps {
   readonly clock: () => number;
 }
 
+/**
+ * Hay esquemas de log, pero el rol del pool no puede leer ninguno: por ejemplo, porque no tiene los
+ * privilegios de `buoh_lectura` o porque el lector recibió otro pool. La búsqueda del log activo
+ * toma un log que no se puede leer por uno que se está preparando (ADR-0018 §6), así que sin esto la
+ * respuesta diría que no hay log activo.
+ */
+export class LogsUnreadableError extends Error {
+  constructor() {
+    super('Hay logs, pero el rol de lectura no puede leer ninguno.');
+    this.name = 'LogsUnreadableError';
+  }
+}
+
 function toContract(observation: StoredHealthObservation): NonNullable<DataHealth['observation']> {
   return observation.status === 'completed'
     ? {
         status: 'completed',
         observed_at_utc: observation.observedAtUtc,
         report: observation.report,
+        alerts: observation.alerts.map(({ event, reason }) => ({ event, reason })),
       }
-    : { status: 'failed', observed_at_utc: observation.observedAtUtc, reason: observation.reason };
+    : {
+        status: 'failed',
+        observed_at_utc: observation.observedAtUtc,
+        reason: observation.reason,
+        code: observation.code,
+      };
 }
 
 export function createDataReader(deps: DataReaderDeps): DataReader {
   return {
     health: async () => {
-      const log = await findActiveLog(deps.pool, {
-        now: () => new Date(deps.clock()).toISOString(),
-        source: DERIV_SOURCE,
-      });
+      // Como `findActiveLog`: lee los logs y después toma la hora.
+      const logs = await listCaptureLogs(deps.pool, DERIV_SOURCE);
+      if (logs.length > 0 && logs.every((log) => !log.readable)) {
+        throw new LogsUnreadableError();
+      }
+      const log = selectActiveLog(logs, new Date(deps.clock()).toISOString());
       if (log === null) {
         return { log: null, observation: null };
       }

@@ -188,35 +188,39 @@ describe('buildOpenApiDocument', () => {
       service_health: 'healthy',
       source: 'deriv_options',
     };
+    const completed = { status: 'completed', observed_at_utc: observed, report, alerts: [] };
+    const failed = {
+      status: 'failed',
+      observed_at_utc: observed,
+      reason: 'child_timeout',
+      code: null,
+    };
     expect(data({ log: null, observation: null })).toBe(true);
+    expect(data({ log: 2, observation: completed })).toBe(true);
+    expect(
+      data({
+        log: 2,
+        observation: {
+          ...completed,
+          alerts: [{ event: 'data_health_storage_unavailable', reason: null }],
+        },
+      }),
+    ).toBe(true);
+    expect(data({ log: 2, observation: failed })).toBe(true);
+    expect(
+      data({
+        log: 2,
+        observation: { ...failed, reason: 'health_command_failed', code: 'ConfigError' },
+      }),
+    ).toBe(true);
+    expect(data({ log: 2, observation: { ...failed, reason: 'connect ECONNREFUSED' } })).toBe(
+      false,
+    );
+    expect(data({ log: 2, observation: { ...completed, report: { ...report, x: 1 } } })).toBe(
+      false,
+    );
     expect(
       data({ log: 2, observation: { status: 'completed', observed_at_utc: observed, report } }),
-    ).toBe(true);
-    expect(
-      data({
-        log: 2,
-        observation: { status: 'failed', observed_at_utc: observed, reason: 'child_timeout' },
-      }),
-    ).toBe(true);
-    expect(
-      data({
-        log: 2,
-        observation: {
-          status: 'failed',
-          observed_at_utc: observed,
-          reason: 'connect ECONNREFUSED',
-        },
-      }),
-    ).toBe(false);
-    expect(
-      data({
-        log: 2,
-        observation: {
-          status: 'completed',
-          observed_at_utc: observed,
-          report: { ...report, x: 1 },
-        },
-      }),
     ).toBe(false);
     expect(data({ log: 0, observation: null })).toBe(false);
   });

@@ -1456,13 +1456,32 @@ describe('runOperations: la salud (ADR-0018 §11, paso 2)', () => {
         status: entry.row.status,
       });
     };
-    expect(await stored({})).toEqual({ observedAtUtc: NOW, report: REPORT, status: 'completed' });
-    expect(await stored({ exitCode: 2, stdout: '' })).toEqual({
+    expect(
+      await stored({
+        stderr:
+          '{"event":"data_health_storage_unavailable","reason":"connect ECONNREFUSED 10.0.0.5"}\n',
+      }),
+    ).toEqual({
+      alerts: [{ event: 'data_health_storage_unavailable', reason: null }],
+      observedAtUtc: NOW,
+      report: REPORT,
+      status: 'completed',
+    });
+    expect(
+      await stored({
+        exitCode: 2,
+        stderr:
+          '{"code":"ConfigError","message":"Configuración inválida o ausente: X.","status":"failed"}\n',
+        stdout: '',
+      }),
+    ).toEqual({
+      code: 'ConfigError',
       observedAtUtc: NOW,
       reason: 'health_command_failed',
       status: 'failed',
     });
     expect(await stored({ exitCode: null, stdout: '', timedOut: true })).toEqual({
+      code: null,
       observedAtUtc: NOW,
       reason: 'child_timeout',
       status: 'failed',

@@ -372,8 +372,13 @@ describe('GET /api/v1/datos/salud (ADR-0019 §8)', () => {
     service_health: 'healthy',
     source: 'deriv_options',
   };
-  const completed = { status: 'completed', observed_at_utc: OBSERVED, report };
-  const failed = { status: 'failed', observed_at_utc: OBSERVED, reason: 'child_timeout' };
+  const completed = { status: 'completed', observed_at_utc: OBSERVED, report, alerts: [] };
+  const failed = {
+    status: 'failed',
+    observed_at_utc: OBSERVED,
+    reason: 'child_timeout',
+    code: null,
+  };
 
   it('el log activo y su última observación: terminada con su HealthReport, fallida con su motivo, o ninguna', () => {
     for (const value of [
@@ -381,6 +386,28 @@ describe('GET /api/v1/datos/salud (ADR-0019 §8)', () => {
       { log: 2, observation: { ...completed, report: { ...report, service_health: 'paused' } } },
       { log: 2, observation: failed },
       { log: 2, observation: { ...failed, reason: '57P01' } },
+      {
+        log: 2,
+        observation: {
+          ...completed,
+          report: {
+            ...report,
+            connection_state: 'disconnected',
+            last_event_time_utc: null,
+            last_observation_id: null,
+            last_received_at_utc: null,
+            service_health: 'paused',
+          },
+          alerts: [
+            { event: 'data_health_storage_unavailable', reason: null },
+            { event: 'checkpoint_rejected', reason: 'checkpoint_link_mismatch' },
+          ],
+        },
+      },
+      {
+        log: 2,
+        observation: { ...failed, reason: 'health_command_failed', code: 'ConfigError' },
+      },
       { log: 3, observation: null },
       { log: null, observation: null },
     ]) {
@@ -414,6 +441,16 @@ describe('GET /api/v1/datos/salud (ADR-0019 §8)', () => {
       { ...completed, report: { ...report, open_condition_types: ['connection_lost'] } },
       { ...completed, extra: 1 },
       { ...completed, status: 'pending' },
+      // Las alertas y el código: siempre, saneados, y cada uno en su estado.
+      { status: 'completed', observed_at_utc: OBSERVED, report },
+      { ...completed, alerts: [{ event: 'data_health_failed' }] },
+      { ...completed, alerts: [{ event: 'con espacios', reason: null }] },
+      { ...completed, alerts: [{ event: 'x', reason: 'connect ECONNREFUSED 10.0.0.5' }] },
+      { ...completed, alerts: [{ event: 'x', reason: null, extra: 1 }] },
+      { ...completed, code: null },
+      { status: 'failed', observed_at_utc: OBSERVED, reason: 'child_timeout' },
+      { ...failed, code: 'Configuración inválida' },
+      { ...failed, alerts: [] },
     ]) {
       expect(accepts(dataHealthSchema, { log: 2, observation }), JSON.stringify(observation)).toBe(
         false,

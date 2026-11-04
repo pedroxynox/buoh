@@ -82,9 +82,9 @@ Las tres claves son de 256 bits y viven fuera de la base; cambiar la contraseña
 
 Borra la API entera, no la base ni la captura de datos:
 
-1. Quita el servicio `buoh-api` de `render-datos.yaml` y la variable `BUOH_API_POSTGRES_PASSWORD` de `buoh-operaciones`, y fusiona.
+1. Quita el servicio `buoh-api` de `render-datos.yaml` y las variables `BUOH_API_POSTGRES_PASSWORD` y `BUOH_API_LECTURA_POSTGRES_PASSWORD` de `buoh-operaciones`, que las toman de `buoh-api`, y fusiona.
 2. Borra `buoh-api` en el panel de Render. Si solo lo borras del panel, Render lo recrea en la siguiente sincronización del Blueprint.
-3. El esquema `buoh_api` y su rol quedan en la base. Bórralos a mano con la credencial dueña solo si quieres; una fila nunca se borra sola (ADR-0019 §7).
+3. El esquema `buoh_api` y los roles `buoh_api` y `buoh_api_lectura` quedan en la base. Bórralos a mano con la credencial dueña solo si quieres; una fila nunca se borra sola (ADR-0019 §7).
 
 ## Comprobar desde fuera (lo hace el agente)
 

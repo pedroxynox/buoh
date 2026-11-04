@@ -34,6 +34,8 @@ import { apiRoutes } from '../src/routes.js';
  */
 const DATABASE = 'buoh_integration_api_datos';
 const READER_USER = 'buoh_integration_api_datos_lectura';
+/** Un rol que inicia sesión sin ningún privilegio en los logs, como un pool equivocado. */
+const UNPRIVILEGED_USER = 'buoh_integration_api_datos_sin_privilegios';
 const readerPassword = randomBytes(24).toString('hex');
 const ORIGIN = 'https://buoh.test';
 const SID = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
@@ -193,6 +195,7 @@ async function waitForNoSessions(server: Pool, database: string): Promise<void> 
 async function dropAll(server: Pool): Promise<void> {
   await server.query(`DROP DATABASE IF EXISTS ${DATABASE} WITH (FORCE)`);
   await server.query(`DROP ROLE IF EXISTS ${READER_USER}`);
+  await server.query(`DROP ROLE IF EXISTS ${UNPRIVILEGED_USER}`);
 }
 
 beforeAll(async () => {
@@ -201,6 +204,9 @@ beforeAll(async () => {
   await dropAll(platform);
   await platform.query(
     `CREATE ROLE ${READER_USER} LOGIN PASSWORD ${pg.escapeLiteral(readerPassword)}`,
+  );
+  await platform.query(
+    `CREATE ROLE ${UNPRIVILEGED_USER} LOGIN PASSWORD ${pg.escapeLiteral(readerPassword)}`,
   );
   await platform.query(`CREATE DATABASE ${DATABASE}`);
   admin = new pg.Pool({ ...local, database: DATABASE, ssl: false, max: 2 });
@@ -233,7 +239,12 @@ describe('GET /api/v1/datos/salud contra PostgreSQL (ADR-0019 §8)', () => {
       step: 'health',
       status: 'completed',
       observed: '2026-11-04T12:50:31.000Z',
-      report: { alerts: [], exit_code: 0, log: 1, report: REPORT },
+      report: {
+        alerts: [{ event: 'checkpoint_rejected', reason: 'checkpoint_link_mismatch' }],
+        exit_code: 0,
+        log: 1,
+        report: REPORT,
+      },
     });
     const completed = await getHealth();
     expect(completed.status).toBe(200);
@@ -243,6 +254,7 @@ describe('GET /api/v1/datos/salud contra PostgreSQL (ADR-0019 §8)', () => {
         status: 'completed',
         observed_at_utc: '2026-11-04T12:50:31.000Z',
         report: REPORT,
+        alerts: [{ event: 'checkpoint_rejected', reason: 'checkpoint_link_mismatch' }],
       },
     });
 
@@ -266,6 +278,7 @@ describe('GET /api/v1/datos/salud contra PostgreSQL (ADR-0019 §8)', () => {
           status: 'failed',
           observed_at_utc: '2026-11-04T12:55:31.000Z',
           reason: 'child_timeout',
+          code: null,
         },
       },
       status: 200,
@@ -296,6 +309,23 @@ describe('GET /api/v1/datos/salud contra PostgreSQL (ADR-0019 §8)', () => {
       error: 'StoredHealthError',
     });
     expect(JSON.stringify(response)).not.toContain('contenido-del-informe');
+  });
+
+  it('con un rol que no puede leer ningún log, internal con LogsUnreadableError, nunca «sin log activo»', async () => {
+    const unprivileged = createReaderPool({ ...readerConfig(), user: UNPRIVILEGED_USER });
+    unprivileged.on('error', () => undefined);
+    try {
+      const response = await getHealth(unprivileged);
+      expect(response.status).toBe(500);
+      expect(response.body).toMatchObject({ error: { code: 'internal' } });
+      expect(response.lines).toContainEqual({
+        event: 'api_error',
+        request_id: '00000000-0000-4000-8000-000000000000',
+        error: 'LogsUnreadableError',
+      });
+    } finally {
+      await unprivileged.end();
+    }
   });
 
   it('con una contraseña que PostgreSQL rechaza, postgres_unavailable con el código y sin el mensaje', async () => {

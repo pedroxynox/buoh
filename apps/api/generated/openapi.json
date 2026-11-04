@@ -1700,12 +1700,41 @@
                       },
                       "report": {
                         "$ref": "#/components/schemas/HealthReport"
+                      },
+                      "alerts": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "event": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+                            },
+                            "reason": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "event",
+                            "reason"
+                          ],
+                          "additionalProperties": false
+                        }
                       }
                     },
                     "required": [
                       "status",
                       "observed_at_utc",
-                      "report"
+                      "report",
+                      "alerts"
                     ],
                     "additionalProperties": false
                   },
@@ -1724,12 +1753,24 @@
                       "reason": {
                         "type": "string",
                         "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+                      },
+                      "code": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       }
                     },
                     "required": [
                       "status",
                       "observed_at_utc",
-                      "reason"
+                      "reason",
+                      "code"
                     ],
                     "additionalProperties": false
                   }

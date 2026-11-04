@@ -113,6 +113,7 @@ export {
   parseStoredHealthObservation,
   readLatestStoredHealth,
   StoredHealthError,
+  type StoredHealthAlert,
   type StoredHealthObservation,
   type StoredHealthRow,
 } from './operations/stored-health.js';

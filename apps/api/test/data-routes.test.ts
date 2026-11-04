@@ -51,6 +51,7 @@ const HEALTH: DataHealth = {
       service_health: 'healthy',
       source: 'deriv_options',
     },
+    alerts: [],
   },
 };
 
@@ -136,6 +137,7 @@ describe('GET /api/v1/datos/salud (ADR-0019 §8)', () => {
           status: 'failed',
           observed_at_utc: '2026-11-09T00:00:31.000Z',
           reason: 'child_timeout',
+          code: null,
         },
       },
     ] satisfies DataHealth[]) {
