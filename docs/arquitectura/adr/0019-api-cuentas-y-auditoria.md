@@ -177,7 +177,7 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
   | `buoh_api` | sí | en `buoh_api`: uso del esquema y de sus secuencias, y `SELECT` e `INSERT` en sus tablas; nada en los logs | la API y la orden `cuenta` |
   | `buoh_api_lectura` | sí, miembro de `buoh_lectura` | los de `buoh_lectura`: en cada log, `SELECT`; nada en `buoh_api` | las lecturas de datos de la API (F2.4) y los backtests (F2.7) |
 
-  - `buoh_lectura`, y con él `buoh_salud` y `buoh_agente`, no lee nada de `buoh_api`, donde están los hashes y los secretos cifrados.
+  - `buoh_lectura`, y con él `buoh_salud` y `buoh_agente`, no lee nada de `buoh_api`, donde están los hashes y los secretos cifrados. (Precisión del registro del PR #91.) No lee ninguna fila, pero, como cualquier rol de PostgreSQL, ve las estadísticas de sus tablas (`pg_stat_all_tables`): sus nombres y cuántas filas se insertaron en cada una, como cuántas sesiones se abrieron, lo que dice cuándo entra el propietario. No ve su contenido. Esas vistas y funciones son del superusuario de la base, que en Render es suyo, así que buoh no puede ocultarlas ([evidencia de F2.4](../../operacion/evidencia-datos-f2-4.md)).
   - `buoh-operaciones` crea y ajusta estos roles como los demás. Usa las contraseñas que Render genera en `buoh-api` (`generateValue`) y que lee con `fromService`.
   - `buoh_api_lectura` llega con su primer uso, en F2.4.
 - **Conexión:** la dirección interna, con `BUOH_POSTGRES_SSLMODE=require` (ADR-0018 §9). En `production`, la API rechaza `disable` y la falta de la variable, y una prueba lo comprueba (`F2-API-001`). Cada pool tiene como mucho 3 conexiones, para no quitarle a la captura los 0,1 CPU de la base.
@@ -257,7 +257,7 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 
 ### 10. El servicio en Render
 
-- `buoh-api` es un servicio web Starter, de 512 MB, en la región `virginia`, con una instancia, en `render-datos.yaml` (ADR-0018 §2). Despliega después de CI (`autoDeployTrigger: checksPass`) y solo cuando cambia algo de lo que depende (`buildFilter`). Su ruta de salud es `/api/salud`. (Precisión del registro del PR #91.) Un push que cambia su sección de `render-datos.yaml` lo despliega al sincronizarse el Blueprint, sin esperar a CI, como pasó el 2026-11-04 ([despliegue en Render](../../operacion/despliegue-en-render.md), «Cuándo despliegan»).
+- `buoh-api` es un servicio web Starter, de 512 MB, en la región `virginia`, con una instancia, en `render-datos.yaml` (ADR-0018 §2). Despliega después de CI (`autoDeployTrigger: checksPass`) y solo cuando cambia algo de lo que depende (`buildFilter`). Su ruta de salud es `/api/salud`. (Precisión del registro del PR #91.) Un push que cambia su sección de `render-datos.yaml` puede desplegarlo al sincronizarse el Blueprint, sin esperar a CI, como pasó el 2026-11-04 ([despliegue en Render](../../operacion/despliegue-en-render.md), «Cuándo despliegan»).
 - Compila la API y la exportación `out-api`. Arranca con Node directamente, con sus tamaños de V8 delante del script, como el worker (ADR-0018 §3), para que le llegue el `SIGTERM` de Render. Entonces deja de aceptar peticiones, termina las que están en curso y, desde F2.7, para el backtest que corre.
 - **Dirección:** `https://buoh-api.onrender.com`, o la que Render le dé si ese nombre está ocupado. `BUOH_API_ORIGIN` la fija. Con un dominio propio cambia esa variable: las sesiones abiertas se pierden, y la contraseña y el código siguen valiendo.
 - **Variables:**
