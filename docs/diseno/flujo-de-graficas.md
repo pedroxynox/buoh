@@ -101,7 +101,7 @@ Está en `apps/web/src/components/`: la geometría en `chart-geometry.ts`, los t
 2. **Trazo** (`linePath`). Recorre los valores y levanta el lápiz en cada `null`: un hueco nunca se une ni se suaviza. Un punto sin vecinos es un trazo de largo cero, que el extremo redondo de la línea (`stroke-linecap="round"`) dibuja como un punto.
 3. **Banda del hueco** (`gapBand`). Va del último tick antes del hueco al primero después. La de un hueco en el primer punto empieza en el borde izquierdo, y la de uno en el último termina en el derecho. Rechaza un hueco vacío o que se sale de la serie.
 4. **Marco** (`Frame`). Dibuja 5 líneas de rejilla repartidas por igual en el rango con margen, que no son valores redondos. Coloca encima, en HTML, las cifras del eje vertical y las etiquetas de tiempo.
-5. **Textos** (`chart-text.ts`). La alternativa en texto de cada gráfico (`describePriceChart` y `describeEquityChart`) y la nota de cada hueco (`gapLabel`) se calculan de los datos, con las reglas del concepto de interfaz §9.
+5. **Textos** (`chart-text.ts`). La alternativa en texto de cada gráfico (`describePriceChart` y `describeEquityChart`) y la nota de cada hueco (`gapLabel`) se calculan de los datos, con las reglas del concepto de interfaz §9. La alternativa de ticks rechaza una hora que no es un instante ISO 8601 con zona, y unos huecos que no coinciden con los valores que faltan (`checkGaps`, en `chart-geometry.ts`): un `null` sin hueco, un hueco sobre un valor o un hueco vacío.
 6. **Formato de cifras.**
    - Precios: `toFixed(2)`, con punto decimal.
    - Resultados: coma decimal y signo menos tipográfico (−), sin signo en una cifra que se redondea a cero (`decimalComma`), y en % del capital inicial (`percentText`).
@@ -166,7 +166,8 @@ No hay. Los gráficos no responden a pasar el ratón ni a tocar, y no tienen ven
 | Contraste comprobado por pruebas | guía §10, concepto §9 | Se cumple: las etiquetas usan colores con contraste probado, la línea y el hueco miden 3:1 o más, y la nota del hueco 4,5:1. La rejilla es decorativa y no llega a 3:1. |
 | Alternativa en texto o en tabla, calculada de los datos | concepto §9 | Se cumple en los dos gráficos, con texto. La tabla de las velas llega con ellas. |
 | Una sola unidad para la peor caída | concepto §9 | Se cumple: «−3,6 %», en % del capital inicial, en la nota, en la alternativa y en la tarjeta de contexto. |
-| Velas con su intervalo y sus huecos | concepto §9 | La regla está escrita; las velas todavía no existen. |
+| El eje horizontal es el tiempo UTC | concepto §9 | Se cumple con los ticks ficticios, que llegan cada 2 s exactos y van por su índice (§10). |
+| Velas con su intervalo, su dirección y sus huecos | concepto §9 | La regla está escrita; las velas todavía no existen. |
 | Gráficos de ticks y velas, en web, móvil (resumen) y escritorio | catálogo de funciones, Fase 2 | Es el destino, no lo actual. Hoy solo hay una línea de ticks ficticios, y nada en el móvil. |
 
 ## 10. Detalles a tener en cuenta

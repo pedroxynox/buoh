@@ -1,6 +1,6 @@
 import { worstDrawdown } from '@buoh/prototype-data';
 
-import { presentValues, type GapRange, type SeriesValue } from './chart-geometry';
+import { checkGaps, presentValues, type GapRange, type SeriesValue } from './chart-geometry';
 
 /**
  * Los textos de los gráficos, calculados de los datos que dibujan (concepto de interfaz §9): la
@@ -21,8 +21,22 @@ export interface AxisLabel {
   readonly label: string;
 }
 
-/** La hora UTC (HH:MM:SS) de un instante ISO 8601. Rechaza un instante que no lo es. */
+/**
+ * Un instante ISO 8601 con fecha, hora y zona (`Z` o `±hh:mm`). El `UtcTimestampMs` de los contratos
+ * es uno de ellos.
+ */
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u;
+
+/**
+ * La hora UTC (HH:MM:SS) de un instante ISO 8601. Rechaza lo que no es un instante con su zona: sin
+ * ella, la hora se leería como local.
+ */
 export function clockUtc(iso: string): string {
+  if (!ISO_INSTANT.test(iso)) {
+    throw new RangeError(
+      'La hora de un punto del gráfico tiene que ser un instante ISO 8601 con zona.',
+    );
+  }
   return new Date(iso).toISOString().slice(11, 19);
 }
 
@@ -86,26 +100,30 @@ export interface PriceChartData {
 
 /**
  * La alternativa en texto del gráfico de ticks (concepto de interfaz §9): qué es, su período UTC,
- * cuántos ticks tiene, el mínimo y el máximo, el último y cada hueco, con los ticks que faltan, su
- * período y su motivo. Si no llegó ningún tick, lo dice. Rechaza una hora que falta.
+ * cuántos ticks tiene, el primero y el último, el mínimo y el máximo, y cada hueco, con los ticks que
+ * faltan, su período y su motivo. Si no llegó ningún tick, lo dice. Rechaza una hora que falta o que
+ * no es un instante con zona, y unos huecos que no coinciden con los valores que faltan
+ * (`checkGaps`).
  */
 export function describePriceChart(data: PriceChartData): string {
   const { gaps, times, title, values } = data;
   if (times.length !== values.length) {
     throw new RangeError('Cada valor del gráfico necesita su hora.');
   }
+  checkGaps(values, gaps);
   if (values.length === 0) {
     return `${title}: no llegó ningún tick en este período.`;
   }
   const period = `entre las ${clockUtc(times[0] ?? '')} y las ${clockUtc(times.at(-1) ?? '')} UTC`;
   const present = presentValues(values);
+  const first = present[0];
   const last = present.at(-1);
-  if (last === undefined) {
+  if (first === undefined || last === undefined) {
     return `${title} ${period}: no llegó ningún tick. ${describeGaps(gaps, times)}`;
   }
   const min = present.reduce((a, b) => Math.min(a, b));
   const max = present.reduce((a, b) => Math.max(a, b));
-  return `${title} ${period}: ${tickCount(present.length)}, entre ${priceText(min)} y ${priceText(max)}, y el último a ${priceText(last)}. ${describeGaps(gaps, times)}`;
+  return `${title} ${period}: ${tickCount(present.length)}, el primero a ${priceText(first)} y el último a ${priceText(last)}, entre ${priceText(min)} y ${priceText(max)}. ${describeGaps(gaps, times)}`;
 }
 
 export interface EquityChartData {

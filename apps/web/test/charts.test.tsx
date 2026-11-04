@@ -2,13 +2,22 @@
  * Gráficos accesibles y probados (`F2-CHART-001`; concepto de interfaz §9): la escala, los cortes de
  * la línea, la banda de cada hueco, la alternativa en texto calculada de los datos y el SVG que
  * dibujan los componentes, también con una serie vacía, una sin ningún dato y un hueco en el primer
- * punto. Los valores esperados están calculados a mano, no con el código que prueban.
+ * punto. Los valores esperados están calculados a mano. Las dos pruebas del nombre de un gráfico lo
+ * comparan con su función de texto, que tiene aquí mismo sus vectores escritos a mano.
  */
+import { readFileSync } from 'node:fs';
+
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { EquityChart, PriceChart } from '../src/components/Charts';
-import { gapBand, linePath, scaleFor, type Scale } from '../src/components/chart-geometry';
+import {
+  checkGaps,
+  gapBand,
+  linePath,
+  scaleFor,
+  type Scale,
+} from '../src/components/chart-geometry';
 import {
   clockUtc,
   decimalComma,
@@ -31,6 +40,17 @@ const timesOf = (count: number) =>
 
 /** Las rutas `d` de los `<path>` de un SVG. */
 const pathsOf = (html: string) => [...html.matchAll(/<path d="([^"]*)"/g)].map((m) => m[1] ?? '');
+
+/**
+ * La línea del gráfico, con el extremo redondo que dibuja como un punto un tick aislado: sin él, el
+ * trazo de largo cero no se ve.
+ */
+const ROUND_LINE =
+  /<path d="[^"]*" fill="none" stroke="var\(--b-chart-line\)" stroke-width="1\.75" stroke-linecap="round"/;
+
+/** El texto de la nota visible de la peor caída, fuera del `aria-label`. */
+const lossNoteOf = (html: string) =>
+  /<span class="w-chart__note w-chart__note--loss"[^>]*>([^<]*)<\/span>/.exec(html)?.[1];
 
 describe('scaleFor (F2-CHART-001)', () => {
   it('deja un 10 % de margen arriba y abajo y reparte los puntos a lo ancho, también los que faltan', () => {
@@ -107,11 +127,49 @@ describe('gapBand (F2-CHART-001)', () => {
   });
 });
 
+describe('checkGaps (F2-CHART-001)', () => {
+  it('acepta huecos que marcan justo los puntos que faltan, también en un extremo', () => {
+    expect(() => {
+      checkGaps(
+        [null, 1, null, null, 2],
+        [
+          { end: 1, start: 0 },
+          { end: 4, start: 2 },
+        ],
+      );
+    }).not.toThrow();
+    expect(() => {
+      checkGaps([], []);
+    }).not.toThrow();
+  });
+
+  it('rechaza un punto que falta sin hueco, un hueco sobre un valor y un hueco vacío', () => {
+    expect(() => {
+      checkGaps([1, null, 3], []);
+    }).toThrow(RangeError);
+    expect(() => {
+      checkGaps([1, null, 3], [{ end: 3, start: 1 }]);
+    }).toThrow(RangeError);
+    expect(() => {
+      checkGaps(
+        [null, null],
+        [
+          { end: 2, start: 0 },
+          { end: 1, start: 1 },
+        ],
+      );
+    }).toThrow(RangeError);
+  });
+});
+
 describe('cifras y horas de los textos', () => {
-  it('la hora es la UTC del instante', () => {
+  it('la hora es la UTC del instante, y solo vale un instante con su zona', () => {
     expect(clockUtc('2026-10-20T14:30:00.000Z')).toBe('14:30:00');
     expect(clockUtc('2026-10-20T16:30:00+02:00')).toBe('14:30:00');
-    expect(() => clockUtc('')).toThrow(RangeError);
+    // Sin zona se leería como hora local; los demás no son instantes.
+    for (const value of ['', '1', 'hola 3', '2026-10-20T14:30:00', '2026-10-20']) {
+      expect(() => clockUtc(value), value).toThrow(RangeError);
+    }
   });
 
   it('las cifras de resultados llevan coma y signo menos, y el cero va sin signo', () => {
@@ -143,13 +201,13 @@ describe('alternativa en texto calculada de los datos (F2-CHART-001)', () => {
         values: [1, 2, null, null, 3],
       }),
     ).toBe(
-      'Precio de prueba entre las 00:00:00 y las 00:00:08 UTC: 3 ticks, entre 1.00 y 3.00, y el último a 3.00. Un hueco de 2 ticks, de las 00:00:04 a las 00:00:06: conexión perdida.',
+      'Precio de prueba entre las 00:00:00 y las 00:00:08 UTC: 3 ticks, el primero a 1.00 y el último a 3.00, entre 1.00 y 3.00. Un hueco de 2 ticks, de las 00:00:04 a las 00:00:06: conexión perdida.',
     );
   });
 
   it('ticks: sin huecos lo dice, y con varios los enumera', () => {
     expect(describePriceChart({ gaps: [], times: timesOf(2), title, values: [5, 4] })).toBe(
-      'Precio de prueba entre las 00:00:00 y las 00:00:02 UTC: 2 ticks, entre 4.00 y 5.00, y el último a 4.00. Sin huecos.',
+      'Precio de prueba entre las 00:00:00 y las 00:00:02 UTC: 2 ticks, el primero a 5.00 y el último a 4.00, entre 4.00 y 5.00. Sin huecos.',
     );
     expect(
       describePriceChart({
@@ -162,7 +220,7 @@ describe('alternativa en texto calculada de los datos (F2-CHART-001)', () => {
         values: [null, 1, null, null, 2],
       }),
     ).toBe(
-      'Precio de prueba entre las 00:00:00 y las 00:00:08 UTC: 2 ticks, entre 1.00 y 2.00, y el último a 2.00. 2 huecos: 1 tick, a las 00:00:00: conexión perdida; 2 ticks, de las 00:00:04 a las 00:00:06: hueco sin resolver.',
+      'Precio de prueba entre las 00:00:00 y las 00:00:08 UTC: 2 ticks, el primero a 1.00 y el último a 2.00, entre 1.00 y 2.00. 2 huecos: 1 tick, a las 00:00:00: conexión perdida; 2 ticks, de las 00:00:04 a las 00:00:06: hueco sin resolver.',
     );
   });
 
@@ -182,9 +240,24 @@ describe('alternativa en texto calculada de los datos (F2-CHART-001)', () => {
     );
   });
 
-  it('ticks: cada valor necesita su hora', () => {
+  it('ticks: cada valor necesita su hora, y los huecos tienen que coincidir con lo que falta', () => {
     expect(() =>
       describePriceChart({ gaps: [], times: timesOf(1), title, values: [1, 2] }),
+    ).toThrow(RangeError);
+    // Un tick que falta sin hueco diría «Sin huecos.»; un hueco vacío, «un hueco de 0 ticks».
+    expect(() =>
+      describePriceChart({ gaps: [], times: timesOf(3), title, values: [1, null, 3] }),
+    ).toThrow(RangeError);
+    expect(() =>
+      describePriceChart({
+        gaps: [
+          { end: 2, reason: 'conexión perdida', start: 0 },
+          { end: 1, reason: 'conexión perdida', start: 1 },
+        ],
+        times: timesOf(2),
+        title,
+        values: [null, null],
+      }),
     ).toThrow(RangeError);
   });
 
@@ -238,6 +311,7 @@ describe('SVG de los gráficos (F2-CHART-001)', () => {
       values,
     });
     expect(html).toContain(`role="img" aria-label="${expected}"`);
+    expect(html).toMatch(ROUND_LINE);
     // Dos tramos: 0–1 y el punto 4, solo, al otro lado del hueco.
     expect(pathsOf(html)).toEqual([
       expect.stringMatching(/^M0\.00 [\d.]+L250\.00 [\d.]+M1000\.00 [\d.]+L1000\.00 [\d.]+$/),
@@ -270,7 +344,9 @@ describe('SVG de los gráficos (F2-CHART-001)', () => {
     const html = renderToStaticMarkup(
       <EquityChart title="Curva de prueba" values={[0, 1.5, -0.5, 0.2]} timeLabels={[]} />,
     );
-    expect(html).toContain(`Peor caída: −2,0${NB}%`);
+    // La nota visible, no la misma frase dentro del `aria-label`.
+    expect(lossNoteOf(html)).toBe(`Peor caída: −2,0${NB}%`);
+    expect(html).toMatch(ROUND_LINE);
     expect(html).toContain('stroke="var(--b-tone-rojo-fg)"');
     expect(html).toContain(
       `aria-label="${describeEquityChart({ timeLabels: [], title: 'Curva de prueba', values: [0, 1.5, -0.5, 0.2] })}"`,
@@ -289,5 +365,14 @@ describe('SVG de los gráficos (F2-CHART-001)', () => {
     );
     expect(empty).not.toContain('<svg');
     expect(empty).toContain('todavía no hay resultados en este período');
+  });
+
+  it('la nota del hueco usa el color del hueco, el que mide su contraste de texto', () => {
+    // `packages/design-system/test/tokens.test.ts` mide 4,5:1 para `chart.gap` porque esta regla
+    // escribe la nota con él.
+    const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+    const start = css.indexOf('.w-chart__note {');
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(css.slice(start, css.indexOf('}', start))).toContain('color: var(--b-chart-gap);');
   });
 });

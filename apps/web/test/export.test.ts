@@ -193,16 +193,27 @@ const NB = '\u00a0';
 const chartLabels = (html: string) =>
   [...html.matchAll(/<div class="w-chart" role="img" aria-label="([^"]*)"/g)].map((m) => m[1]);
 
-/** La ruta de la línea de cada gráfico de la página. */
+/**
+ * La ruta de la línea de cada gráfico de la página, con el extremo redondo que dibuja un tick aislado
+ * como un punto.
+ */
 const chartLines = (html: string) =>
-  [...html.matchAll(/<path d="([^"]*)" fill="none" stroke="var\(--b-chart-line\)"/g)].map(
-    (m) => m[1] ?? '',
+  [
+    ...html.matchAll(
+      /<path d="([^"]*)" fill="none" stroke="var\(--b-chart-line\)" stroke-width="1\.75" stroke-linecap="round"/g,
+    ),
+  ].map((m) => m[1] ?? '');
+
+/** El texto de la nota visible de la peor caída, fuera del `aria-label`. */
+const lossNotes = (html: string) =>
+  [...html.matchAll(/<span class="w-chart__note w-chart__note--loss"[^>]*>([^<]*)<\/span>/g)].map(
+    (m) => m[1],
   );
 
 describe('gráficos exportados (F2-CHART-001)', () => {
   it('Mercados: la alternativa del gráfico de ticks sale de sus datos, con el hueco y su motivo', () => {
     expect(chartLabels(read(pageOf('/mercados/')))).toEqual([
-      'Precio ficticio de Volatility 100 entre las 14:29:06 y las 14:32:04 UTC: 84 ticks, entre 1036.99 y 1045.99, y el último a 1040.01. Un hueco de 6 ticks, de las 14:30:00 a las 14:30:10: conexión perdida.',
+      'Precio ficticio de Volatility 100 entre las 14:29:06 y las 14:32:04 UTC: 84 ticks, el primero a 1040.00 y el último a 1040.01, entre 1036.99 y 1045.99. Un hueco de 6 ticks, de las 14:30:00 a las 14:30:10: conexión perdida.',
     ]);
   });
 
@@ -221,7 +232,7 @@ describe('gráficos exportados (F2-CHART-001)', () => {
     expect(chartLabels(html)).toEqual([
       `Curva ficticia de resultado acumulado, en % del capital inicial, del 1 oct al 15 oct: empieza en 0,0${NB}% y termina en −0,4${NB}%, con un máximo de 1,0${NB}% y un mínimo de −2,6${NB}%. Peor caída: −3,6${NB}%, de 1,0${NB}% a −2,6${NB}%.`,
     ]);
-    expect(html).toContain(`Peor caída: −3,6${NB}%`);
+    expect(lossNotes(html)).toEqual([`Peor caída: −3,6${NB}%`]);
     // `textOf` junta los espacios, también el de no separación, así que aquí el contexto lleva uno normal.
     const text = textOf(mainOf(html));
     expect(text).toContain('Drawdown máximo −3,6 %');

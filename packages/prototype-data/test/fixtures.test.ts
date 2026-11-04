@@ -8,6 +8,7 @@ import {
   DEMO_NOW_UTC,
   equitySeries,
   GLOBAL_STATUS,
+  INCIDENT_LABELS,
   INCIDENTS,
   INSTRUMENTS,
   instrumentsOf,
@@ -205,7 +206,10 @@ describe('datos ficticios coherentes (V1-UI-001)', () => {
     const lost = INCIDENTS.find((i) => i.type === 'connection_lost');
     const unresolved = INCIDENTS.find((i) => i.type === 'event_gap_unresolved');
     expect(PRICE_GAPS).toHaveLength(1);
+    // El motivo del hueco es la incidencia que lo abrió, con su nombre: la conexión perdida.
+    const reason = lost === undefined ? undefined : INCIDENT_LABELS[lost.type].toLowerCase();
     for (const gap of PRICE_GAPS) {
+      expect(gap.reason).toBe(reason);
       for (let i = gap.start; i < gap.end; i += 1) {
         expect(values[i]).toBeNull();
       }
@@ -215,9 +219,6 @@ describe('datos ficticios coherentes (V1-UI-001)', () => {
         Date.parse(lost?.whenUtc ?? ''),
       );
       expect(r100TickTimeUtc(gap.end)).toBe(unresolved?.whenUtc);
-      // El motivo del hueco es la incidencia que lo abrió: la conexión perdida.
-      expect(lost?.type).toBe('connection_lost');
-      expect(gap.reason).toBe('conexión perdida');
     }
     expect(R100_TICK_SECONDS).toBe(2);
     expect(Date.parse(r100TickTimeUtc(values.length - 1))).toBeLessThanOrEqual(now);

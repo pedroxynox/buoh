@@ -84,16 +84,8 @@ export function linePath(values: readonly SeriesValue[], scale: Scale): string {
   return d;
 }
 
-/**
- * La banda de un hueco: va del último punto antes del hueco al primero después, así se ven los dos
- * bordes del corte. La de un hueco en el primer punto empieza en el borde izquierdo, y la de uno en
- * el último termina en el derecho. Rechaza un hueco vacío o que se sale de la serie.
- */
-export function gapBand(
-  gap: GapRange,
-  scale: Scale,
-  length: number,
-): { readonly x: number; readonly width: number } {
+/** Rechaza un hueco vacío o que se sale de una serie de `length` puntos. */
+function checkGapRange(gap: GapRange, length: number): void {
   if (
     !Number.isInteger(gap.start) ||
     !Number.isInteger(gap.end) ||
@@ -105,6 +97,42 @@ export function gapBand(
       `Hueco fuera de la serie: puntos ${String(gap.start)} a ${String(gap.end)} de ${String(length)}.`,
     );
   }
+}
+
+/**
+ * Comprueba que los huecos y los valores que faltan coinciden: cada hueco está dentro de la serie,
+ * no está vacío y todos sus puntos faltan, y cada punto que falta está en un hueco. Así un `null` sin
+ * hueco que lo marque, o un hueco sobre ticks que sí llegaron, falla en lugar de dibujarse o
+ * describirse en silencio.
+ */
+export function checkGaps(values: readonly SeriesValue[], gaps: readonly GapRange[]): void {
+  const marked = new Set<number>();
+  for (const gap of gaps) {
+    checkGapRange(gap, values.length);
+    for (let index = gap.start; index < gap.end; index += 1) {
+      if (values[index] !== null) {
+        throw new RangeError(`El hueco tiene un valor en el punto ${String(index)}.`);
+      }
+      marked.add(index);
+    }
+  }
+  const unmarked = values.findIndex((value, index) => value === null && !marked.has(index));
+  if (unmarked !== -1) {
+    throw new RangeError(`Falta el punto ${String(unmarked)} sin un hueco que lo marque.`);
+  }
+}
+
+/**
+ * La banda de un hueco: va del último punto antes del hueco al primero después, así se ven los dos
+ * bordes del corte. La de un hueco en el primer punto empieza en el borde izquierdo, y la de uno en
+ * el último termina en el derecho. Rechaza un hueco vacío o que se sale de la serie.
+ */
+export function gapBand(
+  gap: GapRange,
+  scale: Scale,
+  length: number,
+): { readonly x: number; readonly width: number } {
+  checkGapRange(gap, length);
   const from = scale.x(Math.max(gap.start - 1, 0));
   const to = scale.x(Math.min(gap.end, length - 1));
   return { width: to - from, x: from };
