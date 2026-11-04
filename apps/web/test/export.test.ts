@@ -183,3 +183,50 @@ describe('prototipo exportado (V1-UI-001)', () => {
     expect(read(pageOf('/laboratorio/'))).toContain('id="evidencia-ruptura-v2"');
   });
 });
+
+// Los gráficos exportados (F2-CHART-001; concepto de interfaz §9). Las cifras esperadas salen de los
+// datos ficticios de @buoh/prototype-data: 90 ticks desde las 14:29:06 UTC, uno cada 2 s, con un hueco
+// de 6 ticks por la conexión perdida, y la curva de 121 puntos que termina en −0,4 %.
+const NB = '\u00a0';
+
+/** El nombre de cada gráfico de la página, que es su alternativa en texto. */
+const chartLabels = (html: string) =>
+  [...html.matchAll(/<div class="w-chart" role="img" aria-label="([^"]*)"/g)].map((m) => m[1]);
+
+/** La ruta de la línea de cada gráfico de la página. */
+const chartLines = (html: string) =>
+  [...html.matchAll(/<path d="([^"]*)" fill="none" stroke="var\(--b-chart-line\)"/g)].map(
+    (m) => m[1] ?? '',
+  );
+
+describe('gráficos exportados (F2-CHART-001)', () => {
+  it('Mercados: la alternativa del gráfico de ticks sale de sus datos, con el hueco y su motivo', () => {
+    expect(chartLabels(read(pageOf('/mercados/')))).toEqual([
+      'Precio ficticio de Volatility 100 entre las 14:29:06 y las 14:32:04 UTC: 84 ticks, entre 1036.99 y 1045.99, y el último a 1040.01. Un hueco de 6 ticks, de las 14:30:00 a las 14:30:10: conexión perdida.',
+    ]);
+  });
+
+  it('Mercados: la línea se corta una sola vez, en el hueco, que lleva su banda y su nota', () => {
+    const html = read(pageOf('/mercados/'));
+    const lines = chartLines(html);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.match(/M/g)).toHaveLength(2);
+    expect(html.match(/<rect\b[^>]*stroke="var\(--b-chart-gap\)"/g)).toHaveLength(1);
+    expect(html).toContain(`Hueco: 6 ticks (12${NB}s) · conexión perdida`);
+    expect(html).not.toMatch(/NaN|Infinity/);
+  });
+
+  it('Laboratorio: la peor caída va en % del capital inicial en el gráfico, en su alternativa y en su contexto', () => {
+    const html = read(pageOf('/laboratorio/'));
+    expect(chartLabels(html)).toEqual([
+      `Curva ficticia de resultado acumulado, en % del capital inicial, del 1 oct al 15 oct: empieza en 0,0${NB}% y termina en −0,4${NB}%, con un máximo de 1,0${NB}% y un mínimo de −2,6${NB}%. Peor caída: −3,6${NB}%, de 1,0${NB}% a −2,6${NB}%.`,
+    ]);
+    expect(html).toContain(`Peor caída: −3,6${NB}%`);
+    // `textOf` junta los espacios, también el de no separación, así que aquí el contexto lleva uno normal.
+    const text = textOf(mainOf(html));
+    expect(text).toContain('Drawdown máximo −3,6 %');
+    expect(text).not.toMatch(/\bpts\b|puntos porcentuales/);
+    expect(chartLines(html)).toHaveLength(1);
+    expect(html).not.toMatch(/NaN|Infinity/);
+  });
+});

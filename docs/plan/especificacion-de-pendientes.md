@@ -159,25 +159,23 @@ La línea terminó el 2026-10-25 (P-V1-01). Los demás pendientes de esta secci�
 - **Decisión del propietario (2026-10-25):** el contexto se queda fuera del gráfico, en la tarjeta de al lado.
 - **Resolución:** la guía §8 acepta el contexto en la tarjeta de al lado, y el [flujo de gráficos](../diseno/flujo-de-graficas.md) §9 da la regla por cumplida. El código no cambia.
 
-### P-V1-04. Gráficos: accesibilidad, pruebas y unidades — sin empezar
+### P-V1-04. Gráficos: accesibilidad, pruebas y unidades — resuelto
 
 - **Objetivo:** que los gráficos cumplan la guía §10 y tengan pruebas propias antes de mostrar datos reales.
 - **Fuente:**
   - guía §10 («Contraste… comprobado por pruebas» y «Ninguna información depende solo del color»);
-  - AGENTS.md (pruebas derivadas de los criterios).
-- **Estado (verificado):**
-  - el contraste de la línea y la rejilla de los gráficos no se mide;
-  - no hay pruebas de `scaleFor`, `segments` ni del SVG exportado;
-  - la descripción accesible de cada gráfico se escribe a mano, y no hay tabla alternativa;
-  - la peor caída se muestra como «3,6 pts» y el contexto dice «−3,6 %».
-- **Esperado:** la guía §10 y, desde el [plan de Fase 2](fase-2-laboratorio-y-bot-shadow.md), el requisito `F2-CHART-001`.
-- **Componentes:** `apps/web/src/components/Charts.tsx`, `packages/design-system/test` y el concepto de interfaz §6.
-- **Aceptación:** la de `F2-CHART-001`. Con la paleta de hoy, la rejilla no llega a 3:1 de contraste, así que el requisito la trata como decorativa y pide 3:1 a la línea y al hueco.
-- **Propuesta:** antes de los gráficos con datos reales de la Fase 2, definir en el concepto de interfaz:
-  - la alternativa textual o tabular;
-  - la unidad de la peor caída;
-  - una prueba de contraste de los tokens `chart`.
-- **Abierto:** resuelto por el [plan de Fase 2](fase-2-laboratorio-y-bot-shadow.md): se hace dentro de la fase, en F2.4, antes de que un gráfico muestre datos reales, con la aceptación de `F2-CHART-001`.
+  - AGENTS.md (pruebas derivadas de los criterios);
+  - desde el [plan de Fase 2](fase-2-laboratorio-y-bot-shadow.md), el requisito `F2-CHART-001`, que se hace en F2.4, antes de que un gráfico muestre datos reales.
+- **Antes:**
+  - el contraste de la línea y la rejilla de los gráficos no se medía;
+  - no había pruebas de `scaleFor`, `segments` ni del SVG exportado;
+  - la descripción accesible de cada gráfico se escribía a mano, y no había tabla alternativa;
+  - la peor caída se mostraba como «3,6 pts» y el contexto decía «−3,6 %».
+- **Resolución (F2.4, `F2-CHART-001`):**
+  - el [concepto de interfaz](../diseno/concepto-de-interfaz.md) §9 fija la alternativa de cada gráfico (texto para los ticks y la curva de resultados, tabla para las velas), la unidad de la peor caída, el % del capital inicial, igual en el gráfico y en su contexto («−3,6 %»), y la regla de las velas: su intervalo y cómo marcan un hueco;
+  - `packages/design-system/test/tokens.test.ts` mide el contraste de la línea y del hueco, 3:1 o más sobre todos los fondos, y deja escrito que la rejilla, decorativa, no llega a 3:1;
+  - `apps/web/test/charts.test.tsx` prueba la escala, los cortes de la línea y el SVG, también con una serie vacía, una sin ningún dato y un hueco en el primer punto, y la alternativa de cada gráfico se calcula de sus datos (`apps/web/src/components/chart-text.ts`).
+- **Límite:** las velas todavía no existen. Su regla está escrita, y llegan con los gráficos de datos reales de F2.4 (`F2-UI-001`).
 
 ### P-V1-05. Móvil: teléfono real y reautenticación — menor registrado y decisiones humanas
 

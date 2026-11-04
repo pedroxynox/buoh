@@ -215,6 +215,9 @@ describe('datos ficticios coherentes (V1-UI-001)', () => {
         Date.parse(lost?.whenUtc ?? ''),
       );
       expect(r100TickTimeUtc(gap.end)).toBe(unresolved?.whenUtc);
+      // El motivo del hueco es la incidencia que lo abrió: la conexión perdida.
+      expect(lost?.type).toBe('connection_lost');
+      expect(gap.reason).toBe('conexión perdida');
     }
     expect(R100_TICK_SECONDS).toBe(2);
     expect(Date.parse(r100TickTimeUtc(values.length - 1))).toBeLessThanOrEqual(now);

@@ -177,6 +177,7 @@ Escala (rem sobre 16 px): 0,75 · 0,8125 · 0,875 · 1 · 1,125 · 1,25 · 1,5 �
 - Líneas finas sobre fondo noche; sin degradados intensos ni efectos 3D.
 - Los huecos y las incidencias de datos se marcan en el gráfico, no se suavizan.
 - Toda curva de resultados lleva su modo, período, muestra y costes en la tarjeta de al lado, que en pantallas estrechas pasa debajo. El gráfico no tiene que repetirlos.
+- La alternativa en texto o en tabla de cada gráfico, la unidad de la peor caída y la regla de las velas están en el [concepto de interfaz](concepto-de-interfaz.md) §9.
 
 Cómo están hechos hoy los gráficos, y qué parte de estas reglas cumplen, está en [flujo de gráficos](flujo-de-graficas.md). Antes, esta guía pedía ese contexto dentro del gráfico; el propietario decidió el 2026-10-25 que vaya en la tarjeta de al lado (P-V1-03 de la [especificación de pendientes](../plan/especificacion-de-pendientes.md)).
 
@@ -189,6 +190,7 @@ Cómo están hechos hoy los gráficos, y qué parte de estas reglas cumplen, est
 ## 10. Accesibilidad
 
 - Contraste WCAG 2.2 AA: 4,5:1 para texto y 3:1 para bordes de controles y texto grande, comprobado por pruebas en ambos temas sobre todos los fondos.
+- En los gráficos, la línea y el hueco miden al menos 3:1 sobre todos los fondos, y la nota del hueco, que es texto, 4,5:1. La rejilla es decorativa: no lleva información y no llega a 3:1 ([concepto de interfaz](concepto-de-interfaz.md) §9).
 - El texto nunca baja su contraste con opacidad; solo los controles desactivados se atenúan.
 - Una insignia nunca desborda su contenedor: si falta espacio, su descripción pasa a otra línea y la etiqueta se mantiene entera.
 - Foco del teclado siempre visible, en tono cielo.
