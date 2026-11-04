@@ -18,8 +18,9 @@ import {
 /**
  * Laboratorio (concepto de interfaz §3): versiones de estrategia, validación fuera de muestra y la
  * curva de resultados con su contexto. El ejemplo pierde fuera de muestra a propósito (concepto §6).
- * Datos: `equitySeries`, `BACKTEST_CONTEXT`, `BACKTEST_SPLITS` y `APPROVED_VALIDATION`. El `label`
- * del gráfico se escribe a mano y debe coincidir con la curva (docs/diseno/flujo-de-graficas.md).
+ * Datos: `equitySeries`, `BACKTEST_CONTEXT`, `BACKTEST_SPLITS` y `APPROVED_VALIDATION`. La
+ * alternativa en texto del gráfico se calcula de la curva, y su peor caída va en % del capital
+ * inicial, como en su contexto (concepto de interfaz §9; docs/diseno/flujo-de-graficas.md).
  */
 export const metadata: Metadata = { title: 'Laboratorio' };
 
@@ -126,13 +127,13 @@ export default function LaboratorioPage() {
       <div className="w-grid w-grid--wide">
         <Card
           title="Retorno a la media corta v3 · prueba fuera de muestra"
-          subtitle="Resultado acumulado hipotético, en puntos porcentuales"
+          subtitle="Resultado acumulado hipotético, en % del capital inicial"
           headingLevel={2}
         >
           <EquityChart
+            title="Curva ficticia de resultado acumulado"
             values={equitySeries()}
             timeLabels={EQUITY_TIME_LABELS}
-            label="Curva ficticia de resultado acumulado del 1 al 15 de octubre, que termina en −0,4 puntos, con una peor caída de 3,6 puntos"
           />
           <p className="b-muted w-small">
             La línea punteada es el cero. La marca roja es la peor caída desde un máximo.

@@ -96,6 +96,43 @@ describe('contraste WCAG 2.2 AA (V1-DS-001)', () => {
   });
 });
 
+describe('contraste de los gráficos (F2-CHART-001)', () => {
+  // Concepto de interfaz §9. La línea y el hueco hacen falta para entender un gráfico: 3:1 contra su
+  // fondo, como pide WCAG 2.2 (criterio 1.4.11). Un gráfico puede ir sobre cualquier fondo del tema.
+  for (const theme of THEMES) {
+    it(`tema ${theme.name}: la línea y el hueco miden 3:1 o más sobre todos los fondos`, () => {
+      for (const [bgName, bg] of Object.entries(backgroundsOf(theme))) {
+        expect(contrastRatio(theme.chart.line, bg), `línea sobre ${bgName}`).toBeGreaterThanOrEqual(
+          WCAG_AA.ui,
+        );
+        expect(contrastRatio(theme.chart.gap, bg), `hueco sobre ${bgName}`).toBeGreaterThanOrEqual(
+          WCAG_AA.ui,
+        );
+      }
+    });
+
+    it(`tema ${theme.name}: la nota del hueco es texto y mide 4,5:1 o más`, () => {
+      // `.w-chart__note` escribe el motivo del hueco con el color del hueco.
+      for (const [bgName, bg] of Object.entries(backgroundsOf(theme))) {
+        expect(contrastRatio(theme.chart.gap, bg), `nota sobre ${bgName}`).toBeGreaterThanOrEqual(
+          WCAG_AA.text,
+        );
+      }
+    });
+
+    it(`tema ${theme.name}: la rejilla es decorativa y no llega a 3:1`, () => {
+      // Los valores se leen en las cifras del eje y en la alternativa en texto, así que la rejilla no
+      // lleva información. Con la paleta de hoy no llega a 3:1 sobre ningún fondo: si llegara, el
+      // concepto de interfaz §9 tiene que decirlo.
+      for (const [bgName, bg] of Object.entries(backgroundsOf(theme))) {
+        expect(contrastRatio(theme.chart.grid, bg), `rejilla sobre ${bgName}`).toBeLessThan(
+          WCAG_AA.ui,
+        );
+      }
+    });
+  }
+});
+
 describe('estados del contrato con texto, icono y tono (V1-DS-001)', () => {
   const cases = [
     ['execution_mode', executionModeSchema.options, EXECUTION_MODE_PRESENTATION],

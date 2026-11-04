@@ -277,6 +277,12 @@
   color: var(--b-tone-rojo-fg);
   transform: translate(calc(-100% - 0.5rem), -50%);
 }
+/* Estado vacío de un gráfico sin ningún valor: su alternativa en texto, en lugar del dibujo. */
+.w-chart-empty {
+  padding: var(--b-space-6) 0;
+  color: var(--b-text-muted);
+  font-size: var(--b-size-sm);
+}
 
 .w-stat {
   display: grid;

@@ -87,15 +87,16 @@ export function r100TickTimeUtc(index: number): string {
 }
 
 /**
- * Ticks que faltan: índices `start` a `end - 1` (14:30:00 a 14:30:10). Su hora y su motivo coinciden
- * con `INCIDENTS` (conexión perdida e `event_gap_unresolved`), pero la etiqueta se escribe a mano:
- * la coherencia la comprueba una prueba, no el código (docs/diseno/flujo-de-graficas.md).
+ * Ticks que faltan: índices `start` a `end - 1` (14:30:00 a 14:30:10), con su motivo. Su hora y su
+ * motivo coinciden con `INCIDENTS` (conexión perdida e `event_gap_unresolved`): la coherencia la
+ * comprueba una prueba, no el código. La nota del hueco y la alternativa en texto del gráfico se
+ * calculan de estos datos (concepto de interfaz §9; docs/diseno/flujo-de-graficas.md).
  */
 export const PRICE_GAPS: readonly {
   readonly start: number;
   readonly end: number;
-  readonly label: string;
-}[] = [{ start: 27, end: 33, label: `Hueco: 6 ticks (12${NB}s) · conexión perdida` }];
+  readonly reason: string;
+}[] = [{ start: 27, end: 33, reason: 'conexión perdida' }];
 
 /** Serie de precios calculada con una fórmula fija (sin aleatoriedad). `null` marca un tick que falta. */
 export function priceSeries(): readonly (number | null)[] {
@@ -498,12 +499,12 @@ export const SHADOW_CONTEXT: PerformanceContext = {
 export const SHADOW_RESULT = `−0,3${NB}%`;
 
 /**
- * Curva de resultado acumulado hipotético fuera de muestra (fórmula fija). Termina en −0,4 y su
- * peor caída es de 3,6 puntos, coherente con `BACKTEST_CONTEXT`.
+ * Curva de resultado acumulado hipotético fuera de muestra (fórmula fija). Termina en −0,4 % y su
+ * peor caída es de −3,6 %, coherente con `BACKTEST_CONTEXT`.
  *
- * Los valores son puntos porcentuales de resultado acumulado; la caída se mide en esas mismas
- * unidades, no como porcentaje desde el máximo. Los 121 puntos no tienen un paso de tiempo
- * definido: `EQUITY_TIME_LABELS` solo reparte las fechas a lo largo de la curva.
+ * Los valores son el resultado acumulado en % del capital inicial; la caída se mide en esa misma
+ * unidad, no como porcentaje desde el máximo (concepto de interfaz §9). Los 121 puntos no tienen un
+ * paso de tiempo definido: `EQUITY_TIME_LABELS` solo reparte las fechas a lo largo de la curva.
  */
 export function equitySeries(): readonly number[] {
   const values: number[] = [];
