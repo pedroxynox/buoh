@@ -219,7 +219,7 @@ Observatorio, Mercados y Datos de `apps/web` ([concepto de interfaz](../diseno/c
 - Mercados muestra el catálogo de Deriv con su versión y su fecha, y el gráfico de R_100 de las últimas horas, en ticks y en velas, con los huecos marcados y su motivo;
 - Datos muestra los datasets publicados, con su identificador, período, conteos, incidencias y el resultado de su verificación. Sus pruebas usan datasets sintéticos, y en producción la sección muestra su estado vacío hasta que F2.5 publique los primeros;
 - toda vista de datos dice símbolo, fuente, zona horaria UTC, intervalo, frescura y calidad. Una sección con datos reales nunca muestra datos ficticios, y las que siguen ficticias conservan la marca «Datos ficticios»;
-- las preferencias de la Fase 2 del [catálogo de funciones](../producto/funciones-y-disponibilidad.md) se guardan por cuenta: el tema noche o día y el idioma, con los idiomas que decida el propietario (§12). Las preferencias de notificaciones llegan con la Fase 3, que trae las alertas y sus permisos y preferencias ([roadmap](../producto/roadmap.md), Fase 3);
+- las preferencias de la Fase 2 del [catálogo de funciones](../producto/funciones-y-disponibilidad.md) se guardan por cuenta: el tema noche o día y el idioma, con los idiomas que decida el propietario (§12). El propietario decidió el 2026-11-04 que el producto va solo en español, así que en la Fase 2 solo se guarda el tema: con un solo idioma no hay nada que elegir, y el selector de idioma llega con el segundo. Las preferencias de notificaciones llegan con la Fase 3, que trae las alertas y sus permisos y preferencias ([roadmap](../producto/roadmap.md), Fase 3);
 - cada pantalla tiene los estados del concepto de interfaz §5: cargando, vacío, error y degradado;
 - la exportación con datos ficticios sigue en `apps/web/out`, la carpeta que empaqueta el escritorio (ADR-0010), y la API sirve otra exportación. Una prueba comprueba que la de `apps/web/out` solo tiene datos ficticios y no llama a la API.
 
@@ -371,6 +371,7 @@ F2.4 no tiene ADR: cambia el concepto de interfaz, que es su fuente canónica (P
 
 - La captura empieza en F2.2, lo antes posible, para que los datos se acumulen mientras avanza lo demás.
 - F2.2 se cierra con su evidencia de 7 días. F2.3 no la espera: empieza en cuanto la captura corre en producción. F2.5 sí espera esos 7 días.
+- F2.4 no espera el último PR de F2.3, el 7c, que solo reúne la memoria y el tráfico de salida de `buoh-api` de varios días (ADR-0019 §14). Para no mezclar su tráfico con esa medición, ninguna lectura de R2 de F2.4 llega a producción antes del 2026-11-08. Lo decidió el propietario el 2026-11-04.
 - Cada incremento se entrega en PR pequeños, con una revisión semántica cada uno, y desde F2.3 el propietario lo usa en la web.
 - Ningún incremento deja componentes futuros vacíos.
 
@@ -431,7 +432,7 @@ Pueden sumarse, si sus ADR los eligen y el propietario los aprueba:
 | Un cron job de Render para las operaciones del sistema de datos, unos 1 USD más al mes | dinero | decidida el 2026-10-31: sí (§11 y ADR-0018 §11) |
 | El costo de R2 con el redondeo de Cloudflare, unos 3 USD más al mes | dinero | decidida el 2026-10-31: sí, unos 19 USD al mes para el sistema de datos (§11 y ADR-0018 §14) |
 | Cómo inicia sesión el propietario | seguridad | decidida el 2026-11-02: con una contraseña de buoh y un código de 6 cifras de una app de autenticación ([ADR-0019](../arquitectura/adr/0019-api-cuentas-y-auditoria.md) §1) |
-| Qué idiomas tiene el producto, para la preferencia de idioma del catálogo | producto | F2.4 |
+| Qué idiomas tiene el producto, para la preferencia de idioma del catálogo | producto | decidida el 2026-11-04: solo español. F2.4 guarda por cuenta solo el tema, y el selector de idioma llega con un segundo idioma (`F2-UI-001`) |
 | Qué tipo de operación representan las posiciones hipotéticas, dentro de lo que ofrece Deriv para R_100 | producto | antes de abrir la ADR del modelo de estrategia (§8, punto 5) |
 | Cómo se reanuda una estrategia `shadow` detenida: a mano, como pide hoy el protocolo §5, o sola tras las degradaciones breves que la historia cubre, lo que cambia el protocolo. Las dos adelantan para `shadow` el «Volver a encender» del catálogo (`F2-STOP-001`) | riesgo y producto | antes de abrir la ADR del motor (§8, punto 8) |
 | El worker Standard, si el punto de control no cumple `F2-CHECKPOINT-001` | dinero | solo si pasa |
