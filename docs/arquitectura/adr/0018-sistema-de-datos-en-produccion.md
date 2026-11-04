@@ -63,7 +63,7 @@ El sistema de datos tiene su propio Blueprint, `render-datos.yaml`, en la raíz 
 | `buoh-ingesta` | background worker `starter`, una instancia | `ingest --live --symbol R_100` (§4) |
 | `buoh-operaciones` | cron job `starter`, `*/5 * * * *` | salud, roles, logs, retención y verificación (§11) |
 
-- Los dos servicios usan el runtime de Node, con el Node de `.node-version` (24.22.0), e instalan y compilan con pnpm 12.14.0 solo el worker y sus paquetes, como el sitio. Despliegan después de CI (`autoDeployTrigger: checksPass`) y solo cuando cambia algo de lo que depende el worker (`buildFilter`).
+- Los dos servicios usan el runtime de Node, con el Node de `.node-version` (24.22.0), e instalan y compilan con pnpm 12.14.0 solo el worker y sus paquetes, como el sitio. Despliegan después de CI (`autoDeployTrigger: checksPass`) y solo cuando cambia algo de lo que depende el worker (`buildFilter`). (Precisión del registro del PR #91 de ADR-0019.) El 2026-11-04, un push que cambiaba la sección de `buoh-api` en `render-datos.yaml` la desplegó al sincronizarse el Blueprint, sin esperar a CI, y lo mismo puede pasar con estos dos servicios ([despliegue en Render](../../operacion/despliegue-en-render.md), «Cuándo despliegan»).
 - `buoh-ingesta` tiene `maxShutdownDelaySeconds: 60`, el minuto que el runbook da a la parada antes de `SIGKILL`. Tiene siempre una instancia: una segunda esperaría el bloqueo sin fin.
 - Ningún servicio lleva disco persistente: desactivaría el despliegue sin corte, y el log no confía su durabilidad al disco local (ADR-0006).
 - El almacenamiento autoescalado de la base queda apagado: subiría el presupuesto sin el visto bueno del propietario. El espacio lo vigilan §7 y el runbook.

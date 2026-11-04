@@ -11,8 +11,10 @@ El Blueprint del sistema de datos es `render-datos.yaml`; qué define está en [
 
 ## Desplegar
 
-1. Fusiona en `main` el PR de despliegue. Cuando CI pase, Render sincroniza el Blueprint y crea el servicio `buoh-api`. En su primer cron, `buoh-operaciones` crea el rol `buoh_api`, migra su esquema y le pone la contraseña que Render generó (ADR-0019 §7); hasta entonces, `GET /api/salud` responde `503 not_ready`.
-2. **Mira si el Blueprint dejó algo pendiente.** En el panel, abre **Blueprints**, el del sistema de datos, y pulsa **Manual Sync**. Si aparece un cambio con un botón **Approve**, apruébalo. El 2026-11-03, Render creó `buoh-api` pero dejó así la variable `BUOH_API_POSTGRES_PASSWORD` de `buoh-operaciones`, y sin ella `buoh-operaciones` no prepara la base de la API ([evidencia](evidencia-api-f2-3.md)).
+Si el comentario de listo de un PR dice que cambia `render-datos.yaml`, y después de ese comentario fusionaste otro PR, no lo fusiones todavía: pídele al agente que lo actualice. Una sincronización del Blueprint puede desplegar sin esperar a CI, y así lo que se despliega es lo que CI ya probó ([despliegue en Render](despliegue-en-render.md), «Cuándo despliegan»).
+
+1. Fusiona en `main` el PR de despliegue. Render sincroniza el Blueprint al recibir el push y crea el servicio `buoh-api`. En su primer cron, `buoh-operaciones` crea el rol `buoh_api`, migra su esquema y le pone la contraseña que Render generó (ADR-0019 §7); hasta entonces, `GET /api/salud` responde `503 not_ready`.
+2. **Mira si el Blueprint dejó algo pendiente.** Si llegó un email «Blueprint sync failed», antes de nada abre **Blueprints**, el del sistema de datos, pásale al agente el error que muestra, o una captura, y espera su respuesta: él te dice cuándo sincronizar y qué aprobar. Si no llegó ese email, abre **Blueprints**, el del sistema de datos, y pulsa **Manual Sync**, y si aparece un cambio con un botón **Approve**, apruébalo. El 2026-11-03, Render creó `buoh-api` pero dejó así la variable `BUOH_API_POSTGRES_PASSWORD` de `buoh-operaciones`, y sin ella `buoh-operaciones` no prepara la base de la API ([evidencia](evidencia-api-f2-3.md)). El 2026-11-04, la sincronización falló sin decir por qué y no creó una variable nueva de `buoh-operaciones`, y una **Manual Sync** con **Approve** la creó (abajo, «La credencial de lectura de los datos»).
 3. En el panel de `buoh-api`, espera a que el despliegue termine y la salud (`/api/salud`) quede verde. La dirección aparece en la página del servicio, con la forma `https://buoh-api….onrender.com`.
    - **Si termina en `Timed Out`** (Render espera 15 minutos a que `/api/salud` responda `200`): aprueba primero lo pendiente del paso 2. Después, en `buoh-operaciones`, pulsa **Trigger Run** y espera a que termine en verde. Por último, en `buoh-api`, pulsa **Manual Deploy** y después **Deploy latest commit**.
 4. **Si Render dio una dirección distinta de `https://buoh-api.onrender.com`** (porque el nombre estaba ocupado), cambia `BUOH_API_ORIGIN` en `render-datos.yaml` a esa dirección exacta (sin barra final) y vuelve a fusionar: el `Origin` tiene que coincidir, o la web no puede cambiar nada (CSRF, ADR-0019 §2). Pásale la dirección al agente.
@@ -20,11 +22,20 @@ El Blueprint del sistema de datos es `render-datos.yaml`; qué define está en [
 
 ### La credencial de lectura de los datos
 
-El PR de la salud de los datos de F2.4 suma `BUOH_API_LECTURA_POSTGRES_PASSWORD`, la contraseña del rol `buoh_api_lectura` (ADR-0019 §7 y §8): Render la genera en `buoh-api`, y `buoh-operaciones` la toma de ahí (`fromService`). Al fusionarlo se despliegan los tres servicios: `buoh-ingesta`, con un corte de unos segundos en la captura, `buoh-operaciones` y `buoh-api`.
+El PR de la salud de los datos de F2.4 (#91) sumó `BUOH_API_LECTURA_POSTGRES_PASSWORD`, la contraseña del rol `buoh_api_lectura` (ADR-0019 §7 y §8): Render la genera en `buoh-api`, y `buoh-operaciones` la toma de ahí (`fromService`). Al fusionarlo se desplegaron los tres servicios: `buoh-ingesta`, con un corte de unos segundos en la captura, `buoh-operaciones` y `buoh-api`. El propietario lo fusionó el 2026-11-04, y pasó esto ([evidencia de F2.4](evidencia-datos-f2-4.md)):
 
-1. Cuando CI pase y termine el despliegue, en la página del Blueprint pulsa **Manual Sync**, y aprueba con **Approve** lo que haya quedado pendiente, como en el paso 2 de arriba. Sin la variable en `buoh-api`, la API arranca igual, y solo `GET /api/v1/datos/salud` responde `503 not_ready`.
-2. En su ejecución siguiente, unos 30 s después de cada minuto múltiplo de 5, `buoh-operaciones` crea `buoh_api_lectura`, miembro de `buoh_lectura`, y le pone la contraseña: su informe `roles_and_logs` lleva `buoh_api_lectura` en `passwords_set`. Hasta entonces, esa ruta responde `503 postgres_unavailable`.
-3. El agente comprueba con su acceso («Acceso del agente», en el runbook de ingesta) que el rol existe, inicia sesión, no tiene `CREATEROLE` y solo es miembro de `buoh_lectura`, y que el informe lo nombra en `passwords_set`. Después tú, con tu sesión abierta en el navegador, abres `https://<dirección>/api/v1/datos/salud` y le pasas lo que ves: el número del log y la última observación de la salud, con su hora. No lleva ningún secreto.
+- La sincronización automática del Blueprint creó la variable en `buoh-api` y desplegó la API sin esperar a CI. En `buoh-operaciones` no la creó, y llegó un email «Blueprint sync failed for buoh-datos», sin el motivo. No se rompió nada: la API arrancó igual, y solo `GET /api/v1/datos/salud` habría respondido `503` mientras faltaba el rol.
+- Cuando terminaron los despliegues, el propietario pulsó **Manual Sync** y aprobó con **Approve** la variable de `buoh-operaciones`.
+- En su ejecución siguiente, la de las 20:50 UTC, `buoh-operaciones` creó `buoh_api_lectura`, miembro de `buoh_lectura`, y le puso la contraseña: su informe `roles_and_logs` lleva `buoh_api_lectura` en `passwords_set`. El agente comprobó con su acceso («Acceso del agente», en el runbook de ingesta) que el rol inicia sesión, no tiene `CREATEROLE` y solo es miembro de `buoh_lectura`.
+- Con su sesión abierta, el propietario vio en la ruta la salud `healthy` del log 2.
+
+**Si vuelve a pasar**, con un PR que añada una variable que copia otra nueva de otro servicio, sigue el paso 2 de arriba: el agente te dice cuándo sincronizar y qué aprobar. Después, el agente comprueba lo que crea `buoh-operaciones` en su ejecución siguiente, unos 30 s después de cada minuto múltiplo de 5.
+
+**Para ver una ruta de datos en el navegador**, como `https://<dirección>/api/v1/datos/salud`, que no lleva ningún secreto:
+
+1. Entra en `https://<dirección>/acceso` con tu usuario, tu contraseña y el código de 6 cifras.
+2. Comprueba que tienes la sesión abierta: al pulsar **Propietario**, arriba a la derecha, aparece **Cerrar sesión**. En el teléfono no se ve la palabra **Propietario**, solo el icono de una persona: púlsalo. Mientras la web lee la sesión, ese botón está, pero no abre el menú.
+3. Escribe la dirección en la barra de direcciones del navegador, o elígela de sus sugerencias, y pásale al agente lo que ves. Si llegas desde un enlace de otra página, como el chat del agente, tu navegador no envía la sesión, y la respuesta es `401 unauthenticated` (ADR-0019 §2).
 
 ## Dar de alta tu cuenta (enseguida, justo después de desplegar)
 
