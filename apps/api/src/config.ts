@@ -11,6 +11,15 @@ export const DEFAULT_PORT = 10_000;
 /** El único usuario de PostgreSQL de la API en `production` (ADR-0019 §7). */
 export const API_POSTGRES_USER = 'buoh_api';
 
+/**
+ * El usuario de las lecturas del sistema de datos (ADR-0019 §7 y §8), en todos los entornos: el rol
+ * que `buoh-operaciones` crea, miembro de `buoh_lectura`. Solo su contraseña es configurable.
+ */
+export const API_READER_POSTGRES_USER = 'buoh_api_lectura';
+
+/** La contraseña de `buoh_api_lectura`, que Render genera en `buoh-api` (`generateValue`). */
+const READER_PASSWORD_VARIABLE = 'BUOH_API_LECTURA_POSTGRES_PASSWORD';
+
 const PORT_PATTERN = /^[1-9]\d{0,4}$/u;
 /** 32 bytes en base64 con relleno, como los valores de `generateValue` de Render. */
 const KEY_PATTERN = /^[A-Za-z0-9+/]{43}=$/u;
@@ -48,6 +57,13 @@ export interface ApiConfig {
   readonly origin: string;
   readonly keys: ApiKeys;
   readonly postgres: PostgresConfig;
+  /**
+   * La conexión de las lecturas del sistema de datos (ADR-0019 §8): la de `postgres`, con el usuario
+   * `buoh_api_lectura` y su contraseña, `BUOH_API_LECTURA_POSTGRES_PASSWORD`. `null` sin ella:
+   * entonces las rutas de datos responden 503 `not_ready`, y lo demás de la API no cambia. Es
+   * opcional para que un despliegue no falle si Render deja la variable pendiente de aprobar.
+   */
+  readonly reader: PostgresConfig | null;
 }
 
 const KEY_VARIABLES = {
@@ -82,6 +98,9 @@ function parseOrigin(value: string | undefined): string | null {
  * - `BUOH_API_ORIGIN`, un origen exacto, y en `production` con `https`;
  * - las tres claves, cada una de 32 bytes en base64 canónico y distinta de las otras dos;
  * - la conexión a PostgreSQL de `loadPostgresConfig`, y en `production` con el usuario `buoh_api`.
+ *
+ * `BUOH_API_LECTURA_POSTGRES_PASSWORD`, la contraseña de las lecturas del sistema de datos, es
+ * opcional, pero no puede estar vacía.
  *
  * Una variable inválida o ausente lanza `ApiConfigError` con los nombres de todas las rechazadas,
  * ordenados, nunca sus valores.
@@ -135,6 +154,11 @@ export function loadApiConfig(env: Readonly<Record<string, string | undefined>>)
     rejected.add('BUOH_POSTGRES_USER');
   }
 
+  const readerPassword = env[READER_PASSWORD_VARIABLE];
+  if (readerPassword === '') {
+    rejected.add(READER_PASSWORD_VARIABLE);
+  }
+
   const { passwordPepper, totpKey, tokenKey } = keys;
   if (
     !parsed.success ||
@@ -155,5 +179,9 @@ export function loadApiConfig(env: Readonly<Record<string, string | undefined>>)
     origin,
     keys: { passwordPepper, totpKey, tokenKey },
     postgres,
+    reader:
+      readerPassword === undefined
+        ? null
+        : { ...postgres, password: readerPassword, user: API_READER_POSTGRES_USER },
   };
 }

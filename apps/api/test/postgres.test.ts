@@ -5,8 +5,10 @@ import { API_SCHEMA, loadPostgresConfig } from '../src/postgres/config.js';
 import { isPostgresUnavailable } from '../src/postgres/errors.js';
 import {
   createPool,
+  createReaderPool,
   POOL_MAX_CONNECTIONS,
   postgresSslOption,
+  READER_SESSION_OPTIONS,
   SERVICE_POOL_TIMEOUTS,
 } from '../src/postgres/pool.js';
 
@@ -179,6 +181,45 @@ describe('createPool con los plazos del servicio', () => {
       expect(pool.options).not.toHaveProperty('connectionTimeoutMillis');
     } finally {
       await pool.end();
+    }
+  });
+});
+
+describe('createReaderPool (ADR-0019 §8)', () => {
+  it('con buoh_api_lectura: 3 conexiones, los plazos del servicio, su cifrado, sin esquema propio y en solo lectura', async () => {
+    expect(READER_SESSION_OPTIONS).toBe(
+      '-c search_path=pg_catalog -c default_transaction_read_only=on',
+    );
+    for (const [sslMode, ssl] of [
+      ['require', { rejectUnauthorized: false }],
+      ['verify-full', true],
+      ['disable', false],
+    ] as const) {
+      const pool = createReaderPool({
+        database: 'buoh',
+        host: '127.0.0.1',
+        password: SECRET,
+        port: 5432,
+        sslMode,
+        user: 'buoh_api_lectura',
+      });
+      try {
+        expect(pool.options).toMatchObject({
+          connectionTimeoutMillis: 5000,
+          database: 'buoh',
+          host: '127.0.0.1',
+          idle_in_transaction_session_timeout: 30_000,
+          max: 3,
+          options: READER_SESSION_OPTIONS,
+          port: 5432,
+          ssl,
+          statement_timeout: 10_000,
+          user: 'buoh_api_lectura',
+        });
+        expect(String(pool.options.options)).not.toContain(API_SCHEMA);
+      } finally {
+        await pool.end();
+      }
     }
   });
 });

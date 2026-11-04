@@ -172,6 +172,13 @@ services:
           type: web
           name: buoh-api
           envVarKey: BUOH_POSTGRES_PASSWORD
+      # La contraseña de buoh_api_lectura, la que genera buoh-api: con ella el paso 1 crea el rol de
+      # las lecturas de datos de la API, miembro de buoh_lectura (ADR-0019 §7 y §8).
+      - key: BUOH_API_LECTURA_POSTGRES_PASSWORD
+        fromService:
+          type: web
+          name: buoh-api
+          envVarKey: BUOH_API_LECTURA_POSTGRES_PASSWORD
       - key: BUOH_SALUD_POSTGRES_PASSWORD
         generateValue: true
       - key: BUOH_AGENTE_POSTGRES_PASSWORD
@@ -208,7 +215,8 @@ services:
     numInstances: 1
     # La ruta de salud de Render: 200 cuando el proceso responde y tiene sus migraciones (ADR-0019 §7).
     healthCheckPath: /api/salud
-    # Compila la API y la exportación out-api de la web, que la API sirve (ADR-0019 §9 y §10).
+    # Compila la API, el worker del que lee por la ruta lectura, y la exportación out-api de la web,
+    # que la API sirve (ADR-0019 §8, §9 y §10).
     buildCommand: >-
       npx --yes pnpm@12.14.0 install --frozen-lockfile --filter "@buoh/api..." --filter "@buoh/web..." &&
       npx --yes pnpm@12.14.0 --filter "@buoh/api..." --filter "@buoh/web..." run build
@@ -220,8 +228,10 @@ services:
       paths:
         - apps/api/**
         - apps/web/**
+        - apps/market-data-worker/**
         - packages/contracts/**
         - packages/design-system/**
+        - packages/domain/**
         - packages/prototype-data/**
         - package.json
         - pnpm-lock.yaml
@@ -234,8 +244,11 @@ services:
         - apps/api/test/**
         - apps/api/integration/**
         - apps/web/test/**
+        - apps/market-data-worker/test/**
+        - apps/market-data-worker/integration/**
         - packages/contracts/test/**
         - packages/design-system/test/**
+        - packages/domain/test/**
         - packages/prototype-data/test/**
         - '**/*.md'
     envVars:
@@ -265,6 +278,10 @@ services:
       # Dirección interna, con un certificado autofirmado: cifrado sin verificarlo (ADR-0018 §9).
       - key: BUOH_POSTGRES_SSLMODE
         value: require
+      # La contraseña de buoh_api_lectura, el rol de las lecturas del sistema de datos, con la misma
+      # base: la genera Render, y buoh-operaciones la pone al rol (ADR-0019 §7 y §8).
+      - key: BUOH_API_LECTURA_POSTGRES_PASSWORD
+        generateValue: true
       # Las tres claves del servidor, de 256 bits que genera Render y viven fuera de la base, para la
       # contraseña (pepper), el secreto TOTP y los tokens de sesiones, CSRF y enlaces (ADR-0019 §1, §2).
       - key: BUOH_API_PASSWORD_PEPPER

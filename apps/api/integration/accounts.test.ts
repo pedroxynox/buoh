@@ -1071,6 +1071,7 @@ describe('el recorrido completo por HTTP, con inject contra la base (ADR-0019 §
         sessions: unusedSessions,
         limiter: createRateLimiter(),
         clock: clock.now,
+        data: null,
       }),
       rateLimit: () => 0,
     });

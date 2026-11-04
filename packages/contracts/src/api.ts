@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { auditEventStructuralSchema } from './audit.js';
+import { healthReportSchema } from './health.js';
 import { utcTimestampMsSchema } from './scalars.js';
 
 /**
@@ -25,7 +26,8 @@ import { utcTimestampMsSchema } from './scalars.js';
  * - `invalid_code`: el código de 6 cifras no corresponde al secreto TOTP del enlace;
  * - `password_rejected`: la contraseña nueva no cumple la política, con su motivo (§1);
  * - `rate_limited`: hay que esperar, con los segundos que faltan;
- * - `not_ready`: faltan las migraciones de la API (§7);
+ * - `not_ready`: faltan las migraciones de la API (§7) y, en las rutas de datos (F2.4), también la
+ *   credencial de lectura (§8);
  * - `postgres_unavailable`: PostgreSQL no responde.
  *
  * Los de las sesiones y el inicio de sesión (PR 4b):
@@ -268,6 +270,57 @@ export const auditEventsResponseSchema = z
   .strictObject({ events: z.array(auditEventStructuralSchema) })
   .meta({ id: 'AuditEvents', title: 'AuditEvents' });
 
+// --- F2.4: las lecturas del sistema de datos (ADR-0019 §8) ---
+
+/** El mayor número de un log de producción: seis cifras (ADR-0018 §6). */
+const MAX_LOG_NUMBER = 999_999;
+
+/**
+ * Un motivo saneado de un informe de `buoh-operaciones` (ADR-0018 §11): letras, cifras, `_`, `.` y
+ * `-`, de 1 a 64, como `child_timeout`, `health_command_failed` o un SQLSTATE. Nunca un mensaje.
+ */
+const operationsReasonSchema = z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/u);
+
+/**
+ * La respuesta de `GET /api/v1/datos/salud` (ADR-0019 §8): la salud de los datos, la última
+ * observación que guardó `buoh-operaciones` en el log activo, con la hora en que la guardó, para que
+ * se vea su frescura. La API no ejecuta `data:health`.
+ * - `log`: el número del log activo, o `null` si no hay ninguno; entonces tampoco hay observación.
+ * - `observation`: la última del log activo, o `null` si todavía no tiene ninguna, como justo
+ *   después del corte semanal. Si la última falló, una anterior que terminó no la sustituye.
+ *   `completed` lleva el `HealthReport`, que puede no ser `healthy`; `failed`, el motivo por el que
+ *   la salud no se pudo observar.
+ */
+export const dataHealthSchema = z
+  .strictObject({
+    log: z.number().int().min(1).max(MAX_LOG_NUMBER).nullable(),
+    observation: z
+      .discriminatedUnion('status', [
+        z.strictObject({
+          status: z.literal('completed'),
+          observed_at_utc: utcTimestampMsSchema,
+          // El esquema con sus reglas: el OpenAPI lo nombra HealthReport, como el estructural.
+          report: healthReportSchema,
+        }),
+        z.strictObject({
+          status: z.literal('failed'),
+          observed_at_utc: utcTimestampMsSchema,
+          reason: operationsReasonSchema,
+        }),
+      ])
+      .nullable(),
+  })
+  .superRefine((value, context) => {
+    if (value.log === null && value.observation !== null) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Sin log activo no hay observación.',
+        path: ['observation'],
+      });
+    }
+  })
+  .meta({ id: 'DataHealth', title: 'DataHealth' });
+
 export type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
 export type ApiHealth = z.infer<typeof apiHealthSchema>;
@@ -281,3 +334,4 @@ export type SessionLoginRequest = z.infer<typeof sessionLoginRequestSchema>;
 export type SessionInfo = z.infer<typeof sessionInfoSchema>;
 export type SessionsClosedResult = z.infer<typeof sessionsClosedResultSchema>;
 export type AuditEventsResponse = z.infer<typeof auditEventsResponseSchema>;
+export type DataHealth = z.infer<typeof dataHealthSchema>;

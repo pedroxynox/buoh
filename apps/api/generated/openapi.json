@@ -115,6 +115,65 @@
         }
       }
     },
+    "/api/v1/datos/salud": {
+      "get": {
+        "operationId": "getDatosSalud",
+        "summary": "La salud de los datos: el log activo y la última observación que guardó buoh-operaciones en él, con su hora (ADR-0019 §8).",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataHealth"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "La petición no cumple su contrato, también si trae parámetros de consulta que la ruta no admite.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "La petición necesita una sesión y no la trae o no vale (unauthenticated).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Un fallo del servidor, también una respuesta que no cumple su contrato.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Faltan las migraciones de la API o la credencial de lectura de los datos (not_ready), o PostgreSQL no responde (postgres_unavailable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/enlace": {
       "post": {
         "operationId": "postEnlace",
@@ -1608,11 +1667,212 @@
         "additionalProperties": false,
         "title": "AuditEvents"
       },
+      "DataHealth": {
+        "type": "object",
+        "properties": {
+          "log": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 999999
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observation": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "const": "completed"
+                      },
+                      "observed_at_utc": {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+                      },
+                      "report": {
+                        "$ref": "#/components/schemas/HealthReport"
+                      }
+                    },
+                    "required": [
+                      "status",
+                      "observed_at_utc",
+                      "report"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "const": "failed"
+                      },
+                      "observed_at_utc": {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+                      },
+                      "reason": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+                      }
+                    },
+                    "required": [
+                      "status",
+                      "observed_at_utc",
+                      "reason"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "log",
+          "observation"
+        ],
+        "additionalProperties": false,
+        "title": "DataHealth"
+      },
       "EmptyRequest": {
         "type": "object",
         "properties": {},
         "additionalProperties": false,
         "title": "EmptyRequest"
+      },
+      "HealthReport": {
+        "type": "object",
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "execution_mode": {
+            "type": "string",
+            "const": "disabled"
+          },
+          "service_health": {
+            "type": "string",
+            "enum": [
+              "starting",
+              "healthy",
+              "degraded",
+              "recovering",
+              "paused",
+              "failed"
+            ]
+          },
+          "connection_state": {
+            "type": "string",
+            "enum": [
+              "disconnected",
+              "connecting",
+              "connected"
+            ]
+          },
+          "backlog_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "backlog_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "last_observation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_received_at_utc": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_event_time_utc": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_published_dataset_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "open_condition_types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "connection_lost",
+                "event_gap_unresolved",
+                "persistence_unavailable",
+                "source_limit_exceeded"
+              ]
+            }
+          }
+        },
+        "required": [
+          "schema_version",
+          "source",
+          "execution_mode",
+          "service_health",
+          "connection_state",
+          "backlog_count",
+          "backlog_bytes",
+          "last_observation_id",
+          "last_received_at_utc",
+          "last_event_time_utc",
+          "last_published_dataset_id",
+          "open_condition_types"
+        ],
+        "additionalProperties": false,
+        "title": "HealthReport"
       },
       "LinkSecret": {
         "type": "object",

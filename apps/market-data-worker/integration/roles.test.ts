@@ -671,6 +671,7 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
   function ownerConfig(user: string, password: string): OperationsConfig {
     return {
       apiPassword: null,
+      apiReaderPassword: null,
       healthObjects: config.s3,
       operationsObjects: config.s3,
       owner: { ...roleConfig(user, password).postgres, schema: 'public' },

@@ -75,7 +75,7 @@ describe('@buoh/market-data-worker/lectura (ADR-0019 §8)', () => {
     expect(forbidden(main.urls)).toEqual(['fflate', 'node:child_process', 'ws']);
   });
 
-  it('exporta lo que se lee: configuración, log activo, log, perfil, catálogo, registro, publicaciones y almacenes en memoria', () => {
+  it('exporta lo que se lee: configuración, log activo, log, perfil, salud guardada, catálogo, registro, publicaciones y almacenes en memoria', () => {
     expect(lectura.exports).toEqual(
       expect.arrayContaining([
         // La configuración y los pools.
@@ -97,6 +97,10 @@ describe('@buoh/market-data-worker/lectura (ADR-0019 §8)', () => {
         'createDerivMeasurementProfileFromSourceSchema',
         'DERIV_SCHEMA_RELEASE',
         'SOURCE_SCHEMA_ENTRY',
+        // La salud que guardó buoh-operaciones.
+        'parseStoredHealthObservation',
+        'readLatestStoredHealth',
+        'StoredHealthError',
         // El catálogo.
         'PostgresCatalogStore',
         // El registro operativo.
@@ -112,6 +116,21 @@ describe('@buoh/market-data-worker/lectura (ADR-0019 §8)', () => {
         'InMemorySourceLogStore',
       ]),
     );
+  });
+
+  it('no exporta lo que solo escribe: ni los roles, ni sus contraseñas, ni las migraciones, ni las operaciones', () => {
+    for (const name of [
+      'ensureApiReaderRole',
+      'ensureApiRole',
+      'ensureRuntimeRoles',
+      'grantLogPrivileges',
+      'setRolePassword',
+      'migrate',
+      'runOperations',
+    ]) {
+      expect(main.exports, name).toContain(name);
+      expect(lectura.exports, name).not.toContain(name);
+    }
   });
 
   it('el paquete la declara con su JavaScript y sus tipos compilados', () => {

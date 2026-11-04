@@ -10,9 +10,10 @@ import { buildApp } from '../app.js';
 import { loadCommonPasswords } from '../auth/common-passwords.js';
 import { createPasswordHasher } from '../auth/password-hash.js';
 import { ApiConfigError, loadApiConfig } from '../config.js';
+import { createDataReader } from '../data/reader.js';
 import { createUuidV7Generator } from '../ids.js';
 import { errorName, jsonLines } from '../log.js';
-import { createPool, SERVICE_POOL_TIMEOUTS } from '../postgres/pool.js';
+import { createPool, createReaderPool, SERVICE_POOL_TIMEOUTS } from '../postgres/pool.js';
 import { migrationState } from '../postgres/readiness.js';
 import { createReadiness } from '../readiness.js';
 import { apiRoutes } from '../routes.js';
@@ -91,6 +92,11 @@ if (config !== undefined) {
     limiter,
     failures,
   });
+  // Las lecturas del sistema de datos, con su propio pool y `buoh_api_lectura` (ADR-0019 §8). Sin
+  // su contraseña, sus rutas responden not_ready, y lo demás de la API no cambia.
+  const readerPool = config.reader === null ? null : createReaderPool(config.reader);
+  readerPool?.on('error', () => undefined);
+  const data = readerPool === null ? null : createDataReader({ pool: readerPool, clock });
   // La exportación `out-api` de la web, junto a la API en el repositorio; `apps/web/out-api` desde
   // `apps/api/dist/cli/`. Sin ella, la API sirve solo JSON (el despliegue la compila, ADR-0019 §10).
   const web = loadWebAssets(fileURLToPath(new URL('../../../web/out-api/', import.meta.url)));
@@ -99,14 +105,14 @@ if (config !== undefined) {
     now: () => performance.now(),
     requestId: () => randomUUID(),
     origin: config.origin,
-    routes: apiRoutes({ readiness, links, sessions, limiter, clock }),
+    routes: apiRoutes({ readiness, links, sessions, limiter, clock, data }),
     rateLimit: (address) => limiter.requestWait(address, clock()),
     ...(web === null ? {} : { web }),
   });
   app.addHook('onClose', async () => {
     readiness.stop();
     await sessions.flushPendingFailures().catch(() => undefined);
-    await pool.end();
+    await Promise.all([pool.end(), readerPool?.end()]);
   });
   readiness.start();
   try {

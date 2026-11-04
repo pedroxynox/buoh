@@ -18,6 +18,14 @@ El Blueprint del sistema de datos es `render-datos.yaml`; qué define está en [
 4. **Si Render dio una dirección distinta de `https://buoh-api.onrender.com`** (porque el nombre estaba ocupado), cambia `BUOH_API_ORIGIN` en `render-datos.yaml` a esa dirección exacta (sin barra final) y vuelve a fusionar: el `Origin` tiene que coincidir, o la web no puede cambiar nada (CSRF, ADR-0019 §2). Pásale la dirección al agente.
 5. El agente comprueba desde fuera lo que pide ADR-0019 §13 (abajo, «Comprobar desde fuera»).
 
+### La credencial de lectura de los datos
+
+El PR de la salud de los datos de F2.4 suma `BUOH_API_LECTURA_POSTGRES_PASSWORD`, la contraseña del rol `buoh_api_lectura` (ADR-0019 §7 y §8): Render la genera en `buoh-api`, y `buoh-operaciones` la toma de ahí (`fromService`). Al fusionarlo se despliegan los tres servicios: `buoh-ingesta`, con un corte de unos segundos en la captura, `buoh-operaciones` y `buoh-api`.
+
+1. Cuando CI pase y termine el despliegue, en la página del Blueprint pulsa **Manual Sync**, y aprueba con **Approve** lo que haya quedado pendiente, como en el paso 2 de arriba. Sin la variable en `buoh-api`, la API arranca igual, y solo `GET /api/v1/datos/salud` responde `503 not_ready`.
+2. En su ejecución siguiente, unos 30 s después de cada minuto múltiplo de 5, `buoh-operaciones` crea `buoh_api_lectura`, miembro de `buoh_lectura`, y le pone la contraseña: su informe `roles_and_logs` lleva `buoh_api_lectura` en `passwords_set`. Hasta entonces, esa ruta responde `503 postgres_unavailable`.
+3. El agente comprueba con su acceso («Acceso del agente», en el runbook de ingesta) que el rol existe, inicia sesión, no tiene `CREATEROLE` y solo es miembro de `buoh_lectura`, y que el informe lo nombra en `passwords_set`. Después tú, con tu sesión abierta en el navegador, abres `https://<dirección>/api/v1/datos/salud` y le pasas lo que ves: el número del log y la última observación de la salud, con su hora. No lleva ningún secreto.
+
 ## Dar de alta tu cuenta (enseguida, justo después de desplegar)
 
 Hazlo **cuanto antes**. Hasta que tu cuenta esté dada de alta, alguien con la contraseña del rol de la base podría insertar una credencial falsa y adelantarse (ADR-0019, «Consecuencias», «La contraseña del rol de la API»).
@@ -59,6 +67,7 @@ Si pierdes también el acceso a la Shell, entra por la base: con la credencial d
 Se rota si una credencial se filtra o cuando quieras. Nada de esto se pide por chat.
 
 - **La contraseña del rol `buoh_api`** (la de la base): se rota como en [ADR-0018 §12](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md). `buoh-operaciones` vuelve a ponérsela al rol en su paso 1.
+- **La contraseña de `buoh_api_lectura`** (`BUOH_API_LECTURA_POSTGRES_PASSWORD`, en `buoh-api`): igual, con los pasos de «La contraseña de un rol de ejecución» del runbook de ingesta («Rotar credenciales»). Mientras `buoh-operaciones` no le pone la nueva, solo las rutas de datos responden `503 postgres_unavailable`; lo demás de la API sigue.
 - **`BUOH_API_PASSWORD_PEPPER` o `BUOH_API_TOTP_KEY`:** cámbialas en el panel de `buoh-api` (o deja que Render genere otra). Dejan **inservible** la credencial guardada, así que después haz un `restablecer` (arriba).
 - **`BUOH_API_TOKEN_KEY`:** cambiarla **cierra todas las sesiones** y anula los enlaces sin usar. La contraseña y el código siguen valiendo.
 
@@ -84,11 +93,13 @@ Con la dirección del servicio en lugar de `<dirección>`:
 ```sh
 curl -sI https://<dirección>/api/salud
 curl -s -o /dev/null -w '%{http_code}\n' https://<dirección>/api/v1/desconocida
+curl -s https://<dirección>/api/v1/datos/salud
 ```
 
 - `/api/salud` responde `200` cuando la API responde y tiene sus migraciones; si le faltan, `503 not_ready`.
 - Toda respuesta lleva las cabeceras de seguridad de §9 (`Strict-Transport-Security`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `X-Frame-Options`, `X-Robots-Tag`); el HTML, su política de contenido con los hashes de sus scripts en línea; el JSON y los demás archivos de la web, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`; y el JSON, `Cache-Control: no-store` (`F2-API-001`).
 - Una ruta `/api/` que no existe responde `404 not_found` en JSON; cualquier otra ruta desconocida, el `404.html` de la web.
+- `GET /api/v1/datos/salud` sin sesión responde `401 unauthenticated`: la ruta existe y no da nada sin sesión.
 - La comprobación completa de §13 incluye que ninguna respuesta ni ningún registro lleva la contraseña, el secreto TOTP, los códigos, el identificador de la sesión, el token CSRF, el del enlace ni las tres claves, cada uno solo en su canal (`F2-API-001`, `F2-AUTH-001`).
 
 ### El límite por dirección

@@ -3,7 +3,7 @@ import { healthReportSchema, type HealthReport, type JsonValue } from '@buoh/con
 import { ConfigError } from '../config.js';
 import type { Scheduler } from '../deriv/ports.js';
 import type { OperationalAlert } from '../operational/registry.js';
-import { API_ROLE, LOGIN_ROLES, type PasswordRole } from '../postgres/roles.js';
+import { API_READER_ROLE, API_ROLE, LOGIN_ROLES, type PasswordRole } from '../postgres/roles.js';
 import { failureReason } from '../source-log/source-event-log.js';
 import {
   isLogExpired,
@@ -29,6 +29,7 @@ import {
   type DeletionProgress,
   type LogDeletion,
 } from './retention.js';
+import { SANITIZED } from './sanitized.js';
 import {
   VERIFICATION_DEADLINE_MS,
   verificationSlot,
@@ -58,9 +59,6 @@ export type OperationsStep = (typeof OPERATIONS_STEPS)[number];
 
 /** Un informe: solo códigos, nombres, números y horas, nunca un mensaje de error ni un precio. */
 type Report = Record<string, JsonValue>;
-
-/** Un código, un evento o un motivo saneado: letras, cifras, `_`, `.` y `-`, de 1 a 64. */
-const SANITIZED = /^[A-Za-z0-9_.-]{1,64}$/u;
 
 /** Lo que dejó un paso, y el log en cuya tabla de informes se guarda, si lo hay. */
 interface StepOutcome {
@@ -209,6 +207,20 @@ async function prepareApi(
 }
 
 /**
+ * El rol de lectura de la API (ADR-0019 §7 y §8): crea o ajusta `buoh_api_lectura`, miembro de
+ * `buoh_lectura`. Anota el fallo. Da si el rol existe, para ponerle después su contraseña.
+ */
+async function prepareApiReader(input: OperationsInput, failures: Report[]): Promise<boolean> {
+  try {
+    await input.database.ensureApiReaderRole();
+    return true;
+  } catch (error) {
+    failures.push({ action: 'api_reader_role', reason: failureReason(error) });
+    return false;
+  }
+}
+
+/**
  * Paso 1 (ADR-0018 §11): crea y ajusta los roles; aplica las migraciones pendientes a cada log que
  * existe, cada uno con `db:migrate` en un proceso aparte, y le da los privilegios; prepara el log
  * siguiente, o el log 1 si no hay ninguno (`nextLogToPrepare`); y pone la contraseña a cada rol de
@@ -218,11 +230,12 @@ async function prepareApi(
  *
  * Con la contraseña de `buoh_api`, después de los logs, prepara también la API (`prepareApi`,
  * ADR-0019 §7) y le pone esa contraseña; el informe lleva entonces `api_migrated`. Sin ella no toca
- * la API: así es en producción hasta el PR 6 de ADR-0019 §14.
+ * la API: así es en producción hasta el PR 6 de ADR-0019 §14. Con la de `buoh_api_lectura`, crea o
+ * ajusta ese rol (`prepareApiReader`, ADR-0019 §8) y le pone su contraseña; sin ella, no lo toca.
  */
 async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
   const { database } = input;
-  const { apiPassword } = input.config;
+  const { apiPassword, apiReaderPassword } = input.config;
   const failures: Report[] = [];
   const migrated: Report[] = [];
   const apiMigrated: string[] = [];
@@ -287,11 +300,15 @@ async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
     failures.push({ action: 'logs', reason: failureReason(error) });
   }
   const apiRoleReady = apiPassword !== null && (await prepareApi(input, failures, apiMigrated));
+  const apiReaderReady = apiReaderPassword !== null && (await prepareApiReader(input, failures));
   const passwords: (readonly [PasswordRole, string])[] = LOGIN_ROLES.map(
     (role) => [role, input.config.passwords[role]] as const,
   );
   if (apiRoleReady) {
     passwords.push([API_ROLE, apiPassword]);
+  }
+  if (apiReaderReady) {
+    passwords.push([API_READER_ROLE, apiReaderPassword]);
   }
   for (const [role, password] of passwords) {
     try {

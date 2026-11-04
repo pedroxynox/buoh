@@ -1,8 +1,9 @@
 /**
  * Lo que leen del sistema de datos la API (F2.4) y el motor (F2.9), por la ruta de exportación
  * `@buoh/market-data-worker/lectura` (ADR-0019 §8): la configuración y los pools, la búsqueda del
- * log activo, el log y sus puntos de control, el perfil de medición, el catálogo, el registro
- * operativo, las publicaciones y el replay, y los almacenes en memoria para las pruebas.
+ * log activo, el log y sus puntos de control, el perfil de medición, la salud que guardó
+ * `buoh-operaciones`, el catálogo, el registro operativo, las publicaciones y el replay, y los
+ * almacenes en memoria para las pruebas.
  *
  * A diferencia del punto de entrada principal (`index.ts`), importarla no carga `ws`, `fflate` ni
  * `node:child_process`, que solo usan la captura, la carga de los esquemas de Deriv y
@@ -106,6 +107,15 @@ export {
   type SchemaEntryName,
   type SchemaKind,
 } from './deriv/schema-release.js';
+
+// La salud de los datos: la última observación que guardó `buoh-operaciones` en un log (ADR-0019 §8).
+export {
+  parseStoredHealthObservation,
+  readLatestStoredHealth,
+  StoredHealthError,
+  type StoredHealthObservation,
+  type StoredHealthRow,
+} from './operations/stored-health.js';
 
 // El catálogo (ADR-0012 §7).
 export { PostgresCatalogStore } from './postgres/catalog-store.js';

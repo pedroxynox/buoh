@@ -108,6 +108,7 @@ describe('la tabla de rutas', () => {
       'DELETE /api/v1/sesion',
       'DELETE /api/v1/sesiones',
       'GET /api/v1/auditoria',
+      'GET /api/v1/datos/salud',
     ]);
   });
 });

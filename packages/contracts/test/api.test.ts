@@ -6,6 +6,7 @@ import {
   apiErrorSchema,
   apiHealthSchema,
   auditEventsResponseSchema,
+  dataHealthSchema,
   emptyRequestSchema,
   linkSecretRequestSchema,
   linkSecretSchema,
@@ -352,5 +353,72 @@ describe('GET /api/v1/auditoria (ADR-0019 §5)', () => {
     );
     expect(accepts(auditEventsResponseSchema, { events: event })).toBe(false);
     expect(accepts(auditEventsResponseSchema, { events: [event], extra: 1 })).toBe(false);
+  });
+});
+
+describe('GET /api/v1/datos/salud (ADR-0019 §8)', () => {
+  const OBSERVED = '2026-11-04T12:55:31.204Z';
+  const report = {
+    backlog_bytes: 0,
+    backlog_count: 0,
+    connection_state: 'connected',
+    execution_mode: 'disabled',
+    last_event_time_utc: '2026-11-04T12:55:29.000Z',
+    last_observation_id: '01900000-0000-7000-8000-000000000001',
+    last_published_dataset_id: null,
+    last_received_at_utc: '2026-11-04T12:55:29.412Z',
+    open_condition_types: [],
+    schema_version: '1.0.0',
+    service_health: 'healthy',
+    source: 'deriv_options',
+  };
+  const completed = { status: 'completed', observed_at_utc: OBSERVED, report };
+  const failed = { status: 'failed', observed_at_utc: OBSERVED, reason: 'child_timeout' };
+
+  it('el log activo y su última observación: terminada con su HealthReport, fallida con su motivo, o ninguna', () => {
+    for (const value of [
+      { log: 2, observation: completed },
+      { log: 2, observation: { ...completed, report: { ...report, service_health: 'paused' } } },
+      { log: 2, observation: failed },
+      { log: 2, observation: { ...failed, reason: '57P01' } },
+      { log: 3, observation: null },
+      { log: null, observation: null },
+    ]) {
+      expect(dataHealthSchema.parse(value)).toEqual(value);
+    }
+  });
+
+  it('sin log activo no hay observación', () => {
+    expect(accepts(dataHealthSchema, { log: null, observation: completed })).toBe(false);
+    expect(accepts(dataHealthSchema, { log: null, observation: failed })).toBe(false);
+  });
+
+  it('el log es un número de 1 a 999 999', () => {
+    for (const log of [0, -1, 1.5, 1_000_000, '2']) {
+      expect(accepts(dataHealthSchema, { log, observation: null }), String(log)).toBe(false);
+    }
+    expect(accepts(dataHealthSchema, { log: 999_999, observation: null })).toBe(true);
+  });
+
+  it('cada estado lleva solo lo suyo, con la hora UTC con milisegundos, y un motivo saneado', () => {
+    for (const observation of [
+      { ...completed, reason: 'child_timeout' },
+      { status: 'completed', observed_at_utc: OBSERVED },
+      { ...failed, report },
+      { status: 'failed', observed_at_utc: OBSERVED },
+      { ...failed, reason: 'connect ECONNREFUSED 10.0.0.5:5432' },
+      { ...failed, reason: '' },
+      { ...failed, observed_at_utc: '2026-11-04T12:55:31Z' },
+      { ...completed, report: { ...report, extra: 1 } },
+      // Un HealthReport que no cumple sus reglas: healthy con una condición abierta.
+      { ...completed, report: { ...report, open_condition_types: ['connection_lost'] } },
+      { ...completed, extra: 1 },
+      { ...completed, status: 'pending' },
+    ]) {
+      expect(accepts(dataHealthSchema, { log: 2, observation }), JSON.stringify(observation)).toBe(
+        false,
+      );
+    }
+    expect(accepts(dataHealthSchema, { log: 2, observation: null, extra: 1 })).toBe(false);
   });
 });

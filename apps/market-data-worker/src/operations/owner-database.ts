@@ -4,6 +4,7 @@ import pg, { type PoolClient } from 'pg';
 import { stderrAlert, type OperationalAlert } from '../operational/registry.js';
 import { createPool, postgresSslOption } from '../postgres/metadata-store.js';
 import {
+  ensureApiReaderRole,
   ensureApiRole,
   ensureRuntimeRoles,
   grantApiPrivileges,
@@ -92,6 +93,11 @@ export interface OwnerDatabase {
   ensureApiRole(): Promise<void>;
   /** Da a `buoh_api` sus privilegios en el esquema de la API (`grantApiPrivileges`). */
   grantApiPrivileges(): Promise<void>;
+  /**
+   * Crea el rol `buoh_api_lectura`, miembro de `buoh_lectura`, o le vuelve a fijar sus atributos
+   * (`ensureApiReaderRole`, ADR-0019 §7 y §8).
+   */
+  ensureApiReaderRole(): Promise<void>;
   /**
    * Si el rol inicia sesión con esa contraseña: `accepted`, `rejected` si PostgreSQL la rechaza
    * (`28P01`), o `unchecked` si no hay conexiones libres (`53300`), como con las 4 de `buoh_agente`
@@ -245,6 +251,7 @@ export function openOwnerDatabase(
           throw error;
         }
       }),
+    ensureApiReaderRole: () => withClient((client) => ensureApiReaderRole(client)),
     ensureApiRole: () => withClient((client) => ensureApiRole(client)),
     ensureRuntimeRoles: () => withClient((client) => ensureRuntimeRoles(client)),
     grantApiPrivileges: () => withClient((client) => grantApiPrivileges(client)),

@@ -6,7 +6,10 @@
     "rootDir": "../..",
     "types": ["node", "vitest/globals"],
     "paths": {
-      "@buoh/contracts": ["../../packages/contracts/src/index.ts"]
+      "@buoh/contracts": ["../../packages/contracts/src/index.ts"],
+      "@buoh/domain": ["../../packages/domain/src/index.ts"],
+      "@buoh/market-data-worker": ["../market-data-worker/src/index.ts"],
+      "@buoh/market-data-worker/lectura": ["../market-data-worker/src/lectura.ts"]
     }
   },
   "include": [

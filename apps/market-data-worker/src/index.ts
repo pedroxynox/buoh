@@ -125,10 +125,12 @@ export {
 export { createPool, PostgresMetadataStore, postgresSslOption } from './postgres/metadata-store.js';
 export {
   AGENT_CONNECTION_LIMIT,
+  API_READER_ROLE,
   API_ROLE,
   API_SCHEMA,
   AGENT_IDLE_IN_TRANSACTION_TIMEOUT,
   AGENT_STATEMENT_TIMEOUT,
+  ensureApiReaderRole,
   ensureApiRole,
   ensureRuntimeRoles,
   grantApiPrivileges,
@@ -266,6 +268,13 @@ export {
   migrateEnvironment,
   type OperationsConfig,
 } from './operations/config.js';
+export {
+  parseStoredHealthObservation,
+  readLatestStoredHealth,
+  StoredHealthError,
+  type StoredHealthObservation,
+  type StoredHealthRow,
+} from './operations/stored-health.js';
 export {
   DROP_LOG_LOCK_TIMEOUT_MS,
   OPERATIONS_CONNECTION_TIMEOUT_MS,
