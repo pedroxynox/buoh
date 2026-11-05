@@ -10,18 +10,30 @@ import dynamic from 'next/dynamic';
 import type { ReactNode } from 'react';
 import { GLOBAL_STATUS } from '@buoh/prototype-data';
 import { NAV_ITEMS } from '../navigation';
+import { API_EXECUTION_MODE } from './modo';
 import { MoreMenu } from './MoreMenu';
 import { NavLink } from './NavLink';
 
-// La variante de la API muestra el menú de la sesión; la del escritorio, solo la insignia estática
-// del propietario. La variable de compilación, que Next inlinea, deja que el empaquetador quite del
-// escritorio el menú y todo lo que llama a la API (ADR-0019 §9; `F2-UI-001`).
+// La variante de la API muestra el menú de la sesión, la salud real de los datos y la marca de datos
+// ficticios solo en las secciones que siguen con ellos; la del escritorio, la insignia estática del
+// propietario, la salud ficticia y la marca en todas. La variable de compilación, que Next inlinea,
+// deja que el empaquetador quite del escritorio el menú y todo lo que llama a la API (ADR-0019 §9;
+// `F2-UI-001`). Cada condición la compara entera: con una constante intermedia, el empaquetador no la
+// resolvería y dejaría en el escritorio los fragmentos de la API.
 const SessionMenu =
   process.env.NEXT_PUBLIC_BUOH_WEB_TARGET === 'api'
     ? dynamic(() => import('./SessionMenu').then((module) => module.SessionMenu))
     : null;
+const SaludBadge =
+  process.env.NEXT_PUBLIC_BUOH_WEB_TARGET === 'api'
+    ? dynamic(() => import('./salud/SaludBadge').then((module) => module.SaludBadge))
+    : null;
+const FictitiousDataMark =
+  process.env.NEXT_PUBLIC_BUOH_WEB_TARGET === 'api'
+    ? dynamic(() => import('./FictitiousDataMark').then((module) => module.FictitiousDataMark))
+    : null;
 
-/** Barra superior: marca, aviso de datos ficticios, modo y salud por separado (concepto §2). */
+/** Barra superior: marca, aviso de datos ficticios, modo y salud por separado (concepto §2 y §10). */
 export function TopBar() {
   return (
     <header className="w-topbar">
@@ -29,11 +41,18 @@ export function TopBar() {
         <Link href="/" className="w-topbar__home" aria-label="buoh, ir al observatorio">
           <BuohLogo size={32} />
         </Link>
-        <FictitiousDataNotice />
+        {FictitiousDataMark === null ? <FictitiousDataNotice /> : <FictitiousDataMark />}
       </div>
       <div className="w-topbar__status" role="group" aria-label="Estado global">
-        <ModeBadge mode={GLOBAL_STATUS.mode} showDescription />
-        <HealthBadge health={GLOBAL_STATUS.health} />
+        <ModeBadge
+          mode={
+            process.env.NEXT_PUBLIC_BUOH_WEB_TARGET === 'api'
+              ? API_EXECUTION_MODE
+              : GLOBAL_STATUS.mode
+          }
+          showDescription
+        />
+        {SaludBadge === null ? <HealthBadge health={GLOBAL_STATUS.health} /> : <SaludBadge />}
         {SessionMenu === null ? (
           <span className="w-topbar__user">
             <Icon name="user" />

@@ -84,7 +84,7 @@ Tipos de pendiente:
   - `data:health` muestra `recovering` hasta que la historia cubre el hueco (P-F1-05, PR #39);
   - la aceptación del plan §6 se cumple con las pruebas de reloj y transporte falsos y con el smoke vivo aparte. Los ensayos de la puerta de salida lo demostraron en vivo el 2026-10-29 (P-F1-06, [evidencia de la puerta de salida](../operacion/evidencia-puerta-fase-1.md)), y encontraron el fallo del `pip_size` de la historia, que corrigió el PR #40;
   - cierra los pendientes 6 de F1.2 y 7 de F1.3 (`PROJECT_STATUS.md`).
-- **Límite:** con la continuidad pendiente, la salud `recovering` no muestra la causa en `open_condition_types` (pendiente 2 de F1.2, que sigue abierto). Los ticks recuperados solo existen como raw hasta que se publiquen datasets vivos (ADR-0015 §4).
+- **Límite:** con la continuidad pendiente, la salud `recovering` no muestra la causa en `open_condition_types`. Desde F2.4, la web la lee de la conexión del informe ([concepto de interfaz](../diseno/concepto-de-interfaz.md) §10), y así quedó resuelto el pendiente 2 de F1.2. Los ticks recuperados solo existen como raw hasta que se publiquen datasets vivos (ADR-0015 §4).
 
 ### P-F1-05. Reporte de salud y `pnpm run data:health -- --json` (`F1-HEALTH-001`) — resuelto
 
@@ -101,8 +101,8 @@ Tipos de pendiente:
   - almacenamiento no disponible da `paused`;
   - contrato o configuración incompatibles dan `failed`;
   - nunca `healthy` sin datos persistidos.
+- **Resuelto en F2.4:** en `recovering` por continuidad pendiente, `open_condition_types` queda vacío (pendiente 2 de F1.2), y la web lee esa causa de la conexión del informe ([concepto de interfaz](../diseno/concepto-de-interfaz.md) §10).
 - **Abierto:**
-  - en `recovering` por continuidad pendiente, `open_condition_types` queda vacío (pendiente 2 de F1.2);
   - **decidido en [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §8:** un envoltorio en `scripts/` deja stdout limpio, como `data-replay.mjs`, porque el emulador de shell de pnpm no respeta `1>&2` (ADR-0003). El backlog sale del latido que persiste la ingesta, y la conexión también si el latido es posterior al último evento de conexión del log; sin escritor vivo, la conexión es `disconnected` y el backlog, 0.
 
 ### P-F1-06. Puerta de salida de Fase 1 (`F1.5`) — resuelto
