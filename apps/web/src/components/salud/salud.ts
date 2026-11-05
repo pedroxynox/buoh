@@ -235,12 +235,35 @@ function failedAlertCause(reason: string | null): HealthCause {
       detail: 'El log observado todavía no se puede leer: no existe o no está preparado.',
     };
   }
+  if (reason === 'migrations_pending') {
+    return {
+      title: 'Migraciones pendientes',
+      detail:
+        'Al esquema del log le faltan migraciones del worker, o una de sus tablas, así que la salud no se pudo observar. buoh-operaciones las aplica antes de cada observación.',
+    };
+  }
   return {
     title: 'Log incompatible',
     detail: `La observación encontró algo que no cuadra en el log: ${
       reason === null ? 'sin motivo' : (INCOMPATIBLE_REASONS[reason] ?? reason)
     }.`,
   };
+}
+
+/**
+ * La salud que impone cada alerta de `data:health` que la cambia: la del informe sin observación que
+ * la acompaña (`evaluateDataHealth` del worker; ADR-0015 §8, reglas 2 y 3, y ADR-0017 §6). La prueba
+ * de la web la compara con la evaluación real del worker.
+ */
+const ALERT_HEALTH: Readonly<Record<string, ServiceHealth>> = {
+  data_health_failed: 'failed',
+  data_health_storage_unavailable: 'paused',
+  data_health_checkpoint_rebuild_incomplete: 'paused',
+};
+
+/** La salud que impone una alerta, o `null` si es un aviso que no la cambia. */
+export function alertHealth(event: string): ServiceHealth | null {
+  return ALERT_HEALTH[event] ?? null;
 }
 
 /**
@@ -252,12 +275,13 @@ function alertEntry(alert: {
   readonly reason: string | null;
 }): RatedCause | { readonly cause: HealthCause; readonly imposes: null } {
   const { reason } = alert;
+  const imposes = alertHealth(alert.event);
   switch (alert.event) {
     case 'data_health_failed':
-      return { imposes: 'failed', cause: failedAlertCause(reason) };
+      return { imposes, cause: failedAlertCause(reason) };
     case 'data_health_storage_unavailable':
       return {
-        imposes: 'paused',
+        imposes,
         cause: {
           title: 'Almacenes sin respuesta',
           detail: `No se pudo leer PostgreSQL o el almacenamiento de objetos${withReason(reason)}, así que la salud no se pudo observar.`,
@@ -265,7 +289,7 @@ function alertEntry(alert: {
       };
     case 'data_health_checkpoint_rebuild_incomplete':
       return {
-        imposes: 'paused',
+        imposes,
         cause: {
           title: 'Reconstrucción sin terminar',
           detail:

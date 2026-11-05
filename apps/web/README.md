@@ -26,7 +26,7 @@ pnpm --filter @buoh/web run typecheck
 | `scripts/` | `build-exports.mjs`: compila las dos variantes `out` y `out-api` |
 | `test/` | Comprobación de cada página de `out/` y de `out-api/`, de que `out` no llama a la API, y de la salud de los datos y el Observatorio de `out-api` |
 
-`test/salud.test.ts` compara la causa que lee la web con la derivación real de la salud, que carga del dominio compilado (`packages/domain/dist`) por ruta relativa: `pnpm run verify` lo compila antes de probar. `@buoh/domain` no es una dependencia de la web, así que no entra en el JavaScript de ninguna exportación.
+`test/salud.test.ts` compara la causa que lee la web con la derivación real de la salud y con la evaluación real de `data:health`, que carga del dominio y del worker compilados (`packages/domain/dist` y `apps/market-data-worker/dist`) por ruta relativa: `pnpm run verify` los compila antes de probar. Ni `@buoh/domain` ni el worker son dependencias de la web, así que no entran en el JavaScript de ninguna exportación.
 
 Los datos ficticios y sus pruebas de coherencia viven en [`@buoh/prototype-data`](../../packages/prototype-data/README.md), compartidos con el prototipo móvil.
 

@@ -21,6 +21,7 @@ import { showsFictitiousDataInApi } from '../src/navigation';
 import { readDataHealth } from '../src/components/salud/respuesta';
 import {
   ageText,
+  alertHealth,
   healthView,
   QUEUE_LIMITS,
   STALE_AFTER_MS,
@@ -362,6 +363,7 @@ describe('la causa de la salud (concepto de interfaz §10)', () => {
   it.each([
     ['unexpected_error', 'Error de la observación', 'error inesperado'],
     ['log_not_prepared', 'Log sin preparar', 'todavía no se puede leer'],
+    ['migrations_pending', 'Migraciones pendientes', 'faltan migraciones'],
   ] as const)(
     'failed por %s tiene su propio título: no dice nada del log',
     (reason, title, detail) => {
@@ -754,6 +756,68 @@ describe('la lectura de la causa cuadra con la derivación del dominio (pendient
     expect(pendingCases).toBeGreaterThan(0);
     expect(noWriterCases).toBeGreaterThan(0);
     expect(mismatches).toEqual([]);
+  });
+});
+
+/** Lo que la prueba usa de la evaluación compilada de `data:health` del worker. */
+interface WorkerHealth {
+  readonly evaluateDataHealth: (
+    observation:
+      | {
+          readonly reason: string;
+          readonly source: string;
+          readonly status: 'incompatible' | 'storage_unavailable';
+        }
+      | { readonly source: string; readonly status: 'checkpoint_rebuild_incomplete' },
+  ) => {
+    readonly alert: { readonly event: string; readonly reason: string } | null;
+    readonly report: HealthReport;
+  };
+}
+
+// La evaluación real de `data:health` (ADR-0015 §8), del worker compilado, por la misma razón que el
+// dominio: la web no depende del worker. `pnpm run verify` lo compila antes de probar.
+const WORKER_EVALUATE = fileURLToPath(
+  new URL('../../../apps/market-data-worker/dist/health/evaluate.js', import.meta.url),
+);
+
+// Las alertas que dan un informe sin observación (reglas 2 y 3, y la reconstrucción sin terminar de
+// ADR-0017 §6): la gravedad que la web les da tiene que ser la del informe que las acompaña.
+describe('la gravedad de las alertas cuadra con la evaluación de data:health del worker', () => {
+  let worker: WorkerHealth;
+
+  beforeAll(async () => {
+    if (!existsSync(WORKER_EVALUATE)) {
+      throw new Error(`Falta ${WORKER_EVALUATE}: compila antes el worker, con pnpm run build.`);
+    }
+    worker = (await import(WORKER_EVALUATE)) as WorkerHealth;
+  });
+
+  it('cada alerta que cambia la salud impone la del informe que la acompaña, y la explica sola', () => {
+    const source = 'deriv_options';
+    const observations = [
+      { reason: 'ECONNREFUSED', source, status: 'storage_unavailable' },
+      { reason: 'deadline_exceeded', source, status: 'storage_unavailable' },
+      { source, status: 'checkpoint_rebuild_incomplete' },
+      ...[
+        'source_schema_missing',
+        'symbol_mismatch',
+        'cursor_ahead_of_log',
+        'migrations_pending',
+        'log_not_prepared',
+        'unexpected_error',
+        'motivo_nuevo',
+      ].map((reason) => ({ reason, source, status: 'incompatible' as const })),
+    ] as const;
+    for (const observation of observations) {
+      const label = JSON.stringify(observation);
+      const { alert, report } = worker.evaluateDataHealth(observation);
+      expect(alert, label).not.toBeNull();
+      if (alert === null) continue;
+      expect(alertHealth(alert.event), label).toBe(report.service_health);
+      // La vista no le suma la causa del propio estado: la alerta basta.
+      expect(titlesOf(ready(completed(report, [alert]))), label).toHaveLength(1);
+    }
   });
 });
 
