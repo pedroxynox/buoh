@@ -8,7 +8,8 @@ Cómo funcionan hoy los gráficos de buoh, desde los datos hasta la pantalla. Se
 - Los dos se alimentan **solo de datos ficticios** de `packages/prototype-data`, calculados con fórmulas fijas. El código no usa azar, reloj real ni red.
 - Son **SVG propios** dibujados en el servidor durante la exportación estática de Next.js. No llevan JavaScript de cliente ni interacción.
 - La app de escritorio muestra los mismos dos gráficos porque carga la exportación de la web. El móvil y el sitio no tienen gráficos.
-- Los datos reales de Fase 1 (`market-data-worker` y `packages/domain`) **no están conectados** a ningún gráfico: no existe API ni dependencia entre ellos.
+- Los datos reales de Fase 1 (`market-data-worker` y `packages/domain`) **no están conectados** a estos dos gráficos: no hay dependencia entre ellos.
+- Desde F2.4, Mercados de `out-api`, la web que sirve la API, tiene otros dos con **datos reales**, el de ticks y el de velas de R_100, que lee de la API en el navegador ([concepto de interfaz](concepto-de-interfaz.md) §11). Su eje va en el tiempo, cada tick en su hora de fuente, y su código está aparte, en `apps/web/src/components/mercados/`: `grafico.ts` (los ticks, la línea, las bandas, las velas y las alternativas), `MarketCharts.tsx` (el SVG, que reutiliza el marco `Frame` de `Charts.tsx`), `respuesta.ts` y `store.ts`. Este documento describe los dos gráficos ficticios.
 
 ## 2. Diagrama
 
@@ -129,7 +130,7 @@ Detalles comunes:
 
   La línea y el hueco miden al menos 3:1 sobre todos los fondos, y el hueco, que también colorea su nota, 4,5:1. La rejilla es decorativa y no llega a 3:1 (concepto de interfaz §9).
 
-- **Accesibilidad.** Cada gráfico es una imagen (`role="img"`) cuyo nombre es su alternativa en texto, calculada de los datos (concepto de interfaz §9). El lector de pantalla lee solo ese texto, no las etiquetas HTML de dentro. La tabla es la alternativa de las velas, que todavía no existen.
+- **Accesibilidad.** Cada gráfico es una imagen (`role="img"`) cuyo nombre es su alternativa en texto, calculada de los datos (concepto de interfaz §9). El lector de pantalla lee solo ese texto, no las etiquetas HTML de dentro. La tabla es la alternativa de las velas, que solo tiene Mercados de `out-api`.
 - **Estado vacío.** Sin ningún valor, el componente no dibuja nada y escribe su alternativa en un párrafo (`.w-chart-empty`).
 - **Movimiento:** ninguno. La regla global de movimiento reducido existe, pero no tiene nada que desactivar aquí.
 
@@ -164,11 +165,11 @@ No hay. Los gráficos no responden a pasar el ratón ni a tocar, y no tienen ven
 | SVG propios, sin bibliotecas de gráficos | concepto §6, ADR-0008 §4 | Se cumple: `apps/web` no depende de ninguna. |
 | Sin azar ni reloj real | ADR-0008 §2 | Se cumple por construcción: las series son fórmulas fijas del índice. Ninguna prueba prohíbe `Math.random` o `Date.now` en `apps/web` ni en `prototype-data`; solo se comprueba que `priceSeries()` se repite. |
 | Contraste comprobado por pruebas | guía §10, concepto §9 | Se cumple: las etiquetas usan colores con contraste probado, la línea y el hueco miden 3:1 o más, y la nota del hueco 4,5:1. La rejilla es decorativa y no llega a 3:1. |
-| Alternativa en texto o en tabla, calculada de los datos | concepto §9 | Se cumple en los dos gráficos, con texto. La tabla de las velas llega con ellas. |
+| Alternativa en texto o en tabla, calculada de los datos | concepto §9 | Se cumple en los dos gráficos, con texto, y en los de Mercados de `out-api`: texto para los ticks y una tabla para las velas. |
 | Una sola unidad para la peor caída | concepto §9 | Se cumple: «−3,6 %», en % del capital inicial, en la nota, en la alternativa y en la tarjeta de contexto. |
-| El eje horizontal es el tiempo UTC | concepto §9 | Se cumple con los ticks ficticios, que llegan cada 2 s exactos y van por su índice (§10). |
-| Velas con su intervalo, su dirección y sus huecos | concepto §9 | La regla está escrita; las velas todavía no existen. |
-| Gráficos de ticks y velas, en web, móvil (resumen) y escritorio | catálogo de funciones, Fase 2 | Es el destino, no lo actual. Hoy solo hay una línea de ticks ficticios, y nada en el móvil. |
+| El eje horizontal es el tiempo UTC | concepto §9 | Se cumple con los ticks ficticios, que llegan cada 2 s exactos y van por su índice (§10), y con los reales de Mercados de `out-api`, cada uno en su hora (`timeScaleFor`). |
+| Velas con su intervalo, su dirección y sus huecos | concepto §9 | Se cumple en Mercados de `out-api` (`candlesOf` y `CandleChart`). El escritorio no tiene velas. |
+| Gráficos de ticks y velas, en web, móvil (resumen) y escritorio | catálogo de funciones, Fase 2 | En parte: ticks y velas reales en Mercados de `out-api`; en el escritorio, la línea de ticks ficticios; nada en el móvil. |
 
 ## 10. Detalles a tener en cuenta
 
@@ -176,7 +177,7 @@ Son hechos del código actual, no fallos confirmados. Las propuestas están en l
 
 - **Ancho de la banda del hueco.** Faltan 6 ticks (12 s), pero la banda va de un tick vecino al otro y abarca 14 s. Así se ven los dos bordes del corte.
 - **Formato distinto en cada gráfico:** punto decimal en precios y coma en resultados.
-- **El eje horizontal va por índices.** Los ticks ficticios llegan cada 2 s exactos, así que un índice es un instante y un hueco ocupa lo que duró, como pide el concepto de interfaz §9. Los datos reales no siempre llegan a intervalos exactos: con ellos, cada tick tiene que ir en su hora.
+- **El eje horizontal va por índices.** Los ticks ficticios llegan cada 2 s exactos, así que un índice es un instante y un hueco ocupa lo que duró, como pide el concepto de interfaz §9. Los datos reales no siempre llegan a intervalos exactos: con ellos, cada tick tiene que ir en su hora, como en los gráficos de Mercados de `out-api`.
 - **Dependencia del paquete de prototipo.** `Charts.tsx` y `chart-text.ts` importan `worstDrawdown` de `@buoh/prototype-data`; ADR-0009 §2 acepta este acoplamiento hasta que la Fase 2 traiga datos reales.
 
 Antes de `F2-CHART-001` también había estos, ya resueltos: la peor caída decía «3,6 pts» en el gráfico y «−3,6 %» en su contexto; una serie vacía o toda `null` daba coordenadas inválidas, y un hueco en el índice 0 salía del dibujo; y la descripción accesible de cada gráfico se escribía a mano en su página.
