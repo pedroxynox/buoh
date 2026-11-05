@@ -315,6 +315,35 @@ async function writeCapture(schema: string, log: number): Promise<void> {
   }
 }
 
+/** Un minuto de ticks en el log `log`, sin guardar antes el esquema de fuente, como otra release. */
+async function writeTicksWithoutSchema(schema: string, log: number): Promise<void> {
+  const objects = new S3ObjectStore(s3, worker.s3.bucket, logLocation(log).prefix);
+  const pool = createWorkerPool({ ...local, database: DATABASE, schema, sslMode: 'disable' });
+  try {
+    const writer = await SourceEventLog.open({
+      objects,
+      source: DERIV_SOURCE,
+      store: new PostgresSourceLogStore(pool),
+      zlibVersion: process.versions.zlib,
+    });
+    const start = NOW - 60_000;
+    await writer.append({
+      connection_id: A,
+      event_id: id(),
+      kind: 'connection_opened',
+      occurred_at_utc: iso(start - 1000),
+      schema_version: '1.0.0',
+      source: DERIV_SOURCE,
+      supersedes_connection_id: null,
+    });
+    for (let at = start; at < NOW; at += 2000) {
+      await writer.append(tickFrame(A, at));
+    }
+  } finally {
+    await pool.end();
+  }
+}
+
 async function waitForNoSessions(server: Pool, database: string): Promise<void> {
   const deadline = Date.now() + 10_000;
   for (;;) {
@@ -476,5 +505,18 @@ describe('GET /api/v1/datos/grafico y /api/v1/datos/catalogo contra PostgreSQL y
         (error: unknown) => String((error as { code?: unknown }).code),
       );
     expect(code).toBe('25006');
+  });
+
+  it('un log nuevo sin el esquema de fuente guardado es internal, aunque otro log ya armó el perfil', async () => {
+    const { get, lines } = apiWith();
+    expect((await get('/api/v1/datos/grafico?hours=1')).status).toBe(200);
+    await writeTicksWithoutSchema(await createLog(2), 2);
+    expect(await get('/api/v1/datos/grafico?hours=1')).toMatchObject({
+      body: { error: { code: 'internal' } },
+      status: 500,
+    });
+    expect(lines.flatMap((line) => (line.event === 'api_error' ? [line.error] : []))).toEqual([
+      'SourceSchemaMissingError',
+    ]);
   });
 });

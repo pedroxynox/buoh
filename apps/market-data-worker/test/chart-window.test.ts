@@ -510,18 +510,23 @@ describe('readChartWindow', () => {
     expect(log.alerts).toEqual([]);
   });
 
-  it('da lo mismo que el log entero en ventanas que empiezan en cualquier parte', async () => {
-    const log = await memoryLog(events);
-    for (let start = T0 - 60; start <= T0 + 2460; start += 300) {
-      for (const length of [60, 600, 2600]) {
-        const from = ms(start);
-        const to = ms(start + length);
-        expect(await log.read(from, to), `${String(start - T0)} + ${String(length)}`).toEqual(
-          wholeLogChart(events, from, to),
-        );
+  // Unos 4 s en el sandbox, y hasta 6 s con los demás paquetes probándose a la vez.
+  it(
+    'da lo mismo que el log entero en ventanas que empiezan en cualquier parte',
+    { timeout: 30_000 },
+    async () => {
+      const log = await memoryLog(events);
+      for (let start = T0 - 60; start <= T0 + 2460; start += 300) {
+        for (const length of [60, 600, 2600]) {
+          const from = ms(start);
+          const to = ms(start + length);
+          expect(await log.read(from, to), `${String(start - T0)} + ${String(length)}`).toEqual(
+            wholeLogChart(events, from, to),
+          );
+        }
       }
-    }
-  });
+    },
+  );
 
   it('con la caché, una lectura repetida no vuelve a leer los segmentos cerrados', async () => {
     const log = await memoryLog(events);
@@ -536,42 +541,47 @@ describe('readChartWindow', () => {
     expect(log.reads).toHaveLength(read);
   });
 
-  it(`pliega hasta ${String(CHART_FOLD_LIMIT)} segmentos sin punto de control, y con más falla sin derivar el log`, async () => {
-    const from = ms(T0 + 2300);
-    const to = ms(T0 + 2500);
-    const tail = await memoryLog(events, (index, count) => index >= count - 5);
-    expect(await tail.read(from, to)).toEqual(wholeLogChart(events, from, to));
+  it(
+    `pliega hasta ${String(CHART_FOLD_LIMIT)} segmentos sin punto de control, y con más falla sin derivar el log`,
+    { timeout: 30_000 },
+    async () => {
+      const from = ms(T0 + 2300);
+      const to = ms(T0 + 2500);
+      const tail = await memoryLog(events, (index, count) => index >= count - 5);
+      expect(await tail.read(from, to)).toEqual(wholeLogChart(events, from, to));
 
-    // Con la caché llena, el pliegue del final vuelve a leer los segmentos que le tocan: en ellos
-    // están el cierre, la conexión nueva y el tick que fija el fin del hueco pendiente.
-    const reconnected = reconnectedEvents();
-    const later = await memoryLog(reconnected, (index, count) => index >= count - 5);
-    const cache = mapCache();
-    const window = await later.read(ms(T0 + 2300), ms(T0 + 2700), cache);
-    expect(window).toEqual(wholeLogChart(reconnected, ms(T0 + 2300), ms(T0 + 2700)));
-    expect(window.gaps).toEqual([
-      gap(ms(T0 + 2400, 1), ms(T0 + 2409, 999), { cause: 'connection_lost', history: 'pending' }),
-    ]);
-    expect(await later.read(ms(T0 + 2300), ms(T0 + 2700), cache)).toEqual(window);
+      // Con la caché llena, el pliegue del final vuelve a leer los segmentos que le tocan: en ellos
+      // están el cierre, la conexión nueva y el tick que fija el fin del hueco pendiente.
+      const reconnected = reconnectedEvents();
+      const later = await memoryLog(reconnected, (index, count) => index >= count - 5);
+      const cache = mapCache();
+      const window = await later.read(ms(T0 + 2300), ms(T0 + 2700), cache);
+      expect(window).toEqual(wholeLogChart(reconnected, ms(T0 + 2300), ms(T0 + 2700)));
+      expect(window.gaps).toEqual([
+        gap(ms(T0 + 2400, 1), ms(T0 + 2409, 999), { cause: 'connection_lost', history: 'pending' }),
+      ]);
+      expect(await later.read(ms(T0 + 2300), ms(T0 + 2700), cache)).toEqual(window);
 
-    // Sin el punto de control del segmento de la parada ni el del anterior, el principio se pliega
-    // desde uno más viejo: la parada sigue empezando antes de la ventana.
-    const stopSegment =
-      (await memoryLog(events)).store.closed.find((segment) => segment.close_reason === 'requested')
-        ?.segment_index ?? -1;
-    const beforeWindow = await memoryLog(
-      events,
-      (index) => index === stopSegment || index === stopSegment - 1,
-    );
-    const stopped = await beforeWindow.read(ms(T0 + 800), ms(T0 + 2500));
-    expect(stopped).toEqual(wholeLogChart(events, ms(T0 + 800), ms(T0 + 2500)));
-    expect(stopped.gaps[0]).toMatchObject({ cause: 'capture_stopped', from_ms: ms(T0 + 598, 1) });
+      // Sin el punto de control del segmento de la parada ni el del anterior, el principio se pliega
+      // desde uno más viejo: la parada sigue empezando antes de la ventana.
+      const stopSegment =
+        (await memoryLog(events)).store.closed.find(
+          (segment) => segment.close_reason === 'requested',
+        )?.segment_index ?? -1;
+      const beforeWindow = await memoryLog(
+        events,
+        (index) => index === stopSegment || index === stopSegment - 1,
+      );
+      const stopped = await beforeWindow.read(ms(T0 + 800), ms(T0 + 2500));
+      expect(stopped).toEqual(wholeLogChart(events, ms(T0 + 800), ms(T0 + 2500)));
+      expect(stopped.gaps[0]).toMatchObject({ cause: 'capture_stopped', from_ms: ms(T0 + 598, 1) });
 
-    const none = await memoryLog(events, () => true);
-    await expect(none.read(from, to)).rejects.toBeInstanceOf(ChartCheckpointError);
-    // Falla antes de leer ningún segmento.
-    expect(none.reads).toEqual([]);
-  });
+      const none = await memoryLog(events, () => true);
+      await expect(none.read(from, to)).rejects.toBeInstanceOf(ChartCheckpointError);
+      // Falla antes de leer ningún segmento.
+      expect(none.reads).toEqual([]);
+    },
+  );
 
   it('lee también el segmento de un tick que llegó antes de su hora, con el reloj de la fuente adelantado', async () => {
     const stimuli: unknown[] = [open(1, A, null, at(T0 - 1))];

@@ -264,6 +264,8 @@ export function createMarketDataReader(deps: MarketDataReaderDeps): MarketDataRe
   const segments = new LruCache<readonly ChartItem[]>(CHART_CACHE_SEGMENTS);
   /** El perfil de medición sale del esquema fijado en la release: es el mismo en todos los logs. */
   let profile: MeasurementProfile | null = null;
+  /** El último log en el que se comprobó que `ingest` guardó ese esquema. */
+  let verifiedLog: number | null = null;
   /** La cola de los gráficos: uno a la vez. */
   let queue: Promise<unknown> = Promise.resolve();
 
@@ -277,8 +279,16 @@ export function createMarketDataReader(deps: MarketDataReaderDeps): MarketDataRe
     },
   });
 
-  const profileOf = async (objects: ObjectStore): Promise<MeasurementProfile | null> => {
-    if (profile !== null) {
+  /**
+   * El perfil de medición, si `ingest` guardó en el log el esquema de fuente de la release (ADR-0015
+   * §7), o `null` si no lo guardó. Se comprueba en cada log nuevo: uno escrito con otra release no
+   * tiene ese esquema.
+   */
+  const profileOf = async (
+    log: LogLocation,
+    objects: ObjectStore,
+  ): Promise<MeasurementProfile | null> => {
+    if (profile !== null && verifiedLog === log.number) {
       return profile;
     }
     const stored = await readStoredSourceSchema(objects, release);
@@ -288,11 +298,12 @@ export function createMarketDataReader(deps: MarketDataReaderDeps): MarketDataRe
       case 'mismatch':
         throw new SourceSchemaMismatchError();
       case 'found':
-        profile = createDerivMeasurementProfileFromSourceSchema({
+        profile ??= createDerivMeasurementProfileFromSourceSchema({
           source_schema_bytes: stored.bytes,
           source_schema_release: release.release,
           symbol: CHART_SYMBOL,
         });
+        verifiedLog = log.number;
         return profile;
     }
   };
@@ -324,7 +335,7 @@ export function createMarketDataReader(deps: MarketDataReaderDeps): MarketDataRe
     if (started === null) {
       return { ...base, log: log.number, log_started_at_utc: null, ticks: empty, gaps: [] };
     }
-    const measurement = await profileOf(objects);
+    const measurement = await profileOf(log, objects);
     if (measurement === null) {
       throw new SourceSchemaMissingError();
     }
