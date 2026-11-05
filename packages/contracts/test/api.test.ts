@@ -606,8 +606,22 @@ describe('DataChart', () => {
       { ...recovered, recovered_ticks: null },
       { ...recovered, history: 'pending' },
       { ...recovered, history: 'unavailable', reason: 'history_timeout' },
-      // Sin fin, solo uno que sigue.
+      // Sin fin, solo uno que sigue: la historia ya tiene el rango, con su fin.
       { ...recovered, to_utc: null },
+      {
+        ...recovered,
+        to_utc: null,
+        history: 'partial',
+        reason: 'history_page_limit',
+        recovered_ticks: 3,
+      },
+      {
+        ...recovered,
+        to_utc: null,
+        history: 'unavailable',
+        reason: 'history_timeout',
+        recovered_ticks: null,
+      },
       { ...recovered, to_utc: '2026-11-08T07:00:00.000Z' },
       // Un motivo saneado, nunca un mensaje.
       {

@@ -1,7 +1,9 @@
 import { InMemoryObjectStore, ObjectReadError } from '@buoh/market-data-worker/lectura';
+import type { Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
 
 import {
+  createMarketDataReader,
   LruCache,
   ObjectBytesCache,
   OBJECT_CACHE_BYTES,
@@ -125,5 +127,57 @@ describe('readOnlyObjects', () => {
     expect(error).toBeInstanceOf(StorageUnavailableError);
     expect((error as StorageUnavailableError).reason).toBe('TimeoutError');
     expect((error as Error).message).not.toContain('cuenta');
+  });
+});
+
+describe('createMarketDataReader', () => {
+  it('lee un gráfico a la vez: el siguiente no empieza hasta que termina el anterior, aunque falle', async () => {
+    // Un pool que no responde hasta que la prueba lo suelta: cada gráfico empieza listando los logs.
+    const queries: string[] = [];
+    const answers: ((failure?: Error) => void)[] = [];
+    const pool = {
+      query: (text: string) => {
+        queries.push(text);
+        return new Promise((resolve, reject) => {
+          answers.push((failure) => {
+            if (failure === undefined) {
+              resolve({ rows: [] });
+            } else {
+              reject(failure);
+            }
+          });
+        });
+      },
+    };
+    const market = createMarketDataReader({
+      pool: pool as unknown as Pool,
+      objects: () => {
+        throw new Error('sin logs no se lee R2');
+      },
+      clock: () => Date.parse('2026-11-08T12:00:00.000Z'),
+    });
+    const settle = async () => {
+      for (let turn = 0; turn < 20; turn += 1) {
+        await Promise.resolve();
+      }
+    };
+    const first = market.chart(1);
+    const second = market.chart(6);
+    const third = market.chart(24);
+    await settle();
+    expect(queries).toHaveLength(1);
+    answers[0]?.(Object.assign(new Error('se cortó'), { code: 'ECONNRESET' }));
+    await expect(first).rejects.toMatchObject({ code: 'ECONNRESET' });
+    await settle();
+    expect(queries).toHaveLength(2);
+    answers[1]?.();
+    await expect(second).resolves.toMatchObject({
+      log: null,
+      from_utc: '2026-11-08T06:00:00.000Z',
+    });
+    await settle();
+    expect(queries).toHaveLength(3);
+    answers[2]?.();
+    await expect(third).resolves.toMatchObject({ log: null, from_utc: '2026-11-07T12:00:00.000Z' });
   });
 });
