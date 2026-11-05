@@ -235,6 +235,21 @@ export class PostgresSourceLogStore implements SourceLogStore, ClosedSegmentFind
     return rows.map(closedFromRecord);
   }
 
+  /** Con la clave primaria, de mayor a menor índice. */
+  async lastRequestedSegmentBelow(
+    source: string,
+    below: number,
+  ): Promise<ClosedSourceSegment | null> {
+    const { rows } = await this.#pool.query<ClosedRecord>(
+      `SELECT ${CLOSED_COLUMNS} FROM ${this.#closed}
+        WHERE source = $1 AND segment_index < $2 AND close_reason = 'requested'
+        ORDER BY segment_index DESC LIMIT 1`,
+      [source, below],
+    );
+    const row = rows[0];
+    return row === undefined ? null : closedFromRecord(row);
+  }
+
   /**
    * Con el índice único de `event_id`, sin recorrer las filas de la fuente. Un ID con otra forma que
    * la de `event_id::text` no está en el índice: da `false` sin consultar, en lugar del error del

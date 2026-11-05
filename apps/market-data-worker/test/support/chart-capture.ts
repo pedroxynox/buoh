@@ -14,6 +14,7 @@ import {
   C,
   close,
   open,
+  ping,
   recovery,
   T0,
   tick,
@@ -105,6 +106,25 @@ export function reconnectedEvents(): SourceEvent[] {
   const stimuli = captureStimuli();
   stimuli.push(open(stimuli.length + 1, E, D, at(T0 + 2405)));
   ticksBetween(stimuli, E, T0 + 2410, T0 + 2600);
+  return eventsOf(stimuli, measurement);
+}
+
+/**
+ * Dos paradas pedidas: la primera termina con los ticks de una conexión nueva, y tras la segunda la
+ * conexión nueva solo trae pongs durante más de 6 minutos, hasta los ticks de T0 + 800.
+ */
+export function twoStopsEvents(): SourceEvent[] {
+  const stimuli: unknown[] = [open(1, A, null, at(T0 - 1))];
+  ticksBetween(stimuli, A, T0, T0 + 100);
+  stimuli.push(close(stimuli.length + 1, A, at(T0 + 101), 'requested'));
+  stimuli.push(open(stimuli.length + 1, B, A, at(T0 + 200)));
+  ticksBetween(stimuli, B, T0 + 202, T0 + 300);
+  stimuli.push(close(stimuli.length + 1, B, at(T0 + 301), 'requested'));
+  stimuli.push(open(stimuli.length + 1, C, B, at(T0 + 310)));
+  for (let epoch = T0 + 311; epoch <= T0 + 700; epoch += 2) {
+    stimuli.push(ping(stimuli.length + 1, C, at(epoch)));
+  }
+  ticksBetween(stimuli, C, T0 + 800, T0 + 900);
   return eventsOf(stimuli, measurement);
 }
 

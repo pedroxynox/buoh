@@ -156,6 +156,16 @@ export class InMemorySourceLogStore implements SourceLogStore, ClosedSegmentFind
     );
   }
 
+  lastRequestedSegmentBelow(source: string, below: number): Promise<ClosedSourceSegment | null> {
+    const found = this.closed.filter(
+      (segment) =>
+        segment.source === source &&
+        segment.segment_index < below &&
+        segment.close_reason === 'requested',
+    );
+    return Promise.resolve(found.at(-1) ?? null);
+  }
+
   hasSourceEvent(source: string, eventId: string): Promise<boolean> {
     return Promise.resolve(
       this.rows.some((row) => row.source === source && row.event_id === eventId),

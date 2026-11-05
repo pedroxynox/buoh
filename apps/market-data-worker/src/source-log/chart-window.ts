@@ -13,9 +13,9 @@
  *   de su incidencia `event_gap_unresolved`. Mientras la historia no lo decide, el hueco pendiente
  *   del estado vivo del final (`liveDerivationView`), sin fin si todavía no llegó un tick después;
  * - **una parada pedida** (`capture_stopped`): tras un cierre `requested`, como el de un despliegue,
- *   hasta el primer tick posterior. No se recupera (ADR-0015, «Despliegue o reinicio programado»).
- *   Si la cubre un hueco de conexión, como cuando la parada llega con la continuidad pendiente, cuenta
- *   ese.
+ *   hasta el primer tick posterior; volver a conectar no la termina. No se recupera (ADR-0015,
+ *   «Despliegue o reinicio programado»). Si la cubre un hueco de conexión, como cuando la parada
+ *   llega tras una conexión perdida sin ningún tick nuevo todavía, cuenta ese.
  *
  * Los dos van del high-watermark del símbolo + 1 ms al primer tick posterior − 1 ms, como los rangos
  * del dominio (`pendingGapOf`). El gráfico nunca deduce un hueco de la distancia entre dos ticks.
@@ -141,20 +141,41 @@ export interface ChartBoundary {
   /** El high-watermark del símbolo, o `null` si el log todavía no tenía ningún tick suyo. */
   readonly watermark_ms: number | null;
   /**
-   * Si la captura estaba parada a pedido: sin conexión en el log, sin continuidad pendiente del
-   * símbolo y con algún tick antes.
+   * Si la captura estaba parada, con algún tick antes (`chartBoundaryOf`). Si en realidad era una
+   * conexión perdida, su hueco cubre el de la parada, y cuenta ese (`assembleChartWindow`).
    */
   readonly stopped: boolean;
 }
 
-/** El principio de la ventana para el gráfico, del estado vivo del final del segmento anterior. */
-export function chartBoundaryOf(state: LiveDerivationState, symbol: string): ChartBoundary {
-  const watermark = state.watermarks.find((item) => item.symbol === symbol)?.event_time_utc;
-  const pending = state.pending_continuity.some((item) => item.symbol === symbol);
-  const watermarkMs = watermark === undefined ? null : Date.parse(watermark);
+/** El high-watermark del símbolo en un estado vivo, o `undefined` si no tiene ningún tick suyo. */
+function watermarkOf(state: LiveDerivationState, symbol: string): string | undefined {
+  return state.watermarks.find((item) => item.symbol === symbol)?.event_time_utc;
+}
+
+/**
+ * El principio de la ventana para el gráfico, del estado vivo del final del segmento anterior
+ * (`state`) y del final del último segmento que cerró una parada de `ingest` antes de él (`lastStop`,
+ * el último con `close_reason` `requested`, o `null` si no hay ninguno). Con algún tick antes, la
+ * captura está parada:
+ * - sin conexión en el log, tras un cierre pedido o uno no pedido; del segundo sale además un hueco
+ *   de conexión, que cubre el de la parada. La continuidad pendiente no cambia nada: un cierre
+ *   pedido no la toca (ADR-0015 §10), así que una cuyo fin ya llegó no cubre la parada posterior;
+ * - con conexión, si desde `lastStop` no llegó ningún tick posterior a su high-watermark: volver a
+ *   conectar no termina la parada, solo un tick nuevo.
+ */
+export function chartBoundaryOf(
+  state: LiveDerivationState,
+  symbol: string,
+  lastStop: LiveDerivationState | null,
+): ChartBoundary {
+  const watermark = watermarkOf(state, symbol);
+  if (watermark === undefined) {
+    return { stopped: false, watermark_ms: null };
+  }
   return {
-    stopped: !state.connected_in_log && !pending && watermarkMs !== null,
-    watermark_ms: watermarkMs,
+    stopped:
+      !state.connected_in_log || (lastStop !== null && watermarkOf(lastStop, symbol) === watermark),
+    watermark_ms: Date.parse(watermark),
   };
 }
 
@@ -386,7 +407,9 @@ async function mapLimited<T, R>(
  *    verificado por su hash (`readClosedSegment`), cuatro a la vez;
  * 5. pliega desde cada punto de control hasta el principio de la ventana y hasta el final, con la
  *    foto del abierto: el principio dice si la captura estaba parada, y el final, los huecos
- *    pendientes;
+ *    pendientes. Si al principio la captura tenía conexión y algún tick, busca además el último
+ *    segmento que cerró una parada (`lastRequestedSegmentBelow`) y su estado vivo, desde su punto de
+ *    control y con el mismo tope: la parada sigue si desde entonces no llegó ningún tick nuevo;
  * 6. arma el gráfico (`assembleChartWindow`).
  *
  * Lanza `LogReadError` si un almacén no responde, `LogIntegrityError` si el contenido no pasa sus
@@ -445,9 +468,38 @@ export async function readChartWindow(input: ReadChartWindowInput): Promise<Char
     return chart;
   });
 
+  /** El estado vivo al final de cada segmento plegado hasta el principio de la ventana. */
+  const statesAfter = new Map<number, LiveDerivationState>([
+    [startBase.segment_index, startBase.state],
+  ]);
   let startState = startBase.state;
   for (let index = startBase.segment_index + 1; index < first; index += 1) {
     startState = fold(startState, (await log.readClosedSegment(index)).events, profile);
+    statesAfter.set(index, startState);
+  }
+  /** El estado vivo al final del segmento cerrado `index`, desde su último punto de control. */
+  const stateAfter = async (index: number): Promise<LiveDerivationState> => {
+    const base = await lookup.lastValid(log, index + 1);
+    requireNear(base, index + 1);
+    let state = base.state;
+    for (let next = base.segment_index + 1; next <= index; next += 1) {
+      state = fold(state, (await log.readClosedSegment(next)).events, profile);
+    }
+    return state;
+  };
+  // Con conexión al principio, la parada sigue si desde la última no llegó ningún tick nuevo.
+  let lastStop: LiveDerivationState | null = null;
+  if (startState.connected_in_log && watermarkOf(startState, symbol) !== undefined) {
+    let stopRow: ClosedSourceSegment | null;
+    try {
+      stopRow = await input.segments.lastRequestedSegmentBelow(log.source, first);
+    } catch (error) {
+      throw new LogReadError(failureReason(error), { cause: error });
+    }
+    if (stopRow !== null) {
+      lastStop =
+        statesAfter.get(stopRow.segment_index) ?? (await stateAfter(stopRow.segment_index));
+    }
   }
   let endState = endBase.state;
   for (let index = endBase.segment_index + 1; index < open.segment_index; index += 1) {
@@ -466,7 +518,7 @@ export async function readChartWindow(input: ReadChartWindowInput): Promise<Char
     from_ms: from,
     items: [...items.flat(), ...derived(() => chartItemsOf(open.events, profile, symbol))],
     pending,
-    start: chartBoundaryOf(startState, symbol),
+    start: chartBoundaryOf(startState, symbol, lastStop),
     to_ms: to,
   });
 }

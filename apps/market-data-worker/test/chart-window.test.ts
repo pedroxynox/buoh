@@ -33,6 +33,7 @@ import {
   NO_START,
   reconnectedEvents,
   ticksBetween,
+  twoStopsEvents,
   wholeLogChart,
   writeCapture,
 } from './support/chart-capture.js';
@@ -583,6 +584,146 @@ describe('readChartWindow', () => {
     },
   );
 
+  it(
+    `pliega desde un punto de control ${String(CHART_FOLD_LIMIT)} segmentos, y no ${String(CHART_FOLD_LIMIT + 1)}`,
+    { timeout: 30_000 },
+    async () => {
+      const stimuli: unknown[] = [open(1, A, null, at(T0 - 1))];
+      ticksBetween(stimuli, A, T0, T0 + 4000);
+      const long = eventsOf(stimuli, measurement);
+      const closed = (await memoryLog(long)).store.closed;
+      // La ventana empieza más de un margen después del segmento 19: el primero que lee es el 20.
+      const first = 20;
+      const from = Date.parse(closed[first - 1]?.last_event_time_utc ?? '') + 60_001;
+      const to = from + 600_000;
+      // Sin los puntos de control de los `folds` segmentos anteriores a la ventana, el principio se
+      // pliega desde el de `first - folds - 1`.
+      const near = await memoryLog(long, (index) => index >= first - 12 && index < first);
+      expect(await near.read(from, to)).toEqual(wholeLogChart(long, from, to));
+      expect(Math.min(...near.reads)).toBe(first - 12);
+      const far = await memoryLog(long, (index) => index >= first - 13 && index < first);
+      await expect(far.read(from, to)).rejects.toBeInstanceOf(ChartCheckpointError);
+      expect(far.reads).toEqual([]);
+    },
+  );
+
+  it('una parada larga después de una conexión perdida cuyo fin ya llegó, sin la historia todavía', async () => {
+    const stimuli: unknown[] = [open(1, A, null, at(T0 - 1))];
+    ticksBetween(stimuli, A, T0, T0 + 100);
+    stimuli.push(close(stimuli.length + 1, A, at(T0 + 101), 'timeout'));
+    stimuli.push(open(stimuli.length + 1, B, A, at(T0 + 103)));
+    // El primer tick fija el fin del hueco de conexión; la historia no llega antes de la parada.
+    ticksBetween(stimuli, B, T0 + 104, T0 + 200);
+    stimuli.push(close(stimuli.length + 1, B, at(T0 + 201), 'requested'));
+    stimuli.push(open(stimuli.length + 1, C, B, at(T0 + 1200)));
+    ticksBetween(stimuli, C, T0 + 1202, T0 + 1400);
+    const stopped = eventsOf(stimuli, measurement);
+    const log = await memoryLog(stopped);
+    const from = ms(T0 + 600);
+    const to = ms(T0 + 1500);
+    const window = await log.read(from, to);
+    expect(window.gaps).toEqual([
+      gap(ms(T0 + 200, 1), ms(T0 + 1201, 999), {
+        cause: 'capture_stopped',
+        history: 'not_requested',
+      }),
+    ]);
+    expect(window).toEqual(wholeLogChart(stopped, from, to));
+  });
+
+  it('volver a conectar no termina la parada: solo un tick posterior, también si su segmento queda antes de la ventana', async () => {
+    const stimuli: unknown[] = [open(1, A, null, at(T0 - 1))];
+    ticksBetween(stimuli, A, T0, T0 + 100);
+    stimuli.push(close(stimuli.length + 1, A, at(T0 + 101), 'requested'));
+    stimuli.push(open(stimuli.length + 1, B, A, at(T0 + 110)));
+    // La conexión nueva solo trae pongs, y el tick que repite el último, durante casi 7 minutos.
+    stimuli.push(
+      tick(stimuli.length + 1, B, T0 + 100, { quote: (100 + (100 % 7) / 8).toFixed(3) }),
+    );
+    for (let epoch = T0 + 111; epoch <= T0 + 400; epoch += 2) {
+      stimuli.push(ping(stimuli.length + 1, B, at(epoch)));
+    }
+    ticksBetween(stimuli, B, T0 + 500, T0 + 600);
+    const reconnected = eventsOf(stimuli, measurement);
+    const expected = [
+      gap(ms(T0 + 100, 1), ms(T0 + 499, 999), {
+        cause: 'capture_stopped',
+        history: 'not_requested',
+      }),
+    ];
+    const from = ms(T0 + 300);
+    const to = ms(T0 + 700);
+    const log = await memoryLog(reconnected);
+    const window = await log.read(from, to);
+    expect(window.gaps).toEqual(expected);
+    expect(window).toEqual(wholeLogChart(reconnected, from, to));
+    // Sin el punto de control del segmento de la parada, su estado se pliega desde el anterior.
+    const stopSegment =
+      log.store.closed.find((segment) => segment.close_reason === 'requested')?.segment_index ?? -1;
+    expect(stopSegment).toBeGreaterThanOrEqual(0);
+    const folded = await memoryLog(reconnected, (index) => index === stopSegment);
+    expect((await folded.read(from, to)).gaps).toEqual(expected);
+    expect(folded.reads).toContain(stopSegment);
+    // Con el tick nuevo antes de la ventana, la parada ya terminó.
+    const later = await log.read(ms(T0 + 800), ms(T0 + 900));
+    expect(later.gaps).toEqual([]);
+    expect(later).toEqual(wholeLogChart(reconnected, ms(T0 + 800), ms(T0 + 900)));
+  });
+
+  it('con dos paradas, cuenta la última: la primera ya terminó con un tick nuevo', async () => {
+    const stops = twoStopsEvents();
+    const log = await memoryLog(stops);
+    const requested = log.store.closed.filter((segment) => segment.close_reason === 'requested');
+    expect(requested.map((segment) => segment.segment_index)).toEqual([0, 1]);
+    for (let below = 0; below <= log.store.closed.length + 1; below += 1) {
+      expect(
+        await log.store.lastRequestedSegmentBelow(measurement.source, below),
+        String(below),
+      ).toEqual(requested.filter((segment) => segment.segment_index < below).at(-1) ?? null);
+    }
+    expect(await log.store.lastRequestedSegmentBelow('otra_fuente', 100)).toBeNull();
+    const from = ms(T0 + 600);
+    const to = ms(T0 + 1000);
+    const window = await log.read(from, to);
+    expect(window.gaps).toEqual([
+      gap(ms(T0 + 300, 1), ms(T0 + 799, 999), {
+        cause: 'capture_stopped',
+        history: 'not_requested',
+      }),
+    ]);
+    expect(window).toEqual(wholeLogChart(stops, from, to));
+  });
+
+  it(
+    `el estado de la última parada también se pliega como mucho ${String(CHART_FOLD_LIMIT)} segmentos`,
+    { timeout: 30_000 },
+    async () => {
+      const stimuli: unknown[] = [open(1, A, null, at(T0 - 1))];
+      ticksBetween(stimuli, A, T0, T0 + 1700);
+      stimuli.push(close(stimuli.length + 1, A, at(T0 + 1701), 'requested'));
+      stimuli.push(open(stimuli.length + 1, B, A, at(T0 + 1705)));
+      for (let epoch = T0 + 1710; epoch <= T0 + 2100; epoch += 2) {
+        stimuli.push(ping(stimuli.length + 1, B, at(epoch)));
+      }
+      ticksBetween(stimuli, B, T0 + 2200, T0 + 2300);
+      const long = eventsOf(stimuli, measurement);
+      const from = ms(T0 + 2010);
+      const to = ms(T0 + 2400);
+      const stopSegment =
+        (await memoryLog(long)).store.closed.find((segment) => segment.close_reason === 'requested')
+          ?.segment_index ?? -1;
+      expect(stopSegment).toBeGreaterThan(CHART_FOLD_LIMIT);
+      // Con el punto de control anterior al de la parada, la pliega desde él.
+      const near = await memoryLog(long, (index) => index === stopSegment);
+      const window = await near.read(from, to);
+      expect(window).toEqual(wholeLogChart(long, from, to));
+      expect(window.gaps[0]).toMatchObject({ cause: 'capture_stopped', from_ms: ms(T0 + 1700, 1) });
+      // Sin ninguno hasta ella, tendría que derivar el log desde el principio.
+      const far = await memoryLog(long, (index) => index <= stopSegment);
+      await expect(far.read(from, to)).rejects.toBeInstanceOf(ChartCheckpointError);
+    },
+  );
+
   it('lee también el segmento de un tick que llegó antes de su hora, con el reloj de la fuente adelantado', async () => {
     const stimuli: unknown[] = [open(1, A, null, at(T0 - 1))];
     ticksBetween(stimuli, A, T0, T0 + 114);
@@ -645,6 +786,8 @@ describe('readChartWindow', () => {
           ...row,
           logical_content_sha256: 'e'.repeat(64),
         })),
+      lastRequestedSegmentBelow: (source: string, below: number) =>
+        store.lastRequestedSegmentBelow(source, below),
     };
     const reader = await SourceEventLog.open({
       objects: log.objects,

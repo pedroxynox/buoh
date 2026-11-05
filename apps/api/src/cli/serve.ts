@@ -36,10 +36,16 @@ const READINESS_INTERVAL_MS = 5000;
 /** Contraseñas que esperan su hash con una en curso (ADR-0019 §1); la siguiente es `rate_limited`. */
 const HASHES_WAITING = 4;
 /**
- * Los plazos de cada petición a R2, como los del pool: conectar en 5 s y la petición entera en 10 s.
- * Sin reintentos (`createS3Client`): una lectura que vence responde `storage_unavailable`.
+ * Los plazos de cada petición a R2, como los del pool: conectar en 5 s y llegar a las cabeceras de
+ * la respuesta en 10 s. Sin reintentos (`createS3Client`).
  */
 const STORAGE_TIMEOUTS = { connectionTimeout: 5000, requestTimeout: 10_000 } as const;
+/**
+ * El plazo de cada lectura de un objeto de R2, con su `HeadObject`, su `GetObject` y su cuerpo: al
+ * vencer se corta (`readSignal`), y la respuesta es `storage_unavailable`. Sin él, un cuerpo que deja
+ * de llegar dejaría esperando a todos los gráficos, que van de uno en uno (ADR-0019 §8).
+ */
+const STORAGE_READ_TIMEOUT_MS = 10_000;
 
 let config;
 try {
@@ -114,7 +120,10 @@ if (config !== undefined) {
       ? null
       : createMarketDataReader({
           pool: readerPool,
-          objects: (log) => new S3ObjectStore(s3, storage.bucket, log.prefix),
+          objects: (log) =>
+            new S3ObjectStore(s3, storage.bucket, log.prefix, {
+              readSignal: () => AbortSignal.timeout(STORAGE_READ_TIMEOUT_MS),
+            }),
           clock,
         });
   // La exportación `out-api` de la web, junto a la API en el repositorio; `apps/web/out-api` desde

@@ -10,7 +10,7 @@ La medición no usa datos de mercado: la captura es sintética, con precios inve
 - PostgreSQL 18.4 y SeaweedFS 4.48 portátiles, el almacenamiento de objetos compatible con S3, los dos solo en `127.0.0.1` y sin TLS, del arnés de integración local que describe el steering del sandbox (`.kiro/steering/entorno-sandbox-kiro.md`). La API corre con `BUOH_DEPLOYMENT_ENVIRONMENT=development`, que no exige `https` ni TLS.
 - Node.js 24.22.0 y pnpm 12.14.0. Cada proceso de la API corre con los tamaños de V8 de `API_NODE_FLAGS` (`apps/api/src/node-flags.ts`): `--max-semi-space-size=1` y `--max-old-space-size=256`.
 - La release de esquemas fijada `production_v20260901_0`, descargada de su URL fijada y comprobada con su SHA-256.
-- El código de este PR, sobre `main` en `85f16e9`, compilado con `pnpm run build`, y `scripts/evidencia-f2-4/medir-memoria.mjs`, que no es un comando del producto.
+- El código del primer commit de este PR, `e1450f9`, sobre `main` en `85f16e9`, compilado con `pnpm run build`, y `scripts/evidencia-f2-4/medir-memoria.mjs`, que no es un comando del producto. La medición se repitió con el código después de la revisión (abajo, «Resultado»).
 
 ## Cómo se midió
 
@@ -41,6 +41,7 @@ El primer criterio que probó el agente, el 2026-11-05 antes de la decisión del
 - «RSS tras el gráfico» es la memoria residente justo después de las dos lecturas del gráfico, antes de la segunda alta. La respuesta es el JSON sin comprimir, en KB de 1000 bytes.
 - Cada gráfico trae un hueco, el `capture_stopped` del cierre pedido al final de la captura, sin fin porque después no llegó ningún tick. Los ticks bajan de 1 a 3 de una ronda a la siguiente porque la ventana termina en la hora de cada lectura y la captura no tiene ticks nuevos.
 - Un tick cada 2 s, el ritmo de R_100, son unos 1 800 por hora, así que la ventana de 24 horas trae unos 43 000.
+- **Repetida con el código después de la revisión del PR**, que corrige la parada al principio de la ventana y corta cada lectura de R2 a los 10 s (ADR-0019 §8), el mismo día de 15:28 a 15:35 UTC: máximos de 158,6 MiB sin gráfico y de 170,4, 190,5, 205,6 y 220,1 MiB con 1, 6, 12 y 24 horas. A un backtest le quedan 269, 256, 235, 219 y 204 MB, y el gráfico de 24 horas en frío tardó de 3 404 a 3 444 ms. Pasa igual, y la diferencia con la tabla, de menos de 1 MiB, está dentro de lo que varía entre rondas.
 
 ## Por qué crece la memoria
 

@@ -119,6 +119,12 @@ export interface ClosedSegmentFinder {
    * saltos. Las horas se comparan como texto, que con su formato fijo es su orden en el tiempo.
    */
   listClosedSegmentsSince(source: string, sinceUtc: string): Promise<ClosedSourceSegment[]>;
+  /**
+   * El último segmento cerrado de la fuente por debajo del índice `below` que cerró una parada
+   * (`close_reason` `requested`), o `null` si no hay ninguno. `ingest` cierra así el segmento
+   * abierto al terminar cada sesión (ADR-0015 §3, «Parada»).
+   */
+  lastRequestedSegmentBelow(source: string, below: number): Promise<ClosedSourceSegment | null>;
 }
 
 /**

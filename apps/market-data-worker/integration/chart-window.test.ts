@@ -7,7 +7,13 @@ import { readChartWindow } from '../src/source-log/chart-window.js';
 import { LiveCheckpointLookup } from '../src/source-log/live-checkpoint.js';
 import { SourceEventLog } from '../src/source-log/source-event-log.js';
 import { T0 } from '../../../packages/domain/test/support/live-corpus.js';
-import { captureEvents, ms, wholeLogChart, writeCapture } from '../test/support/chart-capture.js';
+import {
+  captureEvents,
+  ms,
+  twoStopsEvents,
+  wholeLogChart,
+  writeCapture,
+} from '../test/support/chart-capture.js';
 import { checkpointRowsOf } from '../test/support/live-checkpoint-rows.js';
 import { measurement, SYMBOL } from '../test/support/live-corpus.js';
 
@@ -122,6 +128,38 @@ describe('PostgresSourceLogStore con el esquema del log', () => {
           ? []
           : closed.filter((segment) => segment.segment_index >= first.segment_index);
       expect(await qualified.listClosedSegmentsSince(source, since), since).toEqual(expected);
+    }
+  });
+
+  it('da el último segmento que cerró una parada por debajo de cada índice, con dos paradas', async () => {
+    const schema = `${SCHEMA}_paradas`;
+    await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    const twoStops = openStores(loadConfig({ ...environment, BUOH_POSTGRES_SCHEMA: schema }));
+    try {
+      await migrate(twoStops.pool);
+      const writer = await SourceEventLog.open({
+        objects: twoStops.objects,
+        source: measurement.source,
+        store: twoStops.sourceLog,
+        zlibVersion: process.versions.zlib,
+      });
+      await writeCapture(writer, twoStopsEvents());
+      const qualified = new PostgresSourceLogStore(reader, { schema });
+      const source = measurement.source;
+      const closed = await twoStops.sourceLog.listClosedSegments(source, 0, 1000);
+      const stops = closed.filter((segment) => segment.close_reason === 'requested');
+      expect(stops.map((segment) => segment.segment_index)).toEqual([0, 1]);
+      for (let below = 0; below <= closed.length + 1; below += 1) {
+        const expected = stops.filter((segment) => segment.segment_index < below).at(-1) ?? null;
+        expect(await qualified.lastRequestedSegmentBelow(source, below), String(below)).toEqual(
+          expected,
+        );
+      }
+      expect(await qualified.lastRequestedSegmentBelow('otra_fuente', 1000)).toBeNull();
+    } finally {
+      await twoStops.close();
+      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
     }
   });
 });
