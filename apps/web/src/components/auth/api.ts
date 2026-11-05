@@ -12,6 +12,8 @@ import type {
   ApiErrorCode,
   AuditEvent,
   AuditEventsResponse,
+  DataCatalog,
+  DataChart,
   DataHealth,
   LinkSecret,
   LinkUse,
@@ -20,6 +22,7 @@ import type {
   SessionLoginRequest,
   SessionsClosedResult,
 } from '@buoh/contracts';
+import { readDataCatalog, readDataChart } from '../mercados/respuesta';
 import { readDataHealth } from '../salud/respuesta';
 
 /** El motivo de un fallo de la API, con los añadidos locales de red y de respuesta inesperada. */
@@ -127,6 +130,28 @@ export const api = {
       throw new ApiCallError({ code: 'unexpected' });
     }
     return health;
+  },
+  /**
+   * El gráfico de R_100 de las últimas `hours` horas (ADR-0019 §8), sin el token CSRF, como la salud.
+   * Una respuesta sin la forma de `DataChart`, o de otra ventana, es `unexpected`.
+   */
+  dataChart: async (hours: number): Promise<DataChart> => {
+    const chart = readDataChart(
+      await request<unknown>('GET', `/api/v1/datos/grafico?hours=${String(hours)}`),
+      hours,
+    );
+    if (chart === null) {
+      throw new ApiCallError({ code: 'unexpected' });
+    }
+    return chart;
+  },
+  /** El catálogo de Deriv del log activo (ADR-0019 §8), sin el token CSRF, como la salud. */
+  dataCatalog: async (): Promise<DataCatalog> => {
+    const catalog = readDataCatalog(await request<unknown>('GET', '/api/v1/datos/catalogo'));
+    if (catalog === null) {
+      throw new ApiCallError({ code: 'unexpected' });
+    }
+    return catalog;
   },
 } as const;
 

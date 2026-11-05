@@ -44,7 +44,12 @@ function EmptyChart({ text }: { readonly text: string }) {
   return <p className="w-chart-empty">{text}</p>;
 }
 
-function Frame({
+/**
+ * El marco de un gráfico: el SVG con su rejilla, las cifras del eje vertical y las etiquetas del
+ * eje de tiempo, cada una en `s.x(index)`. Los gráficos con datos reales de Mercados le pasan una
+ * escala de tiempo, con milisegundos en lugar de índices (`mercados/MarketCharts.tsx`).
+ */
+export function Frame({
   s,
   height,
   format,

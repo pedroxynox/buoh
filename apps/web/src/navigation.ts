@@ -26,7 +26,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     primary: true,
     realInApi: true,
   },
-  { href: '/mercados/', label: 'Mercados', icon: 'chart', primary: true },
+  { href: '/mercados/', label: 'Mercados', icon: 'chart', primary: true, realInApi: true },
   { href: '/datos/', label: 'Datos', icon: 'database', primary: false },
   { href: '/laboratorio/', label: 'Laboratorio', icon: 'flask', primary: true },
   { href: '/senales/', label: 'Señales', icon: 'radar', primary: true },
