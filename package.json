@@ -24,7 +24,7 @@
     "docs:check:pr": "node scripts/check-doc-impact.mjs --require-base",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "eslint .",
+    "lint": "node --max-old-space-size=4096 node_modules/eslint/bin/eslint.js .",
     "openapi:check": "pnpm --filter @buoh/api run openapi:check",
     "openapi:generate": "pnpm --filter @buoh/api run openapi:generate",
     "runtime:check": "node scripts/check-runtime.mjs",
