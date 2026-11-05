@@ -38,18 +38,17 @@ El PR #91 trajo el rol `buoh_api_lectura` y `GET /api/v1/datos/salud`, que solo 
 - **Esta vez, la sincronización desplegó `buoh-api` sin esperar a CI.** `buoh-api` sirvió el código nuevo antes de que terminara `desktop:windows`, y `buoh-ingesta`, con el mismo `autoDeployTrigger: checksPass`, lo esperó. La diferencia es que el PR cambiaba la sección de `buoh-api` en `render-datos.yaml` y no la de `buoh-ingesta`. Render documenta que un push que cambia el archivo del Blueprint despliega los recursos que cambia ([Render: Blueprints](https://render.com/docs/infrastructure-as-code)), sin decir si espera a los checks de CI: eso es lo que se vio ese día, deducido de las horas. El agente no ve los eventos de Render, así que la hora exacta de ese despliegue no está. Lo que se desplegó era el mismo árbol que CI ya había probado en el PR, y después CI también pasó en `main`. La [guía de despliegue](despliegue-en-render.md) («Cuándo despliegan») dice cómo se evita desplegar un árbol sin probar.
 - **La memoria de `buoh-api`.** El código nuevo, que carga la ruta `lectura` con unos 8 MiB más al arrancar (ADR-0019 §8), corre en `buoh-api` desde el 2026-11-04 entre las 20:00 y las 20:09:34. El PR 7c de F2.3 separa los días de antes y de después (`PROJECT_STATUS.md`, F2.4).
 
-Lo que este documento cita de la documentación de Render la resume con otras palabras; lo demás es lo que se vio o se dedujo el 2026-11-04.
-
 ## El Observatorio y la barra superior (PR #94)
 
-El PR #94 trajo el Observatorio y las insignias de modo y salud de la barra superior de `out-api` con la salud real de los datos, la de `GET /api/v1/datos/salud`, y la marca «Datos ficticios» solo en las secciones que siguen con ellos ([concepto de interfaz](../diseno/concepto-de-interfaz.md) §10). Solo cambió `apps/web`, así que, por los `buildFilter` de `render-datos.yaml`, solo volvió a desplegar `buoh-api`, y no cambió la API, los contratos ni `render-datos.yaml`. Las horas son UTC del 2026-11-05 y salen de GitHub y de las comprobaciones del agente desde fuera, sin sesión ni credenciales.
+El PR #94 trajo el Observatorio y las insignias de modo y salud de la barra superior de `out-api` con la salud real de los datos, la de `GET /api/v1/datos/salud`, y la marca «Datos ficticios» solo en las secciones que siguen con ellos ([concepto de interfaz](../diseno/concepto-de-interfaz.md) §10). Fuera del Markdown, solo cambió `apps/web`, así que, por los `buildFilter` de `render-datos.yaml`, que ignoran el Markdown, solo volvió a desplegar `buoh-api`. No cambió la API, los contratos ni `render-datos.yaml`. Las horas son UTC del 2026-11-05 y salen de GitHub y de las comprobaciones del agente desde fuera, sin sesión ni credenciales.
 
 | Hora | Qué pasó |
 |---|---|
 | 02:41:01 | El propietario fusiona el PR #94 (`312fb5d`, GitHub). El árbol es el de su último commit, `50319e7`, el que probó CI en el PR (`git diff --quiet 50319e7 312fb5d` sale con 0). |
 | 02:43:29, 02:47:55 y 02:52:16 | CI sobre `312fb5d`: `test:integration`, `verify:pr` y `desktop:windows` terminan bien. |
-| 02:43:29 a 02:54:34 | Con `curl` cada 20 s, `buoh-api` sirve todavía la web anterior: la barra de `/` dice «Modo: Shadow», el modo ficticio. |
-| 02:54:54 | `buoh-api` ya sirve la web nueva: `/` trae el Observatorio real. Render desplegó después de que pasaran los checks de CI (`autoDeployTrigger: checksPass`), como describe la [guía de despliegue](despliegue-en-render.md) («Cuándo despliegan») para un commit que no cambia `render-datos.yaml`. El agente no ve los eventos de Render, así que la hora exacta del despliegue no está. |
+| hacia las 02:43:29 | Un `curl` de `/` y de `/mercados/` trae todavía la web anterior: su barra dice «Modo: Shadow», el modo ficticio. |
+| 02:43:53 a 02:54:34 | Con `curl` de `/` cada unos 20 s (33 lecturas hasta las 02:54:54), la página todavía no trae el Observatorio real. |
+| 02:54:54 | `buoh-api` ya sirve la web nueva: `/` trae el Observatorio real. Su HTML lleva `Last-Modified: Thu, 05 Nov 2026 02:53:25 GMT`, la hora del archivo que escribió la compilación de Render, así que la instancia nueva arrancó probablemente después de esa hora. Render despliega después de que pasen los checks de CI (`autoDeployTrigger: checksPass`), como describe la [guía de despliegue](despliegue-en-render.md) («Cuándo despliegan») para un commit que no cambia `render-datos.yaml`. El agente no ve los eventos de Render, así que no están ni el arranque de la instancia nueva ni la parada de la anterior. |
 | 02:55:20 | Comprobación desde fuera (abajo). |
 | 02:55:29 a 02:55:33 | Un navegador sin cabeza (Chrome 157) abre `/` sin sesión (abajo). |
 
@@ -57,9 +56,11 @@ El PR #94 trajo el Observatorio y las insignias de modo y salud de la barra supe
 
 - la barra superior de `/`, `/auditoria/`, `/mercados/` y `/acceso/` dice «Modo: Desactivado» y «Salud: Leyendo…», el estado de la página antes de que su JavaScript lea la salud;
 - la marca «Datos ficticios» sale en `/mercados/`, que sigue con datos ficticios, y no en `/`, `/auditoria/` ni `/acceso/`;
-- en las cuatro páginas, el hash SHA-256 de cada uno de sus 3 scripts en línea está en su `Content-Security-Policy`, que no lleva `'unsafe-inline'`, así que el navegador los ejecuta (ADR-0019 §9);
+- en las cuatro páginas, el hash SHA-256 de cada uno de sus 3 scripts en línea está en el `script-src` de su `Content-Security-Policy`, que no lleva `'unsafe-inline'`, así que el navegador los ejecuta. La política lleva `style-src-attr 'unsafe-inline'`, que ADR-0019 §9 pide por los atributos `style` que escribe React;
 - `GET /api/v1/datos/salud` sin sesión responde `401 unauthenticated`, con `Cache-Control: no-store`.
 
 **En el navegador**, sin sesión: la página se carga y su JavaScript se ejecuta. La barra pasa a «Salud: Sin sesión», con el enlace «Iniciar sesión», y el Observatorio dice «No se pudo leer la salud. Tu sesión no es válida. Vuelve a iniciar sesión.», también con el enlace. La herramienta del navegador no registró mensajes de la consola ni errores de la página.
 
-**Para el PR 7c de F2.3.** El despliegue arrancó una instancia nueva de `buoh-api` entre las 02:54:34 y las 02:54:54, dentro de los días que mide el 7c, del 2026-11-03 al 2026-11-07 (`PROJECT_STATUS.md`, «Decisiones vigentes relevantes»). No cambió el código del servidor: solo los archivos de la web que sirve. Desde entonces, mientras el Observatorio está abierto, la web lee la salud cada minuto, unos 1,5 KB de tráfico de salida por lectura (estimación del PR #94).
+**Para el PR 7c de F2.3.** `buoh-api` empezó a servir la web nueva entre las 02:54:34 y las 02:54:54, dentro de los días que mide el 7c, del 2026-11-03 al 2026-11-07 (`PROJECT_STATUS.md`, «Decisiones vigentes relevantes»). La instancia nueva arrancó antes, probablemente después de las 02:53:25, y la anterior se paró después, a horas que el agente no ve. El despliegue no cambió el código del servidor: solo los archivos de la web que sirve. Desde entonces, mientras una página de la web está abierta, con la pestaña a la vista, la insignia de salud de la barra superior lee la salud cada minuto, unos 1,5 KB de tráfico de salida por lectura (estimación del PR #94).
+
+Lo que este documento cita de la documentación de Render la resume con otras palabras; lo demás es lo que se vio o se dedujo el 2026-11-04 y el 2026-11-05.
