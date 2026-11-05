@@ -159,6 +159,47 @@ describe('readDataHealth: la forma de la respuesta', () => {
       log: 2,
       observation: { status: 'failed', observed_at_utc: OBSERVED, reason: 'no va', code: null },
     },
+    // Las reglas del `HealthReport` y los objetos estrictos del contrato (contratos de dominio).
+    'healthy conectando': withReport({ connection_state: 'connecting' }),
+    'healthy con una condición abierta': withReport({
+      open_condition_types: ['event_gap_unresolved'],
+    }),
+    'healthy sin raw durable': withReport({ last_observation_id: null }),
+    'condiciones repetidas': withReport({
+      service_health: 'recovering',
+      open_condition_types: ['connection_lost', 'connection_lost'],
+    }),
+    'condiciones sin ordenar': withReport({
+      service_health: 'recovering',
+      open_condition_types: ['event_gap_unresolved', 'connection_lost'],
+    }),
+    'un identificador que no es UUIDv7': withReport({ last_observation_id: 'no-es-un-uuid' }),
+    'un dataset que no es sha256': withReport({ last_published_dataset_id: 'sha256:corto' }),
+    'una versión que no es semver': withReport({ schema_version: '1.0' }),
+    'un instante imposible': withReport({ last_received_at_utc: '2026-02-30T00:00:00.000Z' }),
+    'un campo de más en la respuesta': { ...healthy, extra: true },
+    'un campo de más en la observación': {
+      ...healthy,
+      observation: { ...healthy.observation, extra: true },
+    },
+    'un campo de más en el informe': withReport({ extra: true }),
+    'un campo de más en una alerta': {
+      ...healthy,
+      observation: {
+        ...healthy.observation,
+        alerts: [{ event: 'checkpoint_rejected', reason: null, extra: true }],
+      },
+    },
+    'un campo de más en una observación fallida': {
+      log: 2,
+      observation: {
+        status: 'failed',
+        observed_at_utc: OBSERVED,
+        reason: 'child_timeout',
+        code: null,
+        extra: true,
+      },
+    },
   };
 
   it.each(Object.entries(invalid))('rechaza lo que el contrato rechaza: %s', (_, sample) => {
@@ -175,12 +216,55 @@ describe('la causa de la salud (concepto de interfaz §10)', () => {
     expect(view.causes[0]?.detail).toContain('historia de Deriv');
   });
 
-  it('en recovering sin conexión, la causa es la reconexión, con el estado de la conexión', () => {
+  it('en recovering sin conexión, dice las dos causas que el informe no distingue', () => {
     const view = healthView(
       ready(completed(report({ service_health: 'recovering', connection_state: 'connecting' }))),
     );
-    expect(view.causes.map((cause) => cause.title)).toEqual(['Reconectando']);
-    expect(view.causes[0]?.detail).toContain('conectando');
+    expect(view.causes.map((cause) => cause.title)).toEqual(['Sin conexión con Deriv']);
+    expect(view.causes[0]?.detail).toContain('se está conectando');
+    // La reconexión, o un cierre pedido con la continuidad de la reconexión anterior pendiente.
+    expect(view.causes[0]?.detail).toContain('vuelve a conectar');
+    expect(view.causes[0]?.detail).toContain('cerró la conexión a pedido');
+  });
+
+  it('paused sin proceso de captura (regla 4): la conexión perdida y la captura sin proceso', () => {
+    const view = healthView(
+      ready(
+        completed(
+          report({
+            service_health: 'paused',
+            connection_state: 'disconnected',
+            open_condition_types: ['connection_lost'],
+          }),
+        ),
+      ),
+    );
+    expect(view.causes.map((cause) => cause.title)).toEqual([
+      'Conexión perdida',
+      'Sin captura activa',
+    ]);
+    expect(view.causes[1]?.detail).toMatch(/no hay un proceso que capture con un latido reciente/i);
+    // Con causas menores, la pausa solo puede venir de quien observa la ingesta, nunca de un cierre
+    // pedido (`healthReportOf`), así que la causa no lo ofrece como alternativa.
+    expect(view.causes[1]?.detail).not.toContain('a pedido');
+  });
+
+  it('un punto de control descartado es un aviso, no una causa', () => {
+    const healthyView = healthView(
+      ready(completed(report(), [{ event: 'checkpoint_rejected', reason: 'versions_mismatch' }])),
+    );
+    expect(healthyView.causes).toEqual([]);
+    expect(healthyView.notes.map((note) => note.title)).toEqual(['Punto de control descartado']);
+    expect(healthyView.notes[0]?.detail).toContain('versions_mismatch');
+    const pausedView = healthView(
+      ready(
+        completed(report({ service_health: 'paused', connection_state: 'disconnected' }), [
+          { event: 'checkpoint_unavailable', reason: 'timeout' },
+        ]),
+      ),
+    );
+    expect(pausedView.causes.map((cause) => cause.title)).toEqual(['Entrada detenida']);
+    expect(pausedView.notes.map((note) => note.title)).toEqual(['Punto de control sin leer']);
   });
 
   it('con connection_lost abierta, la causa es la conexión perdida, sin sumar la reconexión', () => {
@@ -275,6 +359,24 @@ describe('la causa de la salud (concepto de interfaz §10)', () => {
     expect(view.causes[0]?.detail).toContain('otro símbolo');
   });
 
+  it.each([
+    ['unexpected_error', 'Error de la observación', 'error inesperado'],
+    ['log_not_prepared', 'Log sin preparar', 'todavía no se puede leer'],
+  ] as const)(
+    'failed por %s tiene su propio título: no dice nada del log',
+    (reason, title, detail) => {
+      const view = healthView(
+        ready(
+          completed(report({ service_health: 'failed', connection_state: 'disconnected' }), [
+            { event: 'data_health_failed', reason },
+          ]),
+        ),
+      );
+      expect(view.causes.map((cause) => cause.title)).toEqual([title]);
+      expect(view.causes[0]?.detail).toContain(detail);
+    },
+  );
+
   it('una alerta o un motivo desconocidos se muestran con su código, nunca se ocultan', () => {
     const view = healthView(
       ready(
@@ -285,7 +387,7 @@ describe('la causa de la salud (concepto de interfaz §10)', () => {
       ),
     );
     expect(view.causes.map((cause) => cause.detail).join(' ')).toContain('motivo_nuevo');
-    expect(view.causes.map((cause) => cause.title)).toContain('Alerta alerta_nueva');
+    expect(view.notes.map((note) => note.title)).toEqual(['Alerta alerta_nueva']);
   });
 
   it('healthy no tiene causas, y starting dice que todavía no hay datos', () => {
@@ -411,6 +513,7 @@ describe('la frescura', () => {
 
 /** Lo que la prueba usa del dominio compilado, con sus nombres y la forma de sus entradas. */
 interface DomainHealth {
+  readonly CONDITION_HEALTH: Readonly<Record<ConditionType, ServiceHealth>>;
   readonly deriveLiveHealthReport: (input: {
     readonly backlog_bytes: number;
     readonly backlog_count: number;
@@ -435,8 +538,8 @@ interface DomainHealth {
     observedValue: number,
   ) => unknown;
   readonly SOURCE_LIMITS: {
-    readonly in_memory_queue_bytes: { readonly maximum: number };
-    readonly in_memory_queue_events: { readonly maximum: number };
+    readonly in_memory_queue_bytes: { readonly health: ServiceHealth; readonly maximum: number };
+    readonly in_memory_queue_events: { readonly health: ServiceHealth; readonly maximum: number };
   };
 }
 
@@ -448,8 +551,19 @@ const DOMAIN_DIST = fileURLToPath(
   new URL('../../../packages/domain/dist/index.js', import.meta.url),
 );
 
+/** La gravedad de cada estado: gana la más severa (`healthReportOf`; contratos de dominio). */
+const SEVERITY: Readonly<Record<ServiceHealth, number>> = {
+  starting: 0,
+  healthy: 1,
+  degraded: 2,
+  recovering: 3,
+  paused: 4,
+  failed: 5,
+};
+
 // Todas las combinaciones de lo que el dominio usa para decidir la salud (`healthReportOf`), con la
-// función real: así, si la derivación cambia una causa, esta lectura deja de cuadrar y la prueba falla.
+// función real: así, si la derivación cambia una causa o su gravedad, esta lectura deja de cuadrar y
+// la prueba falla.
 describe('la lectura de la causa cuadra con la derivación del dominio (pendiente 2 de F1.2)', () => {
   let domain: DomainHealth;
 
@@ -470,18 +584,40 @@ describe('la lectura de la causa cuadra con la derivación del dominio (pendient
     persistence_unavailable: 'Persistencia no disponible',
     source_limit_exceeded: 'Límite de fuente superado',
   };
-  const RECOVERING_TITLES = ['Conexión perdida', 'Reconectando', 'Continuidad pendiente'];
 
-  it('la web usa los límites de la cola del dominio', () => {
+  /**
+   * La salud que impone cada causa de la web, según el dominio: la de cada condición
+   * (`CONDITION_HEALTH`) y la de la cola (`SOURCE_LIMITS`); `recovering` la continuidad y la
+   * reconexión; `paused` la falta de un proceso que capture y la entrada detenida.
+   */
+  function titleHealth(): Readonly<Record<string, ServiceHealth>> {
+    const byTitle: Record<string, ServiceHealth> = {
+      'Continuidad pendiente': 'recovering',
+      'Sin conexión con Deriv': 'recovering',
+      'Cola sobre su límite': domain.SOURCE_LIMITS.in_memory_queue_events.health,
+      'Sin captura activa': 'paused',
+      'Entrada detenida': 'paused',
+      'Sin datos todavía': 'starting',
+    };
+    for (const [type, title] of Object.entries(CONDITION_TITLES) as [ConditionType, string][]) {
+      byTitle[title] = domain.CONDITION_HEALTH[type];
+    }
+    return byTitle;
+  }
+
+  it('la web usa los límites de la cola del dominio, y la cola llena impone paused', () => {
     expect(QUEUE_LIMITS).toEqual({
       events: domain.SOURCE_LIMITS.in_memory_queue_events.maximum,
       bytes: domain.SOURCE_LIMITS.in_memory_queue_bytes.maximum,
     });
+    expect(domain.SOURCE_LIMITS.in_memory_queue_bytes.health).toBe('paused');
   });
 
-  it('en cada combinación, la causa que lee la web es la que decidió el dominio', () => {
+  it('en cada combinación, la causa que lee la web es la que decidió el dominio, con su gravedad', () => {
+    const byTitle = titleHealth();
     const mismatches: string[] = [];
     let pendingCases = 0;
+    let noWriterCases = 0;
     let checked = 0;
     for (const connectedInLog of [true, false]) {
       for (const lastRaw of [null, RAW]) {
@@ -501,8 +637,10 @@ describe('la lectura de la causa cuadra con la derivación del dominio (pendient
                 'disconnected',
               ] as const) {
                 for (const minimum of [undefined, 'paused'] as const) {
+                  // Sin cola, justo en sus dos límites (que todavía valen) y pasado cada uno.
                   for (const [count, bytes] of [
                     [0, 0],
+                    [1000, 33_554_432],
                     [1001, 10],
                     [1, 33_554_433],
                   ] as const) {
@@ -542,8 +680,24 @@ describe('la lectura de la causa cuadra con la derivación del dominio (pendient
                     const overLimit =
                       domain.evaluateSourceLimit('in_memory_queue_events', count) !== null ||
                       domain.evaluateSourceLimit('in_memory_queue_bytes', bytes) !== null;
-                    if (health !== 'healthy' && titles.length === 0) {
-                      mismatches.push(`sin causa: ${label}`);
+                    // La regla de la reconexión del dominio: raw durable, el log conectado y la
+                    // conexión observada distinta de `connected`.
+                    const reconnecting =
+                      lastRaw !== null &&
+                      connectedInLog &&
+                      connection !== undefined &&
+                      connection !== 'connected';
+                    if (health !== 'healthy') {
+                      const unknown = titles.filter((title) => byTitle[title] === undefined);
+                      const worst = Math.max(
+                        ...titles.map((title) => {
+                          const imposed = byTitle[title];
+                          return imposed === undefined ? -1 : SEVERITY[imposed];
+                        }),
+                      );
+                      if (unknown.length > 0 || worst !== SEVERITY[health]) {
+                        mismatches.push(`la causa no llega a su gravedad: ${label}`);
+                      }
                     }
                     if (titles.includes('Continuidad pendiente') && pending.length === 0) {
                       mismatches.push(`continuidad pendiente sin hueco pendiente: ${label}`);
@@ -560,16 +714,24 @@ describe('la lectura de la causa cuadra con la derivación del dominio (pendient
                       }
                     }
                     if (
-                      health === 'recovering' &&
-                      !titles.some((title) => RECOVERING_TITLES.includes(title))
+                      titles.includes('Sin conexión con Deriv') &&
+                      (derived.connection_state === 'connected' ||
+                        (!reconnecting && pending.length === 0))
                     ) {
-                      mismatches.push(`recovering sin su causa: ${label}`);
+                      mismatches.push(`sin conexión sin reconexión ni continuidad: ${label}`);
+                    }
+                    if (titles.includes('Sin captura activa')) {
+                      noWriterCases += 1;
+                      if (minimum !== 'paused') {
+                        mismatches.push(`sin captura activa sin la salud mínima: ${label}`);
+                      }
                     }
                     if (
-                      titles.includes('Reconectando') &&
-                      derived.connection_state === 'connected'
+                      titles.includes('Entrada detenida') &&
+                      minimum !== 'paused' &&
+                      connectedInLog
                     ) {
-                      mismatches.push(`reconectando con la conexión activa: ${label}`);
+                      mismatches.push(`entrada detenida sin parada ni salud mínima: ${label}`);
                     }
                     if (titles.includes('Cola sobre su límite') !== overLimit) {
                       mismatches.push(`cola: ${label}`);
@@ -587,9 +749,10 @@ describe('la lectura de la causa cuadra con la derivación del dominio (pendient
         }
       }
     }
-    expect(checked).toBe(3072);
-    // El caso del pendiente 2 existe en la derivación: si no, la prueba no probaría nada.
+    expect(checked).toBe(4096);
+    // Los casos que importan existen en la derivación: si no, la prueba no probaría nada.
     expect(pendingCases).toBeGreaterThan(0);
+    expect(noWriterCases).toBeGreaterThan(0);
     expect(mismatches).toEqual([]);
   });
 });

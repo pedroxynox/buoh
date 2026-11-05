@@ -20,9 +20,20 @@ import { useDataHealth } from './salud/store';
 /** La fuente de la captura que observa la salud (`DERIV_SOURCE` del worker), si no hay informe. */
 const CAPTURE_SOURCE = 'deriv_options';
 
+/** El informe trae los tipos de condición abiertos, no cuántas hay de cada uno. */
 function conditionsText(count: number): string {
   if (count === 0) return 'Sin condiciones abiertas';
-  return count === 1 ? '1 condición abierta' : `${String(count)} condiciones abiertas`;
+  return count === 1
+    ? '1 tipo de condición abierto'
+    : `${String(count)} tipos de condición abiertos`;
+}
+
+/** Por qué no hay informe, según el estado de la lectura. */
+function noReportText(view: HealthView): string {
+  if (view.loading) return 'Leyendo la salud de los datos…';
+  if (view.error !== null) return 'La salud no se pudo leer.';
+  if (view.observation !== null) return 'Sin informe: la última observación falló.';
+  return 'Todavía no hay ninguna observación.';
 }
 
 function utcOrNone(value: string | null): string {
@@ -79,7 +90,7 @@ function captureMeta(view: HealthView): (readonly [string, ReactNode])[] {
     ],
     [
       'Calidad',
-      report === null ? 'Sin informe' : conditionsText(report.open_condition_types.length),
+      report === null ? noReportText(view) : conditionsText(report.open_condition_types.length),
     ],
     ['Log activo', view.log === null ? 'Ninguno' : `Log ${String(view.log)}`],
   ];
@@ -133,24 +144,36 @@ function CaptureDetail({ view }: { readonly view: HealthView }) {
           Sin causas abiertas: datos y persistencia verificados.
         </p>
       ) : (
-        <ul className="w-list">
-          {view.causes.map((cause, index) => (
-            <li key={`${String(index)}-${cause.title}`}>
-              <div>
-                <strong className="w-small">{cause.title}</strong>
-                <p className="b-muted w-small">{cause.detail}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <CauseList causes={view.causes} />
+      )}
+      {view.notes.length === 0 ? null : (
+        <>
+          <p className="b-eyebrow">Avisos de la observación</p>
+          <CauseList causes={view.notes} />
+        </>
       )}
     </div>
   );
 }
 
+function CauseList({ causes }: { readonly causes: HealthView['causes'] }) {
+  return (
+    <ul className="w-list">
+      {causes.map((cause, index) => (
+        <li key={`${String(index)}-${cause.title}`}>
+          <div>
+            <strong className="w-small">{cause.title}</strong>
+            <p className="b-muted w-small">{cause.detail}</p>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function datasetPart(view: HealthView): ReactNode {
   if (view.report === null) {
-    return <p className="b-secondary w-small">Sin informe: la última observación no lo dice.</p>;
+    return <p className="b-secondary w-small">{noReportText(view)}</p>;
   }
   const id = view.report.last_published_dataset_id;
   return id === null ? (
@@ -202,15 +225,21 @@ export function ObservatorioView({ view }: { readonly view: HealthView }) {
             <p className="b-secondary w-small">{healthLine(view)}</p>
           </div>
         </Card>
-        <Card title="Condiciones abiertas" subtitle="Calidad de los datos" headingLevel={2}>
+        <Card
+          title="Condiciones abiertas"
+          subtitle="Tipos de condición, calidad de los datos"
+          headingLevel={2}
+        >
           <div className="w-stack">
             <span className="w-stat__value b-num">
               {view.report === null ? '—' : String(view.report.open_condition_types.length)}
             </span>
             <p className="b-secondary w-small">
               {view.report === null
-                ? 'Sin informe que las cuente.'
-                : 'Su causa está en «Captura de Deriv».'}
+                ? noReportText(view)
+                : view.report.open_condition_types.length === 0
+                  ? 'Ninguna abierta.'
+                  : 'Su causa está en «Captura de Deriv».'}
             </p>
           </div>
         </Card>
@@ -239,7 +268,7 @@ export function ObservatorioView({ view }: { readonly view: HealthView }) {
           <PhaseLock
             phase="4"
             title="Kill switch"
-            description="Detendrá a la vez todas las estrategias, cuentas y órdenes. En modo shadow no hay órdenes que detener."
+            description="Detendrá a la vez todas las estrategias, cuentas y órdenes. Hoy no hay ninguna estrategia ni orden que detener."
           />
         </Card>
       </div>

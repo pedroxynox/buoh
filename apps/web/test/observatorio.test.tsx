@@ -101,8 +101,93 @@ describe('Observatorio con la salud real (F2-UI-001)', () => {
     expect(text).toContain('Todavía no hay señales');
     expect(text).toContain('Disponible en Fase 4');
     expect(text).not.toContain('Datos ficticios');
-    // Ninguna cifra ni nombre de los datos ficticios del prototipo (@buoh/prototype-data).
-    expect(text).not.toMatch(/Ruptura de rango|Vantage|Deriv MT5|Pérdida neta/);
+    // Ninguna cifra ni nombre de los datos ficticios del prototipo (@buoh/prototype-data), ni el
+    // modo shadow del prototipo junto al modo desactivado.
+    expect(text).not.toMatch(/Ruptura de rango|Vantage|Deriv MT5|Pérdida neta|En modo shadow/);
+  });
+
+  it('cuenta los tipos de condición abiertos, que es lo que trae el informe', () => {
+    const one = textOf(
+      observatorio(
+        ready(
+          report({ service_health: 'degraded', open_condition_types: ['event_gap_unresolved'] }),
+        ),
+      ),
+    );
+    expect(one).toContain('Calidad 1 tipo de condición abierto');
+    const two = textOf(
+      observatorio(
+        ready(
+          report({
+            service_health: 'recovering',
+            connection_state: 'disconnected',
+            open_condition_types: ['connection_lost', 'event_gap_unresolved'],
+          }),
+        ),
+      ),
+    );
+    expect(two).toContain('Calidad 2 tipos de condición abiertos');
+  });
+
+  it('sin informe, el último dataset y las condiciones dicen por qué, según el estado', () => {
+    const failed: DataHealthState = {
+      kind: 'ready',
+      health: {
+        log: 2,
+        observation: {
+          status: 'failed',
+          observed_at_utc: OBSERVED,
+          reason: 'child_timeout',
+          code: null,
+        },
+      },
+      receivedAtMs: OBSERVED_MS + 60_000,
+      checkedAtMs: OBSERVED_MS + 60_000,
+      refreshFailure: null,
+    };
+    expect(textOf(observatorio(failed))).toContain('Sin informe: la última observación falló');
+    for (const [state, expected] of [
+      [{ kind: 'loading' }, 'Leyendo la salud de los datos'],
+      [{ kind: 'failed', failure: { code: 'unauthenticated' } }, 'La salud no se pudo leer'],
+      [
+        {
+          kind: 'ready',
+          health: { log: 3, observation: null },
+          receivedAtMs: OBSERVED_MS,
+          checkedAtMs: OBSERVED_MS,
+          refreshFailure: null,
+        },
+        'Todavía no hay ninguna observación',
+      ],
+    ] as const) {
+      const text = textOf(observatorio(state));
+      expect(text).toContain(expected);
+      expect(text).not.toContain('la última observación falló');
+    }
+  });
+
+  it('los avisos de la observación van aparte de la causa', () => {
+    const health: DataHealth = {
+      log: 2,
+      observation: {
+        status: 'completed',
+        observed_at_utc: OBSERVED,
+        report: report(),
+        alerts: [{ event: 'checkpoint_rejected', reason: 'versions_mismatch' }],
+      },
+    };
+    const text = textOf(
+      observatorio({
+        kind: 'ready',
+        health,
+        receivedAtMs: OBSERVED_MS + 60_000,
+        checkedAtMs: OBSERVED_MS + 60_000,
+        refreshFailure: null,
+      }),
+    );
+    expect(text).toContain('Sin causas abiertas');
+    expect(text).toContain('Avisos de la observación');
+    expect(text).toContain('Punto de control descartado');
   });
 
   it('cargando: un esqueleto quieto y un texto para el lector de pantalla', () => {

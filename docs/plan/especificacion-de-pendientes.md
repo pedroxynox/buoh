@@ -101,8 +101,8 @@ Tipos de pendiente:
   - almacenamiento no disponible da `paused`;
   - contrato o configuración incompatibles dan `failed`;
   - nunca `healthy` sin datos persistidos.
+- **Resuelto en F2.4:** en `recovering` por continuidad pendiente, `open_condition_types` queda vacío (pendiente 2 de F1.2), y la web lee esa causa de la conexión del informe ([concepto de interfaz](../diseno/concepto-de-interfaz.md) §10).
 - **Abierto:**
-  - en `recovering` por continuidad pendiente, `open_condition_types` queda vacío (pendiente 2 de F1.2). Desde F2.4, la web lee esa causa de la conexión del informe ([concepto de interfaz](../diseno/concepto-de-interfaz.md) §10);
   - **decidido en [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §8:** un envoltorio en `scripts/` deja stdout limpio, como `data-replay.mjs`, porque el emulador de shell de pnpm no respeta `1>&2` (ADR-0003). El backlog sale del latido que persiste la ingesta, y la conexión también si el latido es posterior al último evento de conexión del log; sin escritor vivo, la conexión es `disconnected` y el backlog, 0.
 
 ### P-F1-06. Puerta de salida de Fase 1 (`F1.5`) — resuelto
