@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 64
-updated_at_utc: "2026-11-04T23:35:00.000Z"
+status_version: 65
+updated_at_utc: "2026-11-05T01:00:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -61,7 +61,7 @@ Producción existe y se paga desde el 2026-11-01: unos 19 USD al mes (ADR-0018 �
 1. La ruta de exportación `@buoh/market-data-worker/lectura` (PR #89), con lo que pide ADR-0019 §8: importarla no carga `ws`, `fflate` ni `node:child_process`, y una prueba lo comprueba sobre el JavaScript compilado. No leía nada nuevo ni cambiaba la API. El propietario lo fusionó el 2026-11-04.
 2. `F2-CHART-001` (PR #90), que resolvió P-V1-04 antes de que un gráfico muestre datos reales: la alternativa en texto o en tabla de cada gráfico, la peor caída en «% del capital inicial» y las pruebas del contraste, de la escala y del SVG ([concepto de interfaz](docs/diseno/concepto-de-interfaz.md) §9). El propietario lo fusionó el 2026-11-04, y los gráficos nuevos se ven en producción desde ese día.
 3. La salud de los datos (PR #91): `buoh_api_lectura`, que llega con su primer uso (ADR-0019 §7) y crea `buoh-operaciones`, y `GET /api/v1/datos/salud`, con sesión, que da el último informe de la salud que guardó `buoh-operaciones` en el log activo (ADR-0019 §8). Solo lee PostgreSQL, así que podía llegar a producción antes del 2026-11-08. El propietario lo fusionó el 2026-11-04 a las 20:00 UTC, y funciona en producción desde ese día ([evidencia de F2.4](docs/operacion/evidencia-datos-f2-4.md)). La sincronización automática del Blueprint falló sin decir por qué y no creó la contraseña nueva en `buoh-operaciones`; una **Manual Sync** del propietario la creó. Esa sincronización desplegó `buoh-api` sin esperar a CI, así que un PR que cambia `render-datos.yaml` se fusiona con su rama al día con `main` ([despliegue en Render](docs/operacion/despliegue-en-render.md), «Cuándo despliegan»). `buoh-operaciones` creó el rol a las 20:50 UTC, y la ruta respondió con sesión la salud `healthy` del log 2. El código nuevo corre en `buoh-api` desde el 2026-11-04 entre las 20:00 y las 20:09 UTC; importar la ruta `lectura` carga `@aws-sdk/client-s3`, unos 8 MiB más al arrancar (ADR-0019 §8), así que el 7c separa los días de antes y de después.
-4. El Observatorio y las insignias de modo y salud de la barra superior, con esa salud. Resuelve el pendiente 2 de F1.2: en `recovering`, la causa se ve aunque `open_condition_types` esté vacío (plan, `F2-UI-001`).
+4. El Observatorio y las insignias de modo y salud de la barra superior, con esa salud ([concepto de interfaz](docs/diseno/concepto-de-interfaz.md) §10). La web la pide al abrirse y cada minuto con la pestaña a la vista, sin renovar la sesión. El modo es `disabled` hasta F2.9, y la marca «Datos ficticios» queda solo en las secciones que siguen con ellos. Resuelve el pendiente 2 de F1.2: en `recovering`, la causa se ve aunque `open_condition_types` esté vacío (plan, `F2-UI-001`). Solo cambia `apps/web`, que despliega `buoh-api`, y solo lee PostgreSQL, por la ruta de la salud, así que puede llegar a producción antes del 2026-11-08. Cada lectura son unos 1,5 KB de tráfico de salida, unos 90 KB por hora con la web abierta (estimación); el registro de su despliegue anota la hora, para el 7c.
 5. Las lecturas de R2: el token `api`, el gráfico de R_100 en ticks y en velas, el contenido del catálogo y la ventana máxima del gráfico, fijada midiendo la memoria. Llega a producción desde el 2026-11-08, después de acordar con el propietario los días del 7c. El propietario crea el token `api` de R2, de solo lectura sobre `buoh-captura`, cuando ese PR lo pida; el PR dice dónde se ponen sus valores en Render, y después de fusionarlo el propietario mira si el Blueprint dejó algo pendiente de aprobar ([runbook de la API](docs/operacion/runbook-api.md), «Desplegar»).
 6. Datos, con los datasets publicados, que en producción muestra su estado vacío hasta F2.5, y los eventos de datos de la sección Auditoría: las incidencias y las condiciones, que solo leen PostgreSQL.
 7. La preferencia del tema por cuenta y la evidencia de las lecturas de R2 y del tráfico de salida medidos en producción (`F2-API-001`).
@@ -198,7 +198,8 @@ Detectados en la revisión semántica del PR #5:
 
 El antiguo pendiente 1 (atribución de símbolo y mensajes que no son ticks) quedó resuelto en F1.4a.
 
-2. Cuando la salud está en `recovering` por continuidad pendiente, el `HealthReport` no muestra la causa: `open_condition_types` queda vacío.
+El antiguo pendiente 2 (en `recovering` por continuidad pendiente, el `HealthReport` no muestra la causa, porque `open_condition_types` queda vacío) quedó resuelto en F2.4, con el punto 4 de «Siguiente tarea autorizada». El informe sigue sin nombrarla: la web la lee de su conexión, como fijan los [contratos de dominio](docs/arquitectura/contratos-de-dominio.md) («HealthReport») y el [concepto de interfaz](docs/diseno/concepto-de-interfaz.md) §10, y su prueba compara esa lectura con la derivación del dominio.
+
 4. `qualityProfileSchema` está duplicado entre `packages/domain` y `packages/contracts/src/vector-integrity.ts`.
 5. `typecheck` y `lint` resuelven `@buoh/contracts` con `paths` al código fuente; vitest usa `dist`. Ejecutar `pnpm run test`, no vitest directo. `apps/market-data-worker` sigue el mismo patrón.
 

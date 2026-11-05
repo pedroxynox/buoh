@@ -12,6 +12,7 @@ import type {
   ApiErrorCode,
   AuditEvent,
   AuditEventsResponse,
+  DataHealth,
   LinkSecret,
   LinkUse,
   PasswordRejectionReason,
@@ -19,6 +20,7 @@ import type {
   SessionLoginRequest,
   SessionsClosedResult,
 } from '@buoh/contracts';
+import { readDataHealth } from '../salud/respuesta';
 
 /** El motivo de un fallo de la API, con los añadidos locales de red y de respuesta inesperada. */
 export type FailureCode = ApiErrorCode | 'network' | 'unexpected';
@@ -114,6 +116,18 @@ export const api = {
   /** Las entradas de auditoría de la cuenta, de la más nueva a la más vieja (ADR-0019 §5). */
   audit: (): Promise<readonly AuditEvent[]> =>
     request<AuditEventsResponse>('GET', '/api/v1/auditoria').then((response) => response.events),
+  /**
+   * La salud de los datos (ADR-0019 §8). Sin el token CSRF: es la actualización automática de la
+   * barra superior y del Observatorio, que no renueva la inactividad de la sesión (ADR-0019 §2). Una
+   * respuesta sin la forma de `DataHealth` es `unexpected`.
+   */
+  dataHealth: async (): Promise<DataHealth> => {
+    const health = readDataHealth(await request<unknown>('GET', '/api/v1/datos/salud'));
+    if (health === null) {
+      throw new ApiCallError({ code: 'unexpected' });
+    }
+    return health;
+  },
 } as const;
 
 const PASSWORD_REASONS: Readonly<Record<PasswordRejectionReason, string>> = {
