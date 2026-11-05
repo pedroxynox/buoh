@@ -11,6 +11,7 @@ import {
   PostgresSourceLogStore,
   readChartWindow,
   readStoredSourceSchema,
+  S3ObjectStore,
   SourceEventLog,
   type ChartItem,
   type ChartSegmentCache,
@@ -63,6 +64,28 @@ export interface MarketDataReaderDeps {
 
 /** El único símbolo de la Fase 2, el que captura `ingest` (plan de Fase 2, «Alcance ya decidido»). */
 export const CHART_SYMBOL = 'R_100';
+
+/**
+ * El plazo de cada lectura de un objeto de R2, con su `HeadObject`, su `GetObject` y su cuerpo
+ * (ADR-0019 §8): al vencer se corta, y la respuesta es `storage_unavailable`. Sin él, un cuerpo que
+ * deja de llegar dejaría esperando a todos los gráficos, que van de uno en uno.
+ */
+export const STORAGE_READ_TIMEOUT_MS = 10_000;
+
+/**
+ * El almacenamiento de objetos de cada log para estas lecturas (`MarketDataReaderDeps.objects`): el
+ * bucket de la captura bajo el prefijo del log, con el plazo de cada lectura (`readSignal`).
+ */
+export function storageObjects(
+  client: ConstructorParameters<typeof S3ObjectStore>[0],
+  bucket: string,
+  timeoutMs = STORAGE_READ_TIMEOUT_MS,
+): (log: LogLocation) => S3ObjectStore {
+  return (log) =>
+    new S3ObjectStore(client, bucket, log.prefix, {
+      readSignal: () => AbortSignal.timeout(timeoutMs),
+    });
+}
 
 const HOUR_MS = 3_600_000;
 

@@ -122,7 +122,9 @@ export interface ClosedSegmentFinder {
   /**
    * El último segmento cerrado de la fuente por debajo del índice `below` que cerró una parada
    * (`close_reason` `requested`), o `null` si no hay ninguno. `ingest` cierra así el segmento
-   * abierto al terminar cada sesión (ADR-0015 §3, «Parada»).
+   * abierto al terminar bien cada sesión (ADR-0015 §3, «Parada»). Si la sesión perdió el bloqueo, si
+   * ese cierre falla o si el proceso muere antes, el segmento sigue abierto, y la sesión siguiente lo
+   * cierra después con otro motivo.
    */
   lastRequestedSegmentBelow(source: string, below: number): Promise<ClosedSourceSegment | null>;
 }

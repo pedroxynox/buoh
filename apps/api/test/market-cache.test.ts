@@ -1,4 +1,10 @@
-import { InMemoryObjectStore, ObjectReadError } from '@buoh/market-data-worker/lectura';
+import { Readable } from 'node:stream';
+
+import {
+  InMemoryObjectStore,
+  logLocation,
+  ObjectReadError,
+} from '@buoh/market-data-worker/lectura';
 import type { Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
 
@@ -9,6 +15,8 @@ import {
   OBJECT_CACHE_BYTES,
   OBJECT_CACHE_MAX_OBJECT_BYTES,
   readOnlyObjects,
+  STORAGE_READ_TIMEOUT_MS,
+  storageObjects,
 } from '../src/data/market.js';
 import { StorageUnavailableError } from '../src/errors.js';
 import { useDeterminismGuards } from './support.js';
@@ -179,5 +187,35 @@ describe('createMarketDataReader', () => {
     expect(queries).toHaveLength(3);
     answers[2]?.();
     await expect(third).resolves.toMatchObject({ log: null, from_utc: '2026-11-07T12:00:00.000Z' });
+  });
+});
+
+describe('storageObjects', () => {
+  it('cada lectura de R2 tiene su plazo: un cuerpo que deja de llegar se corta, y la respuesta es storage_unavailable', async () => {
+    // Un cliente S3 falso, sin red: `HeadObject` responde y `GetObject` deja el cuerpo a medias.
+    const stalled = new Readable({ read: () => undefined });
+    stalled.push(new Uint8Array(10));
+    const keys: unknown[] = [];
+    const client = {
+      send: (command: { constructor: { name: string }; input: { Key?: unknown } }) => {
+        keys.push(command.input.Key);
+        return Promise.resolve(
+          command.constructor.name === 'HeadObjectCommand'
+            ? { ContentLength: 1000 }
+            : { Body: stalled },
+        );
+      },
+    };
+    expect(STORAGE_READ_TIMEOUT_MS).toBe(10_000);
+    const log = logLocation(2);
+    const objects = storageObjects(client as never, 'buoh-captura', 20)(log);
+    expect(objects.bucket).toBe('buoh-captura');
+    const failure = await readOnlyObjects(objects, new ObjectBytesCache(1024, 16), log.prefix)
+      .get(KEY(1), 5000)
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(StorageUnavailableError);
+    expect((failure as StorageUnavailableError).reason).toBe('TimeoutError');
+    expect(stalled.destroyed).toBe(true);
+    expect(keys).toEqual([`${log.prefix}${KEY(1)}`, `${log.prefix}${KEY(1)}`]);
   });
 });

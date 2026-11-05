@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 
-import { createS3Client, S3ObjectStore } from '@buoh/market-data-worker/lectura';
+import { createS3Client } from '@buoh/market-data-worker/lectura';
 
 import { createAccountService } from '../accounts/links.js';
 import { createRateLimiter } from '../accounts/limits.js';
@@ -12,7 +12,7 @@ import { buildApp } from '../app.js';
 import { loadCommonPasswords } from '../auth/common-passwords.js';
 import { createPasswordHasher } from '../auth/password-hash.js';
 import { ApiConfigError, loadApiConfig } from '../config.js';
-import { createMarketDataReader } from '../data/market.js';
+import { createMarketDataReader, storageObjects } from '../data/market.js';
 import { createDataReader } from '../data/reader.js';
 import { createUuidV7Generator } from '../ids.js';
 import { errorName, jsonLines } from '../log.js';
@@ -40,12 +40,6 @@ const HASHES_WAITING = 4;
  * la respuesta en 10 s. Sin reintentos (`createS3Client`).
  */
 const STORAGE_TIMEOUTS = { connectionTimeout: 5000, requestTimeout: 10_000 } as const;
-/**
- * El plazo de cada lectura de un objeto de R2, con su `HeadObject`, su `GetObject` y su cuerpo: al
- * vencer se corta (`readSignal`), y la respuesta es `storage_unavailable`. Sin él, un cuerpo que deja
- * de llegar dejaría esperando a todos los gráficos, que van de uno en uno (ADR-0019 §8).
- */
-const STORAGE_READ_TIMEOUT_MS = 10_000;
 
 let config;
 try {
@@ -120,10 +114,7 @@ if (config !== undefined) {
       ? null
       : createMarketDataReader({
           pool: readerPool,
-          objects: (log) =>
-            new S3ObjectStore(s3, storage.bucket, log.prefix, {
-              readSignal: () => AbortSignal.timeout(STORAGE_READ_TIMEOUT_MS),
-            }),
+          objects: storageObjects(s3, storage.bucket),
           clock,
         });
   // La exportación `out-api` de la web, junto a la API en el repositorio; `apps/web/out-api` desde
