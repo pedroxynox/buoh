@@ -223,6 +223,8 @@
 }
 .w-meta dd {
   margin: 0;
+  /* Un valor largo sin espacios, como el `content_sha256` del catálogo, se parte en el móvil. */
+  overflow-wrap: anywhere;
 }
 
 .w-chart {
