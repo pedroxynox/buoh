@@ -115,6 +115,134 @@
         }
       }
     },
+    "/api/v1/datos/catalogo": {
+      "get": {
+        "operationId": "getDatosCatalogo",
+        "summary": "La última versión del catálogo de Deriv en el log activo, con su número, su hora y sus entradas, leída de R2 (ADR-0019 §8).",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataCatalog"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "La petición no cumple su contrato, también si trae parámetros de consulta que la ruta no admite.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "La petición necesita una sesión y no la trae o no vale (unauthenticated).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Un fallo del servidor, también una respuesta que no cumple su contrato.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Faltan las migraciones de la API, la credencial de lectura de los datos o el token api de R2 (not_ready), o no responden PostgreSQL (postgres_unavailable) o R2 (storage_unavailable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datos/grafico": {
+      "get": {
+        "operationId": "getDatosGrafico",
+        "summary": "El gráfico de R_100 de las últimas horas del log activo: sus ticks y los huecos que marca el log, con su motivo, leídos de R2 (ADR-0019 §8).",
+        "parameters": [
+          {
+            "name": "hours",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:[1-9]|1[0-9]|2[0-4])$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataChart"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "La petición no cumple su contrato: las horas faltan o no son un entero de 1 a la ventana máxima (invalid_request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "La petición necesita una sesión y no la trae o no vale (unauthenticated).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Un fallo del servidor, también una respuesta que no cumple su contrato.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Faltan las migraciones de la API, la credencial de lectura de los datos o el token api de R2 (not_ready), o no responden PostgreSQL (postgres_unavailable) o R2 (storage_unavailable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/datos/salud": {
       "get": {
         "operationId": "getDatosSalud",
@@ -718,7 +846,8 @@
                       "postgres_unavailable",
                       "unauthenticated",
                       "invalid_credentials",
-                      "credential_disabled"
+                      "credential_disabled",
+                      "storage_unavailable"
                     ]
                   },
                   "request_id": {
@@ -1666,6 +1795,288 @@
         ],
         "additionalProperties": false,
         "title": "AuditEvents"
+      },
+      "DataCatalog": {
+        "type": "object",
+        "properties": {
+          "log": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 999999
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "catalog": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "received_at_utc": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+                  },
+                  "source_schema_release": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "content_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "entries": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "underlying_symbol": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "underlying_symbol_name": {
+                          "type": "string"
+                        },
+                        "underlying_symbol_type": {
+                          "type": "string"
+                        },
+                        "market": {
+                          "type": "string"
+                        },
+                        "submarket": {
+                          "type": "string"
+                        },
+                        "subgroup": {
+                          "type": "string"
+                        },
+                        "pip_size": {
+                          "type": "string",
+                          "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                        },
+                        "exchange_is_open": {
+                          "type": "number",
+                          "enum": [
+                            0,
+                            1
+                          ]
+                        },
+                        "is_trading_suspended": {
+                          "type": "number",
+                          "enum": [
+                            0,
+                            1
+                          ]
+                        }
+                      },
+                      "required": [
+                        "underlying_symbol",
+                        "underlying_symbol_name",
+                        "underlying_symbol_type",
+                        "market",
+                        "submarket",
+                        "subgroup",
+                        "pip_size",
+                        "exchange_is_open",
+                        "is_trading_suspended"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "source",
+                  "version",
+                  "received_at_utc",
+                  "source_schema_release",
+                  "content_sha256",
+                  "entries"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "log",
+          "catalog"
+        ],
+        "additionalProperties": false,
+        "title": "DataCatalog"
+      },
+      "DataChart": {
+        "type": "object",
+        "properties": {
+          "log": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 999999
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "symbol": {
+            "type": "string",
+            "minLength": 1
+          },
+          "from_utc": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+          },
+          "to_utc": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+          },
+          "log_started_at_utc": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ticks": {
+            "type": "object",
+            "properties": {
+              "offsets_ms": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 86400000
+                }
+              },
+              "quotes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                }
+              }
+            },
+            "required": [
+              "offsets_ms",
+              "quotes"
+            ],
+            "additionalProperties": false
+          },
+          "gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from_utc": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+                },
+                "to_utc": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "cause": {
+                  "type": "string",
+                  "enum": [
+                    "connection_lost",
+                    "capture_stopped"
+                  ]
+                },
+                "history": {
+                  "type": "string",
+                  "enum": [
+                    "recovered",
+                    "partial",
+                    "unavailable",
+                    "pending",
+                    "not_requested"
+                  ]
+                },
+                "reason": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "recovered_ticks": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "from_utc",
+                "to_utc",
+                "cause",
+                "history",
+                "reason",
+                "recovered_ticks"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "log",
+          "source",
+          "symbol",
+          "from_utc",
+          "to_utc",
+          "log_started_at_utc",
+          "ticks",
+          "gaps"
+        ],
+        "additionalProperties": false,
+        "title": "DataChart"
       },
       "DataHealth": {
         "type": "object",

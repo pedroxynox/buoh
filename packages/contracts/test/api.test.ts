@@ -6,6 +6,10 @@ import {
   apiErrorSchema,
   apiHealthSchema,
   auditEventsResponseSchema,
+  DATA_CHART_MAX_HOURS,
+  dataCatalogSchema,
+  dataChartQuerySchema,
+  dataChartSchema,
   dataHealthSchema,
   emptyRequestSchema,
   linkSecretRequestSchema,
@@ -44,6 +48,7 @@ describe('ApiError', () => {
       'unauthenticated',
       'invalid_credentials',
       'credential_disabled',
+      'storage_unavailable',
     ] as const) {
       expect(apiErrorSchema.parse({ error: { code, request_id: REQUEST_ID } })).toEqual({
         error: { code, request_id: REQUEST_ID },
@@ -51,7 +56,7 @@ describe('ApiError', () => {
     }
   });
 
-  it('cierra la lista de códigos: los del esqueleto, los del PR 4a y los del PR 4b, en ese orden', () => {
+  it('cierra la lista de códigos: los del esqueleto, los del PR 4a, los del PR 4b y el de R2, en ese orden', () => {
     expect(API_ERROR_CODES).toEqual([
       'invalid_request',
       'not_found',
@@ -66,6 +71,7 @@ describe('ApiError', () => {
       'unauthenticated',
       'invalid_credentials',
       'credential_disabled',
+      'storage_unavailable',
     ]);
     expect(apiErrorCodeSchema.options).toEqual(API_ERROR_CODES);
     for (const code of ['forbidden', 'logged_out', 'INTERNAL', 'invalid-credentials', '']) {
@@ -457,5 +463,237 @@ describe('GET /api/v1/datos/salud (ADR-0019 §8)', () => {
       );
     }
     expect(accepts(dataHealthSchema, { log: 2, observation: null, extra: 1 })).toBe(false);
+  });
+});
+
+describe('DataChartQuery', () => {
+  it(`las horas son un entero de 1 a ${String(DATA_CHART_MAX_HOURS)}, escrito sin ceros delante`, () => {
+    for (let hours = 1; hours <= DATA_CHART_MAX_HOURS; hours += 1) {
+      expect(dataChartQuerySchema.parse({ hours: String(hours) })).toEqual({
+        hours: String(hours),
+      });
+    }
+    for (const hours of ['0', String(DATA_CHART_MAX_HOURS + 1), '01', '6.0', '', ' 6', 'x', 6]) {
+      expect(accepts(dataChartQuerySchema, { hours }), String(hours)).toBe(false);
+    }
+    expect(accepts(dataChartQuerySchema, {})).toBe(false);
+    expect(accepts(dataChartQuerySchema, { hours: '6', extra: '1' })).toBe(false);
+  });
+});
+
+describe('DataChart', () => {
+  const FROM = '2026-11-08T06:00:00.000Z';
+  const TO = '2026-11-08T12:00:00.000Z';
+  const empty = {
+    log: 3,
+    source: 'deriv_options',
+    symbol: 'R_100',
+    from_utc: FROM,
+    to_utc: TO,
+    log_started_at_utc: '2026-11-08T00:00:04.646Z',
+    ticks: { offsets_ms: [], quotes: [] },
+    gaps: [],
+  };
+  const recovered = {
+    from_utc: '2026-11-08T07:00:00.001Z',
+    to_utc: '2026-11-08T07:00:05.999Z',
+    cause: 'connection_lost',
+    history: 'recovered',
+    reason: null,
+    recovered_ticks: 2,
+  };
+  const chart = {
+    ...empty,
+    ticks: { offsets_ms: [0, 2000, 6 * 3_600_000], quotes: ['1234.56', '1234.60', '1201.08'] },
+    gaps: [
+      // Empezó antes de la ventana: la toca.
+      {
+        from_utc: '2026-11-08T05:58:00.001Z',
+        to_utc: '2026-11-08T06:00:01.999Z',
+        cause: 'capture_stopped',
+        history: 'not_requested',
+        reason: null,
+        recovered_ticks: null,
+      },
+      recovered,
+      {
+        ...recovered,
+        from_utc: '2026-11-08T08:00:00.001Z',
+        to_utc: '2026-11-08T08:00:09.999Z',
+        history: 'partial',
+        reason: 'history_page_limit',
+        recovered_ticks: 3,
+      },
+      {
+        ...recovered,
+        from_utc: '2026-11-08T09:00:00.001Z',
+        to_utc: '2026-11-08T09:00:09.999Z',
+        history: 'unavailable',
+        reason: 'history_timeout',
+        recovered_ticks: null,
+      },
+      {
+        ...recovered,
+        from_utc: '2026-11-08T11:59:00.001Z',
+        to_utc: null,
+        history: 'pending',
+        recovered_ticks: null,
+      },
+    ],
+  };
+
+  it('el gráfico del log activo, con un tick por instante y cada clase de hueco, o vacío', () => {
+    for (const value of [
+      chart,
+      empty,
+      { ...empty, log: null, log_started_at_utc: null },
+      { ...empty, log_started_at_utc: null },
+      {
+        ...empty,
+        from_utc: '2026-11-07T12:00:00.000Z',
+        ticks: { offsets_ms: [24 * 3_600_000], quotes: ['1.5'] },
+      },
+      { ...empty, from_utc: '2026-11-08T11:00:00.000Z' },
+    ]) {
+      expect(dataChartSchema.parse(value)).toEqual(value);
+    }
+  });
+
+  it('la ventana dura horas enteras, de 1 a la máxima, y termina después de empezar', () => {
+    for (const from_utc of [
+      TO,
+      '2026-11-08T12:00:00.001Z',
+      '2026-11-08T06:00:00.001Z',
+      '2026-11-07T11:00:00.000Z',
+    ]) {
+      expect(accepts(dataChartSchema, { ...empty, from_utc }), from_utc).toBe(false);
+    }
+  });
+
+  it('cada tick tiene su hora dentro de la ventana, en orden y sin repetir, y su cotización decimal', () => {
+    for (const ticks of [
+      { offsets_ms: [0, 2000], quotes: ['1.5'] },
+      { offsets_ms: [2000, 0], quotes: ['1.5', '1.6'] },
+      { offsets_ms: [2000, 2000], quotes: ['1.5', '1.6'] },
+      { offsets_ms: [6 * 3_600_000 + 1], quotes: ['1.5'] },
+      { offsets_ms: [-1], quotes: ['1.5'] },
+      { offsets_ms: [1.5], quotes: ['1.5'] },
+      { offsets_ms: [0], quotes: ['1e3'] },
+      { offsets_ms: [0], quotes: [1.5] },
+      { offsets_ms: [0], quotes: ['1.5'], extra: [] },
+    ]) {
+      expect(accepts(dataChartSchema, { ...empty, ticks }), JSON.stringify(ticks)).toBe(false);
+    }
+  });
+
+  it('sin log activo no hay ticks, huecos ni inicio del log', () => {
+    const none = { ...empty, log: null, log_started_at_utc: null };
+    expect(accepts(dataChartSchema, { ...none, ticks: chart.ticks })).toBe(false);
+    expect(accepts(dataChartSchema, { ...none, gaps: [recovered] })).toBe(false);
+    expect(accepts(dataChartSchema, { ...none, log_started_at_utc: FROM })).toBe(false);
+  });
+
+  it('cada hueco lleva lo de su clase, toca la ventana y van en orden de inicio', () => {
+    for (const gap of [
+      // Una parada pedida no se recupera, y solo ella es not_requested.
+      { ...recovered, cause: 'capture_stopped' },
+      { ...recovered, history: 'not_requested', recovered_ticks: null },
+      // Solo un hueco sin resolver lleva motivo.
+      { ...recovered, reason: 'history_page_limit' },
+      { ...recovered, history: 'partial', recovered_ticks: 3 },
+      { ...recovered, history: 'unavailable', recovered_ticks: null },
+      // Solo la historia que trajo ticks los cuenta.
+      { ...recovered, recovered_ticks: null },
+      { ...recovered, history: 'pending' },
+      { ...recovered, history: 'unavailable', reason: 'history_timeout' },
+      // Sin fin, solo uno que sigue.
+      { ...recovered, to_utc: null },
+      { ...recovered, to_utc: '2026-11-08T07:00:00.000Z' },
+      // Un motivo saneado, nunca un mensaje.
+      {
+        ...recovered,
+        history: 'partial',
+        reason: 'la historia no llegó',
+        recovered_ticks: 0,
+      },
+      { ...recovered, cause: 'other' },
+      { ...recovered, recovered_ticks: -1 },
+      { ...recovered, extra: 1 },
+      // Fuera de la ventana.
+      { ...recovered, from_utc: '2026-11-08T12:00:00.001Z', to_utc: '2026-11-08T12:00:05.999Z' },
+      { ...recovered, from_utc: '2026-11-08T05:00:00.001Z', to_utc: '2026-11-08T05:59:59.999Z' },
+    ]) {
+      expect(accepts(dataChartSchema, { ...empty, gaps: [gap] }), JSON.stringify(gap)).toBe(false);
+    }
+    const [first, second] = chart.gaps;
+    expect(accepts(dataChartSchema, { ...empty, gaps: [second, first] })).toBe(false);
+  });
+
+  it('no admite campos de más', () => {
+    expect(accepts(dataChartSchema, { ...empty, extra: 1 })).toBe(false);
+    expect(accepts(dataChartSchema, { ...empty, symbol: '' })).toBe(false);
+  });
+});
+
+describe('DataCatalog', () => {
+  const entry = {
+    underlying_symbol: 'R_100',
+    underlying_symbol_name: 'Volatility 100 Index',
+    underlying_symbol_type: 'stockindex',
+    market: 'synthetic_index',
+    submarket: 'random_index',
+    subgroup: 'synthetics',
+    pip_size: '0.01',
+    exchange_is_open: 1,
+    is_trading_suspended: 0,
+  };
+  const catalog = {
+    source: 'deriv_options',
+    version: 26,
+    received_at_utc: '2026-11-05T04:30:51.999Z',
+    source_schema_release: 'deriv-api-2026-10-20',
+    content_sha256: 'a'.repeat(64),
+    entries: [{ ...entry, underlying_symbol: 'R_10' }, entry],
+  };
+
+  it('la última versión del log activo, con su número, su hora y sus entradas, o ninguna', () => {
+    for (const value of [
+      { log: 2, catalog },
+      { log: 3, catalog: null },
+      { log: null, catalog: null },
+    ]) {
+      expect(dataCatalogSchema.parse(value)).toEqual(value);
+    }
+  });
+
+  it('sin log activo no hay catálogo, y sus entradas van en orden de símbolo, sin repetir', () => {
+    expect(accepts(dataCatalogSchema, { log: null, catalog })).toBe(false);
+    expect(
+      accepts(dataCatalogSchema, { log: 2, catalog: { ...catalog, entries: [entry, entry] } }),
+    ).toBe(false);
+    expect(
+      accepts(dataCatalogSchema, {
+        log: 2,
+        catalog: { ...catalog, entries: [...catalog.entries].reverse() },
+      }),
+    ).toBe(false);
+    expect(accepts(dataCatalogSchema, { log: 2, catalog: { ...catalog, entries: [] } })).toBe(
+      false,
+    );
+  });
+
+  it('cada entrada tiene los nueve campos oficiales, y la versión cuenta desde 1', () => {
+    for (const value of [
+      { ...catalog, version: 0 },
+      { ...catalog, content_sha256: 'x' },
+      { ...catalog, received_at_utc: '2026-11-05T04:30:51Z' },
+      { ...catalog, entries: [{ ...entry, trade_count: 7 }] },
+      { ...catalog, entries: [{ ...entry, pip_size: 0.01 }] },
+      { ...catalog, extra: 1 },
+    ]) {
+      expect(accepts(dataCatalogSchema, { log: 2, catalog: value }), JSON.stringify(value)).toBe(
+        false,
+      );
+    }
   });
 });

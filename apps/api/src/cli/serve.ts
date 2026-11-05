@@ -2,6 +2,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 
+import { createS3Client, S3ObjectStore } from '@buoh/market-data-worker/lectura';
+
 import { createAccountService } from '../accounts/links.js';
 import { createRateLimiter } from '../accounts/limits.js';
 import { createLoginFailureBuffer } from '../accounts/login-failures.js';
@@ -10,6 +12,7 @@ import { buildApp } from '../app.js';
 import { loadCommonPasswords } from '../auth/common-passwords.js';
 import { createPasswordHasher } from '../auth/password-hash.js';
 import { ApiConfigError, loadApiConfig } from '../config.js';
+import { createMarketDataReader } from '../data/market.js';
 import { createDataReader } from '../data/reader.js';
 import { createUuidV7Generator } from '../ids.js';
 import { errorName, jsonLines } from '../log.js';
@@ -32,6 +35,11 @@ const errorLog = jsonLines((text) => process.stderr.write(text));
 const READINESS_INTERVAL_MS = 5000;
 /** Contraseñas que esperan su hash con una en curso (ADR-0019 §1); la siguiente es `rate_limited`. */
 const HASHES_WAITING = 4;
+/**
+ * Los plazos de cada petición a R2, como los del pool: conectar en 5 s y la petición entera en 10 s.
+ * Sin reintentos (`createS3Client`): una lectura que vence responde `storage_unavailable`.
+ */
+const STORAGE_TIMEOUTS = { connectionTimeout: 5000, requestTimeout: 10_000 } as const;
 
 let config;
 try {
@@ -97,6 +105,18 @@ if (config !== undefined) {
   const readerPool = config.reader === null ? null : createReaderPool(config.reader);
   readerPool?.on('error', () => undefined);
   const data = readerPool === null ? null : createDataReader({ pool: readerPool, clock });
+  // Las de R2, además con el token `api`: sin él, el gráfico y el catálogo responden not_ready.
+  const storage = config.storage;
+  const s3 =
+    storage === null || readerPool === null ? null : createS3Client(storage, STORAGE_TIMEOUTS);
+  const market =
+    storage === null || readerPool === null || s3 === null
+      ? null
+      : createMarketDataReader({
+          pool: readerPool,
+          objects: (log) => new S3ObjectStore(s3, storage.bucket, log.prefix),
+          clock,
+        });
   // La exportación `out-api` de la web, junto a la API en el repositorio; `apps/web/out-api` desde
   // `apps/api/dist/cli/`. Sin ella, la API sirve solo JSON (el despliegue la compila, ADR-0019 §10).
   const web = loadWebAssets(fileURLToPath(new URL('../../../web/out-api/', import.meta.url)));
@@ -105,7 +125,7 @@ if (config !== undefined) {
     now: () => performance.now(),
     requestId: () => randomUUID(),
     origin: config.origin,
-    routes: apiRoutes({ readiness, links, sessions, limiter, clock, data }),
+    routes: apiRoutes({ readiness, links, sessions, limiter, clock, data, market }),
     rateLimit: (address) => limiter.requestWait(address, clock()),
     ...(web === null ? {} : { web }),
   });
@@ -113,6 +133,7 @@ if (config !== undefined) {
     readiness.stop();
     await sessions.flushPendingFailures().catch(() => undefined);
     await Promise.all([pool.end(), readerPool?.end()]);
+    s3?.destroy();
   });
   readiness.start();
   try {

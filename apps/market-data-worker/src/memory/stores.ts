@@ -23,6 +23,7 @@ import {
 import type { OperationalStore } from '../operational/registry.js';
 import type { ObjectStore } from '../ports.js';
 import type {
+  ClosedSegmentFinder,
   ClosedSourceSegment,
   LiveCheckpointCandidate,
   LiveCheckpointInsert,
@@ -72,9 +73,10 @@ export class InMemoryObjectStore implements ObjectStore {
 
 /**
  * Log raw-first con las mismas invariantes que los triggers de `0002_log_raw_first`, y los puntos de
- * control de su estado vivo con la clave de `0005`.
+ * control de su estado vivo con la clave de `0005`. Da también los segmentos de una ventana de tiempo
+ * (`ClosedSegmentFinder`), como `PostgresSourceLogStore`.
  */
-export class InMemorySourceLogStore implements SourceLogStore {
+export class InMemorySourceLogStore implements SourceLogStore, ClosedSegmentFinder {
   readonly rows: SourceEventIndexRow[] = [];
   readonly closed: ClosedSourceSegment[] = [];
   readonly checkpoints: StoredLiveCheckpoint[] = [];
@@ -140,6 +142,17 @@ export class InMemorySourceLogStore implements SourceLogStore {
         (segment) =>
           segment.source === source && segment.segment_index >= from && segment.segment_index <= to,
       ),
+    );
+  }
+
+  /** Los segmentos entran en orden de índice: el primero que cumple es el de menor índice. */
+  listClosedSegmentsSince(source: string, sinceUtc: string): Promise<ClosedSourceSegment[]> {
+    const closed = this.closed.filter((segment) => segment.source === source);
+    const first = closed.find((segment) => segment.last_event_time_utc >= sinceUtc);
+    return Promise.resolve(
+      first === undefined
+        ? []
+        : closed.filter((segment) => segment.segment_index >= first.segment_index),
     );
   }
 

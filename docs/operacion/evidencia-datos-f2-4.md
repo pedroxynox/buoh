@@ -65,4 +65,22 @@ Un `curl -I` de `/` a las 03:24:10 trajo la política entera y el `Last-Modified
 
 **Para el PR 7c de F2.3.** `buoh-api` empezó a servir la web nueva entre las 02:54:34 y las 02:54:54, dentro de los días que mide el 7c, del 2026-11-03 al 2026-11-07 (`PROJECT_STATUS.md`, «Decisiones vigentes relevantes»). La instancia nueva arrancó antes, probablemente después de las 02:53:25, y la anterior se paró después, a horas que el agente no ve. El despliegue no cambió el código del servidor: solo los archivos de la web que sirve. Desde entonces, mientras una página de la web está abierta, con la pestaña a la vista, la insignia de salud de la barra superior lee la salud cada minuto, unos 1,5 KB de tráfico de salida por lectura (estimación del PR #94).
 
+## Los despliegues del arreglo de CI (PR #96)
+
+El PR #96 no es de F2.4, pero volvió a desplegar los servicios dentro de los días del 7c, y este documento registra los despliegues de esos días. `verify:pr` falló en `main` sobre `2a05955`, la fusión del PR #95, porque ESLint se quedó sin memoria (`JavaScript heap out of memory`, salida 134). El PR #96 le dio 4 GB en el script `lint` del `package.json` de la raíz ([ADR-0003](../arquitectura/adr/0003-lenguajes-y-limites.md)). Ese archivo está en el `buildFilter` de los cuatro servicios de Render, así que el PR los volvió a desplegar a todos, sin cambios de código. Las horas son UTC del 2026-11-05 y salen de GitHub, de las comprobaciones del agente desde fuera, sin sesión ni credenciales, y de sus lecturas de producción.
+
+| Hora | Qué pasó |
+|---|---|
+| 11:43:33 | El propietario fusiona el PR #96 (`85f16e9`, GitHub). El árbol es el de su último commit, `2d644c5`, el que probó CI en el PR (`git diff --quiet 2d644c5 85f16e9` sale con 0). |
+| 11:46:02, 11:49:52 y 11:58:33 | CI sobre `85f16e9`: `test:integration`, `verify:pr` y `desktop:windows` terminan bien. `verify:pr` vuelve a pasar en `main`. |
+| 11:59:12 | La hora de la compilación de `buoh-sitio`: su `/` lleva `Last-Modified: Thu, 05 Nov 2026 11:59:12 UTC`. |
+| 11:59:31 | La hora del archivo que escribió la compilación de `buoh-api`: su `/` lleva `Last-Modified: Thu, 05 Nov 2026 11:59:31 GMT`. Un `curl` de las 12:02:03 ya la trae. La instancia nueva arrancó probablemente después de esa hora, y la anterior se paró después, a horas que el agente no ve. |
+| 12:01:24.016 | `buoh-ingesta` recibe el último frame de tick del proceso anterior. |
+| 12:01:25.227 a 12:01:26.105 | El proceso anterior para: envía `forget_all` a las 12:01:25.227, pide el cierre a las 12:01:25.596, que cierra el segmento 1008 como `requested` (de 12:00:24.024 a 12:01:25.596), y escribe su último latido, `disconnected`, a las 12:01:26.105. |
+| 12:01:29.088 a 12:01:31.150 | El proceso nuevo: su primer latido, `connecting`, a las 12:01:29.088; la conexión abierta a las 12:01:30.004 y `connected` a las 12:01:30.543; el catálogo, de 26 468 bytes, a las 12:01:30.571; y el primer frame de tick a las 12:01:31.150. |
+
+Las horas de `buoh-ingesta` son las de recepción de los eventos del log 2 y las de sus latidos. Entre el último frame de tick del proceso anterior y el primero del nuevo pasaron unos 7,1 s sin ticks. El cierre fue pedido, así que ese hueco no se recupera (ADR-0015 §10, «Despliegue o reinicio programado»), y el gráfico del 5a lo marca como `capture_stopped` (ADR-0019 §8). El agente no vio cuándo se desplegó `buoh-operaciones`, que no deja rastro en el log.
+
+**Para el PR 7c de F2.3 y para la evidencia de 7 días de F2.2.** `buoh-api` volvió a arrancar el 2026-11-05 hacia las 12:00. Antes, dentro de los días del 7c, había arrancado con el PR #91, el 2026-11-04 entre las 20:00 y las 20:09, y con el PR #94, el 2026-11-05 hacia las 02:54. La memoria de cada instancia empieza de cero al arrancar, así que esas horas cuentan al leer la gráfica de memoria del 7c. La captura tuvo un corte pedido de unos 7 s, de las 12:01:24 a las 12:01:31.
+
 Lo que este documento cita de la documentación de Render la resume con otras palabras; lo demás es lo que se vio o se dedujo el 2026-11-04 y el 2026-11-05.

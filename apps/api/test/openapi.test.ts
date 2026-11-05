@@ -115,6 +115,8 @@ describe('buildOpenApiDocument', () => {
     ]);
     expect(statuses('/api/v1/auditoria', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/datos/salud', 'get')).toEqual(['200', '400', '401', '500', '503']);
+    expect(statuses('/api/v1/datos/grafico', 'get')).toEqual(['200', '400', '401', '500', '503']);
+    expect(statuses('/api/v1/datos/catalogo', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/enlace', 'post')).toEqual([
       '200',
       '400',
@@ -142,6 +144,8 @@ describe('buildOpenApiDocument', () => {
       'ApiHealth',
       'AuditEvent',
       'AuditEvents',
+      'DataCatalog',
+      'DataChart',
       'DataHealth',
       'EmptyRequest',
       'HealthReport',
@@ -223,6 +227,75 @@ describe('buildOpenApiDocument', () => {
       data({ log: 2, observation: { status: 'completed', observed_at_utc: observed, report } }),
     ).toBe(false);
     expect(data({ log: 0, observation: null })).toBe(false);
+
+    const chart = validatorFor('DataChart');
+    const window = {
+      log: 3,
+      source: 'deriv_options',
+      symbol: 'R_100',
+      from_utc: '2026-11-08T06:00:00.000Z',
+      to_utc: '2026-11-08T12:00:00.000Z',
+      log_started_at_utc: '2026-11-08T00:00:04.646Z',
+      ticks: { offsets_ms: [0, 2000], quotes: ['1234.56', '1234.60'] },
+      gaps: [
+        {
+          from_utc: '2026-11-08T07:00:00.001Z',
+          to_utc: null,
+          cause: 'connection_lost',
+          history: 'pending',
+          reason: null,
+          recovered_ticks: null,
+        },
+      ],
+    };
+    expect(chart(window)).toBe(true);
+    expect(chart({ ...window, log: null, log_started_at_utc: null })).toBe(true);
+    expect(chart({ ...window, ticks: { offsets_ms: [0], quotes: [1234.56] } })).toBe(false);
+    expect(chart({ ...window, gaps: [{ ...window.gaps[0], cause: 'otra' }] })).toBe(false);
+    expect(chart({ ...window, extra: 1 })).toBe(false);
+
+    const catalog = validatorFor('DataCatalog');
+    const entry = {
+      underlying_symbol: 'R_100',
+      underlying_symbol_name: 'Volatility 100 Index',
+      underlying_symbol_type: 'stockindex',
+      market: 'synthetic_index',
+      submarket: 'random_index',
+      subgroup: 'synthetics',
+      pip_size: '0.01',
+      exchange_is_open: 1,
+      is_trading_suspended: 0,
+    };
+    const version = {
+      source: 'deriv_options',
+      version: 26,
+      received_at_utc: '2026-11-05T04:30:51.999Z',
+      source_schema_release: 'deriv-api-2026-10-20',
+      content_sha256: 'a'.repeat(64),
+      entries: [entry],
+    };
+    expect(catalog({ log: 2, catalog: version })).toBe(true);
+    expect(catalog({ log: null, catalog: null })).toBe(true);
+    expect(catalog({ log: 2, catalog: { ...version, entries: [] } })).toBe(false);
+    expect(catalog({ log: 2, catalog: { ...version, entries: [{ ...entry, x: 1 }] } })).toBe(false);
+  });
+
+  it('el gráfico declara sus horas como un parámetro de consulta obligatorio, de 1 a la ventana máxima', () => {
+    const chart = operation('/api/v1/datos/grafico', 'get') as OpenApiOperation & {
+      readonly parameters: readonly unknown[];
+    };
+    expect(chart.parameters).toEqual([
+      {
+        name: 'hours',
+        in: 'query',
+        required: true,
+        schema: { type: 'string', pattern: '^(?:[1-9]|1[0-9]|2[0-4])$' },
+      },
+    ]);
+    const catalog = operation('/api/v1/datos/catalogo', 'get') as OpenApiOperation & {
+      readonly parameters: readonly unknown[];
+    };
+    expect(catalog.parameters).toEqual([]);
   });
 
   it('coincide con apps/api/generated/openapi.json', () => {

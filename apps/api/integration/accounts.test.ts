@@ -1072,6 +1072,7 @@ describe('el recorrido completo por HTTP, con inject contra la base (ADR-0019 §
         limiter: createRateLimiter(),
         clock: clock.now,
         data: null,
+        market: null,
       }),
       rateLimit: () => 0,
     });

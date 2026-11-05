@@ -1,6 +1,8 @@
-import type { Pool } from 'pg';
+import pg, { type Pool } from 'pg';
 
+import { POSTGRES_IDENTIFIER } from '../config.js';
 import type {
+  ClosedSegmentFinder,
   ClosedSourceSegment,
   LiveCheckpointCandidate,
   LiveCheckpointInsert,
@@ -70,15 +72,37 @@ function checkpointFromRecord(record: CheckpointRecord): StoredLiveCheckpoint {
   };
 }
 
+export interface PostgresSourceLogStoreOptions {
+  /**
+   * El esquema del log, para un pool cuyas sesiones no lo tienen en el `search_path`, como el de las
+   * lecturas de la API, que empiezan en `pg_catalog` (ADR-0019 §7 y §8): cada consulta nombra sus
+   * tablas con él. Sin él, como en `ingest` y `data:health`, las tablas salen del `search_path` de la
+   * sesión, y las consultas son las de siempre.
+   */
+  readonly schema?: string;
+}
+
 /**
  * Log raw-first sobre PostgreSQL estándar (migración `0002_log_raw_first`) y los puntos de control de
- * su estado vivo (migración `0005`).
+ * su estado vivo (migración `0005`). También da los segmentos cerrados de una ventana de tiempo, para
+ * el gráfico (`ClosedSegmentFinder`).
  */
-export class PostgresSourceLogStore implements SourceLogStore {
+export class PostgresSourceLogStore implements SourceLogStore, ClosedSegmentFinder {
   readonly #pool: Pool;
+  readonly #index: string;
+  readonly #closed: string;
+  readonly #checkpoints: string;
 
-  constructor(pool: Pool) {
+  constructor(pool: Pool, options: PostgresSourceLogStoreOptions = {}) {
     this.#pool = pool;
+    const { schema } = options;
+    if (schema !== undefined && !POSTGRES_IDENTIFIER.test(schema)) {
+      throw new TypeError('El esquema del log no es un nombre de PostgreSQL que buoh admita.');
+    }
+    const prefix = schema === undefined ? '' : `${pg.escapeIdentifier(schema)}.`;
+    this.#index = `${prefix}source_event_index`;
+    this.#closed = `${prefix}closed_source_segments`;
+    this.#checkpoints = `${prefix}live_derivation_checkpoints`;
   }
 
   async readLogState(source: string): Promise<SourceLogState> {
@@ -87,7 +111,7 @@ export class PostgresSourceLogStore implements SourceLogStore {
       // Una instantánea coherente de todas las lecturas.
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const closed = await client.query<ClosedRecord>(
-        `SELECT ${CLOSED_COLUMNS} FROM closed_source_segments
+        `SELECT ${CLOSED_COLUMNS} FROM ${this.#closed}
           WHERE source = $1 ORDER BY segment_index DESC LIMIT 1`,
         [source],
       );
@@ -96,29 +120,29 @@ export class PostgresSourceLogStore implements SourceLogStore {
       const open = await client.query<IndexRecord>(
         `SELECT source, segment_index, position, event_id::text AS event_id, kind, event_time_utc,
                 object_sha256, byte_length
-           FROM source_event_index
+           FROM ${this.#index}
           WHERE source = $1 AND segment_index = $2
           ORDER BY position`,
         [source, openIndex],
       );
       const first = await client.query<{ event_time_utc: string }>(
-        `SELECT event_time_utc FROM source_event_index
+        `SELECT event_time_utc FROM ${this.#index}
           WHERE source = $1 ORDER BY segment_index, position LIMIT 1`,
         [source],
       );
       const last = await client.query<{ event_id: string }>(
-        `SELECT event_id::text AS event_id FROM source_event_index
+        `SELECT event_id::text AS event_id FROM ${this.#index}
           WHERE source = $1 ORDER BY segment_index DESC, position DESC LIMIT 1`,
         [source],
       );
       const lastRaw = await client.query<{ event_id: string }>(
-        `SELECT event_id::text AS event_id FROM source_event_index
+        `SELECT event_id::text AS event_id FROM ${this.#index}
           WHERE source = $1 AND kind = 'raw_source_frame'
           ORDER BY segment_index DESC, position DESC LIMIT 1`,
         [source],
       );
       const total = await client.query<{ count: string }>(
-        'SELECT count(*) FROM source_event_index WHERE source = $1',
+        `SELECT count(*) FROM ${this.#index} WHERE source = $1`,
         [source],
       );
       await client.query('COMMIT');
@@ -140,7 +164,7 @@ export class PostgresSourceLogStore implements SourceLogStore {
 
   async insertIndexRow(row: SourceEventIndexRow): Promise<void> {
     await this.#pool.query(
-      `INSERT INTO source_event_index
+      `INSERT INTO ${this.#index}
          (source, segment_index, position, event_id, kind, event_time_utc, object_sha256, byte_length)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
@@ -158,7 +182,7 @@ export class PostgresSourceLogStore implements SourceLogStore {
 
   async insertClosedSegment(segment: ClosedSourceSegment): Promise<void> {
     await this.#pool.query(
-      `INSERT INTO closed_source_segments (${CLOSED_COLUMNS})
+      `INSERT INTO ${this.#closed} (${CLOSED_COLUMNS})
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         segment.source,
@@ -186,10 +210,27 @@ export class PostgresSourceLogStore implements SourceLogStore {
     to: number,
   ): Promise<ClosedSourceSegment[]> {
     const { rows } = await this.#pool.query<ClosedRecord>(
-      `SELECT ${CLOSED_COLUMNS} FROM closed_source_segments
+      `SELECT ${CLOSED_COLUMNS} FROM ${this.#closed}
         WHERE source = $1 AND segment_index BETWEEN $2 AND $3
         ORDER BY segment_index`,
       [source, from, to],
+    );
+    return rows.map(closedFromRecord);
+  }
+
+  /**
+   * Con una sola consulta. Las horas son texto con formato fijo, y se comparan byte a byte
+   * (`COLLATE "C"`), como en JavaScript: con la intercalación de la base, que puede depender del
+   * idioma, el orden de dos textos podría no ser el de sus instantes.
+   */
+  async listClosedSegmentsSince(source: string, sinceUtc: string): Promise<ClosedSourceSegment[]> {
+    const { rows } = await this.#pool.query<ClosedRecord>(
+      `SELECT ${CLOSED_COLUMNS} FROM ${this.#closed}
+        WHERE source = $1 AND segment_index >= (
+          SELECT min(segment_index) FROM ${this.#closed}
+           WHERE source = $1 AND last_event_time_utc COLLATE "C" >= $2::text COLLATE "C")
+        ORDER BY segment_index`,
+      [source, sinceUtc],
     );
     return rows.map(closedFromRecord);
   }
@@ -205,7 +246,7 @@ export class PostgresSourceLogStore implements SourceLogStore {
     }
     const { rows } = await this.#pool.query<{ found: boolean }>(
       `SELECT EXISTS (
-         SELECT 1 FROM source_event_index WHERE source = $1 AND event_id = $2::uuid
+         SELECT 1 FROM ${this.#index} WHERE source = $1 AND event_id = $2::uuid
        ) AS found`,
       [source, eventId],
     );
@@ -219,7 +260,7 @@ export class PostgresSourceLogStore implements SourceLogStore {
    */
   async insertLiveCheckpoint(row: StoredLiveCheckpoint): Promise<LiveCheckpointInsert> {
     const inserted = await this.#pool.query(
-      `INSERT INTO live_derivation_checkpoints (${CHECKPOINT_COLUMNS})
+      `INSERT INTO ${this.#checkpoints} (${CHECKPOINT_COLUMNS})
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
        ON CONFLICT (source, segment_index, versions_sha256) DO NOTHING`,
       [
@@ -247,7 +288,7 @@ export class PostgresSourceLogStore implements SourceLogStore {
       return 'inserted';
     }
     const { rows } = await this.#pool.query<{ checkpoint_sha256: string }>(
-      `SELECT checkpoint_sha256 FROM live_derivation_checkpoints
+      `SELECT checkpoint_sha256 FROM ${this.#checkpoints}
         WHERE source = $1 AND segment_index = $2 AND versions_sha256 = $3`,
       [row.source, row.segment_index, row.versions_sha256],
     );
@@ -268,7 +309,7 @@ export class PostgresSourceLogStore implements SourceLogStore {
       // La fila y su enlace en una misma instantánea (ADR-0017 §4 y §6).
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const candidate = await client.query<CheckpointRecord>(
-        `SELECT ${CHECKPOINT_COLUMNS} FROM live_derivation_checkpoints
+        `SELECT ${CHECKPOINT_COLUMNS} FROM ${this.#checkpoints}
           WHERE source = $1 AND versions_sha256 = $2
             AND ($3::bigint IS NULL OR segment_index < $3::bigint)
           ORDER BY segment_index DESC LIMIT 1`,
@@ -289,7 +330,7 @@ export class PostgresSourceLogStore implements SourceLogStore {
                 coalesce(sum(raw_frame_count), 0)::text AS raw_frame_count,
                 max(logical_content_sha256) FILTER (WHERE segment_index = $2::bigint)
                   AS logical_content_sha256
-           FROM closed_source_segments
+           FROM ${this.#closed}
           WHERE source = $1 AND segment_index <= $2::bigint`,
         [source, row.segment_index],
       );

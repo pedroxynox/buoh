@@ -282,6 +282,20 @@ services:
       # base: la genera Render, y buoh-operaciones la pone al rol (ADR-0019 §7 y §8).
       - key: BUOH_API_LECTURA_POSTGRES_PASSWORD
         generateValue: true
+      # El token api de R2, de solo lectura sobre buoh-captura, para el gráfico y el catálogo
+      # (ADR-0019 §8). Como el Blueprint ya existe, Render no los pide: el propietario pega el endpoint
+      # y las dos claves en buoh-api (runbook de la API, «El token api de R2»). Sin ellos, esas rutas
+      # responden not_ready y lo demás de la API no cambia.
+      - key: BUOH_API_S3_ENDPOINT
+        sync: false
+      - key: BUOH_API_S3_REGION
+        value: auto
+      - key: BUOH_API_S3_BUCKET
+        value: buoh-captura
+      - key: BUOH_API_S3_ACCESS_KEY_ID
+        sync: false
+      - key: BUOH_API_S3_SECRET_ACCESS_KEY
+        sync: false
       # Las tres claves del servidor, de 256 bits que genera Render y viven fuera de la base, para la
       # contraseña (pepper), el secreto TOTP y los tokens de sesiones, CSRF y enlaces (ADR-0019 §1, §2).
       - key: BUOH_API_PASSWORD_PEPPER

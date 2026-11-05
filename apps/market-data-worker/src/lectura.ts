@@ -1,9 +1,9 @@
 /**
  * Lo que leen del sistema de datos la API (F2.4) y el motor (F2.9), por la ruta de exportación
  * `@buoh/market-data-worker/lectura` (ADR-0019 §8): la configuración y los pools, la búsqueda del
- * log activo, el log y sus puntos de control, el perfil de medición, la salud que guardó
- * `buoh-operaciones`, el catálogo, el registro operativo, las publicaciones y el replay, y los
- * almacenes en memoria para las pruebas.
+ * log activo, el log y sus puntos de control, el gráfico de una ventana, el perfil de medición, la
+ * salud que guardó `buoh-operaciones`, el catálogo, el registro operativo, las publicaciones y el
+ * replay, y los almacenes en memoria para las pruebas.
  *
  * A diferencia del punto de entrada principal (`index.ts`), importarla no carga `ws`, `fflate` ni
  * `node:child_process`, que solo usan la captura, la carga de los esquemas de Deriv y
@@ -25,7 +25,7 @@ export {
 } from './config.js';
 export { createPool, postgresSslOption, type PoolTimeouts } from './postgres/metadata-store.js';
 export { openStores, type OpenStoresOptions } from './runtime.js';
-export { S3ObjectStore, type S3Timeouts } from './s3/object-store.js';
+export { createS3Client, S3ObjectStore, type S3Timeouts } from './s3/object-store.js';
 export type { MetadataStore, ObjectStore } from './ports.js';
 
 // La búsqueda del log activo (ADR-0018 §6).
@@ -55,8 +55,12 @@ export {
   SourceEventLog,
   type OpenSourceEventLogInput,
 } from './source-log/source-event-log.js';
-export { PostgresSourceLogStore } from './postgres/source-log-store.js';
+export {
+  PostgresSourceLogStore,
+  type PostgresSourceLogStoreOptions,
+} from './postgres/source-log-store.js';
 export type {
+  ClosedSegmentFinder,
   ClosedSourceSegment,
   LiveCheckpointBinding,
   SourceEventIndexRow,
@@ -90,6 +94,24 @@ export {
 export { contentKey, keyFromUri, manifestKey, objectUri } from './object-keys.js';
 export { ObjectReadError } from './errors.js';
 
+// El gráfico de una ventana: los ticks y los huecos del log, desde sus puntos de control (ADR-0019 §8).
+export {
+  assembleChartWindow,
+  CHART_FOLD_LIMIT,
+  CHART_SEGMENT_MARGIN_MS,
+  chartBoundaryOf,
+  ChartCheckpointError,
+  chartItemsOf,
+  chartSegmentKey,
+  readChartWindow,
+  type ChartBoundary,
+  type ChartGap,
+  type ChartItem,
+  type ChartSegmentCache,
+  type ChartWindow,
+  type ReadChartWindowInput,
+} from './source-log/chart-window.js';
+
 // El perfil de medición, armado con el esquema de fuente que guardó la ingesta (ADR-0015 §7 y §8).
 export {
   createDerivMeasurementProfileFromSourceSchema,
@@ -107,6 +129,11 @@ export {
   type SchemaEntryName,
   type SchemaKind,
 } from './deriv/schema-release.js';
+export {
+  readStoredSourceSchema,
+  SOURCE_SCHEMA_MAX_BYTES,
+  type StoredSourceSchema,
+} from './deriv/stored-source-schema.js';
 
 // La salud de los datos: la última observación que guardó `buoh-operaciones` en un log (ADR-0019 §8).
 export {

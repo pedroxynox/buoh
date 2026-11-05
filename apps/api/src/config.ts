@@ -20,6 +20,21 @@ export const API_READER_POSTGRES_USER = 'buoh_api_lectura';
 /** La contraseña de `buoh_api_lectura`, que Render genera en `buoh-api` (`generateValue`). */
 const READER_PASSWORD_VARIABLE = 'BUOH_API_LECTURA_POSTGRES_PASSWORD';
 
+/**
+ * El endpoint y las claves del token `api` de R2, de solo lectura sobre `buoh-captura` (ADR-0019 §8 y
+ * §10), que el propietario pega en `buoh-api` (`sync: false`).
+ */
+const STORAGE_SECRET_VARIABLES = {
+  endpoint: 'BUOH_API_S3_ENDPOINT',
+  accessKeyId: 'BUOH_API_S3_ACCESS_KEY_ID',
+  secretAccessKey: 'BUOH_API_S3_SECRET_ACCESS_KEY',
+} as const;
+/** El bucket y la región, con su valor en el Blueprint. */
+const STORAGE_BUCKET_VARIABLE = 'BUOH_API_S3_BUCKET';
+const STORAGE_REGION_VARIABLE = 'BUOH_API_S3_REGION';
+/** Un nombre de bucket de S3 y de R2, como el que admite el worker en `BUOH_S3_BUCKET`. */
+const BUCKET_PATTERN = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u;
+
 const PORT_PATTERN = /^[1-9]\d{0,4}$/u;
 /** 32 bytes en base64 con relleno, como los valores de `generateValue` de Render. */
 const KEY_PATTERN = /^[A-Za-z0-9+/]{43}=$/u;
@@ -64,6 +79,25 @@ export interface ApiConfig {
    * opcional para que un despliegue no falle si Render deja la variable pendiente de aprobar.
    */
   readonly reader: PostgresConfig | null;
+  /**
+   * El almacenamiento de objetos de la captura, con el token `api` de R2 (ADR-0019 §8). `null` sin
+   * su endpoint ni sus claves: entonces las rutas que leen R2 responden 503 `not_ready`, y lo demás
+   * de la API no cambia. Así el despliegue que las trae no falla antes de que el propietario pegue
+   * el token.
+   */
+  readonly storage: StorageConfig | null;
+}
+
+/** El token `api` de R2 y dónde leer (ADR-0019 §8 y §10). */
+export interface StorageConfig {
+  /** `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` en production: un origen, sin ruta. */
+  readonly endpoint: string;
+  readonly accessKeyId: string;
+  readonly secretAccessKey: string;
+  /** `buoh-captura` en production. */
+  readonly bucket: string;
+  /** `auto` en R2. */
+  readonly region: string;
 }
 
 const KEY_VARIABLES = {
@@ -93,6 +127,53 @@ function parseOrigin(value: string | undefined): string | null {
 }
 
 /**
+ * El token `api` de R2 de `env`: `null` si no hay ninguna de sus tres variables. Con alguna, tienen
+ * que estar las tres, no vacías, el endpoint como un origen exacto (con `https` en `production`), y
+ * el bucket y la región; si no, suma a `rejected` las que faltan o no valen.
+ */
+function loadStorage(
+  env: Readonly<Record<string, string | undefined>>,
+  production: boolean,
+  rejected: Set<string>,
+): StorageConfig | null {
+  const values = Object.values(STORAGE_SECRET_VARIABLES).map((name) => env[name]);
+  if (values.every((value) => value === undefined)) {
+    return null;
+  }
+  for (const name of Object.values(STORAGE_SECRET_VARIABLES)) {
+    if (env[name] === undefined || env[name] === '') {
+      rejected.add(name);
+    }
+  }
+  const endpoint = parseOrigin(env[STORAGE_SECRET_VARIABLES.endpoint]);
+  if (endpoint === null || (production && !endpoint.startsWith('https://'))) {
+    rejected.add(STORAGE_SECRET_VARIABLES.endpoint);
+  }
+  const bucket = env[STORAGE_BUCKET_VARIABLE];
+  if (bucket === undefined || !BUCKET_PATTERN.test(bucket)) {
+    rejected.add(STORAGE_BUCKET_VARIABLE);
+  }
+  const region = env[STORAGE_REGION_VARIABLE];
+  if (region === undefined || region === '') {
+    rejected.add(STORAGE_REGION_VARIABLE);
+  }
+  const accessKeyId = env[STORAGE_SECRET_VARIABLES.accessKeyId];
+  const secretAccessKey = env[STORAGE_SECRET_VARIABLES.secretAccessKey];
+  if (
+    endpoint === null ||
+    accessKeyId === undefined ||
+    accessKeyId === '' ||
+    secretAccessKey === undefined ||
+    secretAccessKey === '' ||
+    bucket === undefined ||
+    region === undefined
+  ) {
+    return null;
+  }
+  return { endpoint, accessKeyId, secretAccessKey, bucket, region };
+}
+
+/**
  * Lee la configuración de `env`. `BUOH_DEPLOYMENT_ENVIRONMENT` es obligatoria y no admite
  * `staging`. Son obligatorias también:
  * - `BUOH_API_ORIGIN`, un origen exacto, y en `production` con `https`;
@@ -100,7 +181,9 @@ function parseOrigin(value: string | undefined): string | null {
  * - la conexión a PostgreSQL de `loadPostgresConfig`, y en `production` con el usuario `buoh_api`.
  *
  * `BUOH_API_LECTURA_POSTGRES_PASSWORD`, la contraseña de las lecturas del sistema de datos, es
- * opcional, pero no puede estar vacía.
+ * opcional, pero no puede estar vacía. El token `api` de R2 (`BUOH_API_S3_ENDPOINT`,
+ * `BUOH_API_S3_ACCESS_KEY_ID` y `BUOH_API_S3_SECRET_ACCESS_KEY`) también es opcional, pero va entero,
+ * con `BUOH_API_S3_BUCKET` y `BUOH_API_S3_REGION` (`loadStorage`).
  *
  * Una variable inválida o ausente lanza `ApiConfigError` con los nombres de todas las rechazadas,
  * ordenados, nunca sus valores.
@@ -158,6 +241,7 @@ export function loadApiConfig(env: Readonly<Record<string, string | undefined>>)
   if (readerPassword === '') {
     rejected.add(READER_PASSWORD_VARIABLE);
   }
+  const storage = loadStorage(env, production, rejected);
 
   const { passwordPepper, totpKey, tokenKey } = keys;
   if (
@@ -183,5 +267,6 @@ export function loadApiConfig(env: Readonly<Record<string, string | undefined>>)
       readerPassword === undefined
         ? null
         : { ...postgres, password: readerPassword, user: API_READER_POSTGRES_USER },
+    storage,
   };
 }

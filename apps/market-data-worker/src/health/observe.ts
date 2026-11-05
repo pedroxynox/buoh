@@ -1,16 +1,11 @@
-import { sha256Hex, type DeploymentEnvironment, type IngestionCursor } from '@buoh/contracts';
-import { SOURCE_LIMITS, type PipelineProfile } from '@buoh/domain';
+import type { DeploymentEnvironment, IngestionCursor } from '@buoh/contracts';
+import type { PipelineProfile } from '@buoh/domain';
 
 import { checkFoldedContent, foldSinceCheckpoint } from '../deriv/log-check.js';
 import { createDerivMeasurementProfileFromSourceSchema, DERIV_SOURCE } from '../deriv/profile.js';
-import {
-  DERIV_SCHEMA_RELEASE,
-  SOURCE_SCHEMA_ENTRY,
-  type ExpectedSchemaArchive,
-} from '../deriv/schema-release.js';
-import { ObjectReadError } from '../errors.js';
+import { DERIV_SCHEMA_RELEASE, type ExpectedSchemaArchive } from '../deriv/schema-release.js';
+import { readStoredSourceSchema } from '../deriv/stored-source-schema.js';
 import type { IngestionStatusStore } from '../ingestion/status.js';
-import { contentKey } from '../object-keys.js';
 import {
   OperationalRegistry,
   type OperationalAlert,
@@ -86,13 +81,6 @@ export interface ObserveDataHealthInput {
   /** El símbolo pedido. */
   readonly symbol: string;
 }
-
-/**
- * Lo más que puede medir el esquema de fuente que guardó la ingesta: el máximo de una entrada de
- * `schemas.zip` (ADR-0004 §7), porque la carga rechaza una entrada mayor. La release fijada no da
- * el tamaño de cada entrada, solo su SHA-256. Un objeto mayor bajo esa clave tiene otros bytes.
- */
-const SOURCE_SCHEMA_MAX_BYTES = SOURCE_LIMITS.schema_entry.maximum;
 
 /**
  * La versión del writer de gzip que pide `SourceEventLog.open` para cerrar segmentos. `data:health`
@@ -243,31 +231,23 @@ export async function readObservedLog(
 
 /**
  * Los bytes del esquema de fuente que guardó la ingesta (ADR-0015 §7), con la clave de su SHA-256
- * fijado, o `null` si no está. Si la clave tiene otros bytes, la ingesta ya no arranca con ese
- * bucket, así que es `source_schema_mismatch` (regla 2), con el log vacío o no: una lectura mayor
- * que cualquier entrada de esquemas, o unos bytes con otro SHA-256.
+ * fijado, o `null` si no está (`readStoredSourceSchema`). Si la clave tiene otros bytes, la ingesta
+ * ya no arranca con ese bucket, así que es `source_schema_mismatch` (regla 2), con el log vacío o
+ * no: una lectura mayor que cualquier entrada de esquemas, o unos bytes con otro SHA-256.
  */
 async function readSourceSchema(
   objects: HealthStores['objects'],
   expected: ExpectedSchemaArchive,
 ): Promise<Uint8Array | null> {
-  const pinned = expected.entries_sha256[SOURCE_SCHEMA_ENTRY];
-  let bytes: Uint8Array;
-  try {
-    bytes = await objects.get(contentKey(pinned), SOURCE_SCHEMA_MAX_BYTES);
-  } catch (error) {
-    if (error instanceof ObjectReadError) {
-      if (error.reason === 'not_found') {
-        return null;
-      }
+  const stored = await fromStore(() => readStoredSourceSchema(objects, expected));
+  switch (stored.status) {
+    case 'found':
+      return stored.bytes;
+    case 'missing':
+      return null;
+    case 'mismatch':
       throw incompatible('source_schema_mismatch');
-    }
-    throw unanswered(failureReason(error));
   }
-  if (sha256Hex(bytes) !== pinned) {
-    throw incompatible('source_schema_mismatch');
-  }
-  return bytes;
 }
 
 /**

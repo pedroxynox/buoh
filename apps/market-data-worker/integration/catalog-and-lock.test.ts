@@ -16,7 +16,7 @@ import { spawnSync } from 'node:child_process';
 import { connect, createServer, type AddressInfo, type Socket } from 'node:net';
 import { resolve } from 'node:path';
 
-import type { Pool } from 'pg';
+import pg, { type Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
@@ -181,6 +181,40 @@ describe('PostgresCatalogStore (ADR-0012 §7)', () => {
     const other = snapshot([SYNTH_100], 20, 'other_source');
     expect(await stores.catalog.record(other)).toEqual({ status: 'created', version: 1 });
     expect((await stores.catalog.latest('other_source', 'deriv_active_symbols'))?.version).toBe(1);
+  });
+
+  it('con el esquema del log, la lee un pool sin él en el search_path, como el de la API (ADR-0019 §8)', async () => {
+    const reader = new pg.Pool({
+      database: config.postgres.database,
+      host: config.postgres.host,
+      max: 1,
+      options: '-c search_path=pg_catalog -c default_transaction_read_only=on',
+      password: config.postgres.password,
+      port: config.postgres.port,
+      user: config.postgres.user,
+    });
+    try {
+      // Sin el esquema, la tabla no existe para esa sesión.
+      expect(
+        await errorCode(
+          new PostgresCatalogStore(reader, stores.objects).latest(
+            DERIV_SOURCE,
+            'deriv_active_symbols',
+          ),
+        ),
+      ).toBe('42P01');
+      expect(
+        await new PostgresCatalogStore(reader, stores.objects, { schema: SCHEMA }).latest(
+          DERIV_SOURCE,
+          'deriv_active_symbols',
+        ),
+      ).toEqual(await stores.catalog.latest(DERIV_SOURCE, 'deriv_active_symbols'));
+      expect(() => new PostgresCatalogStore(reader, stores.objects, { schema: 'Otro' })).toThrow(
+        TypeError,
+      );
+    } finally {
+      await reader.end();
+    }
   });
 
   it('un documento alterado en el almacenamiento hace fallar la lectura', async () => {

@@ -107,6 +107,21 @@ export interface LiveCheckpointCandidate {
 export type LiveCheckpointInsert = 'conflict' | 'exists' | 'inserted';
 
 /**
+ * Los segmentos cerrados de una ventana de tiempo, para el gráfico que leen la API y la web
+ * (ADR-0019 §8). Va aparte de `SourceLogStore`, que usan la captura y `data:health`: ninguno de los
+ * dos lo necesita.
+ */
+export interface ClosedSegmentFinder {
+  /**
+   * Los segmentos cerrados de la fuente desde el primero cuyo `last_event_time_utc` es igual o
+   * posterior a `sinceUtc` hasta el último cerrado, en orden de índice; ninguno si no hay ese
+   * primero. Desde él van todos, aunque alguno posterior tenga una hora anterior, así que no hay
+   * saltos. Las horas se comparan como texto, que con su formato fijo es su orden en el tiempo.
+   */
+  listClosedSegmentsSince(source: string, sinceUtc: string): Promise<ClosedSourceSegment[]>;
+}
+
+/**
  * Puerto PostgreSQL del log raw-first (migración `0002_log_raw_first`) y de los puntos de control de
  * su estado vivo (migración `0005`).
  */

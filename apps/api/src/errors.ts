@@ -22,6 +22,23 @@ export type ApiFailure =
     };
 
 export const INTERNAL_FAILURE: ApiFailure = { status: 500, code: 'internal' };
+export const STORAGE_UNAVAILABLE_FAILURE: ApiFailure = { status: 503, code: 'storage_unavailable' };
+
+/**
+ * El almacenamiento de objetos de la captura (R2) no respondió a una lectura (ADR-0019 §8): la API
+ * responde `storage_unavailable` (503). `reason` es el motivo saneado del error, su código o su
+ * nombre, como `TimeoutError` o `AccessDenied`, el que deja la línea `api_error`; nunca su mensaje,
+ * que puede llevar el endpoint.
+ */
+export class StorageUnavailableError extends Error {
+  readonly reason: string;
+
+  constructor(reason: string, options?: { cause?: unknown }) {
+    super('El almacenamiento de objetos no respondió.', options);
+    this.name = 'StorageUnavailableError';
+    this.reason = reason;
+  }
+}
 export const NOT_FOUND_FAILURE: ApiFailure = { status: 404, code: 'not_found' };
 export const CSRF_REJECTED_FAILURE: ApiFailure = { status: 403, code: 'csrf_rejected' };
 export const NOT_READY_FAILURE: ApiFailure = { status: 503, code: 'not_ready' };
@@ -51,11 +68,15 @@ export class ApiRequestError extends Error {
  *   (`FST_ERR_VALIDATION`), un cuerpo demasiado grande o un tipo de contenido que no se admite,
  *   solo se fía de un estado 4xx: `invalid_request`, o `not_found` con un 404;
  * - un error con el que PostgreSQL no se puede usar es `postgres_unavailable` (503);
+ * - un `StorageUnavailableError`, del almacenamiento de objetos, es `storage_unavailable` (503);
  * - cualquier otro es `internal`, aunque traiga su propio `statusCode`.
  */
 export function classifyError(error: unknown): ApiFailure {
   if (error instanceof ApiRequestError) {
     return error.failure;
+  }
+  if (error instanceof StorageUnavailableError) {
+    return STORAGE_UNAVAILABLE_FAILURE;
   }
   if (error instanceof Error) {
     const { code, statusCode } = error as { code?: unknown; statusCode?: unknown };
@@ -79,7 +100,11 @@ export function classifyError(error: unknown): ApiFailure {
 
 /** Si el fallo deja su línea `api_error`: los que no son de la petición, sino del servidor. */
 export function isServerFailure(failure: ApiFailure): boolean {
-  return failure.code === 'internal' || failure.code === 'postgres_unavailable';
+  return (
+    failure.code === 'internal' ||
+    failure.code === 'postgres_unavailable' ||
+    failure.code === 'storage_unavailable'
+  );
 }
 
 /** El cuerpo JSON de un error, validado con su contrato. */

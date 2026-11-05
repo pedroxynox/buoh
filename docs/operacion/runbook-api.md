@@ -31,6 +31,27 @@ El PR de la salud de los datos de F2.4 (#91) sumó `BUOH_API_LECTURA_POSTGRES_PA
 
 **Si vuelve a pasar**, con un PR que añada una variable que copia otra nueva de otro servicio, sigue el paso 2 de arriba: el agente te dice cuándo sincronizar y qué aprobar. Después, el agente comprueba lo que crea `buoh-operaciones` en su ejecución siguiente, unos 30 s después de cada minuto múltiplo de 5.
 
+### El token `api` de R2
+
+El PR de las lecturas de R2 de F2.4 (el 5a) suma el token `api`, de solo lectura sobre `buoh-captura`, con el que `buoh-api` lee el gráfico y el catálogo (ADR-0019 §8). Como el Blueprint ya existe, Render no pide sus valores: los pegas tú. Sin ellos, esas dos rutas responden `503 not_ready`, y lo demás de la API funciona igual. Hazlo el día que fusiones ese PR, desde el 2026-11-08, en este orden:
+
+1. **En Cloudflare**, crea el token como los otros: **R2 Object Storage**, **Account Details**, **Manage** junto a **API Tokens** y **Create Account API token**. Nombre `api`, permiso **Object Read only**, **Apply to specific buckets only** con `buoh-captura`, y **TTL** *Forever*. Cloudflare muestra su **Secret Access Key** una sola vez: deja la página abierta hasta terminar el paso 2.
+2. **En Render**, en `buoh-api`, abre **Environment**, añade estas tres variables y guarda con **Save only**, que no despliega:
+
+   | Variable | Valor |
+   |---|---|
+   | `BUOH_API_S3_ENDPOINT` | el endpoint de los otros tokens, `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, sin el bucket ni nada detrás: copia el valor de `BUOH_SALUD_S3_ENDPOINT`, en **Environment** de `buoh-operaciones` |
+   | `BUOH_API_S3_ACCESS_KEY_ID` | el **Access Key ID** del token `api` |
+   | `BUOH_API_S3_SECRET_ACCESS_KEY` | su **Secret Access Key** |
+
+   Nunca los pegues en el chat ni en Git. `BUOH_API_S3_BUCKET` y `BUOH_API_S3_REGION` los pone el Blueprint. El código que corre hoy no lee estas variables, así que guardarlas no cambia nada hasta el paso 3.
+3. **Fusiona el PR.** Si su comentario de listo dice que cambia `render-datos.yaml` y después fusionaste otro PR, pídele antes al agente que lo actualice (arriba, «Desplegar»). Render despliega `buoh-api` con las variables nuevas y, como el PR cambia el worker, también `buoh-ingesta` y `buoh-operaciones`.
+4. **Mira si el Blueprint dejó algo pendiente**, como en el paso 2 de «Desplegar».
+5. **Comprueba el token.** Cuando termine el despliegue, con tu sesión abierta (abajo, «Para ver una ruta de datos en el navegador»), abre `https://<dirección>/api/v1/datos/catalogo` y `https://<dirección>/api/v1/datos/grafico?hours=1`, y pásale al agente lo que ves, que no lleva ningún secreto. Con el token bien puesto, la primera trae el catálogo de Deriv y la segunda, los ticks de la última hora.
+   - `503 not_ready`: falta alguna de las tres variables, o se guardaron después del despliegue: pulsa **Manual Deploy** y después **Deploy latest commit**.
+   - `503 storage_unavailable`: R2 rechazó el token o no respondió. Revisa en Cloudflare que el token `api` tiene **Object Read only** sobre `buoh-captura`, y en Render que las dos claves son las suyas.
+   - Si el despliegue falla y en los **Logs** de `buoh-api` sale `api_config_error`, la línea nombra la variable que no vale: una vacía, o un endpoint con el bucket o una barra al final. Corrígela y guarda con **Save and deploy**. Si nombra `BUOH_API_S3_BUCKET` o `BUOH_API_S3_REGION`, no las añadas a mano: las pone el Blueprint, así que su sincronización no terminó (paso 4). Mientras tanto, Render sigue sirviendo la versión anterior.
+
 **Para ver una ruta de datos en el navegador**, como `https://<dirección>/api/v1/datos/salud`, que no lleva ningún secreto:
 
 1. Entra en `https://<dirección>/acceso` con tu usuario, tu contraseña y el código de 6 cifras.
@@ -79,6 +100,7 @@ Se rota si una credencial se filtra o cuando quieras. Nada de esto se pide por c
 
 - **La contraseña del rol `buoh_api`** (la de la base): se rota como en [ADR-0018 §12](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md). `buoh-operaciones` vuelve a ponérsela al rol en su paso 1.
 - **La contraseña de `buoh_api_lectura`** (`BUOH_API_LECTURA_POSTGRES_PASSWORD`, en `buoh-api`): igual, con los pasos de «La contraseña de un rol de ejecución» del runbook de ingesta («Rotar credenciales»). Mientras `buoh-operaciones` no le pone la nueva, solo las rutas de datos responden `503 postgres_unavailable`; lo demás de la API sigue.
+- **El token `api` de R2** (`BUOH_API_S3_ACCESS_KEY_ID` y `BUOH_API_S3_SECRET_ACCESS_KEY`, en `buoh-api`): como «Un token de R2» del runbook de ingesta («Rotar credenciales»). Crea otro igual en Cloudflare, cambia esas dos variables en `buoh-api` y guarda con **Save and deploy**. Cuando el gráfico vuelva a responder (arriba, «El token `api` de R2», paso 5), borra el viejo. Mientras tanto, solo el gráfico y el catálogo pueden responder `503 storage_unavailable`.
 - **`BUOH_API_PASSWORD_PEPPER` o `BUOH_API_TOTP_KEY`:** cámbialas en el panel de `buoh-api` (o deja que Render genere otra). Dejan **inservible** la credencial guardada, así que después haz un `restablecer` (arriba).
 - **`BUOH_API_TOKEN_KEY`:** cambiarla **cierra todas las sesiones** y anula los enlaces sin usar. La contraseña y el código siguen valiendo.
 
@@ -94,7 +116,7 @@ Las tres claves son de 256 bits y viven fuera de la base; cambiar la contraseña
 Borra la API entera, no la base ni la captura de datos:
 
 1. Quita el servicio `buoh-api` de `render-datos.yaml` y las variables `BUOH_API_POSTGRES_PASSWORD` y `BUOH_API_LECTURA_POSTGRES_PASSWORD` de `buoh-operaciones`, que las toman de `buoh-api`, y fusiona.
-2. Borra `buoh-api` en el panel de Render. Si solo lo borras del panel, Render lo recrea en la siguiente sincronización del Blueprint.
+2. Borra `buoh-api` en el panel de Render. Si solo lo borras del panel, Render lo recrea en la siguiente sincronización del Blueprint. Borra también el token `api` en Cloudflare: con el servicio, nadie lo usa.
 3. El esquema `buoh_api` y los roles `buoh_api` y `buoh_api_lectura` quedan en la base. Bórralos a mano con la credencial dueña solo si quieres; una fila nunca se borra sola (ADR-0019 §7).
 
 ## Comprobar desde fuera (lo hace el agente)
@@ -105,12 +127,14 @@ Con la dirección del servicio en lugar de `<dirección>`:
 curl -sI https://<dirección>/api/salud
 curl -s -o /dev/null -w '%{http_code}\n' https://<dirección>/api/v1/desconocida
 curl -s https://<dirección>/api/v1/datos/salud
+curl -s 'https://<dirección>/api/v1/datos/grafico?hours=1'
+curl -s https://<dirección>/api/v1/datos/catalogo
 ```
 
 - `/api/salud` responde `200` cuando la API responde y tiene sus migraciones; si le faltan, `503 not_ready`.
 - Toda respuesta lleva las cabeceras de seguridad de §9 (`Strict-Transport-Security`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `X-Frame-Options`, `X-Robots-Tag`); el HTML, su política de contenido con los hashes de sus scripts en línea; el JSON y los demás archivos de la web, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`; y el JSON, `Cache-Control: no-store` (`F2-API-001`).
 - Una ruta `/api/` que no existe responde `404 not_found` en JSON; cualquier otra ruta desconocida, el `404.html` de la web.
-- `GET /api/v1/datos/salud` sin sesión responde `401 unauthenticated`: la ruta existe y no da nada sin sesión.
+- `GET /api/v1/datos/salud`, `GET /api/v1/datos/grafico?hours=1` y `GET /api/v1/datos/catalogo` sin sesión responden `401 unauthenticated`: las rutas existen y no dan nada sin sesión.
 - La comprobación completa de §13 incluye que ninguna respuesta ni ningún registro lleva la contraseña, el secreto TOTP, los códigos, el identificador de la sesión, el token CSRF, el del enlace ni las tres claves, cada uno solo en su canal (`F2-API-001`, `F2-AUTH-001`).
 
 ### El límite por dirección
