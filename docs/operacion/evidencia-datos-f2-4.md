@@ -56,8 +56,10 @@ El PR #94 trajo el Observatorio y las insignias de modo y salud de la barra supe
 
 - la barra superior de `/`, `/auditoria/`, `/mercados/` y `/acceso/` dice «Modo: Desactivado» y «Salud: Leyendo…», el estado de la página antes de que su JavaScript lea la salud;
 - la marca «Datos ficticios» sale en `/mercados/`, que sigue con datos ficticios, y no en `/`, `/auditoria/` ni `/acceso/`;
-- en las cuatro páginas, el hash SHA-256 de cada uno de sus 3 scripts en línea está en el `script-src` de su `Content-Security-Policy`, que no lleva `'unsafe-inline'`, así que el navegador los ejecuta. La política lleva `style-src-attr 'unsafe-inline'`, que ADR-0019 §9 pide por los atributos `style` que escribe React;
+- en las cuatro páginas, el hash SHA-256 de cada uno de sus 3 scripts en línea está en el `script-src` de su `Content-Security-Policy`, y ese `script-src` no lleva `'unsafe-inline'`, así que el navegador los ejecuta;
 - `GET /api/v1/datos/salud` sin sesión responde `401 unauthenticated`, con `Cache-Control: no-store`.
+
+Un `curl -I` de `/` a las 03:24:10 trajo la política entera y el `Last-Modified` de la fila de las 02:54:54. Además de los hashes, la política lleva `style-src-attr 'unsafe-inline'`, que ADR-0019 §9 pide por los atributos `style` que escribe React.
 
 **En el navegador**, sin sesión: la página se carga y su JavaScript se ejecuta. La barra pasa a «Salud: Sin sesión», con el enlace «Iniciar sesión», y el Observatorio dice «No se pudo leer la salud. Tu sesión no es válida. Vuelve a iniciar sesión.», también con el enlace. La herramienta del navegador no registró mensajes de la consola ni errores de la página.
 
