@@ -111,7 +111,7 @@ Desde la Fase 2 (F2.3), `apps/web` se exporta en dos variantes del mismo código
   - **Menú de la sesión** en la barra superior: cerrar la sesión y cerrar las demás.
   - **Auditoría** (`/auditoria`): sus eventos son reales, los de la cuenta, que pide a la API al abrir la página (ADR-0019 §5); las órdenes siguen con el candado de Fase 4.
 
-La sección de Auditoría fue la primera con datos reales (F2.3). Desde F2.4 lo son también el Observatorio y las insignias de modo y salud de la barra superior (§10), y las demás secciones los traen con sus entregas de F2.4. Mientras tanto, `out-api` conserva en ellas la marca «Datos ficticios». Los formularios usan los campos del sistema de diseño (`b-field`, `b-input`); el QR se dibuja dentro de buoh, sin recursos de terceros; y la propia API sirve la web con su política de contenido (ADR-0019 §9).
+La sección de Auditoría fue la primera con datos reales (F2.3). Desde F2.4 lo son también el Observatorio y las insignias de modo y salud de la barra superior (§10), y las demás secciones los traen con sus entregas de F2.4. Mientras tanto, `out-api` conserva en ellas la marca «Datos ficticios». Los formularios usan los campos del sistema de diseño (`b-field`, `b-input`); el QR se dibuja dentro de buoh, sin recursos de terceros; y la propia API sirve la web con su política de contenido (ADR-0019 §9). Cada fallo de la API se lee con un texto fijo según su código, nunca con el mensaje del servidor (`apps/web/src/components/auth/api.ts`). Desde F2.4, el de `storage_unavailable`, cuando el almacenamiento de los datos no responde (ADR-0019 §8), dice «El almacenamiento de los datos no responde ahora mismo. Inténtalo de nuevo en un momento.».
 
 ## 9. Gráficos (F2.4)
 

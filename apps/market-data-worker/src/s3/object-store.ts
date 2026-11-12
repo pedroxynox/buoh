@@ -37,19 +37,44 @@ function keyExists(error: unknown): boolean {
   return statusOf(error) === 412 || isObjectLocked(error);
 }
 
+/** El motivo de una señal abortada, como error: el `TimeoutError` de `AbortSignal.timeout`. */
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error('La lectura se canceló.');
+}
+
+/**
+ * Lee el cuerpo con un tope de bytes. Si `signal` se aborta mientras llega, corta el flujo, y la
+ * lectura falla en lugar de seguir esperando.
+ */
 async function readCapped(
   body: AsyncIterable<Uint8Array>,
   maxBytes: number,
   key: string,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
+  const stream = body as AsyncIterable<Uint8Array> & { destroy?: (error?: Error) => void };
+  const cut = () => {
+    if (signal !== undefined) {
+      stream.destroy?.(abortReason(signal));
+    }
+  };
+  signal?.addEventListener('abort', cut, { once: true });
   const chunks: Uint8Array[] = [];
   let total = 0;
-  for await (const chunk of body) {
-    total += chunk.byteLength;
-    if (total > maxBytes) {
-      throw new ObjectReadError('too_large', key);
+  try {
+    if (signal?.aborted === true) {
+      cut();
+      throw abortReason(signal);
     }
-    chunks.push(chunk);
+    for await (const chunk of body) {
+      total += chunk.byteLength;
+      if (total > maxBytes) {
+        throw new ObjectReadError('too_large', key);
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    signal?.removeEventListener('abort', cut);
   }
   const bytes = new Uint8Array(total);
   let offset = 0;
@@ -102,6 +127,17 @@ export function createS3Client(
 /** Un prefijo de claves: vacío, o segmentos de minúsculas, cifras, `_` y `-`, cada uno con su `/`. */
 const KEY_PREFIX = /^(?:[a-z0-9][a-z0-9_-]*\/)*$/u;
 
+export interface S3ObjectStoreOptions {
+  /**
+   * Una señal nueva para cada lectura (`get`), como `() => AbortSignal.timeout(10_000)`: si se
+   * aborta antes de que termine, la lectura se corta, también mientras llega el cuerpo, y `get`
+   * rechaza con su motivo, el `TimeoutError` de `AbortSignal.timeout`. Los plazos del cliente
+   * (`S3Timeouts`) solo cubren cada petición hasta sus cabeceras. Sin ella, una lectura espera lo
+   * que tarde; la usa la API (ADR-0019 §8).
+   */
+  readonly readSignal?: () => AbortSignal;
+}
+
 /**
  * Adaptador S3-compatible (SeaweedFS en local; Cloudflare R2 en producción, ADR-0016). Con
  * `keyPrefix`, cada clave que recibe vive en el bucket bajo ese prefijo, como los objetos de un log
@@ -113,8 +149,14 @@ export class S3ObjectStore implements ObjectStore {
   /** El prefijo de las claves en el bucket; vacío sin prefijo. */
   readonly keyPrefix: string;
   readonly #client: S3Client;
+  readonly #readSignal: (() => AbortSignal) | undefined;
 
-  constructor(client: S3Client, bucket: string, keyPrefix = '') {
+  constructor(
+    client: S3Client,
+    bucket: string,
+    keyPrefix = '',
+    options: S3ObjectStoreOptions = {},
+  ) {
     if (!KEY_PREFIX.test(keyPrefix)) {
       throw new TypeError(
         'El prefijo de las claves son segmentos de minúsculas, cifras, _ y -, cada uno con su /.',
@@ -123,6 +165,7 @@ export class S3ObjectStore implements ObjectStore {
     this.#client = client;
     this.bucket = bucket;
     this.keyPrefix = keyPrefix;
+    this.#readSignal = options.readSignal;
   }
 
   /** El cliente de la configuración (`createS3Client`), bajo su prefijo. */
@@ -158,23 +201,44 @@ export class S3ObjectStore implements ObjectStore {
     }
   }
 
+  /**
+   * Los bytes de la clave, con `HeadObject` y `GetObject`: `ObjectReadError` si no existe o si pasa
+   * de `maxBytes`. Con `readSignal`, las dos peticiones y el cuerpo comparten la señal de la lectura,
+   * y si se aborta rechaza con su motivo.
+   */
   async get(key: string, maxBytes: number): Promise<Uint8Array> {
     const stored = this.keyPrefix + key;
+    const signal = this.#readSignal?.();
+    const options = signal === undefined ? undefined : { abortSignal: signal };
     try {
+      if (signal?.aborted === true) {
+        throw abortReason(signal);
+      }
       const head = await this.#client.send(
         new HeadObjectCommand({ Bucket: this.bucket, Key: stored }),
+        options,
       );
       if ((head.ContentLength ?? 0) > maxBytes) {
         throw new ObjectReadError('too_large', stored);
       }
       const object = await this.#client.send(
         new GetObjectCommand({ Bucket: this.bucket, Key: stored }),
+        options,
       );
       const body = object.Body as AsyncIterable<Uint8Array> | undefined;
-      return body === undefined ? new Uint8Array() : await readCapped(body, maxBytes, stored);
+      return body === undefined
+        ? new Uint8Array()
+        : await readCapped(body, maxBytes, stored, signal);
     } catch (error) {
+      if (error instanceof ObjectReadError) {
+        throw error;
+      }
       if (statusOf(error) === 404) {
         throw new ObjectReadError('not_found', stored);
+      }
+      // El SDK rechaza una petición cortada con su propio `AbortError`: cuenta el motivo de la señal.
+      if (signal?.aborted === true) {
+        throw abortReason(signal);
       }
       throw error;
     }

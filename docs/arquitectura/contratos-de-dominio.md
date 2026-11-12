@@ -655,7 +655,8 @@ ApiError {
   error:
     | { code: "invalid_request" | "not_found" | "internal" | "csrf_rejected"
               | "invalid_link" | "invalid_code" | "not_ready" | "postgres_unavailable"
-              | "unauthenticated" | "invalid_credentials" | "credential_disabled",
+              | "unauthenticated" | "invalid_credentials" | "credential_disabled"
+              | "storage_unavailable",
         request_id: UUID }
     | { code: "rate_limited", request_id: UUID, retry_after_seconds: 1..3600 }
     | { code: "password_rejected", request_id: UUID,
@@ -690,6 +691,27 @@ DataHealth {                                     # GET /api/v1/datos/salud (F2.4
     | { status: "failed", observed_at_utc: UtcTimestampMs, reason: Código, code: Código | null }
     | null                                       # sin observación; siempre null si log es null
 }
+
+DataChartQuery { hours: "1" .. "24" }            # GET /api/v1/datos/grafico?hours=<n> (F2.4)
+DataChart {
+  log: 1..999999 | null,                         # el log activo; sin él, sin ticks, huecos ni inicio
+  source: texto, symbol: texto,                  # deriv_options y R_100
+  from_utc: UtcTimestampMs, to_utc: UtcTimestampMs,   # horas enteras, de 1 a 24
+  log_started_at_utc: UtcTimestampMs | null,     # el primer evento del log, o null si está vacío
+  ticks: { offsets_ms: entero ≥ 0 [], quotes: DecimalString [] },   # un tick por instante, en orden
+  gaps: {
+    from_utc: UtcTimestampMs, to_utc: UtcTimestampMs | null,
+    cause: "connection_lost" | "capture_stopped",
+    history: "recovered" | "partial" | "unavailable" | "pending" | "not_requested",
+    reason: Código | null, recovered_ticks: entero ≥ 0 | null
+  }[]                                            # los que tocan la ventana, en orden de inicio
+}
+DataCatalog {                                    # GET /api/v1/datos/catalogo (F2.4)
+  log: 1..999999 | null,
+  catalog: { source: texto, version: entero ≥ 1, received_at_utc: UtcTimestampMs,
+             source_schema_release: texto, content_sha256: Sha256Hex,
+             entries: DerivActiveSymbolEntry [] } | null   # siempre null si log es null
+}
 Código = 1 a 64 caracteres de A-Z, a-z, 0-9, "_", "." y "-"
 
 Username = 3 a 32 caracteres de a-z, 0-9, "-" y "_"
@@ -701,11 +723,14 @@ LinkToken = 32 bytes en base64url sin relleno: 43 caracteres, con una sola escri
   - Del esqueleto (PR 2). `invalid_request`: la petición no cumple su contrato, por ejemplo con un parámetro de consulta que la ruta no admite, o el servidor HTTP la rechazó antes de llegar a una ruta. `not_found`: ninguna ruta atiende ese método y esa dirección. `internal`: un fallo del servidor, también una respuesta que no cumple su contrato.
   - De los enlaces (PR 4a). `csrf_rejected` (403): una petición que cambia algo sin el `Origin`, el `Sec-Fetch-Site` o el `Content-Type` de la propia web. `invalid_link` (400): el enlace no existe, venció, ya se usó o lo anuló otro. `invalid_code` (400): el código no corresponde al último secreto TOTP del enlace. `password_rejected` (422): la contraseña nueva no cumple la política de ADR-0019 §1. `rate_limited` (429): hay que esperar. `not_ready` (503): faltan las migraciones de la API y, en las rutas de datos (F2.4), también la credencial de lectura. `postgres_unavailable` (503): PostgreSQL no responde.
   - De las sesiones (PR 4b). `unauthenticated` (401): la petición necesita una sesión y no la trae o no vale. `invalid_credentials` (401): el nombre, la contraseña o el código no valen, sin decir cuál. `credential_disabled` (403): la credencial está deshabilitada por sus 100 fallos, y solo lo recibe quien acierta la contraseña y el código.
+  - De las lecturas de R2 (F2.4). `storage_unavailable` (503): el almacenamiento de objetos de la captura no responde o rechaza la lectura. En las rutas que leen R2, `not_ready` también dice que falta el token `api`.
 - `ApiHealth` es la respuesta de `GET /api/salud`, la ruta de salud de Render, cuando el proceso responde y tiene sus migraciones.
 - `LinkSecret` es la respuesta de `POST /api/v1/enlace/secreto`: un secreto TOTP nuevo para el enlace, una sola vez, que anula el anterior del mismo enlace (ADR-0019 §3). Su URI repite exactamente el usuario y el secreto: el esquema runtime lo comprueba, el JSON Schema del OpenAPI no.
 - `LinkUseRequest` es el cuerpo de `POST /api/v1/enlace`. La contraseña se rechaza en el contrato si no es texto Unicode bien formado, porque un sustituto suelto se convertiría en otro carácter al pasar a UTF-8; su política la decide después la API, con su motivo.
 - `SessionLoginRequest` es el cuerpo de `POST /api/v1/sesion` (PR 4b). Si el nombre, la contraseña y el código valen, la respuesta es 201 con `SessionInfo` y la cookie `__Host-Http-buoh_sesion` (ADR-0019 §2). `SessionInfo`, el cuerpo del inicio de sesión y de `GET /api/v1/sesion`, lleva solo el token CSRF, que la web manda en `X-CSRF-Token` en cada petición que cambia algo; el identificador de la sesión no sale del `Set-Cookie`. Los cierres, `DELETE /api/v1/sesion` (la actual) y `DELETE /api/v1/sesiones` (las demás), llevan el cuerpo vacío `EmptyRequest` y responden `SessionsClosedResult`. `GET /api/v1/auditoria` responde `AuditEvents`, solo con las entradas de la cuenta de la sesión, de la más nueva a la más vieja.
 - `DataHealth` es la respuesta de `GET /api/v1/datos/salud` (F2.4, [ADR-0019](adr/0019-api-cuentas-y-auditoria.md) §8), con sesión: la salud de los datos, la última observación que guardó `buoh-operaciones` en el log activo, con la hora en que la guardó (`observed_at_utc`), para que se vea su frescura. La API no ejecuta `data:health`. `log` es el número del log activo, o `null` si no hay ninguno, y entonces tampoco hay observación: el esquema runtime lo comprueba, el JSON Schema del OpenAPI no. `observation` es `null` si el log activo todavía no tiene ninguna, como justo después del corte semanal, y si la última falló, una anterior que terminó no la sustituye. `completed` lleva el `HealthReport`, con sus reglas, que puede no ser `healthy`, y las alertas que dejó `data:health` en stderr, con su evento y su motivo saneados, como las guarda `buoh-operaciones`: son la causa de un `paused` o un `failed` cuando no pudo observar el log, como `data_health_storage_unavailable`. `failed` lleva el motivo saneado por el que no se pudo observar, como `child_timeout`, `health_command_failed` o un SQLSTATE, y `code`, con `health_command_failed`, el código de la línea de error de `data:health`, como `ConfigError`, o `null`. Nunca un mensaje.
+- `DataChart` es la respuesta de `GET /api/v1/datos/grafico` (F2.4, [ADR-0019](adr/0019-api-cuentas-y-auditoria.md) §8), con sesión: el gráfico de R_100 en las últimas `hours` horas del log activo, de `from_utc` a `to_utc`, la hora de la lectura. `DataChartQuery` admite solo `hours`, de 1 a 24 escrito sin ceros delante, la ventana máxima (`DATA_CHART_MAX_HOURS`). Cada tick es su distancia en milisegundos a `from_utc` (`offsets_ms`) y su cotización en decimal canónico (`quotes`), en la misma posición: uno por instante, en orden, dentro de la ventana. Si llegó más de uno en el mismo instante, cuenta el de menor `tick_fingerprint_sha256`. `log_started_at_utc` es la hora del primer evento del log: antes, la ventana no tiene datos de ese log, como justo después del corte semanal. Un hueco es un período sin ticks que el log registra, nunca la distancia entre dos ticks, del high-watermark + 1 ms al primer tick posterior − 1 ms, o sin fin (`to_utc` `null`) mientras no llega ninguno. `connection_lost` sigue a un cierre no pedido, y `history` dice qué trajo la historia: `recovered`, con los ticks que faltaban en `recovered_ticks`, que el gráfico no dibuja; `partial` o `unavailable`, sin resolver, con el motivo de su `event_gap_unresolved` en `reason`, y `partial` con los ticks que trajo; o `pending`, sin resultado todavía. `capture_stopped` sigue a un cierre pedido, como el de un despliegue, y su `history` es `not_requested`, porque no se recupera. Van los que tocan la ventana, aunque empiecen antes, en orden de inicio. Las reglas entre campos (las horas enteras de la ventana, los ticks en orden y dentro de ella, lo que lleva cada clase de hueco y que sin log no hay datos) las comprueba el esquema runtime; el JSON Schema del OpenAPI, no.
+- `DataCatalog` es la respuesta de `GET /api/v1/datos/catalogo` (F2.4, ADR-0019 §8), con sesión: la última versión del catálogo de Deriv en el log activo (ADR-0012 §7), con su número, la hora en que llegó, la release de esquemas con que se derivó, su `content_sha256` y sus entradas, las `DerivActiveSymbolEntry` de `SourceCatalogSnapshot`, en orden de símbolo y con los nombres y valores oficiales. El número cuenta desde 1 en cada log. `catalog` es `null` si el log activo todavía no tiene ninguna versión, sin mirar la del log anterior, y siempre que `log` es `null`.
 
 ## `AuditEvent`
 

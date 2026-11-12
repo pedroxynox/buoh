@@ -513,13 +513,18 @@ test('buoh-operaciones: las variables de loadOperationsConfig, con la credencial
   assert.equal(vars.get('BUOH_DUENO_POSTGRES_SSLMODE').value, 'require');
 });
 
-test('buoh-api: las variables de la API en production, con buoh_api, la contraseña de buoh_api_lectura y las tres claves (ADR-0019 §8 y §10)', () => {
+test('buoh-api: las variables de la API en production, con buoh_api, la contraseña de buoh_api_lectura, el token api y las tres claves (ADR-0019 §8 y §10)', () => {
   const vars = variables('buoh-api');
   assert.equal(vars.size, service('buoh-api').envVars.length, 'sin claves repetidas');
   assert.deepEqual([...vars.keys()].sort(), [
     'BUOH_API_LECTURA_POSTGRES_PASSWORD',
     'BUOH_API_ORIGIN',
     'BUOH_API_PASSWORD_PEPPER',
+    'BUOH_API_S3_ACCESS_KEY_ID',
+    'BUOH_API_S3_BUCKET',
+    'BUOH_API_S3_ENDPOINT',
+    'BUOH_API_S3_REGION',
+    'BUOH_API_S3_SECRET_ACCESS_KEY',
     'BUOH_API_TOKEN_KEY',
     'BUOH_API_TOTP_KEY',
     'BUOH_DEPLOYMENT_ENVIRONMENT',
@@ -535,10 +540,16 @@ test('buoh-api: las variables de la API en production, con buoh_api, la contrase
   );
   assert.deepEqual(values, {
     BUOH_API_ORIGIN: 'https://buoh-api.onrender.com',
+    BUOH_API_S3_BUCKET: 'buoh-captura',
+    BUOH_API_S3_REGION: 'auto',
     BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
     BUOH_POSTGRES_SSLMODE: 'require',
     BUOH_POSTGRES_USER: 'buoh_api',
   });
+  // El endpoint y las claves del token api los pega el propietario (`sync: false`, ADR-0019 §8).
+  for (const part of ['ENDPOINT', 'ACCESS_KEY_ID', 'SECRET_ACCESS_KEY']) {
+    assert.equal(sourceOf(vars.get(`BUOH_API_S3_${part}`)), 'sync', part);
+  }
   for (const [key, property] of [
     ['BUOH_POSTGRES_HOST', 'host'],
     ['BUOH_POSTGRES_PORT', 'port'],

@@ -156,6 +156,7 @@ En `production`, la captura es una sucesión de logs numerados desde 1:
   | `operaciones` | Object Read & Write | `buoh-captura` | la retención y la verificación de §11 |
   | `salud` | Object Read only | `buoh-captura` | `data:health` en `buoh-operaciones` |
   | `agente` | Object Read only | `buoh-captura` | el agente (§12) |
+  | `api` | Object Read only | `buoh-captura` | `buoh-api`, desde F2.4: el gráfico y el catálogo ([ADR-0019](0019-api-cuentas-y-auditoria.md) §8) |
   | `prueba` | Object Read & Write, que vence en un día | `buoh-prueba` | el agente, solo para las comprobaciones |
 
   Ninguno es de administración: crear y borrar buckets queda para el propietario, en el panel. El prefijo de cada log evita crear un bucket por semana. (Precisión del PR 6b de §16: los tokens de producción no vencen, con el *TTL* *Forever* de Cloudflare, porque uno que venciera pararía su proceso sin aviso. Se cambian con la rotación de §12.)

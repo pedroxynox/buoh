@@ -1,3 +1,5 @@
+import { StorageUnavailableError } from './errors.js';
+
 /**
  * Una línea del registro de la API (ADR-0019 §11), también las que la CLI escribe en stderr. Solo
  * existen estos campos: ninguna cabecera, cookie, cuerpo, consulta, dirección IP ni navegador. Es
@@ -36,15 +38,21 @@ export type ApiLog = (line: ApiLogLine) => void;
 
 const ERROR_CODE = /^[A-Z0-9][A-Z0-9_]{1,63}$/u;
 const ERROR_NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/u;
+/** Un motivo saneado del worker (`failureReason`): letras, cifras, `_`, `.` y `-`. */
+const STORAGE_REASON = /^[A-Za-z0-9_.-]{1,64}$/u;
 
 /**
  * El nombre saneado de un error: su código (`FST_ERR_…`, `ECONNRESET`, o el SQLSTATE de PostgreSQL,
  * como `42501`) o el nombre de su clase, nunca su mensaje, que puede llevar datos de la petición o
- * de un servicio.
+ * de un servicio. De un `StorageUnavailableError`, el motivo saneado del almacenamiento, como
+ * `TimeoutError` o `AccessDenied`, que dice qué falló con R2.
  */
 export function errorName(error: unknown): string {
   if (!(error instanceof Error)) {
     return 'NonError';
+  }
+  if (error instanceof StorageUnavailableError && STORAGE_REASON.test(error.reason)) {
+    return error.reason;
   }
   const code: unknown = (error as { code?: unknown }).code;
   if (typeof code === 'string' && ERROR_CODE.test(code)) {

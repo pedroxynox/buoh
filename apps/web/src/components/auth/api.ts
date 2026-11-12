@@ -151,6 +151,8 @@ const FAILURE_MESSAGES: Readonly<
   not_ready: 'El servicio no está disponible ahora mismo. Inténtalo de nuevo en un momento.',
   postgres_unavailable:
     'El servicio no está disponible ahora mismo. Inténtalo de nuevo en un momento.',
+  storage_unavailable:
+    'El almacenamiento de los datos no responde ahora mismo. Inténtalo de nuevo en un momento.',
   csrf_rejected: 'Tu navegador bloqueó la petición. Recarga la página e inténtalo de nuevo.',
   invalid_request: 'Los datos no son válidos. Revísalos e inténtalo de nuevo.',
   not_found: 'Ocurrió un error inesperado. Inténtalo de nuevo.',

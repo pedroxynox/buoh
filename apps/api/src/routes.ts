@@ -1,6 +1,9 @@
 import {
   apiHealthSchema,
   auditEventsResponseSchema,
+  dataCatalogSchema,
+  dataChartQuerySchema,
+  dataChartSchema,
   dataHealthSchema,
   emptyRequestSchema,
   linkSecretRequestSchema,
@@ -10,6 +13,7 @@ import {
   sessionInfoSchema,
   sessionLoginRequestSchema,
   sessionsClosedResultSchema,
+  type DataChartQuery,
   type LinkSecretRequest,
   type LinkUseRequest,
   type SessionLoginRequest,
@@ -33,6 +37,7 @@ import {
 import type { RateLimiter } from './accounts/limits.js';
 import { PasswordHasherBusyError } from './auth/password-hash.js';
 import { buildSessionCookie, clearSessionCookie, readSessionCookie } from './auth/session-token.js';
+import type { MarketDataReader } from './data/market.js';
 import type { DataReader } from './data/reader.js';
 import { ApiRequestError, CSRF_REJECTED_FAILURE, NOT_READY_FAILURE } from './errors.js';
 import type { Readiness } from './readiness.js';
@@ -216,6 +221,35 @@ const DATOS_SALUD = {
   },
 } as const satisfies ApiRouteSpec;
 
+const R2_NOT_READY =
+  'Faltan las migraciones de la API, la credencial de lectura de los datos o el token api de R2 (not_ready), o no responden PostgreSQL (postgres_unavailable) o R2 (storage_unavailable).';
+
+const DATOS_GRAFICO = {
+  method: 'GET',
+  url: '/api/v1/datos/grafico',
+  operationId: 'getDatosGrafico',
+  summary:
+    'El gráfico de R_100 de las últimas horas del log activo: sus ticks y los huecos que marca el log, con su motivo, leídos de R2 (ADR-0019 §8).',
+  querystring: dataChartQuerySchema,
+  responses: { 200: dataChartSchema },
+  errors: {
+    400: 'La petición no cumple su contrato: las horas faltan o no son un entero de 1 a la ventana máxima (invalid_request).',
+    401: UNAUTHENTICATED,
+    503: R2_NOT_READY,
+  },
+} as const satisfies ApiRouteSpec;
+
+const DATOS_CATALOGO = {
+  method: 'GET',
+  url: '/api/v1/datos/catalogo',
+  operationId: 'getDatosCatalogo',
+  summary:
+    'La última versión del catálogo de Deriv en el log activo, con su número, su hora y sus entradas, leída de R2 (ADR-0019 §8).',
+  querystring: NO_QUERY,
+  responses: { 200: dataCatalogSchema },
+  errors: { 401: UNAUTHENTICATED, 503: R2_NOT_READY },
+} as const satisfies ApiRouteSpec;
+
 /** Las rutas de la API, en el orden en que se registran. De esta lista sale el OpenAPI. */
 export const API_ROUTE_SPECS: readonly ApiRouteSpec[] = [
   SALUD,
@@ -227,6 +261,8 @@ export const API_ROUTE_SPECS: readonly ApiRouteSpec[] = [
   SESIONES_CIERRE,
   AUDITORIA,
   DATOS_SALUD,
+  DATOS_GRAFICO,
+  DATOS_CATALOGO,
 ];
 
 /**
@@ -245,6 +281,11 @@ export interface ApiRouteDeps {
    * credencial: entonces sus rutas responden `not_ready`.
    */
   readonly data: DataReader | null;
+  /**
+   * Las lecturas de R2, con `buoh_api_lectura` y el token `api` (ADR-0019 §8), o `null` sin alguna de
+   * las dos credenciales: entonces el gráfico y el catálogo responden `not_ready`.
+   */
+  readonly market: MarketDataReader | null;
 }
 
 function requireReady(readiness: Readiness): void {
@@ -483,6 +524,31 @@ export function apiRoutes(deps: ApiRouteDeps): readonly ApiRoute[] {
           throw new ApiRequestError(NOT_READY_FAILURE);
         }
         return { status: 200, body: await deps.data.health() };
+      },
+    },
+    {
+      ...DATOS_GRAFICO,
+      handler: async (request) => {
+        requireReady(deps.readiness);
+        const session = await requireSession(request, deps);
+        await renewIfOwnerRequest(request, session, deps);
+        if (deps.market === null) {
+          throw new ApiRequestError(NOT_READY_FAILURE);
+        }
+        const { hours } = request.query as DataChartQuery;
+        return { status: 200, body: await deps.market.chart(Number(hours)) };
+      },
+    },
+    {
+      ...DATOS_CATALOGO,
+      handler: async (request) => {
+        requireReady(deps.readiness);
+        const session = await requireSession(request, deps);
+        await renewIfOwnerRequest(request, session, deps);
+        if (deps.market === null) {
+          throw new ApiRequestError(NOT_READY_FAILURE);
+        }
+        return { status: 200, body: await deps.market.catalog() };
       },
     },
   ];

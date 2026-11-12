@@ -2,7 +2,15 @@ import { z } from 'zod';
 
 import { auditEventStructuralSchema } from './audit.js';
 import { healthReportSchema } from './health.js';
-import { utcTimestampMsSchema } from './scalars.js';
+import {
+  decimalStringSchema,
+  isSortedUnique,
+  nonEmptyStringSchema,
+  sha256HexSchema,
+  symbolSchema,
+  utcTimestampMsSchema,
+} from './scalars.js';
+import { derivActiveSymbolEntrySchema } from './source-catalog.js';
 
 /**
  * Mensajes de la API de buoh (ADR-0019 §6; contratos de dominio, «Mensajes de la API»). Las rutas
@@ -27,7 +35,7 @@ import { utcTimestampMsSchema } from './scalars.js';
  * - `password_rejected`: la contraseña nueva no cumple la política, con su motivo (§1);
  * - `rate_limited`: hay que esperar, con los segundos que faltan;
  * - `not_ready`: faltan las migraciones de la API (§7) y, en las rutas de datos (F2.4), también la
- *   credencial de lectura (§8);
+ *   credencial de lectura y, en las que leen R2, el token `api` (§8);
  * - `postgres_unavailable`: PostgreSQL no responde.
  *
  * Los de las sesiones y el inicio de sesión (PR 4b):
@@ -36,6 +44,9 @@ import { utcTimestampMsSchema } from './scalars.js';
  *   cuál (§1);
  * - `credential_disabled`: la credencial está deshabilitada por sus 100 fallos; solo lo recibe quien
  *   acierta la contraseña y el código (§1).
+ *
+ * El de las lecturas de R2 de F2.4 (§8):
+ * - `storage_unavailable`: el almacenamiento de objetos de la captura (R2) no responde.
  */
 export const API_ERROR_CODES = [
   'invalid_request',
@@ -51,6 +62,7 @@ export const API_ERROR_CODES = [
   'unauthenticated',
   'invalid_credentials',
   'credential_disabled',
+  'storage_unavailable',
 ] as const;
 
 export const apiErrorCodeSchema = z.enum(API_ERROR_CODES);
@@ -87,6 +99,7 @@ const plainErrorSchema = z.strictObject({
     'unauthenticated',
     'invalid_credentials',
     'credential_disabled',
+    'storage_unavailable',
   ]),
   request_id: requestIdSchema,
 });
@@ -332,6 +345,177 @@ export const dataHealthSchema = z
   })
   .meta({ id: 'DataHealth', title: 'DataHealth' });
 
+/**
+ * La ventana más larga del gráfico, en horas (ADR-0019 §8): la fija la medición de la memoria de la
+ * API de F2.4 (`docs/operacion/evidencia-memoria-f2-4.md`).
+ */
+export const DATA_CHART_MAX_HOURS = 24;
+
+/** Las horas de una ventana, de 1 a `DATA_CHART_MAX_HOURS`, como llegan en la consulta: texto. */
+const HOURS_PATTERN = /^(?:[1-9]|1[0-9]|2[0-4])$/u;
+
+/** `GET /api/v1/datos/grafico?hours=<n>`: las últimas `n` horas, de 1 a `DATA_CHART_MAX_HOURS`. */
+export const dataChartQuerySchema = z.strictObject({
+  hours: z.string().regex(HOURS_PATTERN),
+});
+
+const HOUR_MS = 3_600_000;
+
+const chartCauses = ['connection_lost', 'capture_stopped'] as const;
+const chartHistories = ['recovered', 'partial', 'unavailable', 'pending', 'not_requested'] as const;
+
+/**
+ * Un hueco del gráfico (ADR-0019 §8; concepto de interfaz §9): un período sin ticks del flujo que el
+ * log registra, del high-watermark + 1 ms al primer tick posterior − 1 ms, o sin fin (`to_utc`
+ * `null`) si todavía no llegó ninguno.
+ * - `connection_lost`: tras un cierre no pedido. `history` dice qué trajo la historia: `recovered`,
+ *   con los ticks que faltan en `recovered_ticks`, que el gráfico no dibuja; `partial` o
+ *   `unavailable`, sin resolver, con el motivo de su `event_gap_unresolved` en `reason`; o `pending`,
+ *   todavía sin resultado.
+ * - `capture_stopped`: tras un cierre pedido, como el de un despliegue; `history` es
+ *   `not_requested`, porque no se recupera.
+ */
+const chartGapSchema = z
+  .strictObject({
+    from_utc: utcTimestampMsSchema,
+    to_utc: utcTimestampMsSchema.nullable(),
+    cause: z.enum(chartCauses),
+    history: z.enum(chartHistories),
+    reason: operationsCodeSchema.nullable(),
+    recovered_ticks: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
+  })
+  .superRefine((value, context) => {
+    const issue = (message: string, path: string) => {
+      context.addIssue({ code: 'custom', message, path: [path] });
+    };
+    if ((value.cause === 'capture_stopped') !== (value.history === 'not_requested')) {
+      issue('Una parada pedida no se recupera, y solo ella.', 'history');
+    }
+    const unresolved = value.history === 'partial' || value.history === 'unavailable';
+    if ((value.reason !== null) !== unresolved) {
+      issue('Solo un hueco sin resolver lleva su motivo.', 'reason');
+    }
+    const recovered = value.history === 'recovered' || value.history === 'partial';
+    if ((value.recovered_ticks !== null) !== recovered) {
+      issue('Solo la historia que trajo ticks los cuenta.', 'recovered_ticks');
+    }
+    if (value.to_utc === null) {
+      if (value.history !== 'pending' && value.history !== 'not_requested') {
+        issue('Solo un hueco que sigue no tiene fin.', 'to_utc');
+      }
+    } else if (value.to_utc < value.from_utc) {
+      issue('El hueco termina antes de empezar.', 'to_utc');
+    }
+  });
+
+/**
+ * La respuesta de `GET /api/v1/datos/grafico` (ADR-0019 §8): el gráfico de `symbol` en las últimas
+ * horas del log activo, de `from_utc` a `to_utc`, la hora de la lectura.
+ * - `log`: el número del log activo, o `null` si no hay ninguno; entonces no hay ticks ni huecos.
+ * - `log_started_at_utc`: la hora del primer evento del log, o `null` si está vacío: antes de ella la
+ *   ventana no tiene datos, como justo después del corte semanal.
+ * - `ticks`: un tick por instante, en orden, cada uno a `offsets_ms` milisegundos de `from_utc`, con
+ *   su cotización en decimal canónico en `quotes`, en la misma posición.
+ * - `gaps`: los huecos que tocan la ventana, aunque empiecen antes, en orden de inicio.
+ */
+export const dataChartSchema = z
+  .strictObject({
+    log: z.number().int().min(1).max(MAX_LOG_NUMBER).nullable(),
+    source: nonEmptyStringSchema,
+    symbol: symbolSchema,
+    from_utc: utcTimestampMsSchema,
+    to_utc: utcTimestampMsSchema,
+    log_started_at_utc: utcTimestampMsSchema.nullable(),
+    ticks: z.strictObject({
+      offsets_ms: z.array(
+        z
+          .number()
+          .int()
+          .min(0)
+          .max(DATA_CHART_MAX_HOURS * HOUR_MS),
+      ),
+      quotes: z.array(decimalStringSchema),
+    }),
+    gaps: z.array(chartGapSchema),
+  })
+  .superRefine((value, context) => {
+    const issue = (message: string, path: readonly (number | string)[]) => {
+      context.addIssue({ code: 'custom', message, path: [...path] });
+    };
+    const length = Date.parse(value.to_utc) - Date.parse(value.from_utc);
+    if (length <= 0 || length % HOUR_MS !== 0 || length > DATA_CHART_MAX_HOURS * HOUR_MS) {
+      issue('La ventana dura horas enteras, de 1 a la máxima.', ['to_utc']);
+    }
+    const { offsets_ms: offsets, quotes } = value.ticks;
+    if (offsets.length !== quotes.length) {
+      issue('Cada tick tiene su hora y su cotización.', ['ticks', 'quotes']);
+    }
+    if (offsets.some((offset, index) => index > 0 && offset <= (offsets[index - 1] ?? -1))) {
+      issue('Un tick por instante, en orden.', ['ticks', 'offsets_ms']);
+    }
+    if (offsets.some((offset) => offset > length)) {
+      issue('Los ticks están dentro de la ventana.', ['ticks', 'offsets_ms']);
+    }
+    if (value.log === null) {
+      if (offsets.length > 0 || value.gaps.length > 0 || value.log_started_at_utc !== null) {
+        issue('Sin log activo no hay datos.', ['log']);
+      }
+    }
+    for (const [index, gap] of value.gaps.entries()) {
+      if (gap.from_utc > value.to_utc || (gap.to_utc !== null && gap.to_utc < value.from_utc)) {
+        issue('Un hueco toca la ventana.', ['gaps', index]);
+      }
+      const previous = value.gaps[index - 1];
+      if (previous !== undefined && previous.from_utc > gap.from_utc) {
+        issue('Los huecos van en orden de inicio.', ['gaps', index]);
+      }
+    }
+  })
+  .meta({ id: 'DataChart', title: 'DataChart' });
+
+/**
+ * La respuesta de `GET /api/v1/datos/catalogo` (ADR-0019 §8): la última versión del catálogo de
+ * Deriv en el log activo (ADR-0012 §7), con su número, que cuenta desde 1 en cada log, la hora en
+ * que llegó y sus entradas, en orden de símbolo y con los nombres y valores oficiales.
+ * - `log`: el número del log activo, o `null` si no hay ninguno; entonces tampoco hay catálogo.
+ * - `catalog`: `null` si el log todavía no tiene ninguna versión, como justo después del corte
+ *   semanal, sin mirar la del log anterior.
+ */
+export const dataCatalogSchema = z
+  .strictObject({
+    log: z.number().int().min(1).max(MAX_LOG_NUMBER).nullable(),
+    catalog: z
+      .strictObject({
+        source: nonEmptyStringSchema,
+        version: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+        received_at_utc: utcTimestampMsSchema,
+        source_schema_release: nonEmptyStringSchema,
+        content_sha256: sha256HexSchema,
+        entries: z.array(derivActiveSymbolEntrySchema).min(1),
+      })
+      .nullable(),
+  })
+  .superRefine((value, context) => {
+    if (value.log === null && value.catalog !== null) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Sin log activo no hay catálogo.',
+        path: ['catalog'],
+      });
+    }
+    if (
+      value.catalog !== null &&
+      !isSortedUnique(value.catalog.entries.map((entry) => entry.underlying_symbol))
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Las entradas van en orden de símbolo, sin repetir.',
+        path: ['catalog', 'entries'],
+      });
+    }
+  })
+  .meta({ id: 'DataCatalog', title: 'DataCatalog' });
+
 export type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
 export type ApiHealth = z.infer<typeof apiHealthSchema>;
@@ -346,3 +530,7 @@ export type SessionInfo = z.infer<typeof sessionInfoSchema>;
 export type SessionsClosedResult = z.infer<typeof sessionsClosedResultSchema>;
 export type AuditEventsResponse = z.infer<typeof auditEventsResponseSchema>;
 export type DataHealth = z.infer<typeof dataHealthSchema>;
+export type DataChartQuery = z.infer<typeof dataChartQuerySchema>;
+export type DataChart = z.infer<typeof dataChartSchema>;
+export type DataChartGap = DataChart['gaps'][number];
+export type DataCatalog = z.infer<typeof dataCatalogSchema>;

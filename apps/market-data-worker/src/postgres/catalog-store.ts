@@ -5,8 +5,9 @@ import {
   type SourceCatalogSnapshot,
 } from '@buoh/contracts';
 import { utf8 } from '@buoh/domain';
-import type { Pool } from 'pg';
+import pg, { type Pool } from 'pg';
 
+import { POSTGRES_IDENTIFIER } from '../config.js';
 import type { CatalogStore, CatalogVersion } from '../deriv/ports.js';
 import { contentKey } from '../object-keys.js';
 import type { ObjectStore } from '../ports.js';
@@ -32,16 +33,27 @@ const decoder = new TextDecoder('utf-8', { fatal: true });
 export class PostgresCatalogStore implements CatalogStore {
   readonly #objects: ObjectStore;
   readonly #pool: Pool;
+  readonly #versions: string;
 
-  constructor(pool: Pool, objects: ObjectStore) {
+  /**
+   * Con `schema`, cada consulta nombra la tabla con el esquema del log, para un pool cuyas sesiones
+   * no lo tienen en el `search_path`, como el de las lecturas de la API (ADR-0019 §8). Sin él, como
+   * en `ingest`, la tabla sale del `search_path` de la sesión.
+   */
+  constructor(pool: Pool, objects: ObjectStore, options: { readonly schema?: string } = {}) {
     this.#objects = objects;
     this.#pool = pool;
+    const { schema } = options;
+    if (schema !== undefined && !POSTGRES_IDENTIFIER.test(schema)) {
+      throw new TypeError('El esquema del log no es un nombre de PostgreSQL que buoh admita.');
+    }
+    this.#versions = `${schema === undefined ? '' : `${pg.escapeIdentifier(schema)}.`}source_catalog_versions`;
   }
 
   async #last(source: string, catalogFormat: string): Promise<VersionRow | null> {
     const { rows } = await this.#pool.query<VersionRow>(
       `SELECT version, snapshot_id, content_sha256, document_sha256, document_byte_length
-         FROM source_catalog_versions
+         FROM ${this.#versions}
         WHERE source = $1 AND catalog_format = $2
         ORDER BY version DESC
         LIMIT 1`,
@@ -97,7 +109,7 @@ export class PostgresCatalogStore implements CatalogStore {
     await writeVerified(this.#objects, contentKey(digest), document, 'application/json');
     const version = (last?.version ?? 0) + 1;
     await this.#pool.query(
-      `INSERT INTO source_catalog_versions
+      `INSERT INTO ${this.#versions}
          (source, catalog_format, version, snapshot_id, content_sha256, entry_count,
           observation_id, received_at_utc, document_sha256, document_byte_length)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,

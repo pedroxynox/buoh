@@ -70,7 +70,90 @@ describe('loadApiConfig', () => {
         user: 'buoh_api',
       },
       reader: null,
+      storage: null,
     });
+  });
+
+  it('con el token api de R2, el almacenamiento de la captura; sin ninguna de sus variables, ninguno (ADR-0019 §8)', () => {
+    const storage = {
+      BUOH_API_S3_ENDPOINT: 'https://cuenta.r2.cloudflarestorage.com',
+      BUOH_API_S3_ACCESS_KEY_ID: 'clave-de-acceso',
+      BUOH_API_S3_SECRET_ACCESS_KEY: 'clave-secreta',
+      BUOH_API_S3_BUCKET: 'buoh-captura',
+      BUOH_API_S3_REGION: 'auto',
+    };
+    expect(loadApiConfig({ ...PRODUCTION_ENV, ...storage }).storage).toEqual({
+      endpoint: 'https://cuenta.r2.cloudflarestorage.com',
+      accessKeyId: 'clave-de-acceso',
+      secretAccessKey: 'clave-secreta',
+      bucket: 'buoh-captura',
+      region: 'auto',
+    });
+    // Fuera de production admite http, como el SeaweedFS local.
+    expect(
+      loadApiConfig({ ...TEST_ENV, ...storage, BUOH_API_S3_ENDPOINT: 'http://127.0.0.1:8333' })
+        .storage?.endpoint,
+    ).toBe('http://127.0.0.1:8333');
+    // El bucket y la región solos, como los deja el Blueprint antes de que el propietario pegue el
+    // token, no bastan: la API arranca sin almacenamiento.
+    expect(
+      loadApiConfig({
+        ...PRODUCTION_ENV,
+        BUOH_API_S3_BUCKET: 'buoh-captura',
+        BUOH_API_S3_REGION: 'auto',
+      }).storage,
+    ).toBeNull();
+  });
+
+  it('el token api va entero, con un endpoint que es un origen, y su bucket y su región, y nombra lo que falta sin sus valores', () => {
+    const storage = {
+      BUOH_API_S3_ENDPOINT: 'https://cuenta.r2.cloudflarestorage.com',
+      BUOH_API_S3_ACCESS_KEY_ID: 'clave-de-acceso',
+      BUOH_API_S3_SECRET_ACCESS_KEY: 'clave-secreta',
+      BUOH_API_S3_BUCKET: 'buoh-captura',
+      BUOH_API_S3_REGION: 'auto',
+    };
+    for (const name of [
+      'BUOH_API_S3_ENDPOINT',
+      'BUOH_API_S3_ACCESS_KEY_ID',
+      'BUOH_API_S3_SECRET_ACCESS_KEY',
+      'BUOH_API_S3_BUCKET',
+      'BUOH_API_S3_REGION',
+    ]) {
+      for (const value of [undefined, '']) {
+        expect(
+          rejected({ ...PRODUCTION_ENV, ...storage, [name]: value }),
+          `${name}=${String(value)}`,
+        ).toEqual([name]);
+      }
+    }
+    for (const endpoint of [
+      'http://cuenta.r2.cloudflarestorage.com',
+      'https://cuenta.r2.cloudflarestorage.com/buoh-captura',
+      'https://cuenta.r2.cloudflarestorage.com/',
+      'cuenta.r2.cloudflarestorage.com',
+    ]) {
+      expect(
+        rejected({ ...PRODUCTION_ENV, ...storage, BUOH_API_S3_ENDPOINT: endpoint }),
+        endpoint,
+      ).toEqual(['BUOH_API_S3_ENDPOINT']);
+    }
+    for (const bucket of ['Buoh-Captura', 'b', 'buoh_captura', '-buoh']) {
+      expect(
+        rejected({ ...PRODUCTION_ENV, ...storage, BUOH_API_S3_BUCKET: bucket }),
+        bucket,
+      ).toEqual(['BUOH_API_S3_BUCKET']);
+    }
+    let message = '';
+    try {
+      loadApiConfig({ ...PRODUCTION_ENV, BUOH_API_S3_SECRET_ACCESS_KEY: 'valor-secreto-r2' });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toBe(
+      'Configuración inválida o ausente: BUOH_API_S3_ACCESS_KEY_ID, BUOH_API_S3_BUCKET, BUOH_API_S3_ENDPOINT, BUOH_API_S3_REGION.',
+    );
+    expect(message).not.toContain('valor-secreto-r2');
   });
 
   it('con la contraseña de buoh_api_lectura, la conexión de lectura es la misma base como ese usuario (ADR-0019 §8)', () => {

@@ -251,3 +251,89 @@ describe('los almacenes de un log toman su prefijo de la configuración', () => 
     }
   });
 });
+
+describe('S3ObjectStore con una señal por lectura (ADR-0019 §8)', () => {
+  const KEY = `sha256/${'a'.repeat(64)}`;
+  const timeout = () => Object.assign(new Error('plazo sintético'), { name: 'TimeoutError' });
+
+  it('cada lectura pide una señal nueva, y sus dos peticiones llevan la misma', async () => {
+    const received: unknown[] = [];
+    const client = {
+      send: (command: unknown, options?: { abortSignal?: unknown }) => {
+        received.push(options?.abortSignal);
+        return Promise.resolve(
+          command instanceof HeadObjectCommand
+            ? { ContentLength: 3 }
+            : { Body: body(new Uint8Array([1, 2, 3])) },
+        );
+      },
+    };
+    const made: AbortSignal[] = [];
+    const store = new S3ObjectStore(client as never, 'b', '', {
+      readSignal: () => {
+        const { signal } = new AbortController();
+        made.push(signal);
+        return signal;
+      },
+    });
+    expect(await store.get(KEY, 10)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(await store.get(KEY, 10)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(made).toHaveLength(2);
+    expect(received).toEqual([made[0], made[0], made[1], made[1]]);
+    // Sin la opción, el cliente no recibe ninguna señal.
+    received.length = 0;
+    await new S3ObjectStore(client as never, 'b').get(KEY, 10);
+    expect(received).toEqual([undefined, undefined]);
+  });
+
+  it('si la señal se aborta mientras llega el cuerpo, corta el flujo y rechaza con su motivo', async () => {
+    const stalled = new Readable({ read: () => undefined });
+    stalled.push(new Uint8Array(10));
+    const { client, sent } = fakeClient((command) =>
+      command instanceof HeadObjectCommand ? { ContentLength: 1000 } : { Body: stalled },
+    );
+    const controller = new AbortController();
+    const store = new S3ObjectStore(client, 'b', '', { readSignal: () => controller.signal });
+    const reading = store.get(KEY, 5000);
+    // El cuerpo ya empezó a llegar, y no termina.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(sent.map((item) => item.type)).toEqual(['HeadObjectCommand', 'GetObjectCommand']);
+    controller.abort(timeout());
+    await expect(reading).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(stalled.destroyed).toBe(true);
+  });
+
+  it('una petición que el SDK corta rechaza con el motivo de la señal, y una señal ya abortada no pide nada', async () => {
+    const controller = new AbortController();
+    const cut = fakeClient(() => {
+      controller.abort(timeout());
+      throw Object.assign(new Error('Request aborted'), { name: 'AbortError' });
+    });
+    const store = new S3ObjectStore(cut.client, 'b', '', { readSignal: () => controller.signal });
+    await expect(store.get(KEY, 10)).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(cut.sent).toHaveLength(1);
+    await expect(store.get(KEY, 10)).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(cut.sent).toHaveLength(1);
+    expect(failureReason(await store.get(KEY, 10).catch((error: unknown) => error))).toBe(
+      'TimeoutError',
+    );
+  });
+
+  it('con la señal, un objeto que no existe sigue siendo not_found, y uno mayor, too_large', async () => {
+    const readSignal = () => new AbortController().signal;
+    const missing = fakeClient(() => {
+      throw notFound();
+    });
+    await expect(
+      new S3ObjectStore(missing.client, 'b', '', { readSignal }).get(KEY, 10),
+    ).rejects.toMatchObject({ name: 'ObjectReadError', reason: 'not_found' });
+    const large = fakeClient((command) =>
+      command instanceof HeadObjectCommand
+        ? { ContentLength: 3 }
+        : { Body: body(new Uint8Array(30)) },
+    );
+    await expect(
+      new S3ObjectStore(large.client, 'b', '', { readSignal }).get(KEY, 10),
+    ).rejects.toMatchObject({ name: 'ObjectReadError', reason: 'too_large' });
+  });
+});

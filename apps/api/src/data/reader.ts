@@ -4,6 +4,7 @@ import {
   listCaptureLogs,
   readLatestStoredHealth,
   selectActiveLog,
+  type LogLocation,
   type StoredHealthObservation,
 } from '@buoh/market-data-worker/lectura';
 import type { Pool } from 'pg';
@@ -59,15 +60,26 @@ function toContract(observation: StoredHealthObservation): NonNullable<DataHealt
       };
 }
 
+/**
+ * El log activo de la captura de Deriv (ADR-0018 §6), o `null`, y la hora con que se buscó. Como
+ * `findActiveLog`: lee los logs y después toma la hora. Rechaza con `LogsUnreadableError` si hay
+ * logs y el rol del pool no puede leer ninguno.
+ */
+export async function activeCaptureLog(
+  deps: DataReaderDeps,
+): Promise<{ readonly log: LogLocation | null; readonly now: number }> {
+  const logs = await listCaptureLogs(deps.pool, DERIV_SOURCE);
+  if (logs.length > 0 && logs.every((log) => !log.readable)) {
+    throw new LogsUnreadableError();
+  }
+  const now = deps.clock();
+  return { log: selectActiveLog(logs, new Date(now).toISOString()), now };
+}
+
 export function createDataReader(deps: DataReaderDeps): DataReader {
   return {
     health: async () => {
-      // Como `findActiveLog`: lee los logs y después toma la hora.
-      const logs = await listCaptureLogs(deps.pool, DERIV_SOURCE);
-      if (logs.length > 0 && logs.every((log) => !log.readable)) {
-        throw new LogsUnreadableError();
-      }
-      const log = selectActiveLog(logs, new Date(deps.clock()).toISOString());
+      const { log } = await activeCaptureLog(deps);
       if (log === null) {
         return { log: null, observation: null };
       }

@@ -108,6 +108,7 @@ export function routeDeps(overrides: Partial<ApiRouteDeps> = {}): ApiRouteDeps {
     limiter: createRateLimiter(),
     clock: () => Date.now(),
     data: null,
+    market: null,
     ...overrides,
   };
 }
