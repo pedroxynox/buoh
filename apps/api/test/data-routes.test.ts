@@ -26,7 +26,7 @@ import {
 // `GET /api/v1/datos/eventos`, con un lector y un servicio de sesiones falsos. Necesitan una sesión,
 // renuevan su inactividad solo con el token CSRF, responden `not_ready` sin la credencial de lectura
 // y validan la salida con `DataHealth` y `DataEvents`. La lectura contra PostgreSQL está en
-// integration/data.test.ts.
+// integration/data.test.ts y en integration/data-events.test.ts.
 useDeterminismGuards();
 
 const SID = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
@@ -322,7 +322,7 @@ const EVENTS: DataEvents = {
       source: 'deriv_options',
       incident_id: `sha256:${hex('a')}`,
       incident_type: 'persistence_unavailable',
-      severity: 'error',
+      severity: 'critical',
       symbol: null,
       evidence: { stage: 'raw_object_write', reason: 'ServiceUnavailable' },
     },

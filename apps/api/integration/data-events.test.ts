@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 
 import {
+  canonicalJson,
   DATA_EVENTS_LIMIT,
   dataEventsSchema,
   deriveEventId,
@@ -547,5 +548,211 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
     expectIntegrityError(
       await eventsWithRow(6, '2027-04-01T00:00:00.000Z', `sha256:${'0'.repeat(64)}`, jcs),
     );
+  });
+
+  /** Un log nuevo, legible y con un latido a la hora `at`. */
+  async function liveLog(number: number, at: string): Promise<string> {
+    const schema = await createLog(number);
+    await heartbeat(schema, at);
+    return schema;
+  }
+
+  /** `GET /api/v1/datos/eventos` un minuto después de `at`. */
+  const eventsAt = (at: string) => getEvents(ready(reader), Date.parse(at) + 60_000);
+
+  it('un log que el rol no puede leer no cuenta, como uno que se está preparando', async () => {
+    const at = '2027-06-01T00:00:00.000Z';
+    const readable = await liveLog(7, at);
+    await catalogVersion(readable, 1, at);
+    // El log 8, con una escritura, pero sin los privilegios de `buoh_lectura`.
+    const unreadable = await createLog(8, { readable: false });
+    await heartbeat(unreadable, at);
+    const response = await eventsAt(at);
+    expect(response.status).toBe(200);
+    expect(dataEventsSchema.parse(response.body)).toMatchObject({
+      logs: [7],
+      events: [{ kind: 'catalog_version', log: 7 }],
+      truncated: false,
+    });
+  });
+
+  it('una condición que no es JSON, una respuesta pedida con otro motivo, una publicación sin UUIDv7, una versión con una fecha imposible y un motivo que no es un código son internal', async () => {
+    const persistenceBody: Record<string, JsonValue> = {
+      evidence: { reason: 'con un mensaje', stage: 'raw_object_write' },
+      incident_type: 'persistence_unavailable',
+      observed_at_utc: '2027-01-01T00:00:00.000Z',
+      observed_ref: nextUuid(),
+      quality_rule_version: '2.0.0',
+      related_refs: [],
+      schema_version: '2.0.0',
+      severity: 'critical',
+      source: SOURCE,
+      symbol: null,
+    };
+    const requestedRef = nextUuid();
+    const requestedBody: Record<string, JsonValue> = {
+      evidence: { raw_payload_sha256: sha256('otra'), reason: 'schema_validation_failed' },
+      incident_type: 'invalid_source_frame',
+      observed_at_utc: '2027-01-01T00:00:00.000Z',
+      observed_ref: requestedRef,
+      quality_rule_version: '2.0.0',
+      related_refs: [],
+      schema_version: '2.0.0',
+      severity: 'error',
+      source: SOURCE,
+      symbol: null,
+    };
+    const cases: readonly {
+      readonly at: string;
+      readonly write: (schema: string) => Promise<void>;
+    }[] = [
+      {
+        at: '2027-08-01T00:00:00.000Z',
+        write: async (schema) => {
+          await ready(admin).query(
+            `INSERT INTO ${schema}.operational_conditions
+               (condition_event_id, condition_key, condition_type, action, source, symbol,
+                occurred_at_utc, condition_jcs)
+             VALUES ($1, $2, 'persistence_unavailable', 'opened', $3, NULL,
+                     '2027-01-01T00:00:00.000Z', '{"condicion":')`,
+            [
+              `sha256:${'1'.repeat(64)}`,
+              `persistence_unavailable:sha256:${'2'.repeat(64)}`,
+              SOURCE,
+            ],
+          );
+        },
+      },
+      {
+        at: '2027-10-01T00:00:00.000Z',
+        write: async (schema) => {
+          const incident = withId('incident_id', requestedBody);
+          // La columna dice otro motivo que su documento.
+          await ready(admin).query(
+            `INSERT INTO ${schema}.requested_response_incidents
+               (incident_id, incident_type, source, observed_ref, observed_at_utc, reason,
+                incident_jcs)
+             VALUES ($1, 'invalid_source_frame', $2, $3, '2027-01-01T00:00:00.000Z',
+                     'catalog_empty', $4)`,
+            [incident.incident_id, SOURCE, requestedRef, canonicalJson(incident as JsonValue)],
+          );
+        },
+      },
+      {
+        at: '2027-12-01T00:00:00.000Z',
+        write: async (schema) => {
+          const core = '{"publicacion":"sin-uuidv7"}';
+          await ready(admin).query(
+            `INSERT INTO ${schema}.datasets (dataset_id, state, source, manifest_core_jcs)
+             VALUES ($1, 'published', $2, $3)`,
+            [`sha256:${sha256(core)}`, SOURCE, core],
+          );
+          await ready(admin).query(
+            `INSERT INTO ${schema}.published_manifest_records
+               (publication_id, deployment_environment, dataset_id, schema_version,
+                manifest_document_sha256, manifest_object_uri, manifest_object_bytes_sha256,
+                published_at_utc, state)
+             VALUES ('00000000-0000-4000-8000-000000000001', 'test', $1, '1.0.0', $2,
+                     's3://buoh-local/manifests/x.json', $2, '2027-01-01T00:00:00.000Z', 'active')`,
+            [`sha256:${sha256(core)}`, sha256(core)],
+          );
+        },
+      },
+      {
+        at: '2028-02-01T00:00:00.000Z',
+        write: (schema) => catalogVersion(schema, 1, '2027-02-30T00:00:00.000Z'),
+      },
+      {
+        at: '2028-04-01T00:00:00.000Z',
+        write: async (schema) => {
+          const pool = logPool(13);
+          try {
+            await new PostgresOperationalStore(pool).append({
+              conditions: [],
+              incidents: [withId('incident_id', persistenceBody) as unknown as DataQualityIncident],
+            });
+          } finally {
+            await pool.end();
+          }
+          expect(schema).toBe(logLocation(13).schema);
+        },
+      },
+    ];
+    let number = 9;
+    for (const { at, write } of cases) {
+      await write(await liveLog(number, at));
+      const response = await eventsAt(at);
+      expect(response.status, at).toBe(500);
+      expect(response.lines, at).toContainEqual({
+        event: 'api_error',
+        request_id: '00000000-0000-4000-8000-000000000000',
+        error: 'DataEventIntegrityError',
+      });
+      expect(JSON.stringify(response), at).not.toMatch(/con un mensaje|schema_validation_failed/u);
+      number += 1;
+    }
+  });
+
+  it('el corte toma los más recientes de varios logs y de las dos tablas de incidencias', async () => {
+    const at = '2028-06-01T00:00:00.000Z';
+    const older = await liveLog(14, '2028-05-31T00:00:00.000Z');
+    const newer = await liveLog(15, at);
+    const time = (second: number) =>
+      new Date(Date.parse('2028-05-30T00:00:00.000Z') + second * 1000).toISOString();
+    const body = (second: number, requested: boolean): Record<string, JsonValue> => ({
+      evidence: requested
+        ? { raw_payload_sha256: sha256(String(second)), reason: 'source_error_response' }
+        : { reason: 'ServiceUnavailable', stage: 'raw_object_write' },
+      incident_type: requested ? 'invalid_source_frame' : 'persistence_unavailable',
+      observed_at_utc: time(second),
+      observed_ref: nextUuid(),
+      quality_rule_version: '2.0.0',
+      related_refs: [],
+      schema_version: '2.0.0',
+      severity: requested ? 'error' : 'critical',
+      source: SOURCE,
+      symbol: null,
+    });
+    // En el log 14, 150 incidencias del registro operativo en los segundos pares del 0 al 298 y 60
+    // respuestas pedidas en los impares del 1 al 119; en el 15, 10 versiones del catálogo, más
+    // nuevas que todas.
+    const pool = logPool(14);
+    try {
+      await new PostgresOperationalStore(pool).append({
+        conditions: [],
+        incidents: Array.from(
+          { length: 150 },
+          (_, index) =>
+            withId('incident_id', body(index * 2, false)) as unknown as DataQualityIncident,
+        ),
+      });
+      const store = new PostgresRequestedResponseIncidentStore(pool);
+      for (let index = 0; index < 60; index += 1) {
+        await store.append(
+          withId('incident_id', body(index * 2 + 1, true)) as unknown as DataQualityIncident,
+        );
+      }
+    } finally {
+      await pool.end();
+    }
+    for (let version = 1; version <= 10; version += 1) {
+      await catalogVersion(newer, version, time(1000 + version));
+    }
+    expect(older).toBe(logLocation(14).schema);
+    const result = dataEventsSchema.parse((await eventsAt(at)).body);
+    expect(result.logs).toEqual([15, 14]);
+    expect(result.truncated).toBe(true);
+    expect(result.events).toHaveLength(DATA_EVENTS_LIMIT);
+    const kinds = result.events.map((event) =>
+      event.kind === 'incident' ? event.incident_type : event.kind,
+    );
+    // Las 10 versiones y, de las 210 incidencias, las 190 más nuevas: quedan fuera los segundos 0
+    // a 19, 10 de cada tabla.
+    expect(kinds.filter((kind) => kind === 'catalog_version')).toHaveLength(10);
+    expect(kinds.filter((kind) => kind === 'persistence_unavailable')).toHaveLength(140);
+    expect(kinds.filter((kind) => kind === 'invalid_source_frame')).toHaveLength(50);
+    expect(result.events[0]).toMatchObject({ kind: 'catalog_version', version: 10 });
+    expect(result.events[10]).toMatchObject({ at_utc: time(298) });
+    expect(result.events.at(-1)).toMatchObject({ at_utc: time(20) });
   });
 });

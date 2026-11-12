@@ -1,8 +1,11 @@
 import {
   canonicalJson,
   dataQualityIncidentSchema,
+  derivedEventIdSchema,
   operationalConditionEventSchema,
   publishedManifestRecordSchema,
+  sha256HexSchema,
+  utcTimestampMsSchema,
   type DataQualityIncident,
   type DeploymentEnvironment,
   type JsonValue,
@@ -12,13 +15,15 @@ import {
 import pg, { type Pool } from 'pg';
 import type { z } from 'zod';
 
+import { SANITIZED } from '../operations/sanitized.js';
 import type { LogLocation } from '../successive-logs.js';
 
 // Los eventos de datos de un log para la sección Auditoría (ADR-0019 §5 y §8): las versiones del
 // catálogo, las publicaciones, las incidencias y las condiciones que guardan sus tablas append-only
 // (migraciones `0001` a `0003`). Lo escriben `ingest` y la publicación; aquí solo se lee, con el
 // esquema del log en cada consulta, para un pool cuyas sesiones no lo tienen en el `search_path`,
-// como el de la API. Cada fila se comprueba contra su contrato antes de devolverla.
+// como el de la API. Cada fila se comprueba contra su contrato antes de devolverla, y sus motivos
+// tienen que ser códigos saneados, como los escribe el worker: la Auditoría nunca muestra un mensaje.
 
 /** Una versión del catálogo, con las columnas de su fila en `source_catalog_versions`. */
 export interface StoredCatalogVersion {
@@ -68,8 +73,8 @@ export interface ReadLogDataEventsInput {
 
 /**
  * Una fila de un evento de datos que no pasa sus comprobaciones: un documento que no es JSON, que
- * no cumple su contrato o no está en JCS, o unas columnas que no son las de su documento. No repite
- * nada de su contenido.
+ * no cumple su contrato o no está en JCS, unas columnas que no son las de su documento o que no
+ * tienen sus formatos, o un motivo que no es un código saneado. No repite nada de su contenido.
  */
 export class DataEventIntegrityError extends TypeError {
   constructor() {
@@ -151,8 +156,22 @@ function check(condition: boolean): void {
   }
 }
 
-/** Las versiones del catálogo, por su número: las versiones son contiguas y llegan en orden. */
+const isCount = (value: unknown): boolean =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
+
+/**
+ * Una versión del catálogo, con sus columnas: la tabla no guarda su documento, que vive en el
+ * almacenamiento de objetos, así que se comprueban sus formatos, los del contrato.
+ */
 function catalogVersionOf(row: CatalogRow): StoredCatalogVersion {
+  check(
+    row.source.length > 0 &&
+      isCount(row.version) &&
+      derivedEventIdSchema.safeParse(row.snapshot_id).success &&
+      sha256HexSchema.safeParse(row.content_sha256).success &&
+      isCount(row.entry_count) &&
+      utcTimestampMsSchema.safeParse(row.received_at_utc).success,
+  );
   return {
     source: row.source,
     version: row.version,
@@ -184,6 +203,10 @@ function operationalIncidentOf(row: OperationalIncidentRow): StoredDataIncident 
       incident.symbol === row.symbol &&
       incident.observed_at_utc === row.observed_at_utc,
   );
+  check(
+    incident.incident_type !== 'persistence_unavailable' ||
+      SANITIZED.test(incident.evidence.reason),
+  );
   return incident as StoredDataIncident;
 }
 
@@ -195,7 +218,8 @@ function requestedIncidentOf(row: RequestedIncidentRow): StoredDataIncident {
       incident.source === row.source &&
       incident.observed_ref === row.observed_ref &&
       incident.observed_at_utc === row.observed_at_utc &&
-      incident.evidence.reason === row.reason,
+      incident.evidence.reason === row.reason &&
+      SANITIZED.test(incident.evidence.reason),
   );
   return incident as StoredDataIncident;
 }
@@ -209,7 +233,8 @@ function conditionOf(row: ConditionRow): OperationalConditionEvent {
       condition.action === row.action &&
       condition.source === row.source &&
       condition.symbol === row.symbol &&
-      condition.occurred_at_utc === row.occurred_at_utc,
+      condition.occurred_at_utc === row.occurred_at_utc &&
+      (condition.action === 'opened' || SANITIZED.test(condition.resolution_reason)),
   );
   return condition;
 }
