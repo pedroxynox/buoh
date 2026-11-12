@@ -712,6 +712,26 @@ DataCatalog {                                    # GET /api/v1/datos/catalogo (F
              source_schema_release: texto, content_sha256: Sha256Hex,
              entries: DerivActiveSymbolEntry [] } | null   # siempre null si log es null
 }
+DataEvents {                                     # GET /api/v1/datos/eventos (F2.4)
+  logs: 1..999999 [],                            # los leídos, de mayor a menor, sin repetir
+  events: (                                      # 200 como mucho, del más nuevo al más viejo
+    | { kind: "catalog_version", log, at_utc, source, version: entero ≥ 1,
+        snapshot_id: "sha256:" + Sha256Hex, content_sha256: Sha256Hex, entry_count: entero ≥ 1 }
+    | { kind: "publication", log, at_utc, source, dataset_id: DatasetId,
+        publication_id: UUIDv7, state: "active" | "superseded" }
+    | { kind: "incident", log, at_utc, source, incident_id: "sha256:" + Sha256Hex,
+        severity: Severity, symbol: texto | null,
+        incident_type: "persistence_unavailable", evidence: { stage: PersistenceStage, reason: Código } }
+    | { …, incident_type: "source_limit_exceeded",
+        evidence: { resource, unit, observed_value: entero ≥ 0, maximum_value: entero ≥ 0 } }
+    | { …, incident_type: "invalid_source_frame",
+        evidence: { reason: Código, raw_payload_sha256: Sha256Hex } }
+    | { kind: "condition", log, at_utc, source, condition_event_id: "sha256:" + Sha256Hex,
+        condition_key: ConditionKey, condition_type: ConditionType, symbol: texto | null,
+        action: "opened" | "resolved", resolution_reason: Código | null }
+  )[],
+  truncated: booleano                            # si quedaron fuera otros más viejos
+}
 Código = 1 a 64 caracteres de A-Z, a-z, 0-9, "_", "." y "-"
 
 Username = 3 a 32 caracteres de a-z, 0-9, "-" y "_"
@@ -731,6 +751,7 @@ LinkToken = 32 bytes en base64url sin relleno: 43 caracteres, con una sola escri
 - `DataHealth` es la respuesta de `GET /api/v1/datos/salud` (F2.4, [ADR-0019](adr/0019-api-cuentas-y-auditoria.md) §8), con sesión: la salud de los datos, la última observación que guardó `buoh-operaciones` en el log activo, con la hora en que la guardó (`observed_at_utc`), para que se vea su frescura. La API no ejecuta `data:health`. `log` es el número del log activo, o `null` si no hay ninguno, y entonces tampoco hay observación: el esquema runtime lo comprueba, el JSON Schema del OpenAPI no. `observation` es `null` si el log activo todavía no tiene ninguna, como justo después del corte semanal, y si la última falló, una anterior que terminó no la sustituye. `completed` lleva el `HealthReport`, con sus reglas, que puede no ser `healthy`, y las alertas que dejó `data:health` en stderr, con su evento y su motivo saneados, como las guarda `buoh-operaciones`: son la causa de un `paused` o un `failed` cuando no pudo observar el log, como `data_health_storage_unavailable`. `failed` lleva el motivo saneado por el que no se pudo observar, como `child_timeout`, `health_command_failed` o un SQLSTATE, y `code`, con `health_command_failed`, el código de la línea de error de `data:health`, como `ConfigError`, o `null`. Nunca un mensaje.
 - `DataChart` es la respuesta de `GET /api/v1/datos/grafico` (F2.4, [ADR-0019](adr/0019-api-cuentas-y-auditoria.md) §8), con sesión: el gráfico de R_100 en las últimas `hours` horas del log activo, de `from_utc` a `to_utc`, la hora de la lectura. `DataChartQuery` admite solo `hours`, de 1 a 24 escrito sin ceros delante, la ventana máxima (`DATA_CHART_MAX_HOURS`). Cada tick es su distancia en milisegundos a `from_utc` (`offsets_ms`) y su cotización en decimal canónico (`quotes`), en la misma posición: uno por instante, en orden, dentro de la ventana. Si llegó más de uno en el mismo instante, cuenta el de menor `tick_fingerprint_sha256`. `log_started_at_utc` es la hora del primer evento del log: antes, la ventana no tiene datos de ese log, como justo después del corte semanal. Un hueco es un período sin ticks que el log registra, nunca la distancia entre dos ticks, del high-watermark + 1 ms al primer tick posterior − 1 ms, o sin fin (`to_utc` `null`) mientras no llega ninguno. `connection_lost` sigue a un cierre no pedido, y `history` dice qué trajo la historia: `recovered`, con los ticks que faltaban en `recovered_ticks`, que el gráfico no dibuja; `partial` o `unavailable`, sin resolver, con el motivo de su `event_gap_unresolved` en `reason`, y `partial` con los ticks que trajo; o `pending`, sin resultado todavía. `capture_stopped` sigue a un cierre pedido, como el de un despliegue, y su `history` es `not_requested`, porque no se recupera. Van los que tocan la ventana, aunque empiecen antes, en orden de inicio. Las reglas entre campos (las horas enteras de la ventana, los ticks en orden y dentro de ella, lo que lleva cada clase de hueco y que sin log no hay datos) las comprueba el esquema runtime; el JSON Schema del OpenAPI, no.
 - `DataCatalog` es la respuesta de `GET /api/v1/datos/catalogo` (F2.4, ADR-0019 §8), con sesión: la última versión del catálogo de Deriv en el log activo (ADR-0012 §7), con su número, la hora en que llegó, la release de esquemas con que se derivó, su `content_sha256` y sus entradas, las `DerivActiveSymbolEntry` de `SourceCatalogSnapshot`, en orden de símbolo y con los nombres y valores oficiales. El número cuenta desde 1 en cada log. `catalog` es `null` si el log activo todavía no tiene ninguna versión, sin mirar la del log anterior, y siempre que `log` es `null`.
+- `DataEvents` es la respuesta de `GET /api/v1/datos/eventos` (F2.4, ADR-0019 §5 y §8), con sesión: los eventos de datos que guardan los logs que no han vencido, para la sección Auditoría. Son las versiones del catálogo, las publicaciones del entorno de la API, las incidencias del registro operativo (`persistence_unavailable` y `source_limit_exceeded`) y de las respuestas pedidas (`invalid_source_frame`), y las aperturas y resoluciones de las condiciones del registro operativo. Cada uno lleva el log donde está, su hora (`at_utc`: la de llegada del catálogo, la de la publicación, la de observación de la incidencia o la de la condición) y su fuente; cada incidencia, la evidencia de su `DataQualityIncident`, y cada condición, los campos de su `OperationalConditionEvent` salvo `cause_refs`. Son los `DATA_EVENTS_LIMIT` (200) más recientes como mucho, del más nuevo al más viejo, y `truncated` dice si quedaron fuera otros más viejos, así que solo puede ser `true` con la lista llena. `logs` son los logs leídos, de mayor a menor: cada evento es de uno de ellos. Una resolución lleva su motivo, una apertura no, y la clave de una condición empieza por su tipo. Los motivos son códigos saneados, nunca un mensaje. Las reglas entre campos las comprueba el esquema runtime; el JSON Schema del OpenAPI, no. Los eventos siguen en su log y se borran con él a los 30 días de su última escritura (ADR-0018 §7).
 
 ## `AuditEvent`
 

@@ -6,6 +6,7 @@ import { formatUtc } from '@buoh/prototype-data';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { PageHeader } from './AppShell';
+import { EventosDeDatosView, type DataEventsState } from './auditoria/EventosDeDatos';
 import { api, ApiCallError, describeFailure } from './auth/api';
 
 type State =
@@ -61,13 +62,23 @@ function eventLabel(event: AuditEvent): string {
   }
 }
 
+/** Un fallo de la API como estado de error, con su texto fijo y si falta la sesión. */
+function failureOf(caught: unknown, fallback: string) {
+  return {
+    kind: 'error',
+    message: caught instanceof ApiCallError ? describeFailure(caught.failure) : fallback,
+    unauthenticated: caught instanceof ApiCallError && caught.failure.code === 'unauthenticated',
+  } as const;
+}
+
 /**
- * Auditoría de la web servida por la API (ADR-0019 §5 y §9): pide las entradas reales de la cuenta
- * al abrir la página y las muestra, de la más nueva a la más vieja. Las órdenes llegan en Fase 4,
- * con su candado. Sin sesión, invita a iniciarla.
+ * Auditoría de la web servida por la API (ADR-0019 §5 y §9): pide al abrir la página las entradas
+ * reales de la cuenta y los eventos de datos de los logs, cada lista de la más nueva a la más vieja.
+ * Las órdenes llegan en Fase 4, con su candado. Sin sesión, invita a iniciarla.
  */
 export function AuditoriaReal() {
   const [state, setState] = useState<State>({ kind: 'loading' });
+  const [dataState, setDataState] = useState<DataEventsState>({ kind: 'loading' });
 
   useEffect(() => {
     let active = true;
@@ -77,17 +88,15 @@ export function AuditoriaReal() {
         if (active) setState({ kind: 'ready', events });
       })
       .catch((caught: unknown) => {
-        if (!active) return;
-        const unauthenticated =
-          caught instanceof ApiCallError && caught.failure.code === 'unauthenticated';
-        setState({
-          kind: 'error',
-          message:
-            caught instanceof ApiCallError
-              ? describeFailure(caught.failure)
-              : 'No se pudo cargar la auditoría.',
-          unauthenticated,
-        });
+        if (active) setState(failureOf(caught, 'No se pudo cargar la auditoría.'));
+      });
+    api
+      .dataEvents()
+      .then((data) => {
+        if (active) setDataState({ kind: 'ready', data });
+      })
+      .catch((caught: unknown) => {
+        if (active) setDataState(failureOf(caught, 'No se pudieron cargar los eventos de datos.'));
       });
     return () => {
       active = false;
@@ -99,7 +108,7 @@ export function AuditoriaReal() {
       <PageHeader
         eyebrow="Auditoría"
         title="¿Qué pasó, cuándo y quién lo hizo?"
-        summary="Un registro que solo crece: nada se edita ni se borra."
+        summary="Registros que solo crecen: nada se edita. Los eventos de la cuenta se guardan siempre, y los de datos, 30 días con su log."
       />
 
       <Card title="Eventos de la cuenta" subtitle="Registro inmutable" headingLevel={2}>
@@ -145,6 +154,8 @@ export function AuditoriaReal() {
           </div>
         )}
       </Card>
+
+      <EventosDeDatosView state={dataState} />
 
       <PhaseLock
         phase="4"

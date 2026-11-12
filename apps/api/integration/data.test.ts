@@ -114,7 +114,7 @@ async function getHealth(pool: Pool = ready(reader)) {
       sessions,
       limiter: createRateLimiter(),
       clock: () => NOW,
-      data: createDataReader({ pool, clock: () => NOW }),
+      data: createDataReader({ pool, clock: () => NOW, environment: 'test' }),
       market: null,
     }),
     rateLimit: () => 0,

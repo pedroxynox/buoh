@@ -10,6 +10,8 @@ import {
   dataCatalogSchema,
   dataChartQuerySchema,
   dataChartSchema,
+  DATA_EVENTS_LIMIT,
+  dataEventsSchema,
   dataHealthSchema,
   emptyRequestSchema,
   linkSecretRequestSchema,
@@ -708,6 +710,135 @@ describe('DataCatalog', () => {
       expect(accepts(dataCatalogSchema, { log: 2, catalog: value }), JSON.stringify(value)).toBe(
         false,
       );
+    }
+  });
+});
+
+describe('DataEvents (ADR-0019 §5 y §8)', () => {
+  const hex = (digit: string) => digit.repeat(64);
+  const base = { log: 3, source: 'deriv_options' };
+  const resolved = {
+    ...base,
+    kind: 'condition',
+    at_utc: '2026-11-09T14:00:20.511Z',
+    condition_event_id: `sha256:${hex('c')}`,
+    condition_key: `persistence_unavailable:sha256:${hex('d')}`,
+    condition_type: 'persistence_unavailable',
+    symbol: null,
+    action: 'resolved',
+    resolution_reason: 'persistence_restored',
+  };
+  const opened = {
+    ...resolved,
+    at_utc: '2026-11-09T14:00:00.124Z',
+    condition_event_id: `sha256:${hex('b')}`,
+    action: 'opened',
+    resolution_reason: null,
+  };
+  const incident = {
+    ...base,
+    kind: 'incident',
+    at_utc: '2026-11-09T14:00:00.124Z',
+    incident_id: `sha256:${hex('a')}`,
+    incident_type: 'persistence_unavailable',
+    severity: 'critical',
+    symbol: null,
+    evidence: { stage: 'raw_object_write', reason: 'ServiceUnavailable' },
+  };
+  const limit = {
+    ...incident,
+    at_utc: '2026-11-09T10:00:00.000Z',
+    incident_type: 'source_limit_exceeded',
+    symbol: 'R_100',
+    evidence: {
+      resource: 'websocket_frame',
+      unit: 'bytes',
+      observed_value: 2_000_000,
+      maximum_value: 1_048_576,
+    },
+  };
+  const response = {
+    ...incident,
+    at_utc: '2026-11-09T09:00:00.500Z',
+    incident_type: 'invalid_source_frame',
+    severity: 'error',
+    evidence: { reason: 'catalog_empty', raw_payload_sha256: hex('7') },
+  };
+  const catalog = {
+    ...base,
+    kind: 'catalog_version',
+    at_utc: '2026-11-09T00:00:06.105Z',
+    version: 1,
+    snapshot_id: `sha256:${hex('6')}`,
+    content_sha256: hex('5'),
+    entry_count: 89,
+  };
+  const publication = {
+    kind: 'publication',
+    log: 2,
+    source: 'deriv_options',
+    at_utc: '2026-11-07T00:00:00.000Z',
+    dataset_id: `sha256:${hex('4')}`,
+    publication_id: '01900000-0000-7000-8000-000000000042',
+    state: 'active',
+  };
+  const events = {
+    logs: [4, 3, 2],
+    events: [resolved, opened, incident, limit, response, catalog, publication],
+    truncated: false,
+  };
+
+  it('acepta las cuatro clases de evento, del más nuevo al más viejo, y las listas vacías', () => {
+    expect(accepts(dataEventsSchema, events)).toBe(true);
+    expect(accepts(dataEventsSchema, { logs: [], events: [], truncated: false })).toBe(true);
+    expect(accepts(dataEventsSchema, { logs: [4], events: [], truncated: false })).toBe(true);
+    const full = Array.from({ length: DATA_EVENTS_LIMIT }, () => catalog);
+    expect(accepts(dataEventsSchema, { logs: [3], events: full, truncated: true })).toBe(true);
+  });
+
+  it('rechaza el orden, los logs, el corte y las condiciones que no cumplen sus reglas', () => {
+    const full = Array.from({ length: DATA_EVENTS_LIMIT }, () => catalog);
+    for (const value of [
+      { ...events, events: [...events.events].reverse() },
+      { ...events, logs: [4, 3] },
+      { ...events, logs: [2, 3, 4] },
+      { ...events, logs: [4, 4, 3, 2] },
+      { ...events, truncated: true },
+      { logs: [3], events: [...full, catalog], truncated: true },
+      { logs: [3], events: [...full, catalog], truncated: false },
+      { ...events, events: [{ ...opened, resolution_reason: 'persistence_restored' }] },
+      { ...events, events: [{ ...resolved, resolution_reason: null }] },
+      {
+        ...events,
+        events: [{ ...opened, condition_key: `source_limit_exceeded:sha256:${hex('d')}` }],
+      },
+    ]) {
+      expect(accepts(dataEventsSchema, value), JSON.stringify(value).slice(0, 300)).toBe(false);
+    }
+  });
+
+  it('cada incidencia lleva la evidencia de su tipo, con motivos que son códigos', () => {
+    for (const value of [
+      { ...incident, incident_type: 'duplicate_exact' },
+      { ...incident, evidence: { stage: 'raw_object_write' } },
+      { ...incident, evidence: { stage: 'otra', reason: 'ServiceUnavailable' } },
+      { ...incident, evidence: { stage: 'raw_object_write', reason: 'con un mensaje' } },
+      { ...limit, evidence: { ...limit.evidence, unit: 'kilos' } },
+      { ...limit, evidence: { ...limit.evidence, observed_value: -1 } },
+      { ...response, evidence: { reason: 'catalog_empty' } },
+      { ...incident, severity: 'grave' },
+      { ...incident, symbol: '' },
+      { ...catalog, version: 0 },
+      { ...catalog, snapshot_id: hex('6') },
+      { ...publication, publication_id: '00000000-0000-4000-8000-000000000042' },
+      { ...publication, state: 'retired' },
+      { ...catalog, kind: 'otra' },
+      { ...catalog, extra: 1 },
+    ]) {
+      expect(
+        accepts(dataEventsSchema, { logs: [3, 2], events: [value], truncated: false }),
+        JSON.stringify(value),
+      ).toBe(false);
     }
   });
 });

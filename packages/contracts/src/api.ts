@@ -1,14 +1,26 @@
 import { z } from 'zod';
 
 import { auditEventStructuralSchema } from './audit.js';
+import {
+  conditionTypeSchema,
+  limitUnitSchema,
+  persistenceStageSchema,
+  severitySchema,
+  sourceResourceSchema,
+} from './enums.js';
 import { healthReportSchema } from './health.js';
 import {
+  conditionKeySchema,
+  datasetIdSchema,
   decimalStringSchema,
+  derivedEventIdSchema,
   isSortedUnique,
   nonEmptyStringSchema,
+  nonNegativeIntegerSchema,
   sha256HexSchema,
   symbolSchema,
   utcTimestampMsSchema,
+  uuidV7Schema,
 } from './scalars.js';
 import { derivActiveSymbolEntrySchema } from './source-catalog.js';
 
@@ -516,6 +528,143 @@ export const dataCatalogSchema = z
   })
   .meta({ id: 'DataCatalog', title: 'DataCatalog' });
 
+/**
+ * Cuántos eventos de datos devuelve como mucho `GET /api/v1/datos/eventos`, los más recientes
+ * (ADR-0019 §8). Producción guarda unos 110 a la semana (2026-11-12), así que caben los de unas dos.
+ */
+export const DATA_EVENTS_LIMIT = 200;
+
+const logNumberSchema = z.number().int().min(1).max(MAX_LOG_NUMBER);
+const positiveCountSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
+
+/** Lo que llevan todos los eventos de datos: el log donde está, su hora UTC y su fuente. */
+const dataEventBase = {
+  log: logNumberSchema,
+  at_utc: utcTimestampMsSchema,
+  source: nonEmptyStringSchema,
+};
+
+/** Una versión nueva del catálogo de la fuente (ADR-0012 §7), que cuenta desde 1 en cada log. */
+const catalogVersionEventSchema = z.strictObject({
+  ...dataEventBase,
+  kind: z.literal('catalog_version'),
+  version: positiveCountSchema,
+  snapshot_id: derivedEventIdSchema,
+  content_sha256: sha256HexSchema,
+  entry_count: positiveCountSchema,
+});
+
+/** La publicación de un dataset (ADR-0004 §8): su `PublishedManifestRecord`, por su identificador. */
+const publicationEventSchema = z.strictObject({
+  ...dataEventBase,
+  kind: z.literal('publication'),
+  dataset_id: datasetIdSchema,
+  publication_id: uuidV7Schema,
+  state: z.enum(['active', 'superseded']),
+});
+
+const incidentBase = {
+  ...dataEventBase,
+  kind: z.literal('incident'),
+  incident_id: derivedEventIdSchema,
+  severity: severitySchema,
+  symbol: symbolSchema.nullable(),
+};
+
+/**
+ * Una incidencia del log, con su evidencia, la de su `DataQualityIncident`: las del registro
+ * operativo, `persistence_unavailable` y `source_limit_exceeded`, y las de las respuestas pedidas,
+ * `invalid_source_frame` (ADR-0012 §6). Sus motivos son códigos saneados, nunca un mensaje.
+ */
+const incidentEventSchema = z.discriminatedUnion('incident_type', [
+  z.strictObject({
+    ...incidentBase,
+    incident_type: z.literal('persistence_unavailable'),
+    evidence: z.strictObject({ stage: persistenceStageSchema, reason: operationsCodeSchema }),
+  }),
+  z.strictObject({
+    ...incidentBase,
+    incident_type: z.literal('source_limit_exceeded'),
+    evidence: z.strictObject({
+      resource: sourceResourceSchema,
+      unit: limitUnitSchema,
+      observed_value: nonNegativeIntegerSchema,
+      maximum_value: nonNegativeIntegerSchema,
+    }),
+  }),
+  z.strictObject({
+    ...incidentBase,
+    incident_type: z.literal('invalid_source_frame'),
+    evidence: z.strictObject({ reason: operationsCodeSchema, raw_payload_sha256: sha256HexSchema }),
+  }),
+]);
+
+/**
+ * La apertura o la resolución de una condición del registro operativo (`OperationalConditionEvent`):
+ * las dos comparten `condition_key`, y solo la resolución lleva su motivo.
+ */
+const conditionEventSchema = z.strictObject({
+  ...dataEventBase,
+  kind: z.literal('condition'),
+  condition_event_id: derivedEventIdSchema,
+  condition_key: conditionKeySchema,
+  condition_type: conditionTypeSchema,
+  symbol: symbolSchema.nullable(),
+  action: z.enum(['opened', 'resolved']),
+  resolution_reason: operationsCodeSchema.nullable(),
+});
+
+const dataEventSchema = z.discriminatedUnion('kind', [
+  catalogVersionEventSchema,
+  publicationEventSchema,
+  incidentEventSchema,
+  conditionEventSchema,
+]);
+
+/**
+ * La respuesta de `GET /api/v1/datos/eventos` (ADR-0019 §5 y §8): los eventos de datos que guardan
+ * los logs que no han vencido, para la sección Auditoría. Siguen en su log y se borran con él, a los
+ * 30 días de su última escritura (ADR-0018 §7).
+ * - `logs`: los logs leídos, de mayor a menor número, sin repetir.
+ * - `events`: los `DATA_EVENTS_LIMIT` más recientes como mucho, del más nuevo al más viejo.
+ * - `truncated`: si quedaron fuera otros más viejos.
+ */
+export const dataEventsSchema = z
+  .strictObject({
+    logs: z.array(logNumberSchema),
+    events: z.array(dataEventSchema).max(DATA_EVENTS_LIMIT),
+    truncated: z.boolean(),
+  })
+  .superRefine((value, context) => {
+    const issue = (message: string, path: readonly (number | string)[]) => {
+      context.addIssue({ code: 'custom', message, path: [...path] });
+    };
+    if (value.logs.some((log, index) => index > 0 && log >= (value.logs[index - 1] ?? 0))) {
+      issue('Los logs van de mayor a menor, sin repetir.', ['logs']);
+    }
+    if (value.truncated && value.events.length < DATA_EVENTS_LIMIT) {
+      issue('Solo se corta una lista llena.', ['truncated']);
+    }
+    for (const [index, event] of value.events.entries()) {
+      if (!value.logs.includes(event.log)) {
+        issue('Cada evento es de un log leído.', ['events', index, 'log']);
+      }
+      const previous = value.events[index - 1];
+      if (previous !== undefined && previous.at_utc < event.at_utc) {
+        issue('Los eventos van del más nuevo al más viejo.', ['events', index, 'at_utc']);
+      }
+      if (event.kind === 'condition') {
+        if ((event.resolution_reason !== null) !== (event.action === 'resolved')) {
+          issue('Solo una resolución lleva su motivo.', ['events', index, 'resolution_reason']);
+        }
+        if (!event.condition_key.startsWith(`${event.condition_type}:sha256:`)) {
+          issue('La clave es la de su tipo de condición.', ['events', index, 'condition_key']);
+        }
+      }
+    }
+  })
+  .meta({ id: 'DataEvents', title: 'DataEvents' });
+
 export type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
 export type ApiHealth = z.infer<typeof apiHealthSchema>;
@@ -534,3 +683,5 @@ export type DataChartQuery = z.infer<typeof dataChartQuerySchema>;
 export type DataChart = z.infer<typeof dataChartSchema>;
 export type DataChartGap = DataChart['gaps'][number];
 export type DataCatalog = z.infer<typeof dataCatalogSchema>;
+export type DataEvents = z.infer<typeof dataEventsSchema>;
+export type DataEvent = DataEvents['events'][number];
