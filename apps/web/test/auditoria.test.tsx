@@ -122,6 +122,16 @@ describe('la respuesta de los eventos de datos, como el contrato', () => {
     }
   });
 
+  it('el mayor número de log es el del contrato', () => {
+    for (const log of [999_999, 1_000_000]) {
+      const value = { logs: [log], events: [{ ...CATALOG, log }], truncated: false };
+      expect(readDataEvents(value) !== null, String(log)).toBe(
+        dataEventsSchema.safeParse(value).success,
+      );
+    }
+    expect(readDataEvents({ logs: [999_999], events: [], truncated: false })).not.toBeNull();
+  });
+
   it('rechaza, como el esquema, cada regla entre campos', () => {
     const invalid: unknown[] = [
       // Del más viejo al más nuevo.
@@ -219,6 +229,8 @@ describe('la respuesta de los eventos de datos, como el contrato', () => {
     hex('e'),
     `persistence_unavailable:sha256:${hex('e')}`,
     '01900000-0000-7000-8000-000000000099',
+    999_999,
+    1_000_000,
   ];
 
   /** Cambia una cosa al azar: borra, añade o reemplaza un campo, o reordena una lista. */
