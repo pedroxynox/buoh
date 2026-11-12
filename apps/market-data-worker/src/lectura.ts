@@ -2,8 +2,8 @@
  * Lo que leen del sistema de datos la API (F2.4) y el motor (F2.9), por la ruta de exportación
  * `@buoh/market-data-worker/lectura` (ADR-0019 §8): la configuración y los pools, la búsqueda del
  * log activo, el log y sus puntos de control, el gráfico de una ventana, el perfil de medición, la
- * salud que guardó `buoh-operaciones`, el catálogo, el registro operativo, las publicaciones y el
- * replay, y los almacenes en memoria para las pruebas.
+ * salud que guardó `buoh-operaciones`, el catálogo, los eventos de datos de un log, el registro
+ * operativo, las publicaciones y el replay, y los almacenes en memoria para las pruebas.
  *
  * A diferencia del punto de entrada principal (`index.ts`), importarla no carga `ws`, `fflate` ni
  * `node:child_process`, que solo usan la captura, la carga de los esquemas de Deriv y
@@ -148,6 +148,17 @@ export {
 // El catálogo (ADR-0012 §7).
 export { PostgresCatalogStore } from './postgres/catalog-store.js';
 export type { CatalogStore, CatalogVersion } from './deriv/ports.js';
+
+// Los eventos de datos de un log, para la sección Auditoría (ADR-0019 §5 y §8).
+export {
+  DataEventIntegrityError,
+  readLogDataEvents,
+  type LogDataEvents,
+  type ReadLogDataEventsInput,
+  type StoredCatalogVersion,
+  type StoredDataIncident,
+  type StoredPublication,
+} from './postgres/data-events.js';
 
 // El registro operativo.
 export {

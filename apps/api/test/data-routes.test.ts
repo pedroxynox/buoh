@@ -1,4 +1,12 @@
-import { apiErrorSchema, dataHealthSchema, type DataHealth } from '@buoh/contracts';
+import {
+  apiErrorSchema,
+  DATA_EVENTS_LIMIT,
+  dataEventsSchema,
+  dataHealthSchema,
+  type DataEvent,
+  type DataEvents,
+  type DataHealth,
+} from '@buoh/contracts';
 import type { LightMyRequestResponse } from 'fastify';
 import { describe, expect, it } from 'vitest';
 
@@ -14,10 +22,11 @@ import {
   useDeterminismGuards,
 } from './support.js';
 
-// La salud de los datos (ADR-0019 §8): `GET /api/v1/datos/salud` con un lector y un servicio de
-// sesiones falsos. Necesita una sesión, renueva su inactividad solo con el token CSRF, responde
-// `not_ready` sin la credencial de lectura y valida la salida con `DataHealth`. La lectura contra
-// PostgreSQL está en integration/data.test.ts.
+// Las lecturas de solo PostgreSQL (ADR-0019 §8): `GET /api/v1/datos/salud` y
+// `GET /api/v1/datos/eventos`, con un lector y un servicio de sesiones falsos. Necesitan una sesión,
+// renuevan su inactividad solo con el token CSRF, responden `not_ready` sin la credencial de lectura
+// y validan la salida con `DataHealth` y `DataEvents`. La lectura contra PostgreSQL está en
+// integration/data.test.ts.
 useDeterminismGuards();
 
 const SID = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
@@ -76,16 +85,20 @@ function fakeSessions(calls: string[]): SessionService {
   };
 }
 
-/** Una API con el lector `health`, o sin lector (`null`), y si tiene sus migraciones. */
-function appWith(health: DataReader['health'] | null, ready = true) {
+/** Una API con el lector `reader`, o sin lector (`null`), y si tiene sus migraciones. */
+function appWithReader(reader: Partial<DataReader> | null, ready = true) {
   const calls: string[] = [];
   const data: DataReader | null =
-    health === null
+    reader === null
       ? null
       : {
           health: () => {
             calls.push('health');
-            return health();
+            return reader.health?.() ?? Promise.reject(new Error('sin salud en esta prueba'));
+          },
+          events: () => {
+            calls.push('events');
+            return reader.events?.() ?? Promise.reject(new Error('sin eventos en esta prueba'));
           },
         };
   const built = testApp(
@@ -94,6 +107,11 @@ function appWith(health: DataReader['health'] | null, ready = true) {
     ),
   );
   return { ...built, calls };
+}
+
+/** Una API con el lector de la salud `health`, o sin lector (`null`). */
+function appWith(health: DataReader['health'] | null, ready = true) {
+  return appWithReader(health === null ? null : { health }, ready);
 }
 
 function expectError(response: LightMyRequestResponse, status: number, code: string): void {
@@ -248,5 +266,205 @@ describe('GET /api/v1/datos/salud (ADR-0019 §8)', () => {
       'invalid_request',
     );
     expect(calls).not.toContain('health');
+  });
+});
+
+const EVENTS_URL = '/api/v1/datos/eventos';
+
+const hex = (digit: string) => digit.repeat(64);
+
+const CATALOG_VERSION: DataEvent = {
+  kind: 'catalog_version',
+  log: 2,
+  at_utc: '2026-11-06T21:12:31.681Z',
+  source: 'deriv_options',
+  version: 35,
+  snapshot_id: `sha256:${hex('e')}`,
+  content_sha256: hex('f'),
+  entry_count: 89,
+};
+
+/**
+ * Lo que guardó producción el 2026-11-09 en el log 3, con identificadores inventados: una escritura
+ * en R2 que falló, la condición que abrió y su resolución, y una versión del catálogo del log 2.
+ */
+const EVENTS: DataEvents = {
+  logs: [4, 3, 2],
+  events: [
+    {
+      kind: 'condition',
+      log: 3,
+      at_utc: '2026-11-09T14:00:20.511Z',
+      source: 'deriv_options',
+      condition_event_id: `sha256:${hex('c')}`,
+      condition_key: `persistence_unavailable:sha256:${hex('d')}`,
+      condition_type: 'persistence_unavailable',
+      symbol: null,
+      action: 'resolved',
+      resolution_reason: 'persistence_restored',
+    },
+    {
+      kind: 'condition',
+      log: 3,
+      at_utc: '2026-11-09T14:00:00.124Z',
+      source: 'deriv_options',
+      condition_event_id: `sha256:${hex('b')}`,
+      condition_key: `persistence_unavailable:sha256:${hex('d')}`,
+      condition_type: 'persistence_unavailable',
+      symbol: null,
+      action: 'opened',
+      resolution_reason: null,
+    },
+    {
+      kind: 'incident',
+      log: 3,
+      at_utc: '2026-11-09T14:00:00.124Z',
+      source: 'deriv_options',
+      incident_id: `sha256:${hex('a')}`,
+      incident_type: 'persistence_unavailable',
+      severity: 'error',
+      symbol: null,
+      evidence: { stage: 'raw_object_write', reason: 'ServiceUnavailable' },
+    },
+    CATALOG_VERSION,
+  ],
+  truncated: false,
+};
+
+describe('GET /api/v1/datos/eventos (ADR-0019 §5 y §8)', () => {
+  it('con sesión devuelve los eventos de datos, con las cabeceras del JSON y la cuenta en el registro', async () => {
+    const { app, calls, lines } = appWithReader({ events: () => Promise.resolve(EVENTS) });
+    const response = await app.inject({ method: 'GET', url: EVENTS_URL, headers: COOKIE });
+    expect(response.statusCode).toBe(200);
+    expect(dataEventsSchema.parse(response.json())).toEqual(EVENTS);
+    for (const [name, value] of Object.entries(EXPECTED_JSON_HEADERS)) {
+      expect(response.headers[name], name).toBe(value);
+    }
+    expect(calls).toEqual(['authenticate', 'events']);
+    expect(lines).toEqual([
+      {
+        event: 'api_request',
+        method: 'GET',
+        route: EVENTS_URL,
+        status: 200,
+        duration_ms: 5,
+        request_id: testRequestId(1),
+        account_id: ACCOUNT,
+      },
+    ]);
+  });
+
+  it('también sin ningún log, con logs sin eventos y con una lista cortada', async () => {
+    const full: DataEvents = {
+      logs: [2],
+      events: Array.from({ length: DATA_EVENTS_LIMIT }, () => CATALOG_VERSION),
+      truncated: true,
+    };
+    for (const events of [
+      { logs: [], events: [], truncated: false },
+      { logs: [4, 3], events: [], truncated: false },
+      full,
+    ] satisfies DataEvents[]) {
+      const { app } = appWithReader({ events: () => Promise.resolve(events) });
+      const response = await app.inject({ method: 'GET', url: EVENTS_URL, headers: COOKIE });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual(events);
+    }
+  });
+
+  it('renueva la inactividad solo con el token CSRF: una lectura automática no', async () => {
+    const plain = appWithReader({ events: () => Promise.resolve(EVENTS) });
+    await plain.app.inject({ method: 'GET', url: EVENTS_URL, headers: COOKIE });
+    expect(plain.calls).toEqual(['authenticate', 'events']);
+
+    const owner = appWithReader({ events: () => Promise.resolve(EVENTS) });
+    await owner.app.inject({
+      method: 'GET',
+      url: EVENTS_URL,
+      headers: { ...COOKIE, 'x-csrf-token': CSRF },
+    });
+    expect(owner.calls).toEqual(['authenticate', 'renewActivity', 'events']);
+  });
+
+  it('sin sesión responde unauthenticated sin leer nada, también sin la credencial de lectura', async () => {
+    for (const reader of [{ events: () => Promise.resolve(EVENTS) }, null]) {
+      const { app, calls } = appWithReader(reader);
+      expectError(await app.inject({ method: 'GET', url: EVENTS_URL }), 401, 'unauthenticated');
+      expect(calls).not.toContain('events');
+    }
+  });
+
+  it('sin la credencial de lectura responde not_ready, con la sesión ya comprobada, y sin las migraciones, sin mirarla', async () => {
+    const reader = appWithReader(null);
+    expectError(
+      await reader.app.inject({ method: 'GET', url: EVENTS_URL, headers: COOKIE }),
+      503,
+      'not_ready',
+    );
+    expect(reader.calls).toEqual(['authenticate']);
+
+    const migrations = appWithReader({ events: () => Promise.resolve(EVENTS) }, false);
+    expectError(
+      await migrations.app.inject({ method: 'GET', url: EVENTS_URL, headers: COOKIE }),
+      503,
+      'not_ready',
+    );
+    expect(migrations.calls).toEqual([]);
+  });
+
+  it('si PostgreSQL no responde, postgres_unavailable con el código en el registro y nunca el mensaje', async () => {
+    const failure = Object.assign(new Error('connect ECONNREFUSED dpg-sintetico:5432'), {
+      code: 'ECONNREFUSED',
+    });
+    const { app, lines } = appWithReader({ events: () => Promise.reject(failure) });
+    const response = await app.inject({ method: 'GET', url: EVENTS_URL, headers: COOKIE });
+    expectError(response, 503, 'postgres_unavailable');
+    expect(lines).toContainEqual({
+      event: 'api_error',
+      request_id: testRequestId(1),
+      error: 'ECONNREFUSED',
+    });
+    expect(JSON.stringify(lines)).not.toContain('dpg-sintetico');
+    expect(response.body).not.toContain('dpg-sintetico');
+  });
+
+  it('una fila que no pasa sus comprobaciones, o una salida que no cumple DataEvents, es internal', async () => {
+    class DataEventIntegrityError extends TypeError {
+      override readonly name = 'DataEventIntegrityError';
+    }
+    const stored = appWithReader({
+      events: () => Promise.reject(new DataEventIntegrityError('fila con datos')),
+    });
+    const response = await stored.app.inject({ method: 'GET', url: EVENTS_URL, headers: COOKIE });
+    expectError(response, 500, 'internal');
+    expect(stored.lines).toContainEqual({
+      event: 'api_error',
+      request_id: testRequestId(1),
+      error: 'DataEventIntegrityError',
+    });
+    expect(response.body).not.toContain('fila con datos');
+
+    // Del más viejo al más nuevo, o de un log que no se leyó, no cumple el contrato.
+    for (const invalid of [
+      { ...EVENTS, events: [...EVENTS.events].reverse() },
+      { ...EVENTS, logs: [4, 3] },
+    ]) {
+      const app = appWithReader({ events: () => Promise.resolve(invalid) });
+      expectError(
+        await app.app.inject({ method: 'GET', url: EVENTS_URL, headers: COOKIE }),
+        500,
+        'internal',
+      );
+    }
+  });
+
+  it('no admite parámetros de consulta', async () => {
+    const { app, calls } = appWithReader({ events: () => Promise.resolve(EVENTS) });
+    expectError(
+      await app.inject({ method: 'GET', url: `${EVENTS_URL}?limit=1`, headers: COOKIE }),
+      400,
+      'invalid_request',
+    );
+    expect(calls).not.toContain('events');
   });
 });

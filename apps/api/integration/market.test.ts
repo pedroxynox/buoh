@@ -156,7 +156,7 @@ function apiWith(client = s3) {
       sessions,
       limiter: createRateLimiter(),
       clock: () => NOW,
-      data: createDataReader({ pool, clock: () => NOW }),
+      data: createDataReader({ pool, clock: () => NOW, environment: 'test' }),
       market: createMarketDataReader({
         pool,
         objects: (log) => new S3ObjectStore(client, worker.s3.bucket, log.prefix),
