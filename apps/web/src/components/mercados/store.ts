@@ -17,8 +17,8 @@ export type ChartHours = (typeof CHART_HOURS)[number];
 export const DEFAULT_HOURS: ChartHours = 1;
 
 /**
- * Cada cuánto se vuelve a leer el gráfico, según la ventana: la respuesta de 1 hora pesa unos 28 KB,
- * y la de 24, unos 0,8 MB (ADR-0019 §8).
+ * Cada cuánto se vuelve a leer el gráfico, según la ventana: la respuesta de 1 hora pesa unos 32 KB,
+ * y la de 24, unos 0,8 MB, sin comprimir (evidencia de F2.4).
  */
 export const CHART_REFRESH_MS: Readonly<Record<ChartHours, number>> = {
   1: 60_000,
@@ -77,11 +77,13 @@ function failureOf(caught: unknown): ApiFailure {
 }
 
 /**
- * El estado y sus suscriptores. Al llegar el primero lee el gráfico y el catálogo, y después vuelve a
- * leer el gráfico `CHART_REFRESH_MS` después de terminar cada lectura, y al volver a la pestaña; con
- * ella oculta, o sin suscriptores, no lee. El catálogo se vuelve a leer con el gráfico cuando pasaron
- * `CATALOG_REFRESH_MS` o falló. Un fallo después de una lectura buena la conserva y lo anota, salvo
- * sin sesión, que la quita. Una respuesta de una ventana que ya no está elegida no se muestra.
+ * El estado y sus suscriptores. Al llegar el primero, la ventana vuelve a la de abrir la página, y
+ * lee el gráfico y el catálogo; después vuelve a leer el gráfico `CHART_REFRESH_MS` después de
+ * terminar cada lectura, y al volver a la pestaña; con ella oculta, o sin suscriptores, no lee. El
+ * catálogo se vuelve a leer con el gráfico cuando pasaron `CATALOG_REFRESH_MS`, cuando falló o cuando
+ * el gráfico llega de otro log, como tras el corte semanal. Un fallo después de una lectura buena la
+ * conserva y lo anota, salvo sin sesión, que la quita, también la del catálogo. Una respuesta de una
+ * ventana que ya no está elegida no se muestra.
  */
 export function createMercadosStore(deps: MercadosStoreDeps): MercadosStore {
   let state: MercadosState = { catalog: LOADING, chart: LOADING, hours: DEFAULT_HOURS };
@@ -162,10 +164,21 @@ export function createMercadosStore(deps: MercadosStoreDeps): MercadosStore {
           ...state,
           chart: { checkedAtMs: now, data, kind: 'ready', receivedAtMs: now, refreshFailure: null },
         });
+        // El catálogo es el del log activo: si el gráfico ya es de otro log, se vuelve a leer.
+        const { catalog } = state;
+        if (!catalogReading && catalog.kind === 'ready' && catalog.data.log !== data.log) {
+          void refreshCatalog();
+        }
       }
     } catch (caught) {
       if (reading === id) {
-        publish({ ...state, chart: afterFailure(state.chart, failureOf(caught)) });
+        const failure = failureOf(caught);
+        publish({
+          ...state,
+          chart: afterFailure(state.chart, failure),
+          // Sin sesión no se muestra nada, tampoco el catálogo que llegó con ella.
+          catalog: failure.code === 'unauthenticated' ? { failure, kind: 'failed' } : state.catalog,
+        });
       }
     } finally {
       if (reading === id) {
@@ -186,6 +199,11 @@ export function createMercadosStore(deps: MercadosStoreDeps): MercadosStore {
     subscribe(listener) {
       listeners.add(listener);
       if (listeners.size === 1) {
+        // Al volver a la página sin recargar, se abre otra vez con la última hora.
+        if (state.hours !== DEFAULT_HOURS) {
+          reading = 0;
+          state = { ...state, chart: LOADING, hours: DEFAULT_HOURS };
+        }
         stopWatching = deps.watchVisibility(onVisible);
         if (deps.visible()) {
           void refresh();

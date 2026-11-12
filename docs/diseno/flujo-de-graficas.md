@@ -165,7 +165,7 @@ No hay. Los gráficos no responden a pasar el ratón ni a tocar, y no tienen ven
 | SVG propios, sin bibliotecas de gráficos | concepto §6, ADR-0008 §4 | Se cumple: `apps/web` no depende de ninguna. |
 | Sin azar ni reloj real | ADR-0008 §2 | Se cumple por construcción: las series son fórmulas fijas del índice. Ninguna prueba prohíbe `Math.random` o `Date.now` en `apps/web` ni en `prototype-data`; solo se comprueba que `priceSeries()` se repite. |
 | Contraste comprobado por pruebas | guía §10, concepto §9 | Se cumple: las etiquetas usan colores con contraste probado, la línea y el hueco miden 3:1 o más, y la nota del hueco 4,5:1. La rejilla es decorativa y no llega a 3:1. |
-| Alternativa en texto o en tabla, calculada de los datos | concepto §9 | Se cumple en los dos gráficos, con texto, y en los de Mercados de `out-api`: texto para los ticks y una tabla para las velas. |
+| Alternativa en texto o en tabla, calculada de los datos | concepto §9 | Se cumple en los dos gráficos, con texto. En los de Mercados de `out-api`, en parte: texto para los ticks y una tabla para las velas, pero el texto todavía no cuenta los ticks que faltan en cada hueco (concepto §11, «Ticks»). |
 | Una sola unidad para la peor caída | concepto §9 | Se cumple: «−3,6 %», en % del capital inicial, en la nota, en la alternativa y en la tarjeta de contexto. |
 | El eje horizontal es el tiempo UTC | concepto §9 | Se cumple con los ticks ficticios, que llegan cada 2 s exactos y van por su índice (§10), y con los reales de Mercados de `out-api`, cada uno en su hora (`timeScaleFor`). |
 | Velas con su intervalo, su dirección y sus huecos | concepto §9 | Se cumple en Mercados de `out-api` (`candlesOf` y `CandleChart`). El escritorio no tiene velas. |

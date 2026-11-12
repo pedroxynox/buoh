@@ -17,6 +17,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { api, type ApiFailure } from '../src/components/auth/api';
+import { CandleChart } from '../src/components/mercados/MarketCharts';
 import { MercadosView, type ChartKind } from '../src/components/MercadosReal';
 import {
   candleMinutes,
@@ -581,6 +582,47 @@ describe('las velas (concepto de interfaz §9)', () => {
     });
     expect(falling).toEqual([true, false, false]);
   });
+
+  it('dibuja llena la que baja, hueca la que sube, con borde discontinuo y del color del hueco la que lo toca, y la banda del hueco', () => {
+    const tick = (seconds: number, quote: string): ChartTick => ({
+      quote,
+      timeMs: FROM_MS + seconds * 1000,
+      value: Number(quote),
+    });
+    // Una vela que baja sin huecos y una que sube con una parada a mitad de su minuto.
+    const local = [tick(0, '10.5'), tick(2, '10.4'), tick(60, '10.5'), tick(62, '10.6')];
+    const gap: ChartGapRange = {
+      cause: 'capture_stopped',
+      fromMs: FROM_MS + 62_001,
+      history: 'not_requested',
+      reason: null,
+      recoveredTicks: null,
+      toMs: FROM_MS + 119_999,
+    };
+    const html = renderToStaticMarkup(
+      <CandleChart
+        title="Precio"
+        fromMs={FROM_MS}
+        toMs={TO_MS}
+        ticks={local}
+        candles={candlesOf(local, [gap], 1)}
+        gaps={[gap]}
+        minutes={1}
+      />,
+    );
+    const rects = [...html.matchAll(/<rect [^>]*>/gu)].map((match) => match[0]);
+    const bodies = rects.filter((rect) => /fill="(?:var\(--b-chart-line\)|none)"/u.test(rect));
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toContain('fill="var(--b-chart-line)"');
+    expect(bodies[0]).toContain('stroke="var(--b-chart-line)"');
+    expect(bodies[0]).not.toContain('stroke-dasharray');
+    expect(bodies[1]).toContain('fill="none"');
+    expect(bodies[1]).toContain('stroke="var(--b-chart-gap)"');
+    expect(bodies[1]).toContain('stroke-dasharray="3 2"');
+    const bands = rects.filter((rect) => rect.includes('stroke-dasharray="4 4"'));
+    expect(bands).toHaveLength(1);
+    expect(bands[0]).toContain('stroke="var(--b-chart-gap)"');
+  });
 });
 
 const RECEIVED_MS = Date.parse('2026-11-08T12:00:03.000Z');
@@ -893,6 +935,51 @@ describe('el almacén de Mercados', () => {
       failure: { code: 'unauthenticated' },
       kind: 'failed',
     });
+  });
+
+  it('sin sesión tampoco muestra el catálogo que llegó con ella', async () => {
+    const fake = fakeStore();
+    fake.store.subscribe(() => undefined);
+    fake.charts[0]?.settle(CHART);
+    fake.catalogs[0]?.(CATALOG);
+    await flush();
+    const { ApiCallError } = await import('../src/components/auth/api');
+    fake.elapse(CHART_REFRESH_MS[1]);
+    fake.charts[1]?.settle(new ApiCallError({ code: 'unauthenticated' }));
+    await flush();
+    expect(fake.store.snapshot().catalog).toEqual({
+      failure: { code: 'unauthenticated' },
+      kind: 'failed',
+    });
+  });
+
+  it('si el gráfico llega de otro log, como tras el corte semanal, vuelve a leer el catálogo', async () => {
+    const fake = fakeStore();
+    fake.store.subscribe(() => undefined);
+    fake.charts[0]?.settle(CHART);
+    fake.catalogs[0]?.(CATALOG);
+    await flush();
+    fake.elapse(CHART_REFRESH_MS[1]);
+    fake.charts[1]?.settle(CHART);
+    await flush();
+    expect(fake.catalogs).toHaveLength(1);
+    const next = CHART.log === null ? 1 : CHART.log + 1;
+    fake.elapse(CHART_REFRESH_MS[1]);
+    fake.charts[2]?.settle({ ...CHART, log: next });
+    await flush();
+    expect(fake.catalogs).toHaveLength(2);
+  });
+
+  it('al volver a la página sin recargar, se abre otra vez con la última hora', async () => {
+    const fake = fakeStore();
+    const stop = fake.store.subscribe(() => undefined);
+    fake.store.setHours(24);
+    fake.charts.at(-1)?.settle(CHART);
+    await flush();
+    stop();
+    fake.store.subscribe(() => undefined);
+    expect(fake.store.snapshot()).toMatchObject({ chart: LOADING, hours: 1 });
+    expect(fake.charts.at(-1)?.hours).toBe(1);
   });
 });
 
