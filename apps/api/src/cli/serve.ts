@@ -104,7 +104,10 @@ if (config !== undefined) {
   // su contraseña, sus rutas responden not_ready, y lo demás de la API no cambia.
   const readerPool = config.reader === null ? null : createReaderPool(config.reader);
   readerPool?.on('error', () => undefined);
-  const data = readerPool === null ? null : createDataReader({ pool: readerPool, clock });
+  const data =
+    readerPool === null
+      ? null
+      : createDataReader({ pool: readerPool, clock, environment: config.environment });
   // Las de R2, además con el token `api`: sin él, el gráfico y el catálogo responden not_ready.
   const storage = config.storage;
   const s3 =

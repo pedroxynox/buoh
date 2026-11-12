@@ -14,6 +14,7 @@ import type {
   AuditEventsResponse,
   DataCatalog,
   DataChart,
+  DataEvents,
   DataHealth,
   LinkSecret,
   LinkUse,
@@ -22,6 +23,7 @@ import type {
   SessionLoginRequest,
   SessionsClosedResult,
 } from '@buoh/contracts';
+import { readDataEvents } from '../auditoria/respuesta';
 import { readDataCatalog, readDataChart } from '../mercados/respuesta';
 import { readDataHealth } from '../salud/respuesta';
 
@@ -144,6 +146,17 @@ export const api = {
       throw new ApiCallError({ code: 'unexpected' });
     }
     return chart;
+  },
+  /**
+   * Los eventos de datos de los logs que no han vencido (ADR-0019 §5 y §8), para la Auditoría, sin el
+   * token CSRF, como la salud. Una respuesta sin la forma de `DataEvents` es `unexpected`.
+   */
+  dataEvents: async (): Promise<DataEvents> => {
+    const events = readDataEvents(await request<unknown>('GET', '/api/v1/datos/eventos'));
+    if (events === null) {
+      throw new ApiCallError({ code: 'unexpected' });
+    }
+    return events;
   },
   /** El catálogo de Deriv del log activo (ADR-0019 §8), sin el token CSRF, como la salud. */
   dataCatalog: async (): Promise<DataCatalog> => {

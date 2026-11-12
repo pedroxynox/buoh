@@ -109,7 +109,7 @@ Desde la Fase 2 (F2.3), `apps/web` se exporta en dos variantes del mismo código
   - **Inicio de sesión** (`/acceso`): usuario, contraseña y un código de 6 cifras en un solo formulario, con los atributos que esperan los gestores de contraseñas. Ante cualquier dato incorrecto, el mismo mensaje, sin decir cuál falló.
   - **Enlace de alta** (`/enlace`): lee el token del fragmento de la dirección, muestra el QR del secreto y su texto, y pide la contraseña nueva y un código para terminar el alta o el restablecimiento. buoh nunca envía enlaces para entrar.
   - **Menú de la sesión** en la barra superior: cerrar la sesión y cerrar las demás.
-  - **Auditoría** (`/auditoria`): sus eventos son reales, los de la cuenta, que pide a la API al abrir la página (ADR-0019 §5); las órdenes siguen con el candado de Fase 4.
+  - **Auditoría** (`/auditoria`): sus eventos son reales, los de la cuenta, que pide a la API al abrir la página (ADR-0019 §5), y desde F2.4 también los de datos (§12); las órdenes siguen con el candado de Fase 4.
 
 La sección de Auditoría fue la primera con datos reales (F2.3). Desde F2.4 lo son también el Observatorio y las insignias de modo y salud de la barra superior (§10), y las demás secciones los traen con sus entregas de F2.4. Mientras tanto, `out-api` conserva en ellas la marca «Datos ficticios». Los formularios usan los campos del sistema de diseño (`b-field`, `b-input`); el QR se dibuja dentro de buoh, sin recursos de terceros; y la propia API sirve la web con su política de contenido (ADR-0019 §9). Cada fallo de la API se lee con un texto fijo según su código, nunca con el mensaje del servidor (`apps/web/src/components/auth/api.ts`). Desde F2.4, el de `storage_unavailable`, cuando el almacenamiento de los datos no responde (ADR-0019 §8), dice «El almacenamiento de los datos no responde ahora mismo. Inténtalo de nuevo en un momento.».
 
@@ -184,3 +184,26 @@ En `apps/web/out-api`, Mercados muestra el gráfico de R_100 y el catálogo de D
 - **Estados (§5).** Cargando: un esqueleto quieto. Vacío: sin log activo, o sin ningún tick en la ventana, cuando se lee la alternativa con los huecos. Error: qué falló y, sin sesión, el enlace para iniciarla; si falla una actualización después de una buena, lo dice y conserva la anterior, con su hora. Degradado: la insignia de calidad cuenta los huecos sin recuperar.
 - **Lo que todavía no existe.** Las demás fuentes: en la Fase 2 solo se captura R_100 de Deriv, y la página lo dice, sin las tarjetas de fuentes ficticias del escritorio.
 - **Pruebas.** `apps/web/test/mercados.test.tsx` contrasta la comprobación de las dos respuestas con los esquemas de `@buoh/contracts`, también en miles de respuestas cambiadas al azar, y prueba la línea, las bandas, las velas, sus alternativas, la vista en cada estado, el almacén con su refresco y las dos lecturas sin el token CSRF. `apps/web/test/out-api.test.ts` comprueba la exportación.
+
+## 12. Auditoría con los eventos de datos (F2.4)
+
+En `apps/web/out-api`, la Auditoría muestra, debajo de los eventos de la cuenta, los eventos de datos de producción (`F2-AUDIT-001` y `F2-UI-001` del [plan de Fase 2](../plan/fase-2-laboratorio-y-bot-shadow.md)). `apps/web/out`, el escritorio, no cambia: sigue con los datos ficticios y sin llamar a la API.
+
+- **De dónde salen.** De `GET /api/v1/datos/eventos` (`DataEvents`, [ADR-0019](../arquitectura/adr/0019-api-cuentas-y-auditoria.md) §5 y §8): los de los logs que no han vencido, los 200 más recientes, del más nuevo al más viejo. Como la salud (§10), la lectura va sin el token CSRF y se comprueba en el navegador con las reglas del contrato antes de dibujarse. Se pide al abrir la página, sin refresco, como los eventos de la cuenta.
+- **Qué muestra.** Una tabla con la hora UTC, el log, el evento en una frase y su detalle, sin controles para cambiar nada:
+
+  | En la respuesta | Evento | Detalle |
+  |---|---|---|
+  | `catalog_version` | «Versión *n* del catálogo» | cuántos instrumentos tiene y el principio de su `content_sha256` |
+  | `publication` | «Dataset publicado» | el principio de su `dataset_id` y si está activo o sustituido |
+  | `incident` con `persistence_unavailable` | «Persistencia no disponible», con su gravedad | qué no se pudo hacer, según la etapa, y el código del fallo, como `ServiceUnavailable` |
+  | `incident` con `source_limit_exceeded` | «Límite de fuente superado», con su gravedad | el recurso, el valor que llegó y el máximo, con su unidad |
+  | `incident` con `invalid_source_frame` | «Respuesta de Deriv no válida», con su gravedad | su motivo, como «El catálogo llegó vacío» |
+  | `condition` con `opened` | «Condición abierta», con el nombre de la causa de la salud (§10) | que mientras siga abierta, la salud no es «Saludable» |
+  | `condition` con `resolved` | «Condición resuelta», con el mismo nombre | su motivo, como «La escritura volvió a confirmarse» |
+
+  Un motivo que la web no conoce se muestra con su código. El símbolo, si el evento lo tiene, va al final del detalle.
+- **Metadatos y calidad.** Es un registro, no una serie, así que los metadatos de §1 se leen de cada fila: la hora UTC de cada evento, su log y su símbolo, si lo tiene. La fuente es la captura de Deriv, la única de la Fase 2, como dice el subtítulo de la tarjeta. No hay intervalo, y la frescura es la de la lectura, que se hace al abrir la página. La calidad son los propios eventos: no hay estado degradado de la lista, y la salud de los datos sigue en la barra superior (§10).
+- **Cuánto se guardan.** Debajo de la tabla, la vista dice que cada evento sigue en el log de su semana y se borra con él a los 30 días de su última escritura, qué logs se leyeron y, si la lista está cortada, que se muestran los 200 más recientes. La cabecera de la página lo resume: los eventos de la cuenta se guardan siempre, y los de datos, 30 días con su log.
+- **Estados (§5).** Cargando: «Cargando los eventos de datos…». Vacío: sin ningún log de la captura, o con logs sin eventos. Error: el texto fijo de su código y, sin sesión, el enlace para iniciarla. Cada lista de la página carga y falla por su cuenta.
+- **Pruebas.** `apps/web/test/auditoria.test.tsx` contrasta la comprobación de la respuesta con el esquema de `@buoh/contracts`, también en miles de respuestas cambiadas al azar, y prueba los textos, la vista en cada estado y la lectura sin el token CSRF. `apps/web/test/out-api.test.ts` comprueba que la exportación pide las dos listas.

@@ -115,6 +115,7 @@ describe('buildOpenApiDocument', () => {
     ]);
     expect(statuses('/api/v1/auditoria', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/datos/salud', 'get')).toEqual(['200', '400', '401', '500', '503']);
+    expect(statuses('/api/v1/datos/eventos', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/datos/grafico', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/datos/catalogo', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/enlace', 'post')).toEqual([
@@ -146,6 +147,7 @@ describe('buildOpenApiDocument', () => {
       'AuditEvents',
       'DataCatalog',
       'DataChart',
+      'DataEvents',
       'DataHealth',
       'EmptyRequest',
       'HealthReport',
@@ -278,6 +280,42 @@ describe('buildOpenApiDocument', () => {
     expect(catalog({ log: null, catalog: null })).toBe(true);
     expect(catalog({ log: 2, catalog: { ...version, entries: [] } })).toBe(false);
     expect(catalog({ log: 2, catalog: { ...version, entries: [{ ...entry, x: 1 }] } })).toBe(false);
+
+    const events = validatorFor('DataEvents');
+    const incident = {
+      kind: 'incident',
+      log: 3,
+      at_utc: '2026-11-09T14:00:00.124Z',
+      source: 'deriv_options',
+      incident_id: `sha256:${'a'.repeat(64)}`,
+      incident_type: 'persistence_unavailable',
+      severity: 'error',
+      symbol: null,
+      evidence: { stage: 'raw_object_write', reason: 'ServiceUnavailable' },
+    };
+    const condition = {
+      kind: 'condition',
+      log: 3,
+      at_utc: '2026-11-09T14:00:00.124Z',
+      source: 'deriv_options',
+      condition_event_id: `sha256:${'b'.repeat(64)}`,
+      condition_key: `persistence_unavailable:sha256:${'c'.repeat(64)}`,
+      condition_type: 'persistence_unavailable',
+      symbol: null,
+      action: 'opened',
+      resolution_reason: null,
+    };
+    const list = { logs: [3], events: [condition, incident], truncated: false };
+    expect(events(list)).toBe(true);
+    expect(events({ logs: [], events: [], truncated: false })).toBe(true);
+    expect(events({ ...list, events: [{ ...incident, incident_type: 'duplicate_exact' }] })).toBe(
+      false,
+    );
+    expect(
+      events({ ...list, events: [{ ...incident, evidence: { stage: 'raw_object_write' } }] }),
+    ).toBe(false);
+    expect(events({ ...list, events: [{ ...condition, kind: 'otra' }] })).toBe(false);
+    expect(events({ ...list, extra: 1 })).toBe(false);
   });
 
   it('el gráfico declara sus horas como un parámetro de consulta obligatorio, de 1 a la ventana máxima', () => {
