@@ -85,7 +85,7 @@ describe('variante servida por la API (out-api)', () => {
 
   it('la marca de datos ficticios va solo en las secciones que siguen con datos ficticios', () => {
     const real = NAV_ITEMS.filter((item) => item.realInApi === true).map((item) => item.href);
-    expect(real).toEqual(['/', '/auditoria/']);
+    expect(real).toEqual(['/', '/mercados/', '/auditoria/']);
     for (const item of NAV_ITEMS) {
       const text = textOf(topBarOf(read(pageOf(item.href))));
       if (item.realInApi === true) {
@@ -105,6 +105,19 @@ describe('variante servida por la API (out-api)', () => {
       readFileSync(script, 'utf8').includes('/api/v1/datos/salud'),
     );
     expect(calling.length).toBeGreaterThan(0);
+  });
+
+  it('Mercados es la variante real: pide el gráfico y el catálogo a la API, sin los datos ficticios', () => {
+    const text = textOf(read(['mercados', 'index.html']));
+    expect(text).toContain('Cargando el gráfico de R_100');
+    expect(text).toContain('Cargando el catálogo de Deriv');
+    expect(text).not.toMatch(/ficticio|\(ejemplo\)|Vantage|Deriv MT5/u);
+    for (const route of ['/api/v1/datos/grafico', '/api/v1/datos/catalogo']) {
+      const calling = files(OUT_API, '.js').filter((script) =>
+        readFileSync(script, 'utf8').includes(route),
+      );
+      expect(calling.length, route).toBeGreaterThan(0);
+    }
   });
 
   it('la pantalla de enlace es un marco sin formulario: el QR y el formulario llegan al leer el token', () => {

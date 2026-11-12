@@ -83,4 +83,18 @@ Las horas de `buoh-ingesta` son las de recepción de los eventos del log 2 y las
 
 **Para el PR 7c de F2.3 y para la evidencia de 7 días de F2.2.** `buoh-api` volvió a arrancar el 2026-11-05 hacia las 12:00. Antes, dentro de los días del 7c, había arrancado con el PR #91, el 2026-11-04 entre las 20:00 y las 20:09, y con el PR #94, el 2026-11-05 hacia las 02:54. La memoria de cada instancia empieza de cero al arrancar, así que esas horas cuentan al leer la gráfica de memoria del 7c. La captura tuvo un corte pedido de unos 7 s, de las 12:01:24 a las 12:01:31.
 
+## La compresión de las respuestas de `buoh-api`
+
+El 2026-11-05 a las 20:49:22 UTC, con `curl` desde fuera, sin sesión ni credenciales y con `Accept-Encoding: br, gzip`, cuatro respuestas de `buoh-api` llegaron comprimidas con Brotli: `/`, `/mercados/`, `GET /api/salud` y `GET /api/v1/datos/salud`, el `401` sin sesión. Las cuatro traían `content-encoding: br`, `server: cloudflare` y `x-render-origin-server: Render`. Pedida sin `Accept-Encoding`, `/` llegó sin comprimir. Una comprobación anterior del mismo día dio lo mismo con un script de `/_next/static/`. La API no comprime: no tiene `@fastify/compress`. Comprime Cloudflare, delante de Render, cuando el navegador lo admite, como hacen todos.
+
+Para estimar cuánto reduce eso el gráfico de Mercados (5b), el agente comprimió en el sandbox, con el `zlib` de Node 24.22.0, respuestas sintéticas con la forma de `DataChart`: un tick cada 2 s, con cotizaciones de un paseo aleatorio y ningún precio de mercado.
+
+| Ventana | Sin comprimir | gzip | Brotli, calidad 4 | Brotli, calidad 11 |
+|---|---:|---:|---:|---:|
+| 1 hora | 32 KB | 8 KB | 5 KB | 4 KB |
+| 6 horas | 200 KB | 48 KB | 27 KB | 20 KB |
+| 24 horas | 815 KB | 179 KB | 102 KB | 65 KB |
+
+No se sabe con qué calidad comprime Cloudflare, ni si Render cuenta el tráfico de salida de `buoh-api` antes o después de comprimir. El punto 7 de F2.4 lo mide en producción (ADR-0019 §8; [concepto de interfaz](../diseno/concepto-de-interfaz.md) §11).
+
 Lo que este documento cita de la documentación de Render la resume con otras palabras; lo demás es lo que se vio o se dedujo el 2026-11-04 y el 2026-11-05.

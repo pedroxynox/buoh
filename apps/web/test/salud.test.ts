@@ -1015,7 +1015,7 @@ describe('la marca «Datos ficticios» en la web servida por la API (concepto de
     ['/auditoria/', false],
     ['/acceso/', false],
     ['/enlace', false],
-    ['/mercados/', true],
+    ['/mercados/', false],
     ['/datos', true],
     ['/laboratorio/', true],
     ['/senales/', true],

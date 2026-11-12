@@ -5,7 +5,7 @@ Prototipo navegable de la interfaz de buoh (`V1-UI-001`), con **datos ficticios*
 Desde F2.3 se exporta en dos variantes del mismo código ([ADR-0019](../../docs/arquitectura/adr/0019-api-cuentas-y-auditoria.md) §9), que elige la variable de compilación `NEXT_PUBLIC_BUOH_WEB_TARGET`:
 
 - `out`: el prototipo del escritorio, con datos ficticios, sin formularios y sin llamar a la API (`F2-UI-001`). No tiene cuentas, credenciales, conexión a fuentes ni brókeres, y ninguna pantalla envía órdenes. Es el que empaqueta el escritorio ([ADR-0010](../../docs/arquitectura/adr/0010-prototipo-de-escritorio.md)).
-- `out-api`: la que sirve la API (PR 6). Añade las pantallas de inicio de sesión (`/acceso`) y de enlace de alta (`/enlace`), el menú de la sesión y la sección Auditoría con los eventos reales de la cuenta, que llaman a la API del mismo origen. El QR del enlace lo dibuja `uqr`, dentro de buoh y como SVG en línea. Desde F2.4, el Observatorio y las insignias de modo y salud de la barra superior muestran la salud real de los datos, y la marca «Datos ficticios» va solo en las secciones que siguen con ellos ([concepto de interfaz](../../docs/diseno/concepto-de-interfaz.md) §10).
+- `out-api`: la que sirve la API (PR 6). Añade las pantallas de inicio de sesión (`/acceso`) y de enlace de alta (`/enlace`), el menú de la sesión y la sección Auditoría con los eventos reales de la cuenta, que llaman a la API del mismo origen. El QR del enlace lo dibuja `uqr`, dentro de buoh y como SVG en línea. Desde F2.4, el Observatorio y las insignias de modo y salud de la barra superior muestran la salud real de los datos, y la marca «Datos ficticios» va solo en las secciones que siguen con ellos ([concepto de interfaz](../../docs/diseno/concepto-de-interfaz.md) §10). Mercados muestra el gráfico de R_100, en ticks y en velas, con los huecos del log y su motivo, y el catálogo de Deriv, de producción (§11).
 
 ## Comandos
 
@@ -22,9 +22,9 @@ pnpm --filter @buoh/web run typecheck
 | Ruta | Qué contiene |
 |---|---|
 | `app/` | Una carpeta por sección, las rutas `acceso/` y `enlace/` de `out-api`, el marco (`layout.tsx`) y los estilos `w-*` (`globals.css`) |
-| `src/components/` | Marco con barra superior y navegación, gráficos SVG, tarjeta de señal y metadatos de datos; el menú de la sesión (`SessionMenu.tsx`), las pantallas servidas por la API (`auth/`) y la salud de los datos de `out-api` (`salud/`, `ObservatorioReal.tsx`) |
+| `src/components/` | Marco con barra superior y navegación, gráficos SVG, tarjeta de señal y metadatos de datos; el menú de la sesión (`SessionMenu.tsx`), las pantallas servidas por la API (`auth/`), la salud de los datos de `out-api` (`salud/`, `ObservatorioReal.tsx`) y Mercados con datos reales (`mercados/`, `MercadosReal.tsx`); las variantes del escritorio de esas secciones, con datos ficticios (`ObservatorioDesktop.tsx`, `MercadosDesktop.tsx`) |
 | `scripts/` | `build-exports.mjs`: compila las dos variantes `out` y `out-api` |
-| `test/` | Comprobación de cada página de `out/` y de `out-api/`, de que `out` no llama a la API, y de la salud de los datos y el Observatorio de `out-api` |
+| `test/` | Comprobación de cada página de `out/` y de `out-api/`, de que `out` no llama a la API, de la salud de los datos y el Observatorio de `out-api`, y de Mercados con datos reales (`mercados.test.tsx`) |
 
 `test/salud.test.ts` compara la causa que lee la web con la derivación real de la salud y con la evaluación real de `data:health`, que carga del dominio y del worker compilados (`packages/domain/dist` y `apps/market-data-worker/dist`) por ruta relativa: `pnpm run verify` los compila antes de probar. Ni `@buoh/domain` ni el worker son dependencias de la web, así que no entran en el JavaScript de ninguna exportación.
 
