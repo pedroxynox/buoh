@@ -23,6 +23,7 @@ import {
   candlesOf,
   describeTickChart,
   gapBandOf,
+  isFalling,
   gapCauseText,
   gapsOf,
   qualityText,
@@ -469,6 +470,11 @@ describe('los ticks, la línea y los huecos, en su hora', () => {
     const band = gapBandOf(open, FROM_MS, TO_MS, scale);
     expect(band.x).toBeCloseTo(900);
     expect(band.width).toBeCloseTo(100);
+    // Un hueco que termina después de la hora de la lectura, porque el primer tick posterior trae
+    // una hora de la fuente adelantada, también se recorta al final de la ventana.
+    const late = gapBandOf({ ...open, toMs: TO_MS + 360_000 }, FROM_MS, TO_MS, scale);
+    expect(late.x).toBeCloseTo(900);
+    expect(late.width).toBeCloseTo(100);
   });
 
   it('la alternativa en texto: período, ticks, el primero y el último, los extremos exactos y cada hueco', () => {
@@ -553,6 +559,27 @@ describe('las velas (concepto de interfaz §9)', () => {
     expect(candlesOf(ticks, [], 5).map((candle) => [candle.ticks, candle.gaps.length])).toEqual([
       [6, 0],
     ]);
+  });
+
+  it('baja la que cierra por debajo de su apertura; la que cierra igual se dibuja como la que sube', () => {
+    const tick = (seconds: number, quote: string): ChartTick => ({
+      quote,
+      timeMs: FROM_MS + seconds * 1000,
+      value: Number(quote),
+    });
+    // Una vela que baja, una que cierra igual que abre y una que sube.
+    const falling = [
+      [tick(0, '10.5'), tick(2, '10.4')],
+      [tick(60, '10.5'), tick(62, '10.7'), tick(64, '10.5')],
+      [tick(120, '10.5'), tick(122, '10.6')],
+    ].map((members) => {
+      const [candle] = candlesOf(members, [], 1);
+      if (candle === undefined) {
+        throw new Error('sin vela');
+      }
+      return isFalling(candle);
+    });
+    expect(falling).toEqual([true, false, false]);
   });
 });
 
