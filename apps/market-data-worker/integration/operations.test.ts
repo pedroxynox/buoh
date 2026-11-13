@@ -943,7 +943,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
         WHERE n.nspname = $1 AND c.relkind = 'r' ORDER BY c.relname`,
       [API_ROLE],
     );
-    expect(tables).toHaveLength(11);
+    expect(tables).toHaveLength(12);
     for (const { name, first_column: column } of tables) {
       const table = `buoh_api.${name}`;
       expect(await asApi(`SELECT count(*) FROM ${table}`), table).toBeNull();
