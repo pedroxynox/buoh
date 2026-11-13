@@ -286,54 +286,55 @@ const CASE_THREE = [
   page(28, E, {
     end: 42,
     prices: ['101.250', '101.375', '101.5', '101.8', '101.875', '102.000'],
-    receivedAt: at(44),
+    receivedAt: at(44, 300),
     reqId: 3,
     start: 32,
     times: [32, 34, 36, 38, 40, 42],
   }),
   recovered(29, E, { from: 32, to: 42 }, { recovered_event_count: 4, status: 'complete' }, at(45)),
 ];
-// 4. Un resultado `partial`: el hueco queda sin resolver y su página no da ticks.
+// 4. Un resultado `partial`: el hueco queda sin resolver y su página no da ticks. Cada página llega
+//    después de los 2000 ms que espera la sesión antes de pedirla (ADR-0015 §4).
 // 7. Una reconexión de 2000 ms: la separación demuestra la continuidad, y la historia que llega
 //    después no resuelve nada.
 const CASES_FOUR_AND_SEVEN = [
-  tick(30, E, 44, '102.125'),
-  closed(31, E, at(45)),
-  opened(32, F, E, at(47)),
-  tick(33, F, 50, '102.500'),
+  tick(30, E, 46, '102.125'),
+  closed(31, E, at(47)),
+  opened(32, F, E, at(49)),
+  tick(33, F, 52, '102.500'),
   page(34, F, {
-    end: 50,
+    end: 52,
     prices: ['102.125', '102.250', '102.375', '102.999'],
-    receivedAt: at(52),
+    receivedAt: at(54, 300),
     reqId: 3,
-    start: 44,
-    times: [44, 46, 48, 50],
+    start: 46,
+    times: [46, 48, 50, 52],
   }),
   recovered(
     35,
     F,
-    { from: 44, to: 50 },
+    { from: 46, to: 52 },
     { reason: 'history_boundary_mismatch', recovered_event_count: 2, status: 'partial' },
-    at(52, 100),
+    at(54, 400),
   ),
-  tick(36, F, 52, '102.625'),
-  closed(37, F, at(52, 500)),
-  opened(38, G, F, at(53)),
-  tick(39, G, 54, '102.750'),
+  tick(36, F, 56, '102.625'),
+  closed(37, F, at(56, 500)),
+  opened(38, G, F, at(57)),
+  tick(39, G, 58, '102.750'),
   page(40, G, {
-    end: 54,
+    end: 58,
     prices: ['102.625', '102.750'],
-    receivedAt: at(56),
+    receivedAt: at(60, 300),
     reqId: 3,
-    start: 52,
-    times: [52, 54],
+    start: 56,
+    times: [56, 58],
   }),
   recovered(
     41,
     G,
-    { from: 52, to: 54 },
+    { from: 56, to: 58 },
     { recovered_event_count: 0, status: 'complete' },
-    at(56, 100),
+    at(60, 400),
   ),
 ];
 const SEGMENTS = [CASE_ONE_BEFORE, CASE_ONE_AFTER, CASE_TWO, CASE_THREE, CASES_FOUR_AND_SEVEN];
@@ -573,7 +574,7 @@ describe('vector sintético de las reglas 3.0.0 (ADR-0020 §3)', () => {
     // Los del flujo que se repiten no llevan marca: solo el duplicado.
     const stream = derived.ticks.filter((item) => item.origin === 'stream');
     expect(stream.filter((item) => item.quality_flags.length > 0).map(summary)).toEqual([
-      [at(50), '102.500', 'stream', id(33), ['event_gap_unresolved']],
+      [at(52), '102.500', 'stream', id(33), ['event_gap_unresolved']],
     ]);
   });
 
@@ -634,8 +635,8 @@ describe('vector sintético de las reglas 3.0.0 (ADR-0020 §3)', () => {
   });
 
   it('los ticks de la historia llevan el pip_size de su página, y los posteriores se comparan con ellos', () => {
-    // Todo con pip_size 2, como Deriv; la página lo escribe 2.0, como la historia real. El último
-    // tick del flujo llega tarde, con la hora de uno recuperado.
+    // Todo con pip_size 2, como Deriv; la página lo escribe 2.0, como la historia real. Los dos últimos
+    // ticks del flujo llegan tarde, con la hora de uno recuperado: uno lo repite y el otro no.
     const tick2 = (
       sequence: number,
       conn: string,
@@ -660,7 +661,7 @@ describe('vector sintético de las reglas 3.0.0 (ADR-0020 §3)', () => {
         end: 6,
         pipSize: '2.0',
         prices: ['100.25', '100.37', '100.5'],
-        receivedAt: at(8),
+        receivedAt: at(8, 300),
         reqId: 3,
         start: 2,
         times: [2, 4, 6],
@@ -670,9 +671,10 @@ describe('vector sintético de las reglas 3.0.0 (ADR-0020 §3)', () => {
         B,
         { from: 2, to: 6 },
         { recovered_event_count: 1, status: 'complete' },
-        at(8, 100),
+        at(8, 400),
       ),
       tick2(9, B, 4, '100.37', at(9)),
+      tick2(10, B, 4, '100.38', at(9, 500)),
     ];
     const derived = deriveMarketData([events], v3);
     expect(
@@ -684,6 +686,15 @@ describe('vector sintético de las reglas 3.0.0 (ADR-0020 §3)', () => {
       (incident) => incident.incident_type === 'duplicate_exact',
     );
     expect([duplicate?.observed_ref, duplicate?.related_refs]).toEqual([id(9), ids(7)]);
+    const conflict = derived.incidents.find(
+      (incident) => incident.incident_type === 'source_time_conflict',
+    );
+    expect([conflict?.observed_ref, conflict?.related_refs]).toEqual([id(10), ids(7)]);
+    expect(derived.ticks.find((item) => item.observation_id === id(10))?.quality_flags).toEqual([
+      'delivery_delayed',
+      'out_of_order',
+      'source_time_conflict',
+    ]);
   });
 
   it('una respuesta con req_id en texto no es una página: la sesión solo correlaciona números', () => {
@@ -791,7 +802,7 @@ describe('vector sintético de las reglas 3.0.0 (ADR-0020 §3)', () => {
     });
     expect(publication.core).toMatchObject({
       event_time_from_utc: at(0),
-      event_time_to_utc: at(54),
+      event_time_to_utc: at(58),
       incident_count: 9,
       incident_schema_version: '2.0.0',
       normalized_tick_count: 28,
@@ -813,7 +824,7 @@ describe('vector sintético de las reglas 3.0.0 (ADR-0020 §3)', () => {
  * La identidad del dataset del vector. Fija los bytes de todos sus artefactos: si cambia, cambió lo
  * que derivan las reglas 3.0.0, y eso necesita otra versión.
  */
-const VECTOR_DATASET_ID = 'sha256:f5ef8077618ebc6c0f0e18f7250a4e7aa0cc0796b991bdbcaf77b0cf70db2aa9';
+const VECTOR_DATASET_ID = 'sha256:1bbd9e7513d0e01ba8fd84282378aa07b1a061bcaef086bd71c6c8552cc3298a';
 
 describe('artefactos derivados por partes (ADR-0020 §7)', { timeout: 60_000 }, () => {
   /** Un dataset de una conexión con `count` ticks distintos, cada uno repetido `repeats` veces. */
