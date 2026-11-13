@@ -20,6 +20,7 @@ import {
   publishDataset,
   REPLAY_READ_LIMITS,
   replayDataset,
+  type ReplayReadLimits,
 } from '../src/index.js';
 import { syntheticSchemas } from './support/connection-harness.js';
 import { MemoryMetadataStore, MemoryObjectStore } from './support/memory-stores.js';
@@ -195,7 +196,7 @@ describe('publicar con los derivados en gzip y los límites del replay', () => {
     // Hay un objeto en gzip cuyo tamaño lógico pasa el físico de todos los que van en gzip.
     expect(logical).toBeGreaterThan(physicalGzip);
     const manifest = reference.manifest_bytes.byteLength;
-    const outcome = async (limits: Partial<typeof REPLAY_READ_LIMITS>) => {
+    const outcome = async (limits: Partial<ReplayReadLimits>) => {
       const { result } = await publish({
         derivedCompression: 'gzip',
         limits: { ...REPLAY_READ_LIMITS, ...limits },
