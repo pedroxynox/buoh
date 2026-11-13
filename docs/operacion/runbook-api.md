@@ -59,6 +59,14 @@ El PR de las lecturas de R2 de F2.4 (el 5a) suma el token `api`, de solo lectura
 2. Comprueba que tienes la sesión abierta: al pulsar **Propietario**, arriba a la derecha, aparece **Cerrar sesión**. En el teléfono no se ve la palabra **Propietario**, solo el icono de una persona: púlsalo. Mientras la web lee la sesión, ese botón está, pero no abre el menú.
 3. Escribe la dirección en la barra de direcciones del navegador, o elígela de sus sugerencias, y pásale al agente lo que ves. Si llegas desde un enlace de otra página, como el chat del agente, tu navegador no envía la sesión, y la respuesta es `401 unauthenticated` (ADR-0019 §2).
 
+### Un PR que trae una migración de la API
+
+Cuando un PR trae una migración nueva de la API, como la `0004_preferencias.sql` del tema por cuenta de F2.4, su comentario de listo lo dice. Al fusionarlo, la instancia nueva de `buoh-api` responde `503 not_ready` en `/api/salud` hasta que `buoh-operaciones` aplique la migración, en su ejecución siguiente, unos 30 s después de cada minuto múltiplo de 5. Mientras tanto, Render sigue sirviendo la instancia anterior, que funciona con la base migrada, porque las migraciones solo añaden (ADR-0019 §7).
+
+1. **Fusiona el PR** y no hagas nada más: en unos 10 minutos `buoh-api` queda **Live** con la versión nueva. El agente lo comprueba desde fuera.
+2. **Si termina en `Timed Out`** (15 minutos sin `200`): en `buoh-operaciones`, pulsa **Trigger Run** y espera a que termine en verde; después, en `buoh-api`, **Manual Deploy** y **Deploy latest commit**. Si la ejecución de `buoh-operaciones` termina en rojo, pásale al agente la línea `operations_step` de su paso 1, que solo lleva códigos.
+3. **No se vuelve atrás con un Rollback ni revirtiendo el PR** una vez aplicada la migración. El `buoh-operaciones` anterior no conoce la migración nueva: su paso 1 falla en cada ejecución con `migration_unknown`, con la alerta `operations_step_failed`, y la ejecución termina en rojo, aunque los demás pasos, como la salud, siguen. Si algo sale mal, se corrige hacia delante con un PR nuevo, que el agente prepara.
+
 ## Dar de alta tu cuenta (enseguida, justo después de desplegar)
 
 Hazlo **cuanto antes**. Hasta que tu cuenta esté dada de alta, alguien con la contraseña del rol de la base podría insertar una credencial falsa y adelantarse (ADR-0019, «Consecuencias», «La contraseña del rol de la API»).

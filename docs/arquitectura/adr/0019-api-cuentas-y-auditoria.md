@@ -203,6 +203,7 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 
 - (Precisión del PR del tema por cuenta de F2.4, el 7a.) La preferencia del tema, la única de la Fase 2 (`F2-UI-001`), llega con la migración `0004_preferencias.sql`: la tabla `account_preferences`, con su identificador, su `write_order`, que asigna la base, la cuenta, el tema (`night` o `day`) y la hora en que se eligió, y los triggers de §5. Vale la última fila de la cuenta por `write_order`, y sin ninguna, el tema es noche. `buoh-operaciones` la migra en su paso 1 y `grantApiPrivileges` le da a `buoh_api` `SELECT` e `INSERT`, como a las demás tablas.
   - **Las rutas.** `GET /api/v1/preferencias` da las preferencias de la cuenta de la sesión (`AccountPreferences`) y, como la auditoría, renueva la inactividad solo con el token CSRF (§2). `POST /api/v1/preferencias` guarda el tema (`PreferencesRequest`) con las tres condiciones de CSRF y renueva la inactividad, porque es una acción del propietario. Las dos reciben la cuenta de la sesión: ninguna lee ni cambia la de otra (§4; `src/accounts/preferences.ts`).
+  - **Volver atrás.** Una vez aplicada la `0004`, el `buoh-operaciones` anterior no la conoce y su paso 1 falla en cada ejecución con `migration_unknown` (los demás pasos siguen), como con cualquier migración nueva (§7, «Solo añaden»). Por eso un error se corrige hacia delante, con otro PR, y no con un **Rollback** ([runbook de la API](../../operacion/runbook-api.md), «Un PR que trae una migración de la API»).
   - **Sin escrituras de más.** Elegir el tema que ya vale no escribe ninguna fila, así que repetir la petición no hace crecer la tabla; la que alterna los dos temas la frena el límite general de peticiones (§1), y solo la puede hacer una sesión válida.
   - **Sin entrada de auditoría.** Cambiar el tema no es una de las acciones de `F2-AUDIT-001` ni toca la seguridad, así que `AuditEvent` no suma ninguna: la propia tabla, append-only, guarda cada cambio con su hora.
   - **En la web.** El menú de la sesión de `out-api` lee el tema al abrir la página y lo pone en `data-theme` (`noche` o `dia`, los del sistema de diseño), y su botón lo cambia y lo guarda ([concepto de interfaz](../../diseno/concepto-de-interfaz.md) §13). El escritorio no cambia: sigue con noche y sin llamar a la API.
@@ -386,7 +387,7 @@ Después, F2.4 trae la ruta `lectura` (§8), `buoh_api_lectura`, el token `api`,
 | `F2-API-001`: lecturas de R2 y tráfico de salida medidos | §8 y §10; PR 7 (tráfico) y F2.4 (lecturas de R2) |
 | `F2-AUTH-001`: método aprobado, sin contraseñas de Deriv ni de terceros | §1; PR 4 |
 | `F2-AUTH-001`: sesión de servidor, cookie, vencimiento, cierre, hash, CSRF y límites | §1 y §2; PR 4, y PR 7a (la dirección de los límites) |
-| `F2-AUTH-001`: cada objeto con su cuenta, probado con cuentas de prueba | §4; PR 4, y desde F2.6 para sus objetos |
+| `F2-AUTH-001`: cada objeto con su cuenta, probado con cuentas de prueba | §4; PR 4, el tema por cuenta de F2.4 (`integration/preferences.test.ts`), y desde F2.6 para sus objetos |
 | `F2-AUTH-001`: inicio, cierre y fallos en la auditoría; registros solo con el identificador | §5 y §11; PR 4 |
 | `F2-AUDIT-001`: la base rechaza modificar y borrar | §5 y §7; PR 3 |
 | `F2-AUDIT-001`: autor, hora UTC, acción, motivo y objetos | §5; PR 3 (contrato) y PR 4 (entradas) |
