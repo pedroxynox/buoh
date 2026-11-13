@@ -239,7 +239,7 @@ async function measureLog(pool, s3, number) {
     const end = (Date.parse(event.to_event_time_utc) + 1) / 1000;
     const starts = pages.filter((page) => page.end === end);
     const firstReqId = Math.max(...starts.map((page) => page.reqId));
-    const lastAttempt = pages.filter((page) => page.reqId >= firstReqId);
+    const lastAttempt = starts.length === 0 ? [] : pages.filter((page) => page.reqId >= firstReqId);
     const tally = (key, value) => {
       report.history[key][value] = (report.history[key][value] ?? 0) + 1;
     };
