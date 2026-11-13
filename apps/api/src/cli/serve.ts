@@ -8,6 +8,7 @@ import { createAccountService } from '../accounts/links.js';
 import { createRateLimiter } from '../accounts/limits.js';
 import { createLoginFailureBuffer } from '../accounts/login-failures.js';
 import { createSessionService } from '../accounts/sessions.js';
+import { createPreferenceService } from '../accounts/preferences.js';
 import { buildApp } from '../app.js';
 import { loadCommonPasswords } from '../auth/common-passwords.js';
 import { createPasswordHasher } from '../auth/password-hash.js';
@@ -90,6 +91,7 @@ if (config !== undefined) {
     randomBytes,
     newId,
   });
+  const preferences = createPreferenceService({ pool, clock, newId });
   const sessions = createSessionService({
     pool,
     keys: config.keys,
@@ -128,7 +130,7 @@ if (config !== undefined) {
     now: () => performance.now(),
     requestId: () => randomUUID(),
     origin: config.origin,
-    routes: apiRoutes({ readiness, links, sessions, limiter, clock, data, market }),
+    routes: apiRoutes({ readiness, links, sessions, preferences, limiter, clock, data, market }),
     rateLimit: (address) => limiter.requestWait(address, clock()),
     ...(web === null ? {} : { web }),
   });

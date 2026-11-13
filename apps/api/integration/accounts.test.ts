@@ -1069,6 +1069,10 @@ describe('el recorrido completo por HTTP, con inject contra la base (ADR-0019 §
         readiness: { isReady: () => true },
         links: accounts,
         sessions: unusedSessions,
+        preferences: {
+          get: () => Promise.reject(new Error('sin preferencias en esta prueba')),
+          set: () => Promise.reject(new Error('sin preferencias en esta prueba')),
+        },
         limiter: createRateLimiter(),
         clock: clock.now,
         data: null,

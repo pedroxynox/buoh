@@ -826,7 +826,12 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     expect(first.alerts).toEqual([]);
     expect(first.step('roles_and_logs')).toMatchObject({
       report: {
-        api_migrated: ['0001_auditoria.sql', '0002_cuentas.sql', '0003_sesiones.sql'],
+        api_migrated: [
+          '0001_auditoria.sql',
+          '0002_cuentas.sql',
+          '0003_sesiones.sql',
+          '0004_preferencias.sql',
+        ],
         failures: [],
         passwords_set: [API_ROLE],
       },
@@ -843,6 +848,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     expect(owners).toEqual(
       [
         'account_links',
+        'account_preferences',
         'accounts',
         'audit_events',
         'buoh_api',

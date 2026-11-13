@@ -19,7 +19,12 @@ import {
 // Las migraciones de la API (ADR-0019 §7) sin PostgreSQL: un cliente que anota cada consulta. La
 // prueba contra PostgreSQL está en integration/migrate.test.ts.
 
-const MIGRATION_NAMES = ['0001_auditoria.sql', '0002_cuentas.sql', '0003_sesiones.sql'];
+const MIGRATION_NAMES = [
+  '0001_auditoria.sql',
+  '0002_cuentas.sql',
+  '0003_sesiones.sql',
+  '0004_preferencias.sql',
+];
 
 interface Recorded {
   readonly text: string;

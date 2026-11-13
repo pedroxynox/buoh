@@ -2,8 +2,10 @@
 
 import { Icon } from '@buoh/design-system/react';
 import Link from 'next/link';
+import type { Theme } from '@buoh/contracts';
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiCallError, describeFailure } from './auth/api';
+import { applyTheme, otherTheme, themeToggleLabel } from './tema';
 
 type SessionState =
   | { readonly kind: 'loading' }
@@ -23,13 +25,16 @@ function OwnerBadge() {
 /**
  * Menú de la sesión en la barra superior de la web servida por la API (ADR-0019 §2 y §9). Al abrir
  * la página lee la sesión con `GET /api/v1/sesion`, que además renueva su inactividad y devuelve el
- * token CSRF que necesitan los cierres. Con sesión, ofrece cerrarla y cerrar las demás; sin sesión,
- * un enlace para iniciarla. Mientras lee, muestra la misma insignia que el escritorio.
+ * token CSRF que necesitan los cierres. Con sesión, lee el tema de la cuenta y lo pone en la página
+ * (ADR-0019 §7), y ofrece cambiarlo, cerrar la sesión y cerrar las demás; sin sesión, un enlace para
+ * iniciarla, y la página sigue con el tema noche. Mientras lee, muestra la misma insignia que el
+ * escritorio.
  */
 export function SessionMenu() {
   const [state, setState] = useState<SessionState>({ kind: 'loading' });
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | undefined>(undefined);
+  const [theme, setTheme] = useState<Theme>('night');
   const ref = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
@@ -38,9 +43,18 @@ export function SessionMenu() {
       .session()
       .then((info) => {
         if (active) setState({ kind: 'authenticated', csrfToken: info.csrf_token });
+        return api.preferences();
+      })
+      .then((preferences) => {
+        if (!active) return;
+        setTheme(preferences.theme);
+        applyTheme(document.documentElement, preferences.theme);
       })
       .catch(() => {
-        if (active) setState({ kind: 'anonymous' });
+        // Sin sesión, la página sigue con noche. Si fallan solo las preferencias, también: la
+        // sesión ya quedó leída, y el botón del tema guarda la elección de todos modos.
+        if (active)
+          setState((current) => (current.kind === 'loading' ? { kind: 'anonymous' } : current));
       });
     return () => {
       active = false;
@@ -91,6 +105,21 @@ export function SessionMenu() {
 
   const { csrfToken } = state;
 
+  async function changeTheme() {
+    if (busy) return;
+    setBusy(true);
+    setNote(undefined);
+    try {
+      const preferences = await api.setTheme(otherTheme(theme), csrfToken);
+      setTheme(preferences.theme);
+      applyTheme(document.documentElement, preferences.theme);
+    } catch (caught) {
+      setNote(caught instanceof ApiCallError ? describeFailure(caught.failure) : 'No se pudo.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function logout() {
     if (busy) return;
     setBusy(true);
@@ -131,6 +160,18 @@ export function SessionMenu() {
       </summary>
       <div className="w-usermenu__menu" role="menu">
         {note === undefined ? null : <p className="w-usermenu__note">{note}</p>}
+        <button
+          type="button"
+          className="w-usermenu__item"
+          role="menuitem"
+          disabled={busy}
+          onClick={() => {
+            void changeTheme();
+          }}
+        >
+          <Icon name="moon" />
+          {themeToggleLabel(theme)}
+        </button>
         <button
           type="button"
           className="w-usermenu__item"

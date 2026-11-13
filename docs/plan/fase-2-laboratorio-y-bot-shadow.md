@@ -372,6 +372,7 @@ F2.4 no tiene ADR: cambia el concepto de interfaz, que es su fuente canónica (P
 - La captura empieza en F2.2, lo antes posible, para que los datos se acumulen mientras avanza lo demás.
 - F2.2 se cierra con su evidencia de 7 días. F2.3 no la espera: empieza en cuanto la captura corre en producción. F2.5 sí espera esos 7 días.
 - F2.4 no espera el último PR de F2.3, el 7c, que solo reúne la memoria y el tráfico de salida de `buoh-api` de varios días (ADR-0019 §14). Para no mezclar su tráfico con esa medición, ninguna lectura de R2 de F2.4 llega a producción antes del 2026-11-08. Lo decidió el propietario el 2026-11-04. Los días que copia el 7c terminan antes del primer despliegue de F2.4 que lee R2.
+- La sección Datos de F2.4 (el 6b de `PROJECT_STATUS.md`) va después de la ADR de datasets vivos de F2.5, que decide dónde viven los datasets de producción y cómo se guarda su verificación (ADR-0018 §7). Hasta entonces, su lector solo podría leer las tablas de publicación de cada log, donde producción no publica. Así, F2.4 termina después de esa ADR.
 - Cada incremento se entrega en PR pequeños, con una revisión semántica cada uno, y desde F2.3 el propietario lo usa en la web.
 - Ningún incremento deja componentes futuros vacíos.
 
