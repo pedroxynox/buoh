@@ -266,7 +266,7 @@ describe('F1-DATASET-001: publicación atómica (ADR-0004 §8)', () => {
       (target) => {
         target.objects.failPut = (key) => key.startsWith('sha256/');
       },
-      'object_write',
+      'normalized_object_write',
     ],
     [
       'verificación de lectura de un objeto',
@@ -274,7 +274,7 @@ describe('F1-DATASET-001: publicación atómica (ADR-0004 §8)', () => {
         target.objects.onRead = (key, bytes) =>
           key.startsWith('sha256/') && bytes.byteLength > 0 ? bytes.slice(1) : bytes;
       },
-      'object_write',
+      'normalized_object_write',
     ],
     [
       'escritura del documento canónico',
@@ -288,7 +288,7 @@ describe('F1-DATASET-001: publicación atómica (ADR-0004 §8)', () => {
       (target) => {
         target.metadata.failCommit = true;
       },
-      'commit',
+      'manifest_commit',
     ],
   ];
 

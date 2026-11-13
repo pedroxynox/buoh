@@ -10,17 +10,31 @@ export const MAX_SOURCE_SEGMENT_BYTES = 67_108_864;
 export const GZIP_WRITER_NAME = 'node:zlib';
 const GZIP_LEVEL = 9;
 
+/** Roles derivados que pueden ir en gzip (ADR-0020 §7, «Formato físico»). */
+const DERIVED_ROLES: ReadonlySet<StorageObjectRef['role']> = new Set([
+  'normalized_ticks',
+  'operational_conditions',
+  'quality_incidents',
+]);
+
 /**
  * Codificación física de F1.3 (ADR-0004 §6): source events en gzip determinista para el mismo
  * writer (`node:zlib`, nivel 9, sin nombre ni fecha en la cabecera); el resto en NDJSON/JSON sin
- * compresión. Parquet queda para un incremento posterior. Pura: la versión de zlib se inyecta.
+ * compresión. Con `derived: 'gzip'`, los roles derivados (ticks, incidencias y condiciones) van
+ * también en gzip, con el mismo writer, como los datasets vivos (ADR-0020 §7); el perfil y el esquema
+ * nunca se comprimen, y los vectores siguen sin comprimir. Parquet queda para un incremento posterior.
+ * Pura: la versión de zlib se inyecta.
  */
-export function createStorageEncoder(zlibVersion: string): ObjectEncoder {
+export function createStorageEncoder(
+  zlibVersion: string,
+  options: { readonly derived?: 'gzip' | 'none' } = {},
+): ObjectEncoder {
   if (zlibVersion.length === 0) {
     throw new TypeError('La versión de zlib es obligatoria para declarar el writer.');
   }
+  const derivedGzip = options.derived === 'gzip';
   return ({ logical_bytes, role }) =>
-    role === 'source_events'
+    role === 'source_events' || (derivedGzip && DERIVED_ROLES.has(role))
       ? {
           bytes: new Uint8Array(gzipSync(logical_bytes, { level: GZIP_LEVEL })),
           compression: 'gzip',

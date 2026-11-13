@@ -22,7 +22,9 @@ export {
   ObjectReadError,
   PublicationConflictError,
   PublicationError,
+  PublicationLimitError,
   ReplayError,
+  type PublicationLimit,
   type PublicationStep,
   type ReplayErrorCode,
 } from './errors.js';
@@ -150,9 +152,20 @@ export {
 } from './postgres/roles.js';
 export { publishDataset, type PublishDatasetInput } from './publication.js';
 export {
+  DATASET_ELEMENT_CEILING,
+  DATASET_END_STEP_SEGMENTS,
+  planDataset,
+  type DatasetOpenState,
+  type DatasetPlan,
+  type PlanDatasetInput,
+  type PlanSegment,
+} from './datasets/plan.js';
+export {
   MAX_MANIFEST_DOCUMENT_BYTES,
   MAX_REPLAY_OBJECT_BYTES,
+  REPLAY_READ_LIMITS,
   replayDataset,
+  type ReplayReadLimits,
   type ReplayInput,
   type ReplayMode,
   type ReplayReport,

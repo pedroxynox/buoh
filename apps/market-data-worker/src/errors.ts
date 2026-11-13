@@ -1,5 +1,11 @@
-/** Paso de ADR-0004 §8 en el que se detuvo una publicación. */
-export type PublicationStep = 'commit' | 'manifest_write' | 'object_write' | 'precondition';
+/**
+ * Paso de ADR-0004 §8 en el que se detuvo una publicación, con los nombres de `PersistenceStage`
+ * (ADR-0020 §9; pendiente 3 de F1.3): `precondition` antes de escribir nada (la consulta previa y los
+ * límites), `normalized_object_write` para cada objeto del dataset, también las copias de los
+ * segmentos, `manifest_write` para el documento y `manifest_commit` para la transacción.
+ */
+export type PublicationStep =
+  'manifest_commit' | 'manifest_write' | 'normalized_object_write' | 'precondition';
 
 /** Fallo antes del commit: no hay dataset visible; los objetos escritos quedan huérfanos. */
 export class PublicationError extends Error {
@@ -17,9 +23,27 @@ export class PublicationConflictError extends PublicationError {
   readonly datasetId: string;
 
   constructor(datasetId: string, options?: { cause?: unknown }) {
-    super('commit', `El dataset ${datasetId} ya tiene una publicación activa.`, options);
+    super('manifest_commit', `El dataset ${datasetId} ya tiene una publicación activa.`, options);
     this.name = 'PublicationConflictError';
     this.datasetId = datasetId;
+  }
+}
+
+/** Los límites de lectura del replay que una publicación comprueba antes de escribir (ADR-0020 §7). */
+export type PublicationLimit = 'gzip_logical_bytes' | 'manifest_document_bytes' | 'object_bytes';
+
+/**
+ * Un objeto o el documento del manifiesto pasaría un límite de lectura del replay: no se escribe nada
+ * (`publication_limit_exceeded`, ADR-0020 §7). Nunca se publica lo que el replay rechazaría.
+ */
+export class PublicationLimitError extends PublicationError {
+  readonly limit: PublicationLimit;
+  readonly reason = 'publication_limit_exceeded';
+
+  constructor(limit: PublicationLimit, message: string) {
+    super('precondition', message);
+    this.name = 'PublicationLimitError';
+    this.limit = limit;
   }
 }
 

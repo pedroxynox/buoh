@@ -28,7 +28,7 @@ import {
 } from '@buoh/domain';
 import { z } from 'zod';
 
-import { decodeObject } from './encoding.js';
+import { decodeObject, MAX_SOURCE_SEGMENT_BYTES } from './encoding.js';
 import { ObjectReadError, ReplayError, type ReplayErrorCode } from './errors.js';
 import { contentKey, keyFromUri } from './object-keys.js';
 import type { MetadataStore, ObjectStore } from './ports.js';
@@ -36,6 +36,20 @@ import type { MetadataStore, ObjectStore } from './ports.js';
 /** Límites internos de lectura del replay; nunca se carga contenido por encima de ellos. */
 export const MAX_MANIFEST_DOCUMENT_BYTES = 16 * 1024 * 1024;
 export const MAX_REPLAY_OBJECT_BYTES = 256 * 1024 * 1024;
+
+/**
+ * Los límites con los que el replay lee un dataset: el tamaño físico de cada objeto, los bytes
+ * lógicos de uno en gzip, que descomprime como mucho hasta el tamaño máximo de un segmento raw
+ * (`decodeObject`), y el documento del manifiesto. La publicación los comprueba antes de escribir
+ * nada (ADR-0020 §7).
+ */
+export const REPLAY_READ_LIMITS = {
+  gzip_logical_bytes: MAX_SOURCE_SEGMENT_BYTES,
+  manifest_document_bytes: MAX_MANIFEST_DOCUMENT_BYTES,
+  object_bytes: MAX_REPLAY_OBJECT_BYTES,
+} as const;
+
+export type ReplayReadLimits = { readonly [key in keyof typeof REPLAY_READ_LIMITS]: number };
 
 export type ReplayMode = 'recompute' | 'verify-only';
 
