@@ -432,7 +432,7 @@ describe('el final de un dataset (ADR-0020 §7)', () => {
     expect(summary(await plan(later, { ceiling: 100 }))).toMatchObject({ status: 'due', to: 11 });
   });
 
-  it('sin la marca, un primer segmento que pasa el techo se avisa enseguida', async () => {
+  it('sin la marca, un primer segmento cuyos source events pasan el techo se avisa enseguida', async () => {
     expect(await plan(buildLog(10), { ceiling: 1 })).toEqual({
       elements: 2,
       segment_index: 0,
