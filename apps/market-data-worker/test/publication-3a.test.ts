@@ -15,6 +15,7 @@ import {
   MAX_MANIFEST_DOCUMENT_BYTES,
   MAX_REPLAY_OBJECT_BYTES,
   MAX_SOURCE_SEGMENT_BYTES,
+  PublicationConflictError,
   PublicationLimitError,
   publishDataset,
   REPLAY_READ_LIMITS,
@@ -174,6 +175,72 @@ describe('publicar con los derivados en gzip y los límites del replay', () => {
       manifest_document_bytes: MAX_MANIFEST_DOCUMENT_BYTES,
       object_bytes: MAX_REPLAY_OBJECT_BYTES,
     });
+  });
+
+  it('cada límite admite justo su tamaño y rechaza un byte menos; el de gzip mide los bytes lógicos', async () => {
+    const reference = await (await publish({ derivedCompression: 'gzip' })).result;
+    const gzip = reference.manifest.storage_objects.filter(
+      (object) => object.compression === 'gzip',
+    );
+    const physical = Math.max(
+      ...reference.manifest.storage_objects.map((object) => object.size_bytes),
+    );
+    const logical = Math.max(
+      ...gzip.map(
+        (object) =>
+          gunzipSync(reference.objects.get(object.artifact_id) ?? new Uint8Array()).byteLength,
+      ),
+    );
+    const physicalGzip = Math.max(...gzip.map((object) => object.size_bytes));
+    // Hay un objeto en gzip cuyo tamaño lógico pasa el físico de todos los que van en gzip.
+    expect(logical).toBeGreaterThan(physicalGzip);
+    const manifest = reference.manifest_bytes.byteLength;
+    const outcome = async (limits: Partial<typeof REPLAY_READ_LIMITS>) => {
+      const { result } = await publish({
+        derivedCompression: 'gzip',
+        limits: { ...REPLAY_READ_LIMITS, ...limits },
+      });
+      return result.then(
+        () => 'published',
+        (error: unknown) => (error instanceof PublicationLimitError ? error.limit : 'other'),
+      );
+    };
+    expect(await outcome({ object_bytes: physical })).toBe('published');
+    expect(await outcome({ object_bytes: physical - 1 })).toBe('object_bytes');
+    expect(await outcome({ gzip_logical_bytes: logical })).toBe('published');
+    expect(await outcome({ gzip_logical_bytes: logical - 1 })).toBe('gzip_logical_bytes');
+    // Un límite entre el tamaño físico y el lógico: lo pasan los bytes lógicos.
+    expect(await outcome({ gzip_logical_bytes: physicalGzip })).toBe('gzip_logical_bytes');
+    expect(await outcome({ manifest_document_bytes: manifest })).toBe('published');
+    expect(await outcome({ manifest_document_bytes: manifest - 1 })).toBe(
+      'manifest_document_bytes',
+    );
+  });
+
+  it('un dataset que ya está publicado se rechaza en la consulta previa, antes de escribir', async () => {
+    const { result, target } = await publish();
+    await result;
+    const before = new Map(target.objects.objects);
+    const fixture = await loadSyntheticFixture(
+      resolve(import.meta.dirname, '../../../test-vectors/market-data/v1'),
+    );
+    const principal = fixture.scenarios.find((item) => item.name === 'principal');
+    const error: unknown = await publishDataset({
+      environment: 'test',
+      metadata: target.metadata,
+      objects: target.objects,
+      profile: fixture.profile,
+      publication_id: '019b76da-cb28-7003-8000-0000000000b2',
+      published_at_utc: '2026-01-01T00:00:10.000Z',
+      segments: principal?.segments ?? [],
+      zlibVersion: 'test-zlib',
+    }).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    expect(error).toBeInstanceOf(PublicationConflictError);
+    expect(error).toMatchObject({ step: 'precondition' });
+    expect(target.objects.objects).toEqual(before);
   });
 
   it.each([

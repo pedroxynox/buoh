@@ -132,7 +132,7 @@ export async function publishDataset(input: PublishDatasetInput): Promise<Datase
   }
   if (active !== null) {
     // Reubicar o recodificar (nuevo record `active` y el anterior `superseded`) no forma parte de F1.3.
-    throw new PublicationConflictError(publication.dataset_id);
+    throw new PublicationConflictError(publication.dataset_id, { step: 'precondition' });
   }
 
   // Paso 3: objetos físicos en claves content-addressed, verificados por lectura.

@@ -14,8 +14,11 @@ export const DATASET_END_STEP_SEGMENTS = 6;
 /** Las marcas de un dataset: las 00:00, 06:00, 12:00 y 18:00 UTC. */
 const MARK_MS = 6 * 3_600_000;
 
-/** Lo que el plan necesita de cada segmento cerrado: su índice y la hora de su primer evento. */
-export type PlanSegment = Pick<ClosedSourceSegment, 'first_event_time_utc' | 'segment_index'>;
+/** Lo que el plan necesita de cada segmento cerrado: su índice, sus eventos y la hora del primero. */
+export type PlanSegment = Pick<
+  ClosedSourceSegment,
+  'event_count' | 'first_event_time_utc' | 'segment_index'
+>;
 
 export interface PlanDatasetInput {
   /** Elementos como mucho; por defecto, `DATASET_ELEMENT_CEILING`. */
@@ -109,6 +112,9 @@ export async function planDataset(input: PlanDatasetInput): Promise<DatasetPlan>
         `Los segmentos cerrados tienen que ser contiguos desde ${String(input.from)}.`,
       );
     }
+    if (Number.isNaN(Date.parse(row.first_event_time_utc))) {
+      throw new TypeError(`El segmento ${String(row.segment_index)} no tiene una hora válida.`);
+    }
   });
   const first = rows[0];
   if (first === undefined) {
@@ -121,10 +127,6 @@ export async function planDataset(input: PlanDatasetInput): Promise<DatasetPlan>
   const mark = nextMark(first.first_event_time_utc);
   const startsBefore = rows.filter((row) => Date.parse(row.first_event_time_utc) < mark);
   const reachedMark = startsBefore.length < rows.length;
-  if (!reachedMark && !input.logTerminated) {
-    return { reason: 'mark_not_reached', status: 'not_due' };
-  }
-  const target = startsBefore.at(-1)?.segment_index ?? lastClosed;
 
   // Los segmentos leídos, de `from` en adelante, mientras quepan en el techo.
   const segments: (readonly SourceEvent[])[] = [];
@@ -175,6 +177,25 @@ export async function planDataset(input: PlanDatasetInput): Promise<DatasetPlan>
       status: 'segment_too_large',
     };
   }
+  if (!reachedMark && !input.logTerminated) {
+    // Todos los segmentos cerrados empiezan antes de la marca, así que el objetivo es uno de ellos o
+    // uno posterior. Si el techo llega antes, ningún final posible cabe: el dataset ya está decidido.
+    // Para no leer los segmentos en cada ejecución, solo los lee si sus source events, que dan las
+    // filas, ya pasan el techo; si lo pasan solo con los ticks recuperados, espera a la marca.
+    const events = rows.reduce((sum, row) => sum + row.event_count, 0);
+    if (events <= ceiling) {
+      return { reason: 'mark_not_reached', status: 'not_due' };
+    }
+    await readUpTo(lastClosed);
+    if (!reading.ceilingReached) {
+      return { reason: 'mark_not_reached', status: 'not_due' };
+    }
+    const lastRead = input.from + segments.length - 1;
+    return due(lastRead, derive(lastRead));
+  }
+  // Con la marca alcanzada, el primer segmento siempre empieza antes que ella; en un log terminado
+  // sin alcanzarla, el objetivo es su último segmento.
+  const target = reachedMark ? (startsBefore.at(-1)?.segment_index ?? input.from) : lastClosed;
 
   for (let candidate = target; ; candidate += DATASET_END_STEP_SEGMENTS) {
     await readUpTo(candidate);

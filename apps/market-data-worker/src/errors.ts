@@ -1,8 +1,9 @@
 /**
- * Paso de ADR-0004 §8 en el que se detuvo una publicación, con los nombres de `PersistenceStage`
- * (ADR-0020 §9; pendiente 3 de F1.3): `precondition` antes de escribir nada (la consulta previa y los
- * límites), `normalized_object_write` para cada objeto del dataset, también las copias de los
- * segmentos, `manifest_write` para el documento y `manifest_commit` para la transacción.
+ * Paso de ADR-0004 §8 en el que se detuvo una publicación (ADR-0020 §9; pendiente 3 de F1.3). Las
+ * escrituras llevan los nombres de `PersistenceStage`: `normalized_object_write` para cada objeto del
+ * dataset, también las copias de los segmentos, `manifest_write` para el documento y
+ * `manifest_commit` para la transacción. `precondition`, que no es una etapa de persistencia, es todo
+ * lo anterior a escribir: la consulta previa y los límites.
  */
 export type PublicationStep =
   'manifest_commit' | 'manifest_write' | 'normalized_object_write' | 'precondition';
@@ -18,12 +19,22 @@ export class PublicationError extends Error {
   }
 }
 
-/** Ya existe un `PublishedManifestRecord` activo para el dataset en el entorno. */
+/**
+ * Ya existe un `PublishedManifestRecord` activo para el dataset en el entorno: lo encontró la consulta
+ * previa (`precondition`) o lo rechazó la transacción (`manifest_commit`, el paso por defecto).
+ */
 export class PublicationConflictError extends PublicationError {
   readonly datasetId: string;
 
-  constructor(datasetId: string, options?: { cause?: unknown }) {
-    super('manifest_commit', `El dataset ${datasetId} ya tiene una publicación activa.`, options);
+  constructor(
+    datasetId: string,
+    options?: { cause?: unknown; step?: 'manifest_commit' | 'precondition' },
+  ) {
+    super(
+      options?.step ?? 'manifest_commit',
+      `El dataset ${datasetId} ya tiene una publicación activa.`,
+      options,
+    );
     this.name = 'PublicationConflictError';
     this.datasetId = datasetId;
   }

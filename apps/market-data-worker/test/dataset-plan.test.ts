@@ -119,7 +119,7 @@ class Log {
     from: number,
     to: number,
     at: number,
-    result: 'complete' | 'unavailable' = 'complete',
+    result: 'complete' | 'partial' | 'unavailable' = 'complete',
     interior = 0,
   ): SourceEvent[] {
     const start = tickTime(from) / 1000;
@@ -141,6 +141,19 @@ class Log {
       symbol: SYMBOL,
       to_event_time_utc: iso(tickTime(to) - 1),
     };
+    if (result === 'partial') {
+      // Un `partial` cuenta en `recovered_event_count` los ticks de sus páginas válidas, pero no
+      // entran en el dataset (ADR-0020 §3), así que no cuentan para el techo.
+      return [
+        page,
+        historyRecoveryResultSchema.parse({
+          ...common,
+          reason: 'history_boundary_mismatch',
+          recovered_event_count: interior,
+          status: 'partial',
+        }),
+      ];
+    }
     return result === 'complete'
       ? [
           page,
@@ -172,7 +185,7 @@ function buildLog(
     readonly beforeSubscribing?: boolean;
     readonly history: number;
     readonly interior?: number;
-    readonly result?: 'complete' | 'unavailable';
+    readonly result?: 'complete' | 'partial' | 'unavailable';
   },
 ): SourceEvent[][] {
   const log = new Log();
@@ -216,6 +229,7 @@ const rowsOf = (segments: readonly SourceEvent[][]) =>
       throw new TypeError('Segmento vacío.');
     }
     return {
+      event_count: events.length,
       first_event_time_utc:
         first.kind === 'raw_source_frame' ? first.received_at_utc : first.occurred_at_utc,
       segment_index,
@@ -375,6 +389,41 @@ describe('el final de un dataset (ADR-0020 §7)', () => {
     });
   });
 
+  it('para el techo, los ticks de un partial no cuentan', async () => {
+    // Hasta el 77 hay 81 elementos, y el 78 suma su tick, la página y el resultado: 84. Si contaran
+    // los 149 ticks del partial, el 78 no cabría.
+    const segments = buildLog(90, { close: TARGET, history: 78, interior: 149, result: 'partial' });
+    expect(summary(await plan(segments, { ceiling: 84 }))).toMatchObject({
+      clean: true,
+      elements: 84,
+      open: { open_condition_types: ['event_gap_unresolved'], pending_continuity_symbols: [] },
+      to: 78,
+    });
+  });
+
+  it('sin la marca, si los source events ya pasan el techo, termina en el último que cabe sin esperar', async () => {
+    // 60 segmentos con 61 source events, todos antes de las 06:00: el techo de 40 llega en el 38.
+    expect(summary(await plan(buildLog(60), { ceiling: 40 }))).toMatchObject({
+      clean: true,
+      elements: 40,
+      status: 'due',
+      to: 38,
+    });
+    // Con un techo que no pasan, espera la marca.
+    expect(await plan(buildLog(60), { ceiling: 61 })).toEqual({
+      reason: 'mark_not_reached',
+      status: 'not_due',
+    });
+  });
+
+  it('sin la marca, un primer segmento que pasa el techo se avisa enseguida', async () => {
+    expect(await plan(buildLog(10), { ceiling: 1 })).toEqual({
+      elements: 2,
+      segment_index: 0,
+      status: 'segment_too_large',
+    });
+  });
+
   it('con un techo menor que el objetivo, termina en el último segmento que cabe', async () => {
     expect(summary(await plan(buildLog(80), { ceiling: 40 }))).toMatchObject({
       clean: true,
@@ -416,7 +465,7 @@ describe('el final de un dataset (ADR-0020 §7)', () => {
     });
   });
 
-  it.each(['complete', 'unavailable'] as const)(
+  it.each(['complete', 'partial', 'unavailable'] as const)(
     'el dataset que sigue a un final que no fue limpio se deriva sin fallar con un %s',
     async (result) => {
       // El anterior terminó en el 77 con la continuidad pendiente; este empieza en el 78, con la
@@ -424,7 +473,7 @@ describe('el final de un dataset (ADR-0020 §7)', () => {
       const segments = buildLog(150, { close: TARGET, history: 78, result });
       const next = await plan(segments, { from: 78 });
       expect(summary(next)).toMatchObject({ clean: true, from: 78, status: 'due', to: 143 });
-      if (next.status === 'due' && result === 'unavailable') {
+      if (next.status === 'due' && result !== 'complete') {
         expect(next.open.open_condition_types).toEqual(['event_gap_unresolved']);
       }
     },
@@ -452,6 +501,22 @@ describe('el final de un dataset (ADR-0020 §7)', () => {
         readSegment: read,
       }),
     ).rejects.toThrow(/contiguos desde 0/u);
+  });
+
+  it('rechaza un segmento sin una hora válida', async () => {
+    const segments = buildLog(80);
+    const rows = rowsOf(segments).map((row, index) =>
+      index === 3 ? { ...row, first_event_time_utc: 'no-es-una-hora' } : row,
+    );
+    await expect(
+      planDataset({
+        closedSegments: rows,
+        from: 0,
+        logTerminated: false,
+        profile,
+        readSegment: (index) => Promise.resolve(segments[index] ?? []),
+      }),
+    ).rejects.toThrow(/no tiene una hora válida/u);
   });
 
   it('sin segmentos cerrados desde from no hay nada que publicar', async () => {
