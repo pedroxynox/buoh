@@ -198,7 +198,7 @@ describe('integración PostgreSQL + S3-compatible local', () => {
     const partial = [segmentsOf('principal')[0] ?? []];
     const error = await rejection(publish(partial, PUBLICATION_MAIN));
     expect(error).toBeInstanceOf(PublicationError);
-    expect((error as PublicationError).step).toBe('commit');
+    expect((error as PublicationError).step).toBe('manifest_commit');
 
     const { rows } = await stores.pool.query<{ datasets: string; incidents: string }>(
       `SELECT (SELECT count(*) FROM datasets) AS datasets,
@@ -257,6 +257,8 @@ describe('integración PostgreSQL + S3-compatible local', () => {
       }),
     );
     expect(direct).toBeInstanceOf(PublicationConflictError);
+    // Lo rechazó la transacción, no la consulta previa (ADR-0020 §9).
+    expect((direct as PublicationConflictError).step).toBe('manifest_commit');
   });
 
   it.each([

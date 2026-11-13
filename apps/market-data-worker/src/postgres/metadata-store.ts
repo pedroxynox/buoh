@@ -150,7 +150,7 @@ export class PostgresMetadataStore implements MetadataStore {
         [record.dataset_id],
       );
       if (stored.rows[0]?.manifest_core_jcs !== coreJcs) {
-        throw new PublicationError('commit', 'El dataset existente tiene otro core.');
+        throw new PublicationError('manifest_commit', 'El dataset existente tiene otro core.');
       }
       if (incidents.length > 0) {
         await client.query(

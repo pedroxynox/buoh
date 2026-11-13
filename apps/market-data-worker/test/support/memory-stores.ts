@@ -105,7 +105,7 @@ export class MemoryMetadataStore implements MetadataStore {
     const existing = this.datasets.get(input.record.dataset_id);
     const core = JSON.stringify(input.core);
     if (existing !== undefined && existing !== core) {
-      throw new PublicationError('commit', 'El dataset existente tiene otro core.');
+      throw new PublicationError('manifest_commit', 'El dataset existente tiene otro core.');
     }
     if ((await this.findActivePublication(input.record.dataset_id, input.environment)) !== null) {
       throw new PublicationConflictError(input.record.dataset_id);

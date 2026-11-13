@@ -1,9 +1,7 @@
 import type { HistoryRecoveryResult } from '@buoh/contracts';
 import {
-  canonicalQuoteDecimal,
   checkRequestedResponse,
-  isEpochSecondsLexeme,
-  pipSizeFromNumberLexeme,
+  readHistoryTicks,
   type JsonNode,
   type RequestedResponseInvalidReason,
 } from '@buoh/domain';
@@ -139,52 +137,10 @@ export function readHistoryPage(
       status: common === 'source_error_response' ? 'error_response' : 'invalid',
     };
   }
-  const history = member(root, 'history');
-  const times = member(history, 'times');
-  const prices = member(history, 'prices');
-  const pipSize = member(root, 'pip_size');
-  // Ya cumplió el esquema de respuesta: si le falta un miembro, la página no es coherente.
-  if (
-    history?.type !== 'object' ||
-    times?.type !== 'array' ||
-    prices?.type !== 'array' ||
-    pipSize === undefined
-  ) {
-    return inconsistent;
-  }
-  // `pip_size` solo da los decimales de las cotizaciones: un valor entero, que la historia del canal
-  // real escribe `2.0` (ADR-0015 §4). Los tiempos siguen las reglas de lexema de un tick (ADR-0004
-  // §4): enteros.
-  const decimals = pipSize.type === 'number' ? pipSizeFromNumberLexeme(pipSize.lexeme) : null;
-  if (decimals === null) {
-    return inconsistent;
-  }
-  if (times.items.length !== prices.items.length) {
-    return inconsistent;
-  }
-  const ticks: HistoryTick[] = [];
-  for (const [index, timeNode] of times.items.entries()) {
-    const priceNode = prices.items[index];
-    if (timeNode.type !== 'number' || !isEpochSecondsLexeme(timeNode.lexeme)) {
-      return inconsistent;
-    }
-    const time = Number(timeNode.lexeme);
-    const previous = ticks.at(-1);
-    if (
-      time < page.start ||
-      time > page.end ||
-      (previous !== undefined && time <= previous.time) ||
-      priceNode?.type !== 'number'
-    ) {
-      return inconsistent;
-    }
-    const quote = canonicalQuoteDecimal(priceNode.lexeme, decimals);
-    if (!quote.ok) {
-      return inconsistent;
-    }
-    ticks.push({ quote: quote.value, time });
-  }
-  return { status: 'valid', ticks };
+  // Las comprobaciones posteriores al esquema son las de las reglas 3.0.0 (`readHistoryTicks`), que
+  // derivan los ticks de esta misma página al publicar (ADR-0020 §3).
+  const read = readHistoryTicks(root, page);
+  return read === null ? inconsistent : { status: 'valid', ticks: read.ticks };
 }
 
 /**
