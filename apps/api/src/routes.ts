@@ -1,4 +1,5 @@
 import {
+  accountPreferencesSchema,
   apiHealthSchema,
   auditEventsResponseSchema,
   dataCatalogSchema,
@@ -11,10 +12,12 @@ import {
   linkSecretSchema,
   linkUseRequestSchema,
   linkUseSchema,
+  preferencesRequestSchema,
   sessionInfoSchema,
   sessionLoginRequestSchema,
   sessionsClosedResultSchema,
   type DataChartQuery,
+  type PreferencesRequest,
   type LinkSecretRequest,
   type LinkUseRequest,
   type SessionLoginRequest,
@@ -29,6 +32,7 @@ import {
   PasswordRejectedError,
   RateLimitedError,
 } from './accounts/errors.js';
+import type { PreferenceService } from './accounts/preferences.js';
 import type { LinkService } from './accounts/service.js';
 import {
   SESSION_MAX_MS,
@@ -198,6 +202,28 @@ const SESIONES_CIERRE = {
   errors: { 401: UNAUTHENTICATED, 403: CSRF, 413: BODY_TOO_LARGE, 503: NOT_READY },
 } as const satisfies ApiRouteSpec;
 
+const PREFERENCIAS = {
+  method: 'GET',
+  url: '/api/v1/preferencias',
+  operationId: 'getPreferencias',
+  summary:
+    'Las preferencias de la cuenta de la sesión: en la Fase 2, el tema de la web (ADR-0019 §7).',
+  querystring: NO_QUERY,
+  responses: { 200: accountPreferencesSchema },
+  errors: { 401: UNAUTHENTICATED, 503: NOT_READY },
+} as const satisfies ApiRouteSpec;
+
+const PREFERENCIAS_CAMBIO = {
+  method: 'POST',
+  url: '/api/v1/preferencias',
+  operationId: 'postPreferencias',
+  summary: 'Guarda el tema de la web para la cuenta de la sesión (ADR-0019 §7).',
+  querystring: NO_QUERY,
+  body: preferencesRequestSchema,
+  responses: { 200: accountPreferencesSchema },
+  errors: { 401: UNAUTHENTICATED, 403: CSRF, 413: BODY_TOO_LARGE, 503: NOT_READY },
+} as const satisfies ApiRouteSpec;
+
 const AUDITORIA = {
   method: 'GET',
   url: '/api/v1/auditoria',
@@ -274,6 +300,8 @@ export const API_ROUTE_SPECS: readonly ApiRouteSpec[] = [
   SESION_INFO,
   SESION_CIERRE,
   SESIONES_CIERRE,
+  PREFERENCIAS,
+  PREFERENCIAS_CAMBIO,
   AUDITORIA,
   DATOS_SALUD,
   DATOS_EVENTOS,
@@ -289,6 +317,8 @@ export interface ApiRouteDeps {
   readonly readiness: Readiness;
   readonly links: LinkService;
   readonly sessions: SessionService;
+  /** Las preferencias de cada cuenta (ADR-0019 §7). */
+  readonly preferences: PreferenceService;
   readonly limiter: RateLimiter;
   /** Milisegundos de pared, para el límite por dirección de los enlaces (ADR-0019 §1). */
   readonly clock: () => number;
@@ -517,6 +547,29 @@ export function apiRoutes(deps: ApiRouteDeps): readonly ApiRoute[] {
         const closed = await deps.sessions.closeOthers({ session, requestId: request.id });
         await deps.sessions.renewActivity(session);
         return { status: 200, body: { closed } };
+      },
+    },
+    {
+      ...PREFERENCIAS,
+      handler: async (request) => {
+        requireReady(deps.readiness);
+        const session = await requireSession(request, deps);
+        // La web las lee al abrir cada página: sin el token CSRF, no renueva la inactividad.
+        await renewIfOwnerRequest(request, session, deps);
+        return { status: 200, body: await deps.preferences.get(session) };
+      },
+    },
+    {
+      ...PREFERENCIAS_CAMBIO,
+      handler: async (request) => {
+        requireReady(deps.readiness);
+        const session = await requireSession(request, deps);
+        requireCsrf(request, session, deps);
+        const { theme } = request.body as PreferencesRequest;
+        const preferences = await deps.preferences.set(session, theme);
+        // Elegir el tema es una acción del propietario: renueva la inactividad (ADR-0019 §2).
+        await deps.sessions.renewActivity(session);
+        return { status: 200, body: preferences };
       },
     },
     {

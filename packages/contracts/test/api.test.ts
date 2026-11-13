@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  accountPreferencesSchema,
   API_ERROR_CODES,
   apiErrorCodeSchema,
   apiErrorSchema,
@@ -19,6 +20,7 @@ import {
   linkUseRequestSchema,
   linkUseSchema,
   PASSWORD_REJECTION_REASONS,
+  preferencesRequestSchema,
   sessionInfoSchema,
   sessionLoginRequestSchema,
   sessionsClosedResultSchema,
@@ -839,6 +841,28 @@ describe('DataEvents (ADR-0019 §5 y §8)', () => {
         accepts(dataEventsSchema, { logs: [3, 2], events: [value], truncated: false }),
         JSON.stringify(value),
       ).toBe(false);
+    }
+  });
+});
+
+describe('AccountPreferences y PreferencesRequest (ADR-0019 §7)', () => {
+  it('solo el tema, night o day, en un objeto estricto', () => {
+    for (const schema of [accountPreferencesSchema, preferencesRequestSchema]) {
+      expect(accepts(schema, { theme: 'night' })).toBe(true);
+      expect(accepts(schema, { theme: 'day' })).toBe(true);
+      for (const value of [
+        { theme: 'noche' },
+        { theme: 'dia' },
+        { theme: 'Day' },
+        { theme: '' },
+        { theme: null },
+        {},
+        { theme: 'day', extra: 1 },
+        'day',
+        null,
+      ]) {
+        expect(accepts(schema, value), JSON.stringify(value)).toBe(false);
+      }
     }
   });
 });

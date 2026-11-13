@@ -154,6 +154,10 @@ function apiWith(client = s3) {
         useLink: () => Promise.reject(new Error('sin enlaces en esta prueba')),
       },
       sessions,
+      preferences: {
+        get: () => Promise.reject(new Error('sin preferencias en esta prueba')),
+        set: () => Promise.reject(new Error('sin preferencias en esta prueba')),
+      },
       limiter: createRateLimiter(),
       clock: () => NOW,
       data: createDataReader({ pool, clock: () => NOW, environment: 'test' }),

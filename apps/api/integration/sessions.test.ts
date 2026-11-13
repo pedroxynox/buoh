@@ -607,7 +607,13 @@ describe('integridad de las sesiones (ADR-0019 §2 y §13)', () => {
         WHERE table_schema = 'buoh_api' AND column_name = 'write_order' ORDER BY table_name`,
     );
     const names = columns.map((row) => row.table_name);
-    expect(names).toEqual(['account_links', 'credentials', 'link_totp_secrets', 'sessions']);
+    expect(names).toEqual([
+      'account_links',
+      'account_preferences',
+      'credentials',
+      'link_totp_secrets',
+      'sessions',
+    ]);
     for (const table of names) {
       const { rows } = await ready(admin).query<{ present: boolean }>(
         `SELECT EXISTS (

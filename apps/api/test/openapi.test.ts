@@ -114,6 +114,16 @@ describe('buildOpenApiDocument', () => {
       '503',
     ]);
     expect(statuses('/api/v1/auditoria', 'get')).toEqual(['200', '400', '401', '500', '503']);
+    expect(statuses('/api/v1/preferencias', 'get')).toEqual(['200', '400', '401', '500', '503']);
+    expect(statuses('/api/v1/preferencias', 'post')).toEqual([
+      '200',
+      '400',
+      '401',
+      '403',
+      '413',
+      '500',
+      '503',
+    ]);
     expect(statuses('/api/v1/datos/salud', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/datos/eventos', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/datos/grafico', 'get')).toEqual(['200', '400', '401', '500', '503']);
@@ -141,6 +151,7 @@ describe('buildOpenApiDocument', () => {
 
   it('sus esquemas compilan en modo estricto y validan los mensajes', () => {
     expect(Object.keys(document.components.schemas)).toEqual([
+      'AccountPreferences',
       'ApiError',
       'ApiHealth',
       'AuditEvent',
@@ -155,6 +166,7 @@ describe('buildOpenApiDocument', () => {
       'LinkSecretRequest',
       'LinkUse',
       'LinkUseRequest',
+      'PreferencesRequest',
       'SessionInfo',
       'SessionLoginRequest',
       'SessionsClosedResult',

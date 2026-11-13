@@ -186,9 +186,17 @@ describe('db:migrate de la API (ADR-0019 §7)', () => {
     const applied = [first.parsed, second.parsed]
       .map((line) => (line as { applied: string[] }).applied)
       .sort((a, b) => a.length - b.length);
-    expect(applied).toEqual([[], ['0001_auditoria.sql', '0002_cuentas.sql', '0003_sesiones.sql']]);
+    expect(applied).toEqual([
+      [],
+      ['0001_auditoria.sql', '0002_cuentas.sql', '0003_sesiones.sql', '0004_preferencias.sql'],
+    ]);
     expect(first.parsed).toMatchObject({
-      current: ['0001_auditoria.sql', '0002_cuentas.sql', '0003_sesiones.sql'],
+      current: [
+        '0001_auditoria.sql',
+        '0002_cuentas.sql',
+        '0003_sesiones.sql',
+        '0004_preferencias.sql',
+      ],
       status: 'migrated',
     });
 
@@ -204,6 +212,7 @@ describe('db:migrate de la API (ADR-0019 §7)', () => {
     );
     expect(tables).toEqual([
       { owner: OWNER, table: 'account_links' },
+      { owner: OWNER, table: 'account_preferences' },
       { owner: OWNER, table: 'accounts' },
       { owner: OWNER, table: 'audit_events' },
       { owner: OWNER, table: 'buoh_schema_migrations' },
@@ -261,7 +270,7 @@ describe('db:migrate de la API (ADR-0019 §7)', () => {
       status: 0,
       stderr: '',
       stdout:
-        '{"applied":[],"current":["0001_auditoria.sql","0002_cuentas.sql","0003_sesiones.sql"],"status":"migrated"}\n',
+        '{"applied":[],"current":["0001_auditoria.sql","0002_cuentas.sql","0003_sesiones.sql","0004_preferencias.sql"],"status":"migrated"}\n',
     });
     expect(runCli(migrateEnvironment(RENDER_USER, secret()))).toEqual({
       status: 1,

@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, vi } from 'vitest';
 
 import { createRateLimiter } from '../src/accounts/limits.js';
+import type { PreferenceService } from '../src/accounts/preferences.js';
 import type { LinkService } from '../src/accounts/service.js';
 import type { SessionService } from '../src/accounts/sessions.js';
 import { buildApp } from '../src/app.js';
@@ -99,12 +100,19 @@ const UNUSED_SESSIONS: SessionService = {
   flushPendingFailures: () => Promise.resolve(),
 };
 
+/** Las preferencias, que estas pruebas no ejercitan: siempre el tema de por defecto. */
+export const UNUSED_PREFERENCES: PreferenceService = {
+  get: () => Promise.resolve({ theme: 'night' }),
+  set: () => Promise.reject(new Error('sin preferencias en esta prueba')),
+};
+
 /** Las dependencias de las rutas, con servicios que esta prueba no ejercita salvo lo que cambie. */
 export function routeDeps(overrides: Partial<ApiRouteDeps> = {}): ApiRouteDeps {
   return {
     readiness: { isReady: () => true },
     links: UNUSED_LINKS,
     sessions: UNUSED_SESSIONS,
+    preferences: UNUSED_PREFERENCES,
     limiter: createRateLimiter(),
     clock: () => Date.now(),
     data: null,

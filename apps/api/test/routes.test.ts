@@ -107,6 +107,8 @@ describe('la tabla de rutas', () => {
       'GET /api/v1/sesion',
       'DELETE /api/v1/sesion',
       'DELETE /api/v1/sesiones',
+      'GET /api/v1/preferencias',
+      'POST /api/v1/preferencias',
       'GET /api/v1/auditoria',
       'GET /api/v1/datos/salud',
       'GET /api/v1/datos/eventos',

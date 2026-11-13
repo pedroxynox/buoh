@@ -826,7 +826,12 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     expect(first.alerts).toEqual([]);
     expect(first.step('roles_and_logs')).toMatchObject({
       report: {
-        api_migrated: ['0001_auditoria.sql', '0002_cuentas.sql', '0003_sesiones.sql'],
+        api_migrated: [
+          '0001_auditoria.sql',
+          '0002_cuentas.sql',
+          '0003_sesiones.sql',
+          '0004_preferencias.sql',
+        ],
         failures: [],
         passwords_set: [API_ROLE],
       },
@@ -843,6 +848,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     expect(owners).toEqual(
       [
         'account_links',
+        'account_preferences',
         'accounts',
         'audit_events',
         'buoh_api',
@@ -937,7 +943,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
         WHERE n.nspname = $1 AND c.relkind = 'r' ORDER BY c.relname`,
       [API_ROLE],
     );
-    expect(tables).toHaveLength(11);
+    expect(tables).toHaveLength(12);
     for (const { name, first_column: column } of tables) {
       const table = `buoh_api.${name}`;
       expect(await asApi(`SELECT count(*) FROM ${table}`), table).toBeNull();

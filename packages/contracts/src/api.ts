@@ -665,6 +665,28 @@ export const dataEventsSchema = z
   })
   .meta({ id: 'DataEvents', title: 'DataEvents' });
 
+// --- F2.4: las preferencias de la cuenta (F2-UI-001) ---
+
+/**
+ * Los temas de la web (guía de marca): `night`, el de por defecto, y `day`. En inglés, como los
+ * demás valores de los contratos; la web los aplica como `data-theme="noche"` y `"dia"`.
+ */
+export const THEMES = ['night', 'day'] as const;
+export const themeSchema = z.enum(THEMES);
+
+/**
+ * La respuesta de `GET /api/v1/preferencias` y de `POST /api/v1/preferencias` (ADR-0019 §7): las
+ * preferencias de la cuenta de la sesión. En la Fase 2 solo el tema; sin ninguna guardada, `night`.
+ */
+export const accountPreferencesSchema = z
+  .strictObject({ theme: themeSchema })
+  .meta({ id: 'AccountPreferences', title: 'AccountPreferences' });
+
+/** El cuerpo de `POST /api/v1/preferencias`: el tema que se guarda para la cuenta de la sesión. */
+export const preferencesRequestSchema = z
+  .strictObject({ theme: themeSchema })
+  .meta({ id: 'PreferencesRequest', title: 'PreferencesRequest' });
+
 export type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
 export type ApiHealth = z.infer<typeof apiHealthSchema>;
@@ -685,3 +707,6 @@ export type DataChartGap = DataChart['gaps'][number];
 export type DataCatalog = z.infer<typeof dataCatalogSchema>;
 export type DataEvents = z.infer<typeof dataEventsSchema>;
 export type DataEvent = DataEvents['events'][number];
+export type Theme = z.infer<typeof themeSchema>;
+export type AccountPreferences = z.infer<typeof accountPreferencesSchema>;
+export type PreferencesRequest = z.infer<typeof preferencesRequestSchema>;

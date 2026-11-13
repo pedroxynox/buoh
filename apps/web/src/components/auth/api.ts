@@ -9,6 +9,7 @@
  * una sesión, el `X-CSRF-Token`.
  */
 import type {
+  AccountPreferences,
   ApiErrorCode,
   AuditEvent,
   AuditEventsResponse,
@@ -22,10 +23,12 @@ import type {
   SessionInfo,
   SessionLoginRequest,
   SessionsClosedResult,
+  Theme,
 } from '@buoh/contracts';
 import { readDataEvents } from '../auditoria/respuesta';
 import { readDataCatalog, readDataChart } from '../mercados/respuesta';
 import { readDataHealth } from '../salud/respuesta';
+import { readAccountPreferences } from '../tema';
 
 /** El motivo de un fallo de la API, con los añadidos locales de red y de respuesta inesperada. */
 export type FailureCode = ApiErrorCode | 'network' | 'unexpected';
@@ -118,6 +121,30 @@ export const api = {
   /** Usa el enlace con la contraseña nueva y un código: da de alta o restablece (ADR-0019 §3). */
   useLink: (input: { token: string; password: string; code: string }): Promise<LinkUse> =>
     request<LinkUse>('POST', '/api/v1/enlace', { body: input }),
+  /**
+   * Las preferencias de la cuenta (ADR-0019 §7), sin el token CSRF: la web las lee al abrir cada
+   * página, y eso no renueva la inactividad. Una respuesta sin la forma de `AccountPreferences` es
+   * `unexpected`.
+   */
+  preferences: async (): Promise<AccountPreferences> => {
+    const preferences = readAccountPreferences(
+      await request<unknown>('GET', '/api/v1/preferencias'),
+    );
+    if (preferences === null) {
+      throw new ApiCallError({ code: 'unexpected' });
+    }
+    return preferences;
+  },
+  /** Guarda el tema de la cuenta, con el token CSRF: es una acción del propietario (ADR-0019 §2). */
+  setTheme: async (theme: Theme, csrfToken: string): Promise<AccountPreferences> => {
+    const preferences = readAccountPreferences(
+      await request<unknown>('POST', '/api/v1/preferencias', { body: { theme }, csrfToken }),
+    );
+    if (preferences === null) {
+      throw new ApiCallError({ code: 'unexpected' });
+    }
+    return preferences;
+  },
   /** Las entradas de auditoría de la cuenta, de la más nueva a la más vieja (ADR-0019 §5). */
   audit: (): Promise<readonly AuditEvent[]> =>
     request<AuditEventsResponse>('GET', '/api/v1/auditoria').then((response) => response.events),

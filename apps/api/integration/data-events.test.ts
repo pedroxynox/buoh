@@ -104,6 +104,10 @@ async function getEvents(pool: Pool = ready(reader), now = NOW) {
         useLink: () => Promise.reject(new Error('sin enlaces en esta prueba')),
       },
       sessions,
+      preferences: {
+        get: () => Promise.reject(new Error('sin preferencias en esta prueba')),
+        set: () => Promise.reject(new Error('sin preferencias en esta prueba')),
+      },
       limiter: createRateLimiter(),
       clock: () => now,
       data: createDataReader({ pool, clock: () => now, environment: 'test' }),

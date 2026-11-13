@@ -147,6 +147,13 @@ describe('variante servida por la API (out-api)', () => {
     }
   });
 
+  it('su menú de la sesión lee y guarda el tema de la cuenta (ADR-0019 §7)', () => {
+    const calling = files(OUT_API, '.js').filter((script) =>
+      readFileSync(script, 'utf8').includes('/api/v1/preferencias'),
+    );
+    expect(calling.length).toBeGreaterThan(0);
+  });
+
   it('su JavaScript sí llama a la API, bajo /api/v1/', () => {
     const calling = files(OUT_API, '.js').filter((script) =>
       readFileSync(script, 'utf8').includes('/api/v1/'),
