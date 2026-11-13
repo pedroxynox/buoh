@@ -110,7 +110,7 @@ De las 21:00 del 2026-11-12 a las 00:00 del 2026-11-13, las 37 ejecuciones de `b
 
 **Cuándo desplegó `buoh-api` con el #97.** El propietario abrió las dos rutas nuevas hacia las 21:41, antes de que terminara `desktop:windows`, a las 21:47:48, y `buoh-ingesta` esperó a CI. El #97 cambiaba la sección de `buoh-api` en `render-datos.yaml`, como el PR #91, y la sincronización del Blueprint la desplegó sin esperar a los checks, como describe la [guía de despliegue](despliegue-en-render.md) («Cuándo despliegan»). Lo que se desplegó era el árbol que CI ya había probado en el PR. Con el #99, que no cambia `render-datos.yaml`, `buoh-api` y `buoh-ingesta` esperaron a CI. El propietario no mencionó ningún cambio pendiente en la página del Blueprint, y las variables `BUOH_API_S3_BUCKET` y `BUOH_API_S3_REGION`, que pone el Blueprint, existen: sin ellas, con el token, la API nueva no arrancaría (ADR-0019 §8).
 
-**La medición de F2.4.** Desde el despliegue del #97, `buoh-api` lee R2 cada vez que alguien abre Mercados. El punto 7 de F2.4 mide esas lecturas y su tráfico de salida en producción, con los paneles de Render y de Cloudflare, copiados dentro de los 7 días que guarda Render (ADR-0018 §13).
+**La medición de F2.4.** Desde el despliegue del #98, `buoh-api` lee R2 cada vez que alguien abre Mercados; entre el #97 y el #98, solo con las rutas abiertas a mano. El punto 7 de F2.4 mide esas lecturas y su tráfico de salida en producción, con los paneles de Render y de Cloudflare, copiados dentro de los 7 días que guarda Render (ADR-0018 §13).
 
 ## La compresión de las respuestas de `buoh-api`
 

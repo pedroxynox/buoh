@@ -67,13 +67,13 @@ Desde el 2026-11-05 a las 02:54 UTC, `buoh-api` sirvió el mismo código hasta e
 
 | Panel de `buoh-api` | Lo que mostró, del 2026-11-06 al 2026-11-12 |
 |---|---|
-| **Memory**, en **Total** | entre unos 70 y unos 90 MB toda la semana, con un pico pequeño cerca del 2026-11-06; un punto marcado, del 2026-11-06 a las 12:30 UTC, da 73,39 MB. En **Percentage**, el mismo panel daba de un 10 % a un 15 % de 512 MB, de unos 51 a 77 MB: las dos lecturas del gráfico no coinciden por abajo, y la que vale es la de **Total**, con su punto marcado. El límite del Starter es de 512 MB, y la medición del sandbox llegó a 152 MiB con un alta y un inicio de sesión ([evidencia de memoria](evidencia-memoria-f2-3.md)) |
+| **Memory**, en **Total** | entre unos 70 y unos 90 MB toda la semana; un punto marcado, del 2026-11-06 a las 12:30 UTC, da 73,39 MB. En **Percentage**, el mismo panel daba de un 10 % a un 15 % de 512 MB, de unos 51 a 77 MB, con un pico de un 18 %, unos 92 MB, cerca del 2026-11-06: las dos lecturas del gráfico no coinciden por abajo, y la que vale es la de **Total**, con su punto marcado. El límite del Starter es de 512 MB, y la medición del sandbox llegó a 152 MiB con un alta y un inicio de sesión ([evidencia de memoria](evidencia-memoria-f2-3.md)) |
 | **CPU** | casi 0, de un límite de 0,5 CPU |
 | **Total Instances** | 1 toda la semana |
 | **Total Requests** | 453 en los 7 días, casi todas el 2026-11-06 |
 | **Outbound Bandwidth** | un punto por hora, de unos 0,5 MB el 2026-11-06 a casi 0 el 2026-11-12; **Usage this month**, 12 MB, del 2026-11-01 al momento de la captura, que incluye los días 3 a 5 |
 
-Con eso, el 7c registra lo que pedía ADR-0019 §14: la memoria de la API de F2.3 en producción queda muy por debajo del Starter, y su tráfico de salida, 12 MB en lo que va de mes, cuesta menos de un céntimo al mes. Render incluye 5 GB de tráfico de salida al mes para todo el workspace, que la captura ya pasa (ADR-0018 §13), así que esos 12 MB se pagan al precio de ADR-0016, dentro del presupuesto del plan §11. El criterio de memoria de `F2-API-001`, 435 MB con un backtest en curso, lo mide F2.7, y las lecturas de R2 y su tráfico, el punto 7 de F2.4.
+Con eso, el 7c registra lo que pedía ADR-0019 §14: la memoria de la API de F2.3 en producción queda muy por debajo del Starter, y su tráfico de salida, 12 MB en lo que va de mes, cuesta menos de un céntimo al mes. Render incluye 5 GB de tráfico de salida al mes para todo el workspace, que la captura pasa según la estimación de ADR-0018 §13; el 2026-11-12, los tres servicios llevaban unos 2,4 GB en el mes. Aunque se pagaran, los 12 MB cuestan menos de un céntimo, a 0,15 USD por GB (ADR-0016), dentro del presupuesto del plan §11. El criterio de memoria de `F2-API-001`, 435 MB con un backtest en curso, lo mide F2.7, y las lecturas de R2 y su tráfico, el punto 7 de F2.4.
 
 ## Lo que se aprendió en el 7c
 
