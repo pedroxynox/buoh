@@ -100,6 +100,18 @@ function integerOf(node: JsonNode | undefined): number | null {
   return Number.isSafeInteger(value) ? value : null;
 }
 
+/**
+ * El `req_id` con el que la sesión correlaciona una respuesta: un número entero positivo, nunca un
+ * texto ni 0 (`DerivConnection`); si no, `null`.
+ */
+function reqIdOf(node: JsonNode | undefined): number | null {
+  if (node?.type !== 'number' || !/^[1-9]\d*$/u.test(node.lexeme)) {
+    return null;
+  }
+  const value = Number(node.lexeme);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
 /** Lee de un frame `history` su `req_id` y su petición (`echo_req`). Su payload ya es JSON válido. */
 export function historyFrameOf(frame: RawSourceFrame): HistoryFrame {
   const root = parseJsonPreservingNumbers(frame.payload_utf8);
@@ -108,7 +120,7 @@ export function historyFrameOf(frame: RawSourceFrame): HistoryFrame {
   return {
     end: integerOf(getMember(request, 'end')),
     frame,
-    reqId: integerOf(getMember(root, 'req_id')),
+    reqId: reqIdOf(getMember(root, 'req_id')),
     root,
     start: integerOf(getMember(request, 'start')),
     symbol: symbol?.type === 'string' ? symbol.value : null,

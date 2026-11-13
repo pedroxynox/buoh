@@ -154,6 +154,12 @@ export function createPipelineProfile(input: PipelineProfileInput): PipelineProf
   ) {
     throw new TypeError('non_tick_msg_types debe ser único, ordenado y no incluir "tick".');
   }
+  if (rules.history_ticks && !nonTick?.includes('history')) {
+    // Las respuestas `history` esperan su resultado solo si no son candidatas a tick (ADR-0020 §3).
+    throw new TypeError(
+      `Las reglas ${rules.quality_rule_version} exigen history en non_tick_msg_types: sus ticks salen de esas respuestas.`,
+    );
+  }
   const purpose: ProfilePurpose = 'purpose' in qualityProfile ? 'measurement' : 'publication';
   if (purpose === 'measurement' && rules !== RULE_SETS['2.0.0']) {
     throw new TypeError(
