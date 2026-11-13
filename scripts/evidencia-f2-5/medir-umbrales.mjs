@@ -23,8 +23,10 @@
 //   posterior al high-watermark del último cierre (las reglas de continuidad de los contratos de
 //   dominio). Aparte, la de cada cierre pedido;
 // - cada `HistoryRecoveryResult`, y si `recovered_event_count` coincide con los tiempos distintos
-//   entre S y E de las páginas `history` del último intento: las de la misma conexión desde la última
-//   cuya petición (`echo_req`) termina en E.
+//   entre S y E de las páginas `history` del último intento (ADR-0020 §3): las de la misma conexión
+//   desde el resultado anterior, con un `req_id` igual o mayor que el de la de mayor `req_id` cuya
+//   petición (`echo_req.end`) termina en E. Cuenta también los intentos (las páginas que terminan
+//   en E) y las páginas del último.
 //
 // Los percentiles son de rango más cercano, como `distribution()` del smoke. Escribe un JSON en
 // stdout, y un fallo sale con código 1 y su código o el nombre del error, nunca su mensaje.
@@ -135,6 +137,8 @@ const report = {
     results: 0,
     by_status: {},
     recovered_ticks: 0,
+    attempts_per_result: {},
+    last_attempt_pages_per_result: {},
     count_matches: 0,
     count_mismatches: [],
   },
@@ -203,6 +207,7 @@ async function measureLog(pool, s3, number) {
             closed_at_utc: gap.closedAt,
             closure_type: gap.closureType,
             reason: gap.reason,
+            reasons: gap.reasons,
             closures: gap.closures,
             separation_ms: separation,
           });
@@ -232,9 +237,16 @@ async function measureLog(pool, s3, number) {
     report.history.recovered_ticks += event.recovered_event_count;
     const start = (Date.parse(event.from_event_time_utc) - 1) / 1000;
     const end = (Date.parse(event.to_event_time_utc) + 1) / 1000;
-    const firstOfLast = pages.findLastIndex((page) => page.end === end);
+    const starts = pages.filter((page) => page.end === end);
+    const firstReqId = Math.max(...starts.map((page) => page.reqId));
+    const lastAttempt = pages.filter((page) => page.reqId >= firstReqId);
+    const tally = (key, value) => {
+      report.history[key][value] = (report.history[key][value] ?? 0) + 1;
+    };
+    tally('attempts_per_result', starts.length);
+    tally('last_attempt_pages_per_result', lastAttempt.length);
     const times = new Set();
-    for (const page of firstOfLast === -1 ? [] : pages.slice(firstOfLast)) {
+    for (const page of lastAttempt) {
       for (const time of page.times) {
         if (time > start && time < end) {
           times.add(time);
@@ -279,7 +291,7 @@ async function measureLog(pool, s3, number) {
         const times = payload.history?.times;
         if (Array.isArray(times) && times.every((time) => Number.isSafeInteger(time))) {
           const list = historyPages.get(event.connection_id) ?? [];
-          list.push({ end: Number(payload.echo_req.end), times });
+          list.push({ end: Number(payload.echo_req.end), reqId: Number(payload.req_id), times });
           historyPages.set(event.connection_id, list);
         }
       }
@@ -295,6 +307,7 @@ async function measureLog(pool, s3, number) {
         closureType: event.closure_type,
         closures: (current?.closures ?? 0) + 1,
         reason: event.reason,
+        reasons: [...(current?.reasons ?? []), event.reason],
         reopened: false,
         startWatermark: current?.startWatermark ?? highWatermark,
       };
