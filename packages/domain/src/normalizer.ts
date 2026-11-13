@@ -133,7 +133,11 @@ export function isEpochSecondsLexeme(lexeme: string): boolean {
   return /^-?(?:0|[1-9]\d*)$/u.test(lexeme);
 }
 
-function epochSecondsToUtc(seconds: number): string | null {
+/**
+ * Epoch en segundos a UTC con milisegundos, o `null` fuera del rango de `Date`. Lo usan el tick y los
+ * ticks de la historia (ADR-0020 §3).
+ */
+export function epochSecondsToUtc(seconds: number): string | null {
   const milliseconds = seconds * 1000;
   if (!Number.isSafeInteger(milliseconds)) {
     return null;

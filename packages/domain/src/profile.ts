@@ -10,19 +10,36 @@ import { compileSourceSchema, parseJsonDocument } from './source-schema.js';
  * - 1.0.0: vectores sintéticos v1 (todo frame es candidato a tick).
  * - 2.0.0: fuentes con varios tipos de mensaje como Deriv (contratos de dominio, reglas 2.0.0).
  *   Es mayor porque cambia el resultado de entradas que 1.0.0 ya define.
+ * - 3.0.0: las 2.0.0 más los ticks de la historia (`history_ticks`) y los artefactos derivados por
+ *   partes de `derived_part_records` registros (ADR-0020 §2, §3 y §7). Es mayor por lo mismo: una
+ *   respuesta `history` deja de producir solo raw, y un rol grande deja de ser un artefacto.
+ *
+ * `derived_part_records` es `null` cuando cada rol derivado va en un solo artefacto.
  */
 export const RULE_SETS = {
   '1.0.0': {
     classifies_msg_type: false,
+    derived_part_records: null,
+    history_ticks: false,
     incident_schema_version: '1.0.0',
     normalizer_version: '1.0.0',
     quality_rule_version: '1.0.0',
   },
   '2.0.0': {
     classifies_msg_type: true,
+    derived_part_records: null,
+    history_ticks: false,
     incident_schema_version: '2.0.0',
     normalizer_version: '2.0.0',
     quality_rule_version: '2.0.0',
+  },
+  '3.0.0': {
+    classifies_msg_type: true,
+    derived_part_records: 5000,
+    history_ticks: true,
+    incident_schema_version: '2.0.0',
+    normalizer_version: '3.0.0',
+    quality_rule_version: '3.0.0',
   },
 } as const;
 
@@ -49,7 +66,7 @@ const qualityProfileFields = {
   allowed_symbols: z.array(z.string().min(1)).min(1),
   gap_detection: z.literal('after_reconnection'),
   /**
-   * Reglas 2.0.0 (obligatorio en ellas, prohibido en 1.0.0): tipos de respuesta de la fuente que no
+   * Reglas 2.0.0 y 3.0.0 (obligatorio en ellas, prohibido en 1.0.0): tipos de respuesta de la fuente que no
    * son ticks y se conservan raw sin incidencia. Cualquier otro `msg_type` sigue siendo candidato a
    * tick y, si no lo es, `invalid_source_frame`.
    */
@@ -127,7 +144,7 @@ export function createPipelineProfile(input: PipelineProfileInput): PipelineProf
   const nonTick = qualityProfile.non_tick_msg_types;
   if (rules.classifies_msg_type !== (nonTick !== undefined)) {
     throw new TypeError(
-      `non_tick_msg_types es obligatorio con reglas ${RULE_SETS['2.0.0'].quality_rule_version} y está prohibido con ${RULE_SETS['1.0.0'].quality_rule_version}.`,
+      `non_tick_msg_types es obligatorio con reglas ${RULE_SETS['2.0.0'].quality_rule_version} y ${RULE_SETS['3.0.0'].quality_rule_version}, y está prohibido con ${RULE_SETS['1.0.0'].quality_rule_version}.`,
     );
   }
   if (
