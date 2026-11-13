@@ -16,7 +16,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
-    "test:vectors": "vitest run test/pipeline-vectors.test.ts",
+    "test:vectors": "vitest run test/pipeline-vectors.test.ts test/rules-3-0-0.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

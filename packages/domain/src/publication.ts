@@ -98,6 +98,22 @@ function artifactId(role: string, index: number): string {
   return `${role}:${index.toString().padStart(6, '0')}`;
 }
 
+/**
+ * Los registros de un rol derivado en partes de como mucho `size`, en su orden canónico, y al menos
+ * una, vacía si no hay ninguno (ADR-0004 §9). Con `size` `null`, una sola parte (reglas 1.0.0 y
+ * 2.0.0); con las 3.0.0, 5000 (ADR-0020 §7).
+ */
+function partsOf<T>(records: readonly T[], size: number | null): (readonly T[])[] {
+  if (size === null || records.length <= size) {
+    return [records];
+  }
+  const parts: (readonly T[])[] = [];
+  for (let start = 0; start < records.length; start += size) {
+    parts.push(records.slice(start, start + size));
+  }
+  return parts;
+}
+
 function collectSymbols(events: readonly SourceEvent[], derived: DerivedMarketData): string[] {
   const symbols = new Set<string>();
   for (const tick of derived.ticks) {
@@ -135,6 +151,14 @@ export function buildDatasetPublication(input: PublicationInput): DatasetPublica
   }
   const events = segments.flat();
   const derived = deriveMarketData(segments, profile);
+  const derivedParts = (role: ArtifactRole, records: readonly object[]) =>
+    partsOf(records, profile.rules.derived_part_records).map((part, index) => ({
+      bytes: ndjsonBytes(part),
+      count: part.length,
+      id: artifactId(role, index),
+      index,
+      role,
+    }));
 
   const sequences: {
     bytes: Uint8Array;
@@ -150,19 +174,9 @@ export function buildDatasetPublication(input: PublicationInput): DatasetPublica
       index,
       role: 'source_events' as const,
     })),
-    ...(
-      [
-        ['normalized_ticks', derived.ticks],
-        ['quality_incidents', derived.incidents],
-        ['operational_conditions', derived.conditions],
-      ] as const
-    ).map(([role, records]) => ({
-      bytes: ndjsonBytes(records),
-      count: records.length,
-      id: artifactId(role, 0),
-      index: 0,
-      role,
-    })),
+    ...derivedParts('normalized_ticks', derived.ticks),
+    ...derivedParts('quality_incidents', derived.incidents),
+    ...derivedParts('operational_conditions', derived.conditions),
   ];
 
   const firstTick = derived.ticks[0];

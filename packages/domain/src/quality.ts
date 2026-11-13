@@ -17,12 +17,14 @@ import {
   assertProvenance,
   buildIncident,
   emptyRuleState,
+  pendingGapOf,
   pendingGapsOf,
   sourceEventKey,
   type IncidentBody,
   type PendingGap,
   type RuleSink,
 } from './derivation-rules.js';
+import { historyFrameOf, historyTicksOf, type HistoryFrame } from './history-ticks.js';
 import { normalizeRawFrame, type UnflaggedTick } from './normalizer.js';
 import { derivationThresholds, type PipelineProfile } from './profile.js';
 
@@ -63,6 +65,30 @@ function sortedUnique(values: readonly string[]): string[] {
   return [...new Set(values)].sort();
 }
 
+/** La clave de las marcas de un tick: su observación y su hora (ADR-0020 §3). */
+function tickKey(tick: Pick<UnflaggedTick, 'event_time_utc' | 'observation_id'>): string {
+  return JSON.stringify([tick.observation_id, tick.event_time_utc]);
+}
+
+/**
+ * Si un resultado decide el hueco pendiente de su símbolo con el rango exacto que pide la sesión:
+ * su inicio + 1 ms y su fin − 1 ms (`pendingGapOf`; ADR-0020 §3). `pending` es la continuidad
+ * pendiente antes de aplicarlo.
+ */
+function resolvesExactly(
+  event: { from_event_time_utc: string; symbol: string; to_event_time_utc: string },
+  pending: Parameters<typeof pendingGapOf>[1] | undefined,
+): boolean {
+  if (pending?.end === undefined) {
+    return false;
+  }
+  const gap = pendingGapOf(event.symbol, pending);
+  return (
+    event.from_event_time_utc === gap.from_event_time_utc &&
+    event.to_event_time_utc === gap.to_event_time_utc
+  );
+}
+
 // Orden canónico de ticks, incidencias y condiciones del dataset. contracts lo vuelve a comprobar
 // con sus propios comparadores: dataset-consistency.ts para ticks e incidencias y conditions.ts para
 // condiciones. Deben coincidir con estos (estado-del-codigo D-06 y D-13).
@@ -97,7 +123,7 @@ function compareConditions(
 }
 
 /**
- * Motor puro de normalización y calidad (reglas 1.0.0 y 2.0.0).
+ * Motor puro de normalización y calidad (reglas 1.0.0, 2.0.0 y 3.0.0).
  *
  * Recorre los source events en orden de observación persistido y produce ticks, incidencias
  * derivables y eventos de condición. Solo usa source events, esquema, perfil y versiones; no lee
@@ -108,6 +134,14 @@ function compareConditions(
  * Con un perfil de medición deriva el estado vivo sin umbrales (ADR-0015 §2): sin `delivery_delayed`,
  * y con la continuidad tras un cierre no pedido pendiente hasta que la decide la historia. Publicar
  * con él sigue prohibido (`buildDatasetPublication`).
+ *
+ * Con las reglas 3.0.0, un `HistoryRecoveryResult` `complete` que resuelve el hueco pendiente de esta
+ * derivación con su rango exacto convierte en `MarketTick` los ticks de su historia
+ * (`historyTicksOf`; ADR-0020 §3). Entran en la posición del resultado, en orden de tiempo, con
+ * `duplicate_exact` y `source_time_conflict`, pero sin el high-watermark, la continuidad,
+ * `out_of_order` ni `delivery_delayed`, y no son extremos de un hueco. Las marcas van con cada tick
+ * (`observation_id` y `event_time_utc`), porque los de una página comparten el `observation_id` de
+ * su frame.
  */
 export function deriveMarketData(
   segments: readonly (readonly unknown[])[],
@@ -119,8 +153,13 @@ export function deriveMarketData(
 
   const incidents: DataQualityIncident[] = [];
   const conditions: OperationalConditionEvent[] = [];
+  // Marcas por tick: su `observation_id` y su hora, porque los ticks de una página de historia
+  // comparten el `observation_id` de su frame. Un tick del flujo es el único de su observación.
   const flags = new Map<string, Set<IncidentType>>();
+  const streamTickKeys = new Map<string, string>();
   const observedTicks: ObservedTick[] = [];
+  const historyTicks: UnflaggedTick[] = [];
+  const historyFrames = new Map<string, HistoryFrame[]>();
   const firstByFingerprint = new Map<string, string>();
   const firstByEventTime = new Map<string, { fingerprint: string; observationId: string }>();
   const state = emptyRuleState();
@@ -129,39 +168,23 @@ export function deriveMarketData(
     incident: (incident) => incidents.push(incident),
   };
 
-  const addFlag = (observationId: string, type: IncidentType) => {
-    const set = flags.get(observationId) ?? new Set<IncidentType>();
+  const addFlag = (key: string, type: IncidentType) => {
+    const set = flags.get(key) ?? new Set<IncidentType>();
     set.add(type);
-    flags.set(observationId, set);
+    flags.set(key, set);
   };
 
   const emitIncident = (body: IncidentBody) => {
     incidents.push(buildIncident(profile, body));
   };
 
-  const onRawFrame = (event: Extract<SourceEvent, { kind: 'raw_source_frame' }>, order: number) => {
-    const result = normalizeRawFrame(event, profile);
-    if (!result.ok && result.reason === 'non_tick') {
-      // Reglas 2.0.0: mensaje que no es tick; queda en el log raw sin tick ni incidencia.
-      return;
-    }
-    if (!result.ok) {
-      emitIncident({
-        evidence: { raw_payload_sha256: event.raw_payload_sha256, reason: result.reason },
-        incident_type: 'invalid_source_frame',
-        observed_at_utc: event.received_at_utc,
-        observed_ref: event.observation_id,
-        related_refs: [],
-        symbol: result.symbol,
-      });
-      return;
-    }
-
-    const { tick } = result;
+  /**
+   * `duplicate_exact` y `source_time_conflict` de un tick, del flujo o de la historia, contra los
+   * anteriores. Las incidencias citan la observación (el frame), y la evidencia dice qué tick.
+   */
+  const checkIdentity = (tick: UnflaggedTick, key: string) => {
     const observationId = tick.observation_id;
     const fingerprint = tick.tick_fingerprint_sha256;
-    observedTicks.push({ order, tick });
-
     const common = {
       observed_at_utc: tick.received_at_utc,
       observed_ref: observationId,
@@ -179,7 +202,7 @@ export function deriveMarketData(
         incident_type: 'duplicate_exact',
         related_refs: [firstWithFingerprint],
       });
-      addFlag(observationId, 'duplicate_exact');
+      addFlag(key, 'duplicate_exact');
     }
 
     // source_time_conflict: misma fuente+símbolo+tiempo con fingerprint distinto de la primera
@@ -198,8 +221,45 @@ export function deriveMarketData(
         incident_type: 'source_time_conflict',
         related_refs: [reference.observationId],
       });
-      addFlag(observationId, 'source_time_conflict');
+      addFlag(key, 'source_time_conflict');
     }
+  };
+
+  const onRawFrame = (event: Extract<SourceEvent, { kind: 'raw_source_frame' }>, order: number) => {
+    const result = normalizeRawFrame(event, profile);
+    if (!result.ok && result.reason === 'non_tick') {
+      // Reglas 2.0.0: mensaje que no es tick; queda en el log raw sin tick ni incidencia. Con las
+      // 3.0.0, una respuesta `history` espera el resultado de su recuperación (ADR-0020 §3).
+      if (profile.rules.history_ticks && result.msg_type === 'history') {
+        const list = historyFrames.get(event.connection_id) ?? [];
+        list.push(historyFrameOf(event));
+        historyFrames.set(event.connection_id, list);
+      }
+      return;
+    }
+    if (!result.ok) {
+      emitIncident({
+        evidence: { raw_payload_sha256: event.raw_payload_sha256, reason: result.reason },
+        incident_type: 'invalid_source_frame',
+        observed_at_utc: event.received_at_utc,
+        observed_ref: event.observation_id,
+        related_refs: [],
+        symbol: result.symbol,
+      });
+      return;
+    }
+
+    const { tick } = result;
+    const key = tickKey(tick);
+    streamTickKeys.set(tick.observation_id, key);
+    observedTicks.push({ order, tick });
+    checkIdentity(tick, key);
+
+    const common = {
+      observed_at_utc: tick.received_at_utc,
+      observed_ref: tick.observation_id,
+      symbol: tick.symbol,
+    };
 
     // out_of_order: evento estrictamente anterior al high-watermark del símbolo.
     const watermark = applyTickWatermark(state, tick);
@@ -210,7 +270,7 @@ export function deriveMarketData(
         incident_type: 'out_of_order',
         related_refs: [watermark.observationId],
       });
-      addFlag(observationId, 'out_of_order');
+      addFlag(key, 'out_of_order');
     }
 
     applyTickContinuity(state, tick, maximumGap);
@@ -224,7 +284,7 @@ export function deriveMarketData(
         incident_type: 'delivery_delayed',
         related_refs: [],
       });
-      addFlag(observationId, 'delivery_delayed');
+      addFlag(key, 'delivery_delayed');
     }
   };
 
@@ -282,22 +342,33 @@ export function deriveMarketData(
         applyConnectionOpened(state, event, profile, sink);
         break;
       case 'history_recovery_result': {
+        const pendingBefore = state.pendingContinuity.get(event.symbol);
         const extremes = applyHistoryRecovery(state, event, profile, sink, () =>
           gapBoundaries(event),
         );
         if (extremes?.after !== undefined) {
-          addFlag(extremes.after, 'event_gap_unresolved');
+          addFlag(streamTickKeys.get(extremes.after) ?? extremes.after, 'event_gap_unresolved');
+        }
+        if (profile.rules.history_ticks) {
+          const frames = historyFrames.get(event.connection_id) ?? [];
+          historyFrames.delete(event.connection_id);
+          if (event.status === 'complete' && resolvesExactly(event, pendingBefore)) {
+            for (const recovered of historyTicksOf(event, frames)) {
+              historyTicks.push(recovered);
+              checkIdentity(recovered, tickKey(recovered));
+            }
+          }
         }
         break;
       }
     }
   });
 
-  const ticks = observedTicks
-    .map(({ tick }) =>
+  const ticks = [...observedTicks.map(({ tick }) => tick), ...historyTicks]
+    .map((tick) =>
       marketTickSchema.parse({
         ...tick,
-        quality_flags: [...(flags.get(tick.observation_id) ?? [])].sort(),
+        quality_flags: [...(flags.get(tickKey(tick)) ?? [])].sort(),
       }),
     )
     .sort(compareTicks);

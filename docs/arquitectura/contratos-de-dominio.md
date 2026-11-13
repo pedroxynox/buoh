@@ -228,6 +228,8 @@ quality_flags: QualityIncidentType[]
 
 Dos observaciones pueden compartir fingerprint sin compartir `observation_id`. El adaptador conserva el lexema numérico del payload o usa decimal exacto para producir `quote_decimal`; no deriva la cotización mediante aritmética binaria de `JSON.parse`.
 
+Un tick del flujo (`origin: "stream"`) es el único de su observación. Desde las reglas 3.0.0, un tick que trae la historia (`origin: "history_recovery"`) lleva el `observation_id`, el `raw_payload_sha256`, el `received_at_utc`, la fuente y el conector del frame `history` que lo trajo, así que varios ticks comparten el `observation_id` de su frame y se distinguen por `event_time_utc` (ver «Semántica ejecutable de reglas 3.0.0»).
+
 ## `DataQualityIncident`
 
 ```text
@@ -324,6 +326,8 @@ logical_content_sha256: Sha256Hex
 ```
 
 Orden obligatorio de roles: `source_events`, `normalized_ticks`, `quality_incidents`, `operational_conditions`; dentro del rol, `segment_index` asciende de cero sin huecos. Cada rol aparece al menos una vez. Una secuencia vacía usa un artefacto índice cero, conteo cero, cero bytes y hash `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+`source_events` lleva un artefacto por segmento del log. Los roles derivados (`normalized_ticks`, `quality_incidents` y `operational_conditions`) llevan uno con las reglas 1.0.0 y 2.0.0. Con las 3.0.0 se dividen en partes de como mucho 5000 registros, en su orden canónico: un rol con *n* registros tiene ⌈*n* / 5000⌉ partes, y al menos una, la vacía si no tiene ninguno ([ADR-0020](adr/0020-datasets-vivos.md) §7). El tamaño lo fija el conjunto de reglas (`derived_part_records`), así que no cambia sin otra versión, y el replay une las partes de cada rol en su orden.
 
 ## `StorageObjectRef`
 
@@ -561,6 +565,7 @@ Decididas por el propietario antes de F1.4 para fuentes que mezclan varios tipos
 |---|---|---|---|
 | `1.0.0` | `1.0.0` | `1.0.0` | vectores sintéticos v1 |
 | `2.0.0` | `2.0.0` | `2.0.0` | Deriv y fuentes con varios tipos de mensaje |
+| `3.0.0` | `3.0.0` | `2.0.0` | los datasets vivos de Deriv: las 2.0.0 más los ticks de la historia y los artefactos por partes (ver «Semántica ejecutable de reglas 3.0.0») |
 
 Las reglas 2.0.0 son las 1.0.0 con estas diferencias:
 
@@ -574,6 +579,21 @@ Las reglas 2.0.0 son las 1.0.0 con estas diferencias:
 Cada registro de un dataset declara la misma versión de contrato que su manifiesto, y cada incidencia sus mismas reglas; `validateDatasetConsistency` lo exige (`DATASET_VERSION_MISMATCH`). El replay en `--verify-only` acepta solo esquemas de incidencias con lector y coherentes con las reglas declaradas cuando esas reglas están implementadas; la recomputación exige además un conjunto de reglas implementado.
 
 Aplicadas a los source events del vector v1, las reglas 2.0.0 dan los mismos ticks y las mismas incidencias y condiciones, salvo sus campos de versión e IDs derivados. El vector v1 sigue fijado a 1.0.0, y el replay conserva lector y recomputación para ambos conjuntos.
+
+### Semántica ejecutable de reglas 3.0.0
+
+Desde F2.5 ([ADR-0020](adr/0020-datasets-vivos.md) §2, §3 y §7), para publicar los datasets vivos de Deriv. Son las reglas 2.0.0 con dos diferencias, y con las demás entradas dan lo mismo que ellas. Son mayores porque cambian el resultado de entradas que 2.0.0 ya define: una respuesta `history` deja de producir solo raw, y un rol derivado con más de 5000 registros deja de ser un solo artefacto.
+
+- **Perfil.** Como el 2.0.0, declara `non_tick_msg_types`, y tiene que incluir `history`: los ticks de la historia salen de esas respuestas, que así no son candidatas a tick. Crear un perfil 3.0.0 sin `history` falla. Un perfil de medición sigue usando las reglas 2.0.0 (ver «Perfil de medición»).
+- **Ticks de la historia.** Un `HistoryRecoveryResult` `complete` que resuelve la continuidad pendiente de su símbolo en la misma derivación, con el rango exacto de ese hueco (`from_event_time_utc` = inicio + 1 ms y `to_event_time_utc` = fin − 1 ms, el de `pendingGaps`), convierte en `MarketTick` los ticks de su historia. Un resultado `partial` o `unavailable`, uno `complete` sin continuidad pendiente, como el de un hueco que empezó antes del primer segmento del dataset, y uno con un rango mayor que el del hueco no dan ticks: sus páginas siguen solo en el raw.
+- **Qué páginas.** Las del último intento de la sesión, que correlaciona cada respuesta por su `req_id`, un número entero positivo que asigna creciente en cada conexión: los frames `history` de la misma conexión, posteriores al resultado anterior de esa conexión, cuya petición (`echo_req.ticks_history`) es el símbolo del resultado y cuyo `req_id` es igual o mayor que el de la página de mayor `req_id` cuya petición termina en E (`echo_req.end`, como entero, número o texto). Una respuesta con el `req_id` en texto, 0 o sin él no es una página. Las páginas de otra conexión, como las de una recuperación que se abandonó al perderse la conexión, no cuentan, aunque repitan los `req_id`, que vuelven a empezar en cada conexión. S y E son los segundos de los extremos: S = `from_event_time_utc` − 1 ms y E = `to_event_time_utc` + 1 ms. Así no cuenta la respuesta tardía de un intento anterior.
+- **Qué ticks.** Los de esas páginas con un tiempo estrictamente entre S y E. Cada página pasa las comprobaciones de ADR-0015 §4 que no necesitan el esquema de respuesta (`readHistoryTicks`, en `packages/domain`): `history.times`, `history.prices` y `pip_size`; `pip_size` de valor entero de 0 a 18, también con una fracción de ceros (`2.0`); las dos listas de la misma longitud; tiempos enteros estrictamente crecientes dentro de lo que pidió la página; y precios que acepta la regla de `quote_decimal` con ese `pip_size`. Si una página no las pasa, o los tiempos distintos no suman `recovered_event_count`, la derivación aborta: la sesión ya comprobó esas mismas páginas.
+- **Sus campos.** `origin: "history_recovery"`; `observation_id`, `raw_payload_sha256`, `received_at_utc`, `source` y `connector_version` del frame; `event_time_utc`, su segundo en UTC con milisegundos; `pip_size`, el de la página; y `quote_decimal`, el lexema de su precio con ese `pip_size`.
+- **Sus reglas.** Entran en la derivación en la posición de su resultado, en orden de tiempo, con `duplicate_exact` y `source_time_conflict` contra todos los ticks anteriores, del flujo y de la historia; y un tick posterior, de cualquiera de los dos, se compara también con ellos. No mueven el high-watermark, no deciden la continuidad, no se evalúan con `out_of_order` ni con `delivery_delayed`, y no son extremos de un hueco. Las marcas van con cada tick, por su `observation_id` y su `event_time_utc`; en sus incidencias, `observed_ref` y `related_refs` citan el frame, y la evidencia dice qué tick.
+- **Partes.** Los roles derivados se dividen en partes de 5000 registros (ver `LogicalArtifactRef`).
+- **El estado vivo.** El pliegue de [ADR-0017](adr/0017-punto-de-control-de-la-derivacion-en-vivo.md) §3 no produce ticks ni artefactos, así que da lo mismo con las reglas 2.0.0 y 3.0.0 para un mismo perfil de umbrales.
+
+Implementado en `packages/domain` (`RULE_SETS['3.0.0']`, `deriveMarketData`, `historyTicksOf`, `readHistoryTicks` y `buildDatasetPublication`). Su vector está en `packages/domain/test/rules-3-0-0.test.ts` (ver «Oráculo inicial»).
 
 ### Validador del esquema de fuente
 
@@ -807,9 +827,9 @@ AuditObject = { kind: "account" | "credential" | "link" | "session", id: UuidV7 
 - Cambio aditivo compatible incrementa minor; cambio de semántica, tipo, requiredness, orden o canonicalización incrementa major.
 - Contratos internos son estrictos y productores/consumidores se actualizan coordinadamente.
 - Payload externo se preserva completo como raw; el adaptador extrae campos validados y tolera extras solo si el esquema fijado lo permite.
-- Toda versión mayor conserva lector/replay mientras exista un dataset que la referencie, o documenta migración explícita sin sobrescribir originales. Así conviven hoy las incidencias 1.0.0 y 2.0.0 y los conjuntos de reglas 1.0.0 y 2.0.0.
+- Toda versión mayor conserva lector/replay mientras exista un dataset que la referencie, o documenta migración explícita sin sobrescribir originales. Así conviven hoy las incidencias 1.0.0 y 2.0.0 y los conjuntos de reglas 1.0.0, 2.0.0 y 3.0.0.
 - TypeScript y futuro Python comparten JSON Schema generado y vectores.
 
 ## Oráculo inicial
 
-[`test-vectors/market-data/v1`](../../test-vectors/market-data/v1/) es normativo para serialización lógica, hashes, calidad, salud y fallo de persistencia. Sus datos son sintéticos. El verificador limita cada archivo a 8 MiB y cada manifiesto a 64 MiB declarados, rechaza paths absolutos, traversal y symlinks, y valida expectativas/perfiles además de checksums.
+[`test-vectors/market-data/v1`](../../test-vectors/market-data/v1/) es normativo para serialización lógica, hashes, calidad, salud y fallo de persistencia. Sus datos son sintéticos. Las reglas 3.0.0 tienen su propio vector sintético, con las expectativas escritas a mano y el `dataset_id` fijado, en [`packages/domain/test/rules-3-0-0.test.ts`](../../packages/domain/test/rules-3-0-0.test.ts), que corre con `pnpm run test:vectors` bajo las mismas guardas de reloj, azar y red. El verificador limita cada archivo a 8 MiB y cada manifiesto a 64 MiB declarados, rechaza paths absolutos, traversal y symlinks, y valida expectativas/perfiles además de checksums.

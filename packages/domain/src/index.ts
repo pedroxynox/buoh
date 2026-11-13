@@ -19,6 +19,7 @@ export {
   type HealthLogFacts,
   type LiveHealthInput,
 } from './health.js';
+export { readHistoryTicks, type HistoryPageRange, type HistoryTick } from './history-ticks.js';
 export {
   JsonLexemeError,
   parseJsonPreservingNumbers,
