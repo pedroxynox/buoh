@@ -169,29 +169,32 @@ export async function planDataset(input: PlanDatasetInput): Promise<DatasetPlan>
     to,
   });
 
-  await readUpTo(input.from);
-  if (segments.length === 0) {
-    return {
-      elements: reading.overflowElements,
-      segment_index: input.from,
-      status: 'segment_too_large',
-    };
-  }
+  const tooLarge = (): DatasetPlan => ({
+    elements: reading.overflowElements,
+    segment_index: input.from,
+    status: 'segment_too_large',
+  });
   if (!reachedMark && !input.logTerminated) {
     // Todos los segmentos cerrados empiezan antes de la marca, así que el objetivo es uno de ellos o
     // uno posterior. Si el techo llega antes, ningún final posible cabe: el dataset ya está decidido.
     // Para no leer los segmentos en cada ejecución, solo los lee si sus source events, que dan las
-    // filas, ya pasan el techo; si lo pasan solo con los ticks recuperados, espera a la marca.
+    // filas, ya pasan el techo; si lo pasan solo con los ticks recuperados, espera a la marca
+    // (precisión del PR 3a de ADR-0020 §7).
     const events = rows.reduce((sum, row) => sum + row.event_count, 0);
     if (events <= ceiling) {
       return { reason: 'mark_not_reached', status: 'not_due' };
     }
+    // Los source events pasan el techo, así que leer hasta el último cerrado lo alcanza.
     await readUpTo(lastClosed);
-    if (!reading.ceilingReached) {
-      return { reason: 'mark_not_reached', status: 'not_due' };
+    if (segments.length === 0) {
+      return tooLarge();
     }
     const lastRead = input.from + segments.length - 1;
     return due(lastRead, derive(lastRead));
+  }
+  await readUpTo(input.from);
+  if (segments.length === 0) {
+    return tooLarge();
   }
   // Con la marca alcanzada, el primer segmento siempre empieza antes que ella; en un log terminado
   // sin alcanzarla, el objetivo es su último segmento.

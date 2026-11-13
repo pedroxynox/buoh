@@ -238,7 +238,7 @@ const rowsOf = (segments: readonly SourceEvent[][]) =>
 
 function plan(
   segments: SourceEvent[][],
-  options: { from?: number; logTerminated?: boolean; ceiling?: number } = {},
+  options: { from?: number; logTerminated?: boolean; ceiling?: number; reads?: number[] } = {},
 ): Promise<DatasetPlan> {
   const from = options.from ?? 0;
   return planDataset({
@@ -248,6 +248,7 @@ function plan(
     logTerminated: options.logTerminated ?? false,
     profile,
     readSegment: (index) => {
+      options.reads?.push(index);
       const events = segments[index];
       if (events === undefined) {
         throw new TypeError(`Segmento ${String(index)} sin leer.`);
@@ -414,6 +415,21 @@ describe('el final de un dataset (ADR-0020 §7)', () => {
       reason: 'mark_not_reached',
       status: 'not_due',
     });
+  });
+
+  it('sin la marca, no lee ningún segmento si los source events de las filas caben en el techo', async () => {
+    // 60 segmentos con 65 source events, y la historia del segmento 12 recupera 100 ticks: 165
+    // elementos, que pasan el techo de 100. Las filas no lo saben, así que espera la marca, sin leer.
+    const reads: number[] = [];
+    const segments = buildLog(60, { close: 10, history: 12, interior: 100 });
+    expect(await plan(segments, { ceiling: 100, reads })).toEqual({
+      reason: 'mark_not_reached',
+      status: 'not_due',
+    });
+    expect(reads).toEqual([]);
+    // Al llegar la marca, decide igual que si lo hubiera sabido: termina en el último que cabe.
+    const later = buildLog(80, { close: 10, history: 12, interior: 100 });
+    expect(summary(await plan(later, { ceiling: 100 }))).toMatchObject({ status: 'due', to: 11 });
   });
 
   it('sin la marca, un primer segmento que pasa el techo se avisa enseguida', async () => {

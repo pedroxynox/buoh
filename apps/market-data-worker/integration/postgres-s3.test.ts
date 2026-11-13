@@ -257,6 +257,8 @@ describe('integración PostgreSQL + S3-compatible local', () => {
       }),
     );
     expect(direct).toBeInstanceOf(PublicationConflictError);
+    // Lo rechazó la transacción, no la consulta previa (ADR-0020 §9).
+    expect((direct as PublicationConflictError).step).toBe('manifest_commit');
   });
 
   it.each([
