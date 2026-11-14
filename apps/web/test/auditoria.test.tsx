@@ -370,6 +370,19 @@ describe('la vista de los eventos de datos', () => {
     expect(html).not.toContain('Datos ficticios');
   });
 
+  it('con la lista cortada y solo publicaciones, sin logs leídos, también dice el corte', () => {
+    const html = render({
+      kind: 'ready',
+      data: {
+        logs: [],
+        events: Array.from({ length: DATA_EVENTS_LIMIT }, () => ({ ...PUBLICATION, log: 1 })),
+        truncated: true,
+      },
+    });
+    expect(html).toContain(`Se muestran los ${String(DATA_EVENTS_LIMIT)} más recientes`);
+    expect(html).not.toContain('Se leyó');
+  });
+
   it('con la lista cortada, lo dice', () => {
     const html = render({
       kind: 'ready',

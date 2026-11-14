@@ -15,13 +15,15 @@ export type DataEventsState =
 function retentionNote(data: DataEvents | null): string {
   const base =
     'Cada evento sigue en el log de su semana y se borra con él, a los 30 días de su última escritura. Las publicaciones de los datasets no vencen: siguen aunque su log ya no exista.';
-  if (data === null || data.logs.length === 0) {
+  if (data === null) {
     return base;
   }
   const read =
-    data.logs.length === 1
-      ? ` Se leyó el log ${spanishList(data.logs)}.`
-      : ` Se leyeron los logs ${spanishList(data.logs)}.`;
+    data.logs.length === 0
+      ? ''
+      : data.logs.length === 1
+        ? ` Se leyó el log ${spanishList(data.logs)}.`
+        : ` Se leyeron los logs ${spanishList(data.logs)}.`;
   const cut = data.truncated
     ? ` Se muestran los ${String(DATA_EVENTS_LIMIT)} más recientes: hay otros más viejos.`
     : '';
@@ -35,7 +37,11 @@ function retentionNote(data: DataEvents | null): string {
  */
 export function EventosDeDatosView({ state }: { readonly state: DataEventsState }) {
   return (
-    <Card title="Eventos de datos" subtitle="De los logs de la captura" headingLevel={2}>
+    <Card
+      title="Eventos de datos"
+      subtitle="De los logs de la captura y de los datasets publicados"
+      headingLevel={2}
+    >
       {state.kind === 'loading' ? (
         <p className="b-secondary">Cargando los eventos de datos…</p>
       ) : state.kind === 'error' ? (

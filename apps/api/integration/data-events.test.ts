@@ -562,6 +562,35 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
     expect(
       dataEventsSchema.parse(without.body).events.filter((event) => event.kind === 'publication'),
     ).toEqual([]);
+    // Con el esquema y sin una de sus tablas, no se calla: internal, como sin privilegios.
+    await resetDatasets();
+    await ready(admin).query(`DROP TABLE ${DATASETS_SCHEMA}.dataset_log_ranges`);
+    const broken = await getEvents();
+    expect(broken.status).toBe(500);
+    expect(broken.lines).toContainEqual(expect.objectContaining({ event: 'api_error' }));
+    await resetDatasets();
+  });
+
+  it(`las publicaciones cuentan en el corte: con ${String(DATA_EVENTS_LIMIT)}, la lista entera; con más, las más recientes y cortada`, async () => {
+    // El 2027-01-01 los logs 1 a 3 vencieron: solo quedan las publicaciones, que no vencen.
+    const at = Date.parse('2027-01-01T00:00:00.000Z');
+    const published = (index: number) =>
+      new Date(Date.parse('2026-11-20T00:00:00.000Z') + index * 1000).toISOString();
+    for (let index = 0; index < DATA_EVENTS_LIMIT; index += 1) {
+      await datasetPublication(2, 'test', published(index));
+    }
+    const exact = dataEventsSchema.parse((await getEvents(ready(reader), at)).body);
+    expect(exact.logs).toEqual([]);
+    expect(exact.events).toHaveLength(DATA_EVENTS_LIMIT);
+    expect(exact.truncated).toBe(false);
+    // Dos más que el límite: se ven las más nuevas, de la última a la tercera.
+    for (const index of [DATA_EVENTS_LIMIT, DATA_EVENTS_LIMIT + 1]) {
+      await datasetPublication(2, 'test', published(index));
+    }
+    const cut = dataEventsSchema.parse((await getEvents(ready(reader), at)).body);
+    expect(cut.truncated).toBe(true);
+    expect(cut.events[0]).toMatchObject({ at_utc: published(DATA_EVENTS_LIMIT + 1) });
+    expect(cut.events.at(-1)).toMatchObject({ at_utc: published(2) });
     await resetDatasets();
   });
 

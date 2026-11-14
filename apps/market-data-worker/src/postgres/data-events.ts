@@ -321,14 +321,15 @@ export async function readLogDataEvents(
   };
 }
 
-/** El esquema que no existe (`3F000`) o una tabla que no existe (`42P01`). */
-const MISSING = new Set(['3F000', '42P01']);
+/** Una tabla que no existe: con el nombre del esquema, también si es el esquema el que falta. */
+const UNDEFINED_TABLE = '42P01';
 
 /**
  * Las publicaciones de los datasets (ADR-0020 §10): las `limit` más recientes de `source` en
  * `environment` de `buoh_datasets.published_manifest_records`, cada una con el log de su dataset
  * (`dataset_log_ranges`) y comprobada contra su contrato. Sin el esquema `buoh_datasets`, que crea
- * `buoh-operaciones` antes de la primera publicación, no hay ninguna. Lanza `DataEventIntegrityError`
+ * `buoh-operaciones` antes de la primera publicación, no hay ninguna; con el esquema y sin una de
+ * sus tablas, rechaza con el error de PostgreSQL, como sin privilegios (`42501`). Lanza `DataEventIntegrityError`
  * si una fila no pasa esas comprobaciones. No escribe nada, y nombra el esquema en cada tabla, para
  * un pool sin él en el `search_path`.
  */
@@ -355,7 +356,14 @@ export async function readDatasetPublications(
     );
     return rows.map(publicationOf);
   } catch (error) {
-    if (MISSING.has(String((error as { code?: unknown } | null)?.code))) {
+    if ((error as { code?: unknown } | null)?.code !== UNDEFINED_TABLE) {
+      throw error;
+    }
+    const { rows } = await pool.query<{ missing: boolean }>(
+      'SELECT to_regnamespace($1) IS NULL AS missing',
+      [DATASETS_SCHEMA],
+    );
+    if (rows[0]?.missing === true) {
       return [];
     }
     throw error;
