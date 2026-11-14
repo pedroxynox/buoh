@@ -2,6 +2,9 @@
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 
+/** Un prefijo de claves: vacío, o segmentos de minúsculas, cifras, `_` y `-`, cada uno con su `/`. */
+export const KEY_PREFIX = /^(?:[a-z0-9][a-z0-9_-]*\/)*$/u;
+
 /** Clave final content-addressed de un objeto: `sha256/<object_bytes_sha256>`. */
 export function contentKey(objectBytesSha256: string): string {
   if (!SHA256_PATTERN.test(objectBytesSha256)) {

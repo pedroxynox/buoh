@@ -21,6 +21,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "datasets:publish": "node --max-semi-space-size=1 --max-old-space-size=256 dist/cli/publish-dataset.js",
     "db:migrate": "node dist/cli/migrate.js",
     "fixture:publish": "node dist/cli/publish-fixture.js",
     "ingest": "node --max-semi-space-size=1 --max-old-space-size=256 dist/cli/ingest.js",

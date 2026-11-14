@@ -56,6 +56,12 @@ export type ReplayMode = 'recompute' | 'verify-only';
 export interface ReplayInput {
   readonly datasetId: string;
   readonly environment: DeploymentEnvironment;
+  /**
+   * El prefijo con que empiezan las claves del manifiesto y de los objetos en el bucket: `datasets/`
+   * para los datasets vivos de `production` (ADR-0020 §5). Vacío por defecto, como en F1.3. Un
+   * objeto fuera de `<prefijo>sha256/<hash>` es `OBJECT_LOCATION_UNSUPPORTED`.
+   */
+  readonly keyPrefix?: string;
   readonly metadata: MetadataStore;
   readonly mode: ReplayMode;
   readonly objects: ObjectStore;
@@ -175,6 +181,9 @@ async function loadManifest(
   if (key === null) {
     fail('OBJECT_LOCATION_UNSUPPORTED', 'El manifiesto está fuera del bucket configurado.');
   }
+  if (!key.startsWith(input.keyPrefix ?? '')) {
+    fail('OBJECT_LOCATION_UNSUPPORTED', 'El manifiesto está fuera del prefijo de los datasets.');
+  }
   const bytes = await readObject(
     input.objects,
     key,
@@ -219,7 +228,7 @@ async function loadLogicalObjects(
   const logicalById = new Map<string, Uint8Array>();
   for (const object of manifest.storage_objects) {
     const key = keyFromUri(object.uri, input.objects.bucket);
-    if (key !== contentKey(object.object_bytes_sha256)) {
+    if (key !== (input.keyPrefix ?? '') + contentKey(object.object_bytes_sha256)) {
       fail('OBJECT_LOCATION_UNSUPPORTED', 'El objeto no está en su clave content-addressed.', {
         artifact_id: object.artifact_id,
       });

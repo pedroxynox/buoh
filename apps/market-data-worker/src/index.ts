@@ -176,11 +176,29 @@ export {
   type PublishDatasetInput,
 } from './publication.js';
 export {
+  DATASET_WRITE_CONCURRENCY,
   publishLiveDataset,
   type PublishLiveDatasetInput,
   type PublishLiveOutcome,
 } from './datasets/publish-live.js';
 export { PostgresDatasetStore } from './postgres/dataset-store.js';
+export {
+  logReader,
+  PUBLICATION_BEHIND_MS,
+  publicationFailure,
+  publishDatasetCommand,
+  PUBLISH_USAGE,
+  type PublicationFailureReason,
+  type PublicationLogReader,
+  type PublicationStores,
+  type PublishCommandDependencies,
+} from './datasets/publish-command.js';
+export { openPublicationStores } from './datasets/publication-stores.js';
+export {
+  replayCommand,
+  type ReplayCommandDependencies,
+  type ReplayCommandStores,
+} from './replay-command.js';
 export {
   DATASET_ELEMENT_CEILING,
   DATASET_END_STEP_SEGMENTS,
