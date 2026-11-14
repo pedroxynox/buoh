@@ -8,9 +8,11 @@ import {
   apiHealthSchema,
   auditEventsResponseSchema,
   DATA_CHART_MAX_HOURS,
+  DATA_DATASETS_LIMIT,
   dataCatalogSchema,
   dataChartQuerySchema,
   dataChartSchema,
+  dataDatasetsSchema,
   DATA_EVENTS_LIMIT,
   dataEventsSchema,
   dataHealthSchema,
@@ -888,5 +890,179 @@ describe('AccountPreferences y PreferencesRequest (ADR-0019 §7)', () => {
         expect(accepts(schema, value), JSON.stringify(value)).toBe(false);
       }
     }
+  });
+});
+
+describe('DataDatasets (ADR-0020 §10)', () => {
+  const hex = (digit: string) => digit.repeat(64);
+  const verification = {
+    status: 'passed',
+    verified_at_utc: '2026-11-14T12:21:33.759Z',
+    error_code: null,
+  };
+  const dataset = {
+    dataset_id: `sha256:${hex('1')}`,
+    publication_id: '019b76da-a800-7000-8000-000000000042',
+    published_at_utc: '2026-11-14T12:21:23.290Z',
+    source: 'deriv_options',
+    symbols: ['R_100'],
+    log: 1,
+    first_segment: 0,
+    last_segment: 71,
+    event_time_from_utc: '2026-11-01T00:06:06.000Z',
+    event_time_to_utc: '2026-11-01T05:59:58.000Z',
+    source_event_count: 11_226,
+    raw_frame_count: 11_200,
+    normalized_tick_count: 11_190,
+    incident_count: 3,
+    condition_event_count: 2,
+    quality_rule_version: '3.0.0',
+    quality_profile_id: 'deriv_options-publication-v1-R_100',
+    clean: true,
+    pending_continuity_symbols: [],
+    open_condition_types: [],
+    incidents: [
+      { incident_type: 'connection_lost', severity: 'warning', count: 1 },
+      { incident_type: 'duplicate_exact', severity: 'info', count: 2 },
+    ],
+    verifications: {
+      verify_only: verification,
+      recompute: { ...verification, verified_at_utc: '2026-11-14T12:21:46.868Z' },
+    },
+  };
+  const older = {
+    ...dataset,
+    dataset_id: `sha256:${hex('2')}`,
+    publication_id: '019b76da-a800-7000-8000-000000000041',
+    published_at_utc: '2026-11-14T12:16:00.000Z',
+    first_segment: 72,
+    last_segment: 142,
+    // Sin ticks: el período es null; sin terminar limpio, con lo que dejó abierto.
+    event_time_from_utc: null,
+    event_time_to_utc: null,
+    normalized_tick_count: 0,
+    incident_count: 0,
+    clean: false,
+    pending_continuity_symbols: ['R_100'],
+    open_condition_types: ['connection_lost'],
+    incidents: [],
+    verifications: {
+      verify_only: {
+        status: 'failed',
+        verified_at_utc: verification.verified_at_utc,
+        error_code: 'CONTENT_MISMATCH',
+      },
+      recompute: null,
+    },
+  };
+  const response = { datasets: [dataset, older], truncated: false };
+
+  it('acepta los datasets del más nuevo al más viejo, la lista vacía y una lista llena cortada', () => {
+    expect(accepts(dataDatasetsSchema, response)).toBe(true);
+    expect(accepts(dataDatasetsSchema, { datasets: [], truncated: false })).toBe(true);
+    const full = Array.from({ length: DATA_DATASETS_LIMIT }, (_, index) => ({
+      ...dataset,
+      dataset_id: `sha256:${index.toString(16).padStart(64, '0')}`,
+    }));
+    expect(accepts(dataDatasetsSchema, { datasets: full, truncated: true })).toBe(true);
+    // Una verificación incompleta lleva el código de su última ejecución, si lo tiene.
+    for (const error_code of ['CHILD_TIMEOUT', null]) {
+      expect(
+        accepts(dataDatasetsSchema, {
+          datasets: [
+            {
+              ...dataset,
+              verifications: {
+                verify_only: {
+                  status: 'incomplete',
+                  verified_at_utc: verification.verified_at_utc,
+                  error_code,
+                },
+                recompute: null,
+              },
+            },
+          ],
+          truncated: false,
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it('rechaza el orden, el corte, un dataset repetido y lo que no cuadra dentro de cada dataset', () => {
+    const one = (value: Record<string, unknown>) => ({ datasets: [value], truncated: false });
+    for (const [index, value] of [
+      { ...response, datasets: [older, dataset] },
+      { ...response, truncated: true },
+      { datasets: [dataset, dataset], truncated: false },
+      one({ ...dataset, last_segment: -1 }),
+      one({ ...dataset, first_segment: 72, last_segment: 71 }),
+      // El período es null exactamente cuando no hay ticks, y va en orden.
+      one({ ...dataset, event_time_to_utc: null }),
+      one({ ...dataset, normalized_tick_count: 0 }),
+      one({
+        ...dataset,
+        event_time_from_utc: dataset.event_time_to_utc,
+        event_time_to_utc: dataset.event_time_from_utc,
+      }),
+      one({ ...dataset, raw_frame_count: dataset.source_event_count + 1 }),
+      // Las incidencias por tipo y gravedad suman `incident_count`, sin repetirse y en orden.
+      one({ ...dataset, incident_count: 4 }),
+      one({ ...dataset, incidents: [...dataset.incidents].reverse() }),
+      one({
+        ...dataset,
+        incident_count: 2,
+        incidents: [
+          { incident_type: 'duplicate_exact', severity: 'info', count: 1 },
+          { incident_type: 'duplicate_exact', severity: 'info', count: 1 },
+        ],
+      }),
+      one({ ...dataset, incidents: [{ incident_type: 'otra', severity: 'info', count: 3 }] }),
+      one({
+        ...dataset,
+        incident_count: 0,
+        incidents: [{ incident_type: 'duplicate_exact', severity: 'info', count: 0 }],
+      }),
+      // Limpio es sin continuidad pendiente ni connection_lost abierta.
+      one({ ...dataset, pending_continuity_symbols: ['R_100'] }),
+      one({ ...dataset, open_condition_types: ['connection_lost'] }),
+      one({ ...older, clean: true }),
+      one({ ...older, clean: false, pending_continuity_symbols: [], open_condition_types: [] }),
+      one({ ...older, open_condition_types: ['connection_lost', 'connection_lost'] }),
+      one({ ...dataset, symbols: [] }),
+      one({ ...dataset, symbols: ['R_50', 'R_100'] }),
+      // Una verificación que pasó no lleva código; una que falló, sí.
+      one({
+        ...dataset,
+        verifications: {
+          ...dataset.verifications,
+          verify_only: { ...verification, error_code: 'X' },
+        },
+      }),
+      one({
+        ...dataset,
+        verifications: {
+          ...dataset.verifications,
+          verify_only: { ...verification, status: 'failed' },
+        },
+      }),
+      one({
+        ...dataset,
+        verifications: {
+          ...dataset.verifications,
+          verify_only: { ...verification, error_code: 'con un mensaje', status: 'failed' },
+        },
+      }),
+      one({ ...dataset, verifications: { verify_only: verification } }),
+      one({ ...dataset, quality_rule_version: '3' }),
+      one({ ...dataset, publication_id: '00000000-0000-4000-8000-000000000001' }),
+      one({ ...dataset, extra: 1 }),
+    ].entries()) {
+      expect(accepts(dataDatasetsSchema, value), `caso ${String(index)}`).toBe(false);
+    }
+    const tooMany = Array.from({ length: DATA_DATASETS_LIMIT + 1 }, (_, index) => ({
+      ...dataset,
+      dataset_id: `sha256:${index.toString(16).padStart(64, '0')}`,
+    }));
+    expect(accepts(dataDatasetsSchema, { datasets: tooMany, truncated: true })).toBe(false);
   });
 });

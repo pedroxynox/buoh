@@ -1,8 +1,12 @@
 import {
   apiErrorSchema,
+  DATA_DATASETS_LIMIT,
   DATA_EVENTS_LIMIT,
+  dataDatasetsSchema,
   dataEventsSchema,
   dataHealthSchema,
+  type DataDataset,
+  type DataDatasets,
   type DataEvent,
   type DataEvents,
   type DataHealth,
@@ -99,6 +103,10 @@ function appWithReader(reader: Partial<DataReader> | null, ready = true) {
           events: () => {
             calls.push('events');
             return reader.events?.() ?? Promise.reject(new Error('sin eventos en esta prueba'));
+          },
+          datasets: () => {
+            calls.push('datasets');
+            return reader.datasets?.() ?? Promise.reject(new Error('sin datasets en esta prueba'));
           },
         };
   const built = testApp(
@@ -466,5 +474,142 @@ describe('GET /api/v1/datos/eventos (ADR-0019 §5 y §8)', () => {
       'invalid_request',
     );
     expect(calls).not.toContain('events');
+  });
+});
+
+const DATASETS_URL = '/api/v1/datos/datasets';
+const DATASET: DataDataset = {
+  dataset_id: `sha256:${'1'.repeat(64)}`,
+  publication_id: '019b76da-a800-7000-8000-000000000042',
+  published_at_utc: '2026-11-14T12:21:23.290Z',
+  source: 'deriv_options',
+  symbols: ['R_100'],
+  log: 1,
+  first_segment: 0,
+  last_segment: 71,
+  event_time_from_utc: '2026-11-01T00:06:06.000Z',
+  event_time_to_utc: '2026-11-01T05:59:58.000Z',
+  source_event_count: 11_226,
+  raw_frame_count: 11_200,
+  normalized_tick_count: 11_190,
+  incident_count: 1,
+  condition_event_count: 2,
+  quality_rule_version: '3.0.0',
+  quality_profile_id: 'deriv_options-publication-v1-R_100',
+  clean: true,
+  pending_continuity_symbols: [],
+  open_condition_types: [],
+  incidents: [{ incident_type: 'connection_lost', severity: 'warning', count: 1 }],
+  verifications: {
+    verify_only: {
+      status: 'passed',
+      verified_at_utc: '2026-11-14T12:21:33.759Z',
+      error_code: null,
+    },
+    recompute: null,
+  },
+};
+const DATASETS: DataDatasets = { datasets: [DATASET], truncated: false };
+
+describe('GET /api/v1/datos/datasets (ADR-0020 §10)', () => {
+  it('con sesión devuelve los datasets publicados, con las cabeceras del JSON y la cuenta en el registro', async () => {
+    const { app, calls, lines } = appWithReader({ datasets: () => Promise.resolve(DATASETS) });
+    const response = await app.inject({ method: 'GET', url: DATASETS_URL, headers: COOKIE });
+    expect(response.statusCode).toBe(200);
+    expect(dataDatasetsSchema.parse(response.json())).toEqual(DATASETS);
+    for (const [name, value] of Object.entries(EXPECTED_JSON_HEADERS)) {
+      expect(response.headers[name], name).toBe(value);
+    }
+    expect(calls).toEqual(['authenticate', 'datasets']);
+    expect(lines).toEqual([
+      {
+        event: 'api_request',
+        method: 'GET',
+        route: DATASETS_URL,
+        status: 200,
+        duration_ms: 5,
+        request_id: testRequestId(1),
+        account_id: ACCOUNT,
+      },
+    ]);
+  });
+
+  it('también sin ningún dataset y con una lista cortada', async () => {
+    const full: DataDatasets = {
+      datasets: Array.from({ length: DATA_DATASETS_LIMIT }, (_, index) => ({
+        ...DATASET,
+        dataset_id: `sha256:${index.toString(16).padStart(64, '0')}`,
+      })),
+      truncated: true,
+    };
+    for (const datasets of [{ datasets: [], truncated: false }, full] satisfies DataDatasets[]) {
+      const { app } = appWithReader({ datasets: () => Promise.resolve(datasets) });
+      const response = await app.inject({ method: 'GET', url: DATASETS_URL, headers: COOKIE });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual(datasets);
+    }
+  });
+
+  it('renueva la inactividad solo con el token CSRF: una lectura automática no', async () => {
+    const plain = appWithReader({ datasets: () => Promise.resolve(DATASETS) });
+    await plain.app.inject({ method: 'GET', url: DATASETS_URL, headers: COOKIE });
+    expect(plain.calls).toEqual(['authenticate', 'datasets']);
+    const owner = appWithReader({ datasets: () => Promise.resolve(DATASETS) });
+    await owner.app.inject({
+      method: 'GET',
+      url: DATASETS_URL,
+      headers: { ...COOKIE, 'x-csrf-token': CSRF },
+    });
+    expect(owner.calls).toEqual(['authenticate', 'renewActivity', 'datasets']);
+  });
+
+  it('sin sesión responde unauthenticated sin leer nada; sin la credencial de lectura, not_ready', async () => {
+    for (const reader of [{ datasets: () => Promise.resolve(DATASETS) }, null]) {
+      const { app, calls } = appWithReader(reader);
+      expectError(await app.inject({ method: 'GET', url: DATASETS_URL }), 401, 'unauthenticated');
+      expect(calls).not.toContain('datasets');
+    }
+    const missing = appWithReader(null);
+    expectError(
+      await missing.app.inject({ method: 'GET', url: DATASETS_URL, headers: COOKIE }),
+      503,
+      'not_ready',
+    );
+  });
+
+  it('una fila que no pasa sus comprobaciones, o una salida que no cumple DataDatasets, es internal', async () => {
+    class DatasetIntegrityError extends TypeError {
+      override readonly name = 'DatasetIntegrityError';
+    }
+    const stored = appWithReader({
+      datasets: () => Promise.reject(new DatasetIntegrityError('fila con datos')),
+    });
+    const response = await stored.app.inject({ method: 'GET', url: DATASETS_URL, headers: COOKIE });
+    expectError(response, 500, 'internal');
+    expect(stored.lines).toContainEqual({
+      event: 'api_error',
+      request_id: testRequestId(1),
+      error: 'DatasetIntegrityError',
+    });
+    expect(response.body).not.toContain('fila con datos');
+    const invalid = appWithReader({
+      datasets: () =>
+        Promise.resolve({ datasets: [{ ...DATASET, incident_count: 2 }], truncated: false }),
+    });
+    expectError(
+      await invalid.app.inject({ method: 'GET', url: DATASETS_URL, headers: COOKIE }),
+      500,
+      'internal',
+    );
+  });
+
+  it('no admite parámetros de consulta', async () => {
+    const { app, calls } = appWithReader({ datasets: () => Promise.resolve(DATASETS) });
+    expectError(
+      await app.inject({ method: 'GET', url: `${DATASETS_URL}?limit=1`, headers: COOKIE }),
+      400,
+      'invalid_request',
+    );
+    expect(calls).not.toContain('datasets');
   });
 });

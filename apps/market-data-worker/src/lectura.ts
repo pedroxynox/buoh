@@ -170,6 +170,16 @@ export {
   type StoredPublication,
 } from './postgres/data-events.js';
 
+// Los datasets publicados de `buoh_datasets`, para la sección Datos (ADR-0020 §10).
+export {
+  DatasetIntegrityError,
+  readPublishedDatasets,
+  type ReadPublishedDatasetsInput,
+  type StoredDatasetIncidentCount,
+  type StoredDatasetVerification,
+  type StoredPublishedDataset,
+} from './postgres/published-datasets.js';
+
 // El registro operativo.
 export {
   OperationalRegistry,

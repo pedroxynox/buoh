@@ -126,6 +126,7 @@ describe('buildOpenApiDocument', () => {
     ]);
     expect(statuses('/api/v1/datos/salud', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/datos/eventos', 'get')).toEqual(['200', '400', '401', '500', '503']);
+    expect(statuses('/api/v1/datos/datasets', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/datos/grafico', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/datos/catalogo', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/enlace', 'post')).toEqual([
@@ -158,6 +159,7 @@ describe('buildOpenApiDocument', () => {
       'AuditEvents',
       'DataCatalog',
       'DataChart',
+      'DataDatasets',
       'DataEvents',
       'DataHealth',
       'EmptyRequest',

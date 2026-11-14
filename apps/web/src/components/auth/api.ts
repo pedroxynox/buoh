@@ -15,6 +15,7 @@ import type {
   AuditEventsResponse,
   DataCatalog,
   DataChart,
+  DataDatasets,
   DataEvents,
   DataHealth,
   LinkSecret,
@@ -26,6 +27,7 @@ import type {
   Theme,
 } from '@buoh/contracts';
 import { readDataEvents } from '../auditoria/respuesta';
+import { readDataDatasets } from '../datos/respuesta';
 import { readDataCatalog, readDataChart } from '../mercados/respuesta';
 import { readDataHealth } from '../salud/respuesta';
 import { readAccountPreferences } from '../tema';
@@ -184,6 +186,17 @@ export const api = {
       throw new ApiCallError({ code: 'unexpected' });
     }
     return events;
+  },
+  /**
+   * Los datasets publicados (ADR-0020 §10), para la sección Datos, sin el token CSRF, como la salud.
+   * Una respuesta sin la forma de `DataDatasets` es `unexpected`.
+   */
+  dataDatasets: async (): Promise<DataDatasets> => {
+    const datasets = readDataDatasets(await request<unknown>('GET', '/api/v1/datos/datasets'));
+    if (datasets === null) {
+      throw new ApiCallError({ code: 'unexpected' });
+    }
+    return datasets;
   },
   /** El catálogo de Deriv del log activo (ADR-0019 §8), sin el token CSRF, como la salud. */
   dataCatalog: async (): Promise<DataCatalog> => {
