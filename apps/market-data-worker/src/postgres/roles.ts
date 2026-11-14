@@ -3,6 +3,7 @@ import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto';
 import pg, { type PoolClient } from 'pg';
 
 import { POSTGRES_IDENTIFIER } from '../config.js';
+import { DATASETS_SCHEMA } from '../datasets/location.js';
 
 /**
  * Los roles de PostgreSQL de producción (ADR-0018 §8):
@@ -47,8 +48,21 @@ export const API_SCHEMA = 'buoh_api';
  * lo crea cuando tiene su contraseña.
  */
 export const API_READER_ROLE = 'buoh_api_lectura';
-/** Los roles a los que `buoh-operaciones` pone contraseña: los de ejecución y los de la API. */
-export type PasswordRole = LoginRole | typeof API_ROLE | typeof API_READER_ROLE;
+/**
+ * El rol de la publicación de los datasets vivos (ADR-0020 §5), que inicia sesión y es miembro de
+ * `buoh_lectura`, del que hereda la lectura de los logs y de `buoh_datasets`: en `buoh_datasets`,
+ * además, `SELECT` e `INSERT` en sus tablas, salvo `dataset_verifications`, y el uso de sus
+ * secuencias. Lo usa el paso 6 de `buoh-operaciones` (ADR-0020 §8). Como los de la API, no es un
+ * rol de `LOGIN_ROLES`: `buoh-operaciones` solo lo crea cuando tiene su contraseña, que le llega con
+ * el PR 4 de ADR-0020 §13.
+ */
+export const PUBLICATION_ROLE = 'buoh_publicacion';
+/**
+ * Los roles a los que `buoh-operaciones` pone contraseña: los de ejecución, los de la API y el de
+ * la publicación.
+ */
+export type PasswordRole =
+  LoginRole | typeof API_ROLE | typeof API_READER_ROLE | typeof PUBLICATION_ROLE;
 
 /** Conexiones de `buoh_agente` a la vez, para que no ocupe las 100 de Basic-256mb. */
 export const AGENT_CONNECTION_LIMIT = 4;
@@ -92,13 +106,32 @@ export const INGEST_DENIED_TABLES = [
   'operations_reports',
 ] as const;
 
-/** Una tabla de un log que no está en ninguna de las listas: hay que decidir sus privilegios. */
+/**
+ * Las tablas de `buoh_datasets` en las que la publicación lee e inserta (ADR-0020 §5 y §9): los
+ * datasets, sus records y sus incidencias, sus rangos y el registro operativo de la publicación.
+ */
+export const DATASETS_PUBLICATION_TABLES = [
+  'datasets',
+  'published_manifest_records',
+  'dataset_quality_incidents',
+  'dataset_log_ranges',
+  'operational_incidents',
+  'operational_conditions',
+] as const;
+
+/**
+ * Las tablas de `buoh_datasets` que solo escribe `buoh-operaciones`, como `buoh_dueno`: las
+ * verificaciones (ADR-0020 §8, paso 7). `buoh_publicacion` solo las lee.
+ */
+export const DATASETS_OWNER_TABLES = ['dataset_verifications'] as const;
+
+/** Una tabla de un esquema que no está en ninguna de las listas: hay que decidir sus privilegios. */
 export class UnclassifiedTableError extends TypeError {
   readonly table: string;
 
   constructor(table: string) {
     super(
-      `La tabla ${table} no tiene privilegios decididos: añádela a INGEST_WRITE_TABLES o a INGEST_DENIED_TABLES.`,
+      `La tabla ${table} no tiene privilegios decididos: añádela a la lista de privilegios de su esquema.`,
     );
     this.name = 'UnclassifiedTableError';
     this.table = table;
@@ -144,6 +177,7 @@ const ROLE_ATTRIBUTES = {
   [POSTGRES_ROLES.reader]: 'NOLOGIN NOCREATEROLE',
   [API_ROLE]: 'LOGIN NOCREATEROLE',
   [API_READER_ROLE]: 'LOGIN NOCREATEROLE',
+  [PUBLICATION_ROLE]: 'LOGIN NOCREATEROLE',
 } as const;
 
 /** Crea `role` con sus atributos o, si ya existe, se los vuelve a fijar. */
@@ -312,6 +346,67 @@ export async function grantApiPrivileges(client: Client): Promise<void> {
   });
 }
 
+/**
+ * Crea el rol `buoh_publicacion` o, si ya existe, le vuelve a fijar sus atributos (ADR-0020 §5):
+ * inicia sesión y no crea roles. Lo hace miembro de `buoh_lectura`, del que hereda el uso de cada
+ * esquema de log y de `buoh_datasets` y `SELECT` en sus tablas. Lo crea `buoh_dueno`
+ * (`SET LOCAL ROLE`), que lo administra como a los demás, en una transacción. Necesita `buoh_dueno`
+ * y `buoh_lectura` (`ensureRuntimeRoles`). Sin contraseña: la pone `setRolePassword`. Es idempotente.
+ */
+export async function ensurePublicationRole(client: Client): Promise<void> {
+  await inTransaction(client, async () => {
+    await client.query(`SET LOCAL ROLE ${ident(POSTGRES_ROLES.owner)}`);
+    await ensureRole(client, PUBLICATION_ROLE);
+    await client.query(`GRANT ${ident(POSTGRES_ROLES.reader)} TO ${ident(PUBLICATION_ROLE)}`);
+  });
+}
+
+/**
+ * Da sus privilegios en `buoh_datasets` (ADR-0020 §5), en una transacción y como `buoh_dueno`, el
+ * dueño de sus tablas. Es idempotente.
+ * - `buoh_lectura`: uso del esquema y `SELECT` en todas sus tablas. Lo heredan `buoh_salud`, para la
+ *   verificación, `buoh_agente`, `buoh_api_lectura`, para Datos y la Auditoría, y `buoh_publicacion`.
+ * - `buoh_publicacion`: uso del esquema, `SELECT` e `INSERT` en `DATASETS_PUBLICATION_TABLES` y uso
+ *   de las secuencias; ni `INSERT` en `DATASETS_OWNER_TABLES` ni en la tabla de migraciones.
+ * - `buoh_ingesta`: nada.
+ *
+ * Nadie más que `buoh_dueno` puede actualizar, borrar, vaciar ni cambiar el esquema de una tabla.
+ * Necesita `buoh_publicacion` (`ensurePublicationRole`) y las migraciones de `buoh_datasets`. Antes
+ * comprueba que cada tabla del esquema esté en una de esas listas: una tabla nueva sin privilegios
+ * decididos lanza `UnclassifiedTableError` sin dar ninguno.
+ */
+export async function grantDatasetsPrivileges(client: Client): Promise<void> {
+  const known = new Set<string>([
+    MIGRATIONS_TABLE,
+    ...DATASETS_PUBLICATION_TABLES,
+    ...DATASETS_OWNER_TABLES,
+  ]);
+  await inTransaction(client, async () => {
+    await client.query(`SET LOCAL ROLE ${ident(POSTGRES_ROLES.owner)}`);
+    const { rows } = await client.query<{ table_name: string }>(
+      `SELECT table_name FROM information_schema.tables
+        WHERE table_schema = $1 AND table_type = 'BASE TABLE' ORDER BY table_name`,
+      [DATASETS_SCHEMA],
+    );
+    const unknown = rows.find((row) => !known.has(row.table_name));
+    if (unknown !== undefined) {
+      throw new UnclassifiedTableError(unknown.table_name);
+    }
+    const present = new Set(rows.map((row) => row.table_name));
+    const s = ident(DATASETS_SCHEMA);
+    const reader = ident(POSTGRES_ROLES.reader);
+    const publication = ident(PUBLICATION_ROLE);
+    await client.query(`GRANT USAGE ON SCHEMA ${s} TO ${reader}, ${publication}`);
+    await client.query(`GRANT SELECT ON ALL TABLES IN SCHEMA ${s} TO ${reader}`);
+    for (const table of DATASETS_PUBLICATION_TABLES) {
+      if (present.has(table)) {
+        await client.query(`GRANT SELECT, INSERT ON ${s}.${ident(table)} TO ${publication}`);
+      }
+    }
+    await client.query(`GRANT USAGE ON ALL SEQUENCES IN SCHEMA ${s} TO ${publication}`);
+  });
+}
+
 /** Las iteraciones del verificador SCRAM, las de PostgreSQL por defecto. */
 export const SCRAM_ITERATIONS = 4096;
 
@@ -353,7 +448,7 @@ export async function setRolePassword(
   role: PasswordRole,
   password: string,
 ): Promise<void> {
-  if (![...LOGIN_ROLES, API_ROLE, API_READER_ROLE].includes(role)) {
+  if (![...LOGIN_ROLES, API_ROLE, API_READER_ROLE, PUBLICATION_ROLE].includes(role)) {
     throw new TypeError(`${role} no es un rol que inicia sesión.`);
   }
   if (password.length < MIN_ROLE_PASSWORD_LENGTH) {

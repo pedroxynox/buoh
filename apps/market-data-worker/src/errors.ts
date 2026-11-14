@@ -20,22 +20,50 @@ export class PublicationError extends Error {
 }
 
 /**
- * Ya existe un `PublishedManifestRecord` activo para el dataset en el entorno: lo encontró la consulta
- * previa (`precondition`) o lo rechazó la transacción (`manifest_commit`, el paso por defecto).
+ * La publicación choca con lo que ya está publicado (`publication_conflict`): un
+ * `PublishedManifestRecord` activo para el dataset en el entorno, que encontró la consulta previa
+ * (`precondition`) o rechazó la transacción (`manifest_commit`, el paso por defecto); un dataset con
+ * el mismo `dataset_id` y otro core; o, en `buoh_datasets`, una publicación activa sin su fila de
+ * rango o con otro rango (ADR-0020 §9). Repetir no lo cambia.
  */
 export class PublicationConflictError extends PublicationError {
   readonly datasetId: string;
+  readonly reason = 'publication_conflict';
 
   constructor(
     datasetId: string,
-    options?: { cause?: unknown; step?: 'manifest_commit' | 'precondition' },
+    options?: {
+      cause?: unknown;
+      message?: string;
+      step?: 'manifest_commit' | 'precondition';
+    },
   ) {
     super(
       options?.step ?? 'manifest_commit',
-      `El dataset ${datasetId} ya tiene una publicación activa.`,
+      options?.message ?? `El dataset ${datasetId} ya tiene una publicación activa.`,
       options,
     );
     this.name = 'PublicationConflictError';
+    this.datasetId = datasetId;
+  }
+}
+
+/**
+ * El `COMMIT` de la publicación falló sin que se sepa si se confirmó, como cuando la conexión cae
+ * durante él (`commit_outcome_unknown`; ADR-0020 §9, pendiente 1 de F1.3). No es «no se confirmó»:
+ * el intento siguiente comprueba si el dataset ya está publicado antes de repetirlo.
+ */
+export class CommitOutcomeUnknownError extends PublicationError {
+  readonly datasetId: string;
+  readonly reason = 'commit_outcome_unknown';
+
+  constructor(datasetId: string, options?: { cause?: unknown }) {
+    super(
+      'manifest_commit',
+      `No se sabe si el commit de la publicación de ${datasetId} se confirmó.`,
+      options,
+    );
+    this.name = 'CommitOutcomeUnknownError';
     this.datasetId = datasetId;
   }
 }

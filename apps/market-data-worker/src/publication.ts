@@ -8,7 +8,7 @@ import {
 import { createStorageEncoder, storageContentType } from './encoding.js';
 import { PublicationConflictError, PublicationError, PublicationLimitError } from './errors.js';
 import { contentKey, keyFromUri, manifestKey, objectUri } from './object-keys.js';
-import type { MetadataStore, ObjectStore } from './ports.js';
+import type { DatasetLogRange, MetadataStore, ObjectStore } from './ports.js';
 import { REPLAY_READ_LIMITS, type ReplayReadLimits } from './replay.js';
 
 export interface PublishDatasetInput {
@@ -100,6 +100,16 @@ function checkReadLimits(
  * dataset invisible y los objetos como huérfanos.
  */
 export async function publishDataset(input: PublishDatasetInput): Promise<DatasetPublication> {
+  return writePublication(preparePublication(input), input);
+}
+
+/**
+ * Lo que publica `publishDataset` antes de consultar ni escribir nada: construye la publicación y
+ * comprueba los límites del replay (ADR-0020 §7). Lanza `PublicationLimitError` si pasa uno.
+ */
+export function preparePublication(
+  input: Omit<PublishDatasetInput, 'metadata'>,
+): DatasetPublication {
   const { bucket } = input.objects;
   const encode = createStorageEncoder(input.zlibVersion, {
     derived: input.derivedCompression ?? 'none',
@@ -121,7 +131,20 @@ export async function publishDataset(input: PublishDatasetInput): Promise<Datase
 
   // Nunca se publica lo que el replay rechazaría (ADR-0020 §7): antes de consultar ni escribir nada.
   checkReadLimits(publication, logicalSizes, input.limits ?? REPLAY_READ_LIMITS);
+  return publication;
+}
 
+/**
+ * Escribe una publicación preparada (`preparePublication`): la consulta previa, los objetos, el
+ * documento y el commit, con la fila de rango de `buoh_datasets` si la lleva (ADR-0020 §9).
+ */
+export async function writePublication(
+  publication: DatasetPublication,
+  input: Pick<PublishDatasetInput, 'environment' | 'metadata' | 'objects'> & {
+    readonly logRange?: DatasetLogRange;
+  },
+): Promise<DatasetPublication> {
+  const { bucket } = input.objects;
   let active;
   try {
     active = await input.metadata.findActivePublication(publication.dataset_id, input.environment);
@@ -173,6 +196,7 @@ export async function publishDataset(input: PublishDatasetInput): Promise<Datase
       core: publication.core,
       environment: input.environment,
       incidents: publication.derived.incidents,
+      ...(input.logRange === undefined ? {} : { logRange: input.logRange }),
       record: publication.record,
     });
   } catch (error) {

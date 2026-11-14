@@ -7,7 +7,7 @@ import type {
 } from '@buoh/contracts';
 
 import type { CatalogVersion } from '../../src/deriv/ports.js';
-import { PublicationConflictError, PublicationError } from '../../src/errors.js';
+import { CommitOutcomeUnknownError, PublicationConflictError } from '../../src/errors.js';
 import type { IngestionCursorVersion, IngestionHeartbeat } from '../../src/ingestion/status.js';
 import {
   InMemoryCatalogStore,
@@ -17,7 +17,13 @@ import {
   InMemoryRequestedResponseIncidentStore,
   InMemorySourceLogStore,
 } from '../../src/memory/stores.js';
-import type { CommitPublicationInput, MetadataStore } from '../../src/ports.js';
+import type {
+  CommitPublicationInput,
+  DatasetLogRange,
+  DatasetStore,
+  MetadataStore,
+  PublishedDataset,
+} from '../../src/ports.js';
 import type {
   ClosedSourceSegment,
   LiveCheckpointCandidate,
@@ -105,7 +111,9 @@ export class MemoryMetadataStore implements MetadataStore {
     const existing = this.datasets.get(input.record.dataset_id);
     const core = JSON.stringify(input.core);
     if (existing !== undefined && existing !== core) {
-      throw new PublicationError('manifest_commit', 'El dataset existente tiene otro core.');
+      throw new PublicationConflictError(input.record.dataset_id, {
+        message: 'El dataset existente tiene otro core.',
+      });
     }
     if ((await this.findActivePublication(input.record.dataset_id, input.environment)) !== null) {
       throw new PublicationConflictError(input.record.dataset_id);
@@ -114,6 +122,105 @@ export class MemoryMetadataStore implements MetadataStore {
     this.datasets.set(input.record.dataset_id, core);
     this.incidents.set(input.record.dataset_id, [...input.incidents]);
     this.records.push({ environment: input.environment, record: input.record });
+  }
+}
+
+/**
+ * Los metadatos de `buoh_datasets` en memoria (ADR-0020 §5 y §9), con las reglas de la migración
+ * `0001_datasets`: la fila de rango va en el mismo commit y cada dataset de un log empieza en el
+ * segmento siguiente al último del anterior. `ambiguousCommit` simula un `COMMIT` cortado:
+ * `confirmed` lo aplica y aun así lo informa ambiguo; `not_confirmed` no aplica nada. Se consume una
+ * vez.
+ */
+export class MemoryDatasetStore extends MemoryMetadataStore implements DatasetStore {
+  readonly ranges = new Map<string, { publication_id: string; range: DatasetLogRange }>();
+  ambiguousCommit: 'confirmed' | 'not_confirmed' | null = null;
+  failReads = false;
+
+  #read(): void {
+    if (this.failReads) {
+      throw Object.assign(new Error('Fallo inyectado al leer'), { code: 'ECONNREFUSED' });
+    }
+  }
+
+  /** Hace fallar solo la consulta previa de `writePublication`, no la de `findPublishedDataset`. */
+  failActiveLookup = false;
+
+  override findActivePublication(
+    datasetId: string,
+    environment: DeploymentEnvironment,
+  ): Promise<PublishedManifestRecord | null> {
+    if (this.failActiveLookup) {
+      return Promise.reject(Object.assign(new Error('Fallo inyectado'), { code: 'ECONNRESET' }));
+    }
+    return super.findActivePublication(datasetId, environment);
+  }
+
+  async findPublishedDataset(
+    datasetId: string,
+    environment: DeploymentEnvironment,
+  ): Promise<PublishedDataset | null> {
+    this.#read();
+    const record = await super.findActivePublication(datasetId, environment);
+    if (record === null) {
+      return null;
+    }
+    return { range: this.ranges.get(datasetId)?.range ?? null, record };
+  }
+
+  lastConfirmedPublication(
+    environment: DeploymentEnvironment,
+  ): Promise<{ publication_id: string; published_at_utc: string } | null> {
+    this.#read();
+    const last = this.records
+      .filter((entry) => entry.environment === environment)
+      .map((entry) => entry.record)
+      .sort((left, right) =>
+        left.published_at_utc === right.published_at_utc
+          ? left.publication_id.localeCompare(right.publication_id)
+          : left.published_at_utc.localeCompare(right.published_at_utc),
+      )
+      .at(-1);
+    return Promise.resolve(
+      last === undefined
+        ? null
+        : { publication_id: last.publication_id, published_at_utc: last.published_at_utc },
+    );
+  }
+
+  lastLogRange(logNumber: number): Promise<DatasetLogRange | null> {
+    this.#read();
+    const ranges = [...this.ranges.values()]
+      .map((entry) => entry.range)
+      .filter((range) => range.log_number === logNumber)
+      .sort((left, right) => left.last_segment - right.last_segment);
+    return Promise.resolve(ranges.at(-1) ?? null);
+  }
+
+  override async commitPublication(input: CommitPublicationInput): Promise<void> {
+    const { logRange } = input;
+    if (logRange === undefined) {
+      throw new TypeError('buoh_datasets necesita la fila de rango.');
+    }
+    const ambiguous = this.ambiguousCommit;
+    this.ambiguousCommit = null;
+    if (ambiguous === 'not_confirmed') {
+      throw new CommitOutcomeUnknownError(input.record.dataset_id);
+    }
+    const previous = await this.lastLogRange(logRange.log_number);
+    if (logRange.first_segment !== (previous === null ? 0 : previous.last_segment + 1)) {
+      throw new PublicationConflictError(input.record.dataset_id, {
+        message: 'El rango choca con los ya publicados.',
+      });
+    }
+    await super.commitPublication(input);
+    this.ranges.set(input.record.dataset_id, {
+      publication_id: input.record.publication_id,
+      range: logRange,
+    });
+    if (ambiguous === 'confirmed') {
+      throw new CommitOutcomeUnknownError(input.record.dataset_id);
+    }
   }
 }
 

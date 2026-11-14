@@ -642,6 +642,21 @@ Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §3 y
 
 En los dos casos el transporte pausa el ingestor y cierra la entrada con `ConnectionClosed` (`closure_type: transport_error`, con el recurso como motivo). No es un cierre pedido: se pierden datos, así que las reglas abren `connection_lost` y dejan pendiente la continuidad de los símbolos afectados.
 
+#### Registro de la publicación en `buoh_datasets`
+
+Desde el PR 3b de [ADR-0020](adr/0020-datasets-vivos.md) §13, la publicación de los datasets vivos tiene su propio registro, en las tablas `operational_incidents` y `operational_conditions` de `buoh_datasets` (ADR-0020 §9). Solo registra `persistence_unavailable`, con la etapa de la escritura que falló: `normalized_object_write`, `manifest_write` o `manifest_commit`, también cuando el `COMMIT` es ambiguo, con el motivo `commit_outcome_unknown`. La consulta previa es una lectura, y un conflicto (`publication_conflict`) no cambia al repetirlo: ninguno de los dos entra. Una publicación no produce source events, así que sus referencias son las de la publicación:
+
+| Campo | `persistence_unavailable` de la publicación |
+|---|---|
+| `observed_ref` | el `publication_id` del intento que falló, el UUIDv7 que ya lo identifica |
+| `related_refs` | el `publication_id` de la última publicación confirmada en el entorno, o `[]` si no hay ninguna |
+| `symbol` | `null` |
+| `observed_at_utc` | reloj UTC inyectado al detectar |
+
+- La resuelve la primera publicación confirmada después de la apertura: `cause_refs = [apertura, su publication_id]`, a la hora de su `published_at_utc`, con `resolution_reason` `persistence_restored`. Una publicación confirmada resuelve solo las condiciones abiertas antes de su hora. Por eso un `commit_outcome_unknown` que la ejecución siguiente encuentra confirmado no resuelve nada: su hora es anterior a la apertura, y lo resuelve la publicación nueva siguiente.
+- `validateConditionCausality` recibe, solo en este registro, las publicaciones confirmadas que citan sus condiciones (`confirmedPublications`, cada una con su `publication_id` y su `published_at_utc`). Con ellas, un `publication_id` es una referencia conocida, y cada resolución de `persistence_unavailable` tiene que citar una de ellas, a su misma hora y posterior a la apertura; si no, falla con `CONDITION_PUBLICATION_MISMATCH`. Los demás registros y la validación de los datasets no las pasan, así que en ellos un `publication_id` sigue siendo una referencia desconocida (`CONDITION_REFERENCE_UNKNOWN`).
+- Si PostgreSQL no responde, solo quedan la alerta saneada y el informe del paso, como en el log.
+
 ### Incidencias de respuestas pedidas
 
 Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §6). Las reglas 2.0.0 no comprueban las respuestas declaradas en `non_tick_msg_types`. Quien pidió una respuesta declarada la compara con el esquema de respuesta de su operación en la release fijada. Si la respuesta trae `error`, no cumple ese esquema o, en el catálogo, no puede convertirse en snapshot, quien la pidió registra un `DataQualityIncident`:

@@ -5,7 +5,8 @@
   "type": "module",
   "files": [
     "dist",
-    "migrations"
+    "migrations",
+    "migrations-datasets"
   ],
   "exports": {
     ".": {

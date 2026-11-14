@@ -74,6 +74,7 @@ export {
   type AuditObject,
 } from './audit.js';
 export {
+  confirmedPublicationSchema,
   ContractContextError,
   deriveConnectionConditionKey,
   deriveGapConditionKey,
@@ -84,6 +85,7 @@ export {
   validateConditionCausality,
   type ConditionCausalityInput,
   type ConditionCausalityResult,
+  type ConfirmedPublication,
   type ContractContextErrorCode,
   type OperationalConditionEvent,
 } from './conditions.js';

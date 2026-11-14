@@ -1,11 +1,14 @@
 import {
+  confirmedPublicationSchema,
   dataQualityIncidentSchema,
   deriveEventId,
   derivePersistenceConditionKey,
   deriveSourceLimitConditionKey,
   operationalConditionEventSchema,
   validateConditionCausality,
+  type ConditionCausalityInput,
   type ConditionType,
+  type ConfirmedPublication,
   type DataQualityIncident,
   type OperationalConditionEvent,
   type persistenceStageSchema,
@@ -166,18 +169,56 @@ export class OperationalRegistry {
         condition.condition_type === 'persistence_unavailable' ||
         input.kind === 'connection_opened',
     );
-    if (resolvable.length === 0) {
-      return { conditions: [], incident: null, status: 'recorded' };
-    }
     const occurredAt = sourceEventTime(input);
-    const resolutions = resolvable.map((opening) => {
+    for (const opening of resolvable) {
       if (occurredAt <= opening.occurred_at_utc) {
         throw new TypeError('La resolución debe ser posterior a la apertura.');
       }
+    }
+    return this.#resolve({
+      evidenceRef: sourceEventId(input),
+      occurredAt,
+      resolvable,
+      validation: { sourceEvents: [input] },
+    });
+  }
+
+  /**
+   * Registro de la publicación, en `buoh_datasets` (ADR-0020 §9): una publicación confirmada resuelve
+   * las `persistence_unavailable` abiertas antes de su hora (`published_at_utc`), con
+   * `cause_refs = [apertura, publication_id]`. Las abiertas a su hora o después siguen abiertas: un
+   * `commit_outcome_unknown` que la ejecución siguiente encuentra confirmado tiene una hora anterior
+   * a su apertura, y lo resuelve la publicación nueva siguiente.
+   */
+  async resolveWithPublication(publication: ConfirmedPublication): Promise<RecordResult> {
+    const confirmed = confirmedPublicationSchema.parse(publication);
+    return this.#resolve({
+      evidenceRef: confirmed.publication_id,
+      occurredAt: confirmed.published_at_utc,
+      resolvable: this.openConditions().filter(
+        (condition) =>
+          condition.condition_type === 'persistence_unavailable' &&
+          condition.occurred_at_utc < confirmed.published_at_utc,
+      ),
+      validation: { confirmedPublications: [confirmed], sourceEvents: [] },
+    });
+  }
+
+  async #resolve(input: {
+    readonly evidenceRef: string;
+    readonly occurredAt: string;
+    readonly resolvable: readonly OperationalConditionEvent[];
+    readonly validation: Pick<ConditionCausalityInput, 'confirmedPublications' | 'sourceEvents'>;
+  }): Promise<RecordResult> {
+    const { evidenceRef, occurredAt, resolvable } = input;
+    if (resolvable.length === 0) {
+      return { conditions: [], incident: null, status: 'recorded' };
+    }
+    const resolutions = resolvable.map((opening) => {
       const type = opening.condition_type as OperationalType;
       const body = {
         action: 'resolved',
-        cause_refs: sortedUnique([opening.condition_event_id, sourceEventId(input)]),
+        cause_refs: sortedUnique([opening.condition_event_id, evidenceRef]),
         condition_key: opening.condition_key,
         condition_type: type,
         occurred_at_utc: occurredAt,
@@ -197,16 +238,16 @@ export class OperationalRegistry {
         .filter((incident): incident is DataQualityIncident => incident !== undefined),
     );
     validateConditionCausality({
+      ...input.validation,
       conditions: [...resolvable, ...resolutions],
       incidents: openingIncidents,
-      sourceEvents: [input],
     });
     try {
       await this.#store.append({ conditions: resolutions, incidents: [] });
     } catch (error) {
       this.#alert({
         event: 'operational_registry_unavailable',
-        observed_ref: sourceEventId(input),
+        observed_ref: evidenceRef,
         operation: 'resolve',
         reason: failureReason(error),
       });
