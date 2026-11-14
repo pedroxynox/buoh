@@ -238,6 +238,44 @@ describe('publishLiveDataset (ADR-0020 §9)', () => {
     }
   });
 
+  it('una fila de rango de otra publicación del dataset, y no de la activa, es publication_conflict', async () => {
+    const { publish, store } = await harness();
+    const due = await plan('principal');
+    const first = await publish(due, ATTEMPT_1, AT_1);
+    if (first.status !== 'published') throw new Error('sin publicar');
+    const stored = store.ranges.get(first.publication.dataset_id);
+    if (stored === undefined) throw new Error('sin rango');
+    store.ranges.set(first.publication.dataset_id, { ...stored, publication_id: ATTEMPT_3 });
+    const failure = await publish(due, ATTEMPT_2, AT_2).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(PublicationConflictError);
+    expect(failure).toMatchObject({ kind: 'log_range', step: 'precondition' });
+  });
+
+  it('lo que dejó abierto va único y ordenado, y el reintento no depende de su orden', async () => {
+    const { publish } = await harness();
+    const due = await plan('principal', 0, {
+      open_condition_types: [
+        'source_limit_exceeded',
+        'event_gap_unresolved',
+        'event_gap_unresolved',
+      ],
+      pending_continuity_symbols: ['SYNTH_200', 'SYNTH_100', 'SYNTH_200'],
+    });
+    const first = await publish(due, ATTEMPT_1, AT_1);
+    expect(first.range.open).toEqual({
+      open_condition_types: ['event_gap_unresolved', 'source_limit_exceeded'],
+      pending_continuity_symbols: ['SYNTH_100', 'SYNTH_200'],
+    });
+    const reordered = {
+      ...due,
+      open: {
+        open_condition_types: ['event_gap_unresolved', 'source_limit_exceeded'],
+        pending_continuity_symbols: ['SYNTH_100', 'SYNTH_200'],
+      },
+    };
+    expect((await publish(reordered, ATTEMPT_2, AT_2)).status).toBe('already_published');
+  });
+
   it('el reintento con otro final no cuenta como publicado: cada campo del rango cuenta', async () => {
     const { publish, store } = await harness();
     const due = await plan('principal');

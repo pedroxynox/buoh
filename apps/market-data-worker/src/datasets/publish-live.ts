@@ -60,6 +60,10 @@ export type PublishLiveOutcome =
       readonly status: 'already_published';
     };
 
+function canonical(values: readonly string[]): string[] {
+  return [...new Set(values)].sort();
+}
+
 function sameRange(left: DatasetLogRange, right: DatasetLogRange): boolean {
   const same = (a: readonly string[], b: readonly string[]) =>
     a.length === b.length && a.every((value, index) => value === b[index]);
@@ -126,9 +130,10 @@ export async function publishLiveDataset(
     first_segment: plan.from,
     last_segment: plan.to,
     log_number: input.logNumber,
+    // Únicos y ordenados, para que la fila y su comparación no dependan del orden en que llegan.
     open: {
-      open_condition_types: [...plan.open.open_condition_types],
-      pending_continuity_symbols: [...plan.open.pending_continuity_symbols],
+      open_condition_types: canonical(plan.open.open_condition_types),
+      pending_continuity_symbols: canonical(plan.open.pending_continuity_symbols),
     },
   };
   const publication = preparePublication({
@@ -147,10 +152,16 @@ export async function publishLiveDataset(
     input.store.findPublishedDataset(publication.dataset_id, input.environment),
   );
   if (existing !== null) {
-    if (existing.range !== null && sameRange(existing.range, range)) {
-      return { range: existing.range, record: existing.record, status: 'already_published' };
+    // Su fila de rango tiene que ser la de su publicación activa, y la del plan.
+    if (
+      existing.range !== null &&
+      existing.range.publication_id === existing.record.publication_id &&
+      sameRange(existing.range.range, range)
+    ) {
+      return { range: existing.range.range, record: existing.record, status: 'already_published' };
     }
     throw new PublicationConflictError(publication.dataset_id, {
+      kind: 'log_range',
       message: `El dataset ${publication.dataset_id} ya tiene una publicación activa sin su rango o con otro.`,
       step: 'precondition',
     });

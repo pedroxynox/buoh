@@ -112,6 +112,7 @@ export class MemoryMetadataStore implements MetadataStore {
     const core = JSON.stringify(input.core);
     if (existing !== undefined && existing !== core) {
       throw new PublicationConflictError(input.record.dataset_id, {
+        kind: 'core_mismatch',
         message: 'El dataset existente tiene otro core.',
       });
     }
@@ -165,7 +166,7 @@ export class MemoryDatasetStore extends MemoryMetadataStore implements DatasetSt
     if (record === null) {
       return null;
     }
-    return { range: this.ranges.get(datasetId)?.range ?? null, record };
+    return { range: this.ranges.get(datasetId) ?? null, record };
   }
 
   lastConfirmedPublication(
@@ -210,6 +211,7 @@ export class MemoryDatasetStore extends MemoryMetadataStore implements DatasetSt
     const previous = await this.lastLogRange(logRange.log_number);
     if (logRange.first_segment !== (previous === null ? 0 : previous.last_segment + 1)) {
       throw new PublicationConflictError(input.record.dataset_id, {
+        kind: 'log_range',
         message: 'El rango choca con los ya publicados.',
       });
     }

@@ -12,6 +12,7 @@ import type { CommitPublicationInput, MetadataStore } from '../ports.js';
 import type { WorkerConfig } from '../config.js';
 
 const UNIQUE_VIOLATION = '23505';
+const STATEMENT_COMPLETION_UNKNOWN = '40003';
 const ONE_ACTIVE_INDEX = 'published_manifest_records_one_active';
 
 interface RecordRow {
@@ -148,7 +149,12 @@ export class PostgresMetadataStore implements MetadataStore {
  */
 function commitDefinitelyRejected(error: unknown): boolean {
   const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === 'string' && /^(23|40)[0-9A-Z]{3}$/u.test(code);
+  return (
+    typeof code === 'string' &&
+    /^(23|40)[0-9A-Z]{3}$/u.test(code) &&
+    // `statement_completion_unknown`: el servidor tampoco sabe cómo terminó.
+    code !== STATEMENT_COMPLETION_UNKNOWN
+  );
 }
 
 /**
@@ -186,6 +192,7 @@ export async function commitPublicationIn(
     if (stored.rows[0]?.manifest_core_jcs !== coreJcs) {
       // Un dataset_id con otro core: repetir no lo cambia.
       throw new PublicationConflictError(record.dataset_id, {
+        kind: 'core_mismatch',
         message: `El dataset ${record.dataset_id} ya existe con otro core.`,
       });
     }

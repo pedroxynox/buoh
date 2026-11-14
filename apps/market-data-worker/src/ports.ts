@@ -63,9 +63,12 @@ export interface MetadataStore {
   commitPublication(input: CommitPublicationInput): Promise<void>;
 }
 
-/** Un dataset con su publicación activa en un entorno y su fila de rango, si la tiene. */
+/**
+ * Un dataset con su publicación activa en un entorno y su fila de rango, si la tiene, con la
+ * publicación que la insertó.
+ */
 export interface PublishedDataset {
-  readonly range: DatasetLogRange | null;
+  readonly range: { readonly publication_id: string; readonly range: DatasetLogRange } | null;
   readonly record: PublishedManifestRecord;
 }
 

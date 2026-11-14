@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { connect as tcpConnect, createServer, type Server } from 'node:net';
 import { resolve } from 'node:path';
 
 import pg, { type Pool, type PoolClient } from 'pg';
@@ -90,6 +91,7 @@ let renderClient: PoolClient | undefined;
 let firstMigration: Awaited<ReturnType<typeof migrateDatasets>>;
 let fixture: SyntheticFixture;
 const pools: Pool[] = [];
+const servers: Server[] = [];
 
 function ready<T>(value: T | undefined): T {
   if (value === undefined) {
@@ -158,6 +160,11 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const pool of pools) {
     await pool.end();
+  }
+  for (const server of servers) {
+    await new Promise((done) => {
+      server.close(done);
+    });
   }
   renderClient?.release();
   await renderPool?.end();
@@ -247,6 +254,64 @@ describe('las migraciones de buoh_datasets (ADR-0020 §5)', () => {
     expect(await range(first)).toBe(null);
   });
 
+  it('la clave única impide dos datasets con el mismo comienzo, también con una instantánea anterior', async () => {
+    // Con REPEATABLE READ, el disparador de la segunda inserción no ve la primera, ya confirmada:
+    // la clave única por log y primer segmento es la que la rechaza.
+    const owner = ready(admin);
+    const id = await owner.query<{ id: string }>(
+      `SELECT 'sha256:' || encode(sha256('1'), 'hex') AS id`,
+    );
+    const dataset = id.rows[0]?.id ?? '';
+    const publication = '019a8000-0000-7000-8000-0000000000f2';
+    await owner.query(
+      `INSERT INTO ${DATASETS_SCHEMA}.datasets (dataset_id, state, source, manifest_core_jcs)
+       VALUES ($1, 'published', 'synthetic', '1')`,
+      [dataset],
+    );
+    await owner.query(
+      `INSERT INTO ${DATASETS_SCHEMA}.published_manifest_records
+         (publication_id, deployment_environment, dataset_id, schema_version,
+          manifest_document_sha256, manifest_object_uri, manifest_object_bytes_sha256,
+          published_at_utc, state)
+       VALUES ($1, 'development', $2, '1.0.0', $3, 's3://x/y', $3, '2026-11-14T00:00:00.000Z',
+               'superseded')`,
+      [publication, dataset, '0'.repeat(64)],
+    );
+    const first = await owner.connect();
+    const second = await owner.connect();
+    try {
+      for (const client of [first, second]) {
+        await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+        await client.query(`SELECT 1 FROM ${DATASETS_SCHEMA}.dataset_log_ranges LIMIT 1`);
+      }
+      await first.query(
+        `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
+           (dataset_id, publication_id, log_number, first_segment, last_segment, clean,
+            open_condition_types, pending_continuity_symbols)
+         VALUES ($1, $2, 97, 0, 0, true, '{}', '{}')`,
+        [dataset, publication],
+      );
+      await first.query('COMMIT');
+      const state = await second
+        .query(
+          `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
+             (dataset_id, publication_id, log_number, first_segment, last_segment, clean,
+              open_condition_types, pending_continuity_symbols)
+           VALUES ($1, gen_random_uuid(), 97, 0, 3, true, '{}', '{}')`,
+          [`sha256:${'2'.repeat(64)}`],
+        )
+        .then(
+          () => null,
+          (error: unknown) => (error as { code?: string }).code ?? 'sin_codigo',
+        );
+      expect(state).toBe('23505');
+    } finally {
+      await second.query('ROLLBACK').catch(() => undefined);
+      first.release();
+      second.release();
+    }
+  });
+
   it('cada verificación tiene la salida de su estado', async () => {
     const insert = (status: string, exit: string, error: string, report: string) =>
       sqlState(
@@ -264,11 +329,12 @@ describe('las migraciones de buoh_datasets (ADR-0020 §5)', () => {
     expect(await insert('failed', '1', 'NULL', 'NULL')).toBe('23514');
     expect(await insert('failed', '0', "'OBJECT_INTEGRITY'", 'NULL')).toBe('23514');
     expect(await insert('incomplete', '0', 'NULL', 'NULL')).toBe('23514');
-    expect(await insert('incomplete', '1', 'NULL', 'NULL')).toBe('23514');
-    // Coherentes, solo les falta su dataset y su publicación.
+    // Coherentes, solo les falta su dataset y su publicación. Una incompleta puede llevar la
+    // salida 1 de un error inesperado (UNEXPECTED), o ninguna si el proceso no terminó.
     expect(await insert('passed', '0', 'NULL', "'{}'")).toBe('23503');
     expect(await insert('failed', '1', "'OBJECT_INTEGRITY'", 'NULL')).toBe('23503');
     expect(await insert('incomplete', 'NULL', 'NULL', 'NULL')).toBe('23503');
+    expect(await insert('incomplete', '1', "'UNEXPECTED'", 'NULL')).toBe('23503');
   });
 
   it('ninguna tabla se puede vaciar, tampoco con un superusuario', async () => {
@@ -394,50 +460,67 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
   }
 
   /**
-   * Un pool de `buoh_publicacion` cuyo `COMMIT` corta la conexión: `before` termina su sesión antes
-   * de enviarlo, así que no se confirma; `after` lo envía, se confirma y después la termina. En los
-   * dos casos, quien publica no recibe la respuesta.
+   * Un pool de `buoh_publicacion` que pasa por un proxy TCP hacia PostgreSQL y corta la conexión
+   * durante el `COMMIT`: con `before`, el `COMMIT` no llega al servidor, que deshace la
+   * transacción al ver la conexión cerrada; con `after`, llega, el servidor lo confirma y su
+   * respuesta no vuelve. En los dos casos, quien publica no sabe cómo terminó. El `COMMIT` sin
+   * parámetros va en un mensaje `Query` del protocolo: `Q`, su longitud y `COMMIT` con su cero.
    */
-  function cutPool(cut: 'after' | 'before'): Pool {
-    const pool = poolAs(PUBLICATION_ROLE, passwords.publication);
-    const terminate = async (client: PoolClient) => {
-      const pid = (client as unknown as { processID: number }).processID;
-      await ready(admin).query('SELECT pg_terminate_backend($1)', [pid]);
-    };
-    const connect = pool.connect.bind(pool);
-    return new Proxy(pool, {
-      get(target, property, receiver) {
-        if (property !== 'connect') {
-          return Reflect.get(target, property, receiver) as unknown;
-        }
-        return async (...callback: unknown[]) => {
-          if (callback.length > 0) {
-            // `pool.query` pide su cliente con un callback y nunca envía COMMIT.
-            return (connect as (...args: unknown[]) => unknown)(...callback);
+  async function cutPool(cut: 'after' | 'before'): Promise<Pool> {
+    const commit = Buffer.concat([
+      Buffer.from('Q'),
+      Buffer.from([0, 0, 0, 11]),
+      Buffer.from('COMMIT\0'),
+    ]);
+    const server = createServer((client) => {
+      const upstream = tcpConnect(config.postgres.port, config.postgres.host);
+      let state: 'awaiting_reply' | 'cut' | 'open' = 'open';
+      const close = () => {
+        state = 'cut';
+        client.destroy();
+        upstream.destroy();
+      };
+      client.on('error', () => undefined);
+      upstream.on('error', () => undefined);
+      client.on('close', () => upstream.destroy());
+      upstream.on('close', () => client.destroy());
+      client.on('data', (chunk: Buffer) => {
+        if (state !== 'open') return;
+        if (chunk.includes(commit)) {
+          if (cut === 'before') {
+            close();
+            return;
           }
-          const client = await connect();
-          const query = client.query.bind(client) as (text: string) => Promise<unknown>;
-          (client as unknown as { query: (text: string) => Promise<unknown> }).query = async (
-            text: string,
-            ...rest: unknown[]
-          ) => {
-            if (text !== 'COMMIT') {
-              return (query as (...args: unknown[]) => Promise<unknown>)(text, ...rest);
-            }
-            if (cut === 'before') {
-              await terminate(client);
-              return query(text);
-            }
-            await query(text);
-            await terminate(client);
-            throw Object.assign(new Error('Connection terminated unexpectedly'), {
-              code: 'ECONNRESET',
-            });
-          };
-          return client;
-        };
-      },
+          state = 'awaiting_reply';
+        }
+        upstream.write(chunk);
+      });
+      upstream.on('data', (chunk: Buffer) => {
+        if (state === 'cut') return;
+        if (state === 'awaiting_reply') {
+          // La respuesta del COMMIT: el servidor ya lo confirmó.
+          close();
+          return;
+        }
+        client.write(chunk);
+      });
     });
+    servers.push(server);
+    await new Promise<void>((done) => {
+      server.listen(0, '127.0.0.1', done);
+    });
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new TypeError('Sin puerto.');
+    const pool = createPool({
+      ...config.postgres,
+      host: '127.0.0.1',
+      password: passwords.publication,
+      port: address.port,
+      schema: DATASETS_SCHEMA,
+      user: PUBLICATION_ROLE,
+    });
+    pools.push(pool);
+    return pool;
   }
 
   /** La publicación de `logNumber` con `pool`, y su registro operativo con `registryPool`. */
@@ -549,7 +632,7 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
     // Cada caso publica otro dataset: el dataset_id solo depende del contenido.
     const due = plan('zero-valid-ticks', 0);
     const registryPool = poolAs(PUBLICATION_ROLE, passwords.publication);
-    const cut = await publisher(2, cutPool('before'), registryPool);
+    const cut = await publisher(2, await cutPool('before'), registryPool);
     const failure = await cut
       .publish(due, '019a8000-0000-7000-8000-000000000021', '2026-11-14T07:05:00.000Z')
       .catch((error: unknown) => error);
@@ -579,7 +662,7 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
     if (principal === undefined) throw new TypeError('Falta principal.');
     const due = { ...plan('principal', 0), segments: principal.segments.slice(0, 1), to: 0 };
     const registryPool = poolAs(PUBLICATION_ROLE, passwords.publication);
-    const cut = await publisher(3, cutPool('after'), registryPool);
+    const cut = await publisher(3, await cutPool('after'), registryPool);
     const failure = await cut
       .publish(due, '019a8000-0000-7000-8000-000000000031', '2026-11-14T08:05:00.000Z')
       .catch((error: unknown) => error);

@@ -80,6 +80,7 @@ describe('el COMMIT ambiguo (ADR-0020 §9)', () => {
     ['el servidor termina la sesión (57P01)', '57P01'],
     ['una excepción de conexión (08006)', '08006'],
     ['un error interno (XX000)', 'XX000'],
+    ['statement_completion_unknown (40003)', '40003'],
   ])('si el COMMIT falla por %s, no se sabe si se confirmó', async (_name, code) => {
     const input = await commitInput();
     const core = await coreOf();
@@ -145,9 +146,12 @@ describe('el COMMIT ambiguo (ADR-0020 §9)', () => {
   it('un dataset con otro core, o un rango que choca, es publication_conflict', async () => {
     const input = await commitInput();
     const other = fakePool('NADA', undefined, () => '{"otro":true}');
-    await expect(
-      new PostgresMetadataStore(other.pool).commitPublication(input),
-    ).rejects.toBeInstanceOf(PublicationConflictError);
+    const mismatch = await new PostgresMetadataStore(other.pool)
+      .commitPublication(input)
+      .catch((error: unknown) => error);
+    expect(mismatch).toBeInstanceOf(PublicationConflictError);
+    // No es que ya esté publicado: `fixture:publish` no lo toma por `already_published`.
+    expect(mismatch).toMatchObject({ kind: 'core_mismatch' });
     const core = await coreOf();
     for (const code of ['23505', '23514']) {
       const { pool } = fakePool('INSERT INTO dataset_log_ranges', code, () => core);
@@ -155,7 +159,7 @@ describe('el COMMIT ambiguo (ADR-0020 §9)', () => {
         .commitPublication({ ...input, logRange: RANGE })
         .catch((error: unknown) => error);
       expect(failure, code).toBeInstanceOf(PublicationConflictError);
-      expect(failure).toMatchObject({ reason: 'publication_conflict' });
+      expect(failure).toMatchObject({ kind: 'log_range', reason: 'publication_conflict' });
     }
     // Otro fallo de esa inserción no es un conflicto.
     const { pool } = fakePool('INSERT INTO dataset_log_ranges', '23503', () => core);

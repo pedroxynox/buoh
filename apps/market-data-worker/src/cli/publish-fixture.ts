@@ -102,7 +102,8 @@ async function main(): Promise<number> {
           status: 'published',
         });
       } catch (error) {
-        if (!(error instanceof PublicationConflictError)) {
+        // Solo una publicación activa quiere decir que ya está publicado; otro core es un error.
+        if (!(error instanceof PublicationConflictError) || error.kind !== 'active_publication') {
           throw error;
         }
         results.push({

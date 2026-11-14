@@ -115,7 +115,9 @@ CREATE TRIGGER dataset_log_ranges_contiguous
 -- data:replay. Lo escribe solo buoh-operaciones, como buoh_dueno. verification_id es un UUIDv7 y
 -- run_id, la ejecución de buoh-operaciones. passed es la salida 0; failed, la salida 1, con su
 -- código de error saneado (ReplayErrorCode); incomplete, tres ejecuciones sin un resultado
--- concluyente. report_jcs es el informe JSON de data:replay en JCS, sin precios.
+-- concluyente, como un plazo vencido, el proceso sin memoria o un error inesperado, que data:replay
+-- también termina con 1 (UNEXPECTED): su salida y su código son los de la última, si los tiene.
+-- report_jcs es el informe JSON de data:replay en JCS, sin precios.
 CREATE TABLE dataset_verifications (
   verification_id uuid PRIMARY KEY,
   dataset_id text NOT NULL REFERENCES datasets (dataset_id),
@@ -131,7 +133,7 @@ CREATE TABLE dataset_verifications (
   CHECK (
     (status = 'passed' AND exit_code = 0 AND error_code IS NULL AND report_jcs IS NOT NULL)
     OR (status = 'failed' AND exit_code = 1 AND error_code IS NOT NULL)
-    OR (status = 'incomplete' AND exit_code IS DISTINCT FROM 0 AND exit_code IS DISTINCT FROM 1)
+    OR (status = 'incomplete' AND exit_code IS DISTINCT FROM 0)
   ),
   FOREIGN KEY (publication_id, dataset_id)
     REFERENCES published_manifest_records (publication_id, dataset_id)

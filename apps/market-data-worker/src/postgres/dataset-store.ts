@@ -89,6 +89,7 @@ export class PostgresDatasetStore extends PostgresMetadataStore implements Datas
         if (RANGE_CONFLICTS.has((error as { code?: unknown } | null)?.code)) {
           throw new PublicationConflictError(record.dataset_id, {
             cause: error,
+            kind: 'log_range',
             message: `El rango del dataset ${record.dataset_id} choca con los ya publicados.`,
           });
         }
@@ -108,12 +109,16 @@ export class PostgresDatasetStore extends PostgresMetadataStore implements Datas
     if (record === null) {
       return null;
     }
-    const { rows } = await this.#datasetsPool.query<RangeRow>(
-      `SELECT ${RANGE_COLUMNS} FROM dataset_log_ranges WHERE dataset_id = $1`,
+    const { rows } = await this.#datasetsPool.query<RangeRow & { publication_id: string }>(
+      `SELECT publication_id::text AS publication_id, ${RANGE_COLUMNS}
+         FROM dataset_log_ranges WHERE dataset_id = $1`,
       [datasetId],
     );
     const [row] = rows;
-    return { range: row === undefined ? null : rangeOf(row), record };
+    return {
+      range: row === undefined ? null : { publication_id: row.publication_id, range: rangeOf(row) },
+      record,
+    };
   }
 
   async lastConfirmedPublication(

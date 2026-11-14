@@ -28,12 +28,19 @@ export class PublicationError extends Error {
  */
 export class PublicationConflictError extends PublicationError {
   readonly datasetId: string;
+  /**
+   * Con qué choca: `active_publication`, una publicación activa del dataset (el valor por defecto);
+   * `core_mismatch`, el mismo `dataset_id` con otro core; `log_range`, la fila de rango de
+   * `buoh_datasets`. Solo el primero significa que el dataset ya está publicado.
+   */
+  readonly kind: 'active_publication' | 'core_mismatch' | 'log_range';
   readonly reason = 'publication_conflict';
 
   constructor(
     datasetId: string,
     options?: {
       cause?: unknown;
+      kind?: PublicationConflictError['kind'];
       message?: string;
       step?: 'manifest_commit' | 'precondition';
     },
@@ -45,6 +52,7 @@ export class PublicationConflictError extends PublicationError {
     );
     this.name = 'PublicationConflictError';
     this.datasetId = datasetId;
+    this.kind = options?.kind ?? 'active_publication';
   }
 }
 
