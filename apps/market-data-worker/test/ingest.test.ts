@@ -1078,6 +1078,31 @@ describe('ingestCommand en production: el corte semanal (ADR-0018 §6)', () => {
     expect(run.profileReads).toEqual([2, 3]);
   });
 
+  it('la sesión nueva del corte arma el perfil del log siguiente con su fila, no con la del log que deja (ADR-0020 §4)', async () => {
+    const run = await ingestHarness();
+    run.startup.firstWrites.set(2, START);
+    run.startup.prepared.add(3);
+    // El log 3 tiene el perfil de publicación de R_100, que el código no arma para SYNTH_100: su
+    // sesión falla cerrado antes de conectar. El log 2 no tiene fila.
+    run.startup.profiles.set(3, derivLogProfileRow('R_100'));
+    const { command } = await startProduction(run);
+    await subscribe(run, 1);
+    await run.clock.advance(0);
+    run.clock.jumpWallClock(Date.parse(CUT_TIME) - Date.parse(run.clock.now()) - LOG_CUT_CHECK_MS);
+    await run.clock.advance(LOG_CUT_CHECK_MS);
+    expect(run.alerts).toEqual([{ event: 'log_cut', forced: 'false', log: '2', next: '3' }]);
+    answerForgetAll(run.socket(1));
+    await settleHandover();
+    const { exitCode, line } = await command;
+    expect(run.profileReads).toEqual([2, 3]);
+    expect(run.sockets).toHaveLength(1);
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(line)).toMatchObject({
+      end: { detail: 'LogProfileUnknownError', reason: 'log_not_derivable', status: 'failed' },
+      quality_profile_id: null,
+    });
+  });
+
   it('al arrancar con la hora de corte pasada hace menos de 24 horas, retoma el log activo y lo corta en cuanto está limpio', async () => {
     const run = await ingestHarness();
     run.startup.firstWrites.set(2, START);

@@ -303,7 +303,9 @@ describe('derivación en pliegue del estado vivo (ADR-0017)', () => {
 
   // ADR-0020 §12: el estado vivo de un log con el perfil de publicación, con las reglas 3.0.0. Solo
   // los logs escritos para un perfil con umbrales: en los demás, la sesión pidió una historia que con
-  // umbrales no habría pedido, porque la separación ya decidía el hueco.
+  // umbrales no habría pedido, porque la separación ya decidía el hueco. Estos logs no traen páginas
+  // de historia, así que prueban que las reglas 3.0.0 no cambian el resto del pliegue; los ticks de
+  // la historia los prueba el vector de las reglas 3.0.0, en rules-3-0-0.test.ts.
   it.each(corpus.filter(([, , profile]) => profile === publication))(
     '%s, con el perfil de publicación de las reglas 3.0.0: igual en cada límite',
     (_name, stimuli) => {

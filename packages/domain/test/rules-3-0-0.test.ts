@@ -5,6 +5,7 @@ import {
   connectionClosedSchema,
   connectionOpenedSchema,
   historyRecoveryResultSchema,
+  liveDerivationCheckpointSchema,
   rawSourceFrameSchema,
   sha256Hex,
   validateDatasetConsistency,
@@ -15,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildDatasetPublication,
+  buildLiveDerivationCheckpoint,
   createPipelineProfile,
   deriveMarketData,
   emptyLiveDerivationState,
@@ -634,26 +636,46 @@ describe('vector sintético de las reglas 3.0.0 (ADR-0020 §3)', () => {
     expect(open.map((item) => item.condition_type)).toEqual(['event_gap_unresolved']);
   });
 
-  it('en cada límite de segmento, el pliegue desde el estado del límite da el de todo el log y los huecos de la derivación completa (ADR-0020 §12)', () => {
-    const whole = liveDerivationView(
-      foldLiveDerivation(emptyLiveDerivationState(), SEGMENTS.flat(), v3),
-    );
+  it('en cada límite de segmento, el pliegue da los huecos y las condiciones de la derivación completa; en cada evento, retomado desde su punto de control, da el del log entero (ADR-0020 §12)', () => {
+    const events = SEGMENTS.flat();
+    const whole = liveDerivationView(foldLiveDerivation(emptyLiveDerivationState(), events, v3));
+    // El vector trae ticks de la historia: los que las reglas 3.0.0 convierten en MarketTick.
+    expect(
+      deriveMarketData(SEGMENTS, v3).ticks.filter((item) => item.origin === 'history_recovery')
+        .length,
+    ).toBeGreaterThan(0);
     for (let boundary = 0; boundary <= SEGMENTS.length; boundary += 1) {
       const before = SEGMENTS.slice(0, boundary);
-      const state = foldLiveDerivation(emptyLiveDerivationState(), before.flat(), v3);
+      const view = liveDerivationView(
+        foldLiveDerivation(emptyLiveDerivationState(), before.flat(), v3),
+      );
       const derived = deriveMarketData(before, v3);
-      const view = liveDerivationView(state);
-      expect(view.pendingGaps, `límite ${String(boundary)}`).toEqual(derived.pendingGaps);
-      expect(view.openConditionTypes, `límite ${String(boundary)}`).toEqual(
-        derived.openConditionTypes,
-      );
-      expect(view.pendingContinuitySymbols, `límite ${String(boundary)}`).toEqual(
-        derived.pendingContinuitySymbols,
-      );
-      const rest = SEGMENTS.slice(boundary).flat();
+      const label = `límite de segmento ${String(boundary)}`;
+      expect(view.pendingGaps, label).toEqual(derived.pendingGaps);
+      expect(view.openConditionTypes, label).toEqual(derived.openConditionTypes);
+      expect(view.pendingContinuitySymbols, label).toEqual(derived.pendingContinuitySymbols);
+    }
+    for (let at = 0; at <= events.length; at += 1) {
+      const state = foldLiveDerivation(emptyLiveDerivationState(), events.slice(0, at), v3);
+      // El estado pasa por su contrato y por JSON, como al guardarse y leerse (ADR-0017 §5).
+      const stored = liveDerivationCheckpointSchema.parse(
+        JSON.parse(
+          JSON.stringify(
+            buildLiveDerivationCheckpoint({
+              event_count: Math.max(at, 1),
+              profile: v3,
+              raw_frame_count: 0,
+              segment_index: 0,
+              segment_logical_content_sha256: 'a'.repeat(64),
+              state,
+              symbol: 'SYNTH_100',
+            }),
+          ),
+        ),
+      ).state;
       expect(
-        liveDerivationView(foldLiveDerivation(state, rest, v3)),
-        `límite ${String(boundary)}`,
+        liveDerivationView(foldLiveDerivation(stored, events.slice(at), v3)),
+        `evento ${String(at)}`,
       ).toEqual(whole);
     }
   });
