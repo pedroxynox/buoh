@@ -68,8 +68,8 @@ export function DatosReal() {
             <li>Un dato crudo no se reescribe.</li>
             <li>Un hueco no se rellena ni se suaviza.</li>
             <li>
-              Una incidencia no desaparece al resolverse: queda en su dataset, que no vence. Aquí se
-              cuentan por tipo; la lista de cada una todavía no está en la web.
+              La incidencia de un dataset no desaparece al resolverse: queda en el dataset, que no
+              vence. Aquí se cuentan por tipo; la lista de cada una todavía no está en la web.
             </li>
           </ul>
         </Card>

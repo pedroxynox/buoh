@@ -357,10 +357,11 @@ describe('la vista de los datasets publicados', () => {
     expect(html).toContain('R_100');
     expect(html).toContain('reglas 3.0.0');
     expect(html).toContain(
-      'Cada dataset tiene unas 6 horas de captura y se publica poco después de las 00:00, 06:00, 12:00 o 18:00 UTC.',
+      'Cada dataset tiene unas 6 horas de captura, cortadas cerca de las 00:00, 06:00, 12:00 o 18:00 UTC, y uno nuevo suele llegar poco después de esas horas.',
     );
     expect(html).toContain('Los datasets no vencen');
-    expect(html).toContain('Leído a las 15:50:12 UTC; la página no se actualiza sola.');
+    // Con la fecha: la página no vuelve a leer, y una pestaña puede quedar abierta días.
+    expect(html).toContain('Leído el 14 nov 2026, 15:50:12 UTC; la página no se actualiza sola.');
     expect(html).not.toContain('más recientes');
     // Solo muestra: ningún control para cambiar nada, y ningún dato ficticio.
     expect(html).not.toMatch(/<button|<input|<form/u);
@@ -395,7 +396,7 @@ describe('la vista de los datasets publicados', () => {
     expect(empty).toContain(
       'Todavía no hay datasets publicados: buoh publica uno con cada 6 horas de captura. Vuelve a abrir la página más tarde.',
     );
-    expect(empty).toContain('Leído a las 15:50:12 UTC');
+    expect(empty).toContain('Leído el 14 nov 2026, 15:50:12 UTC');
     const unauthenticated = render({
       kind: 'error',
       message: 'Tu sesión no es válida. Vuelve a iniciar sesión.',
@@ -421,6 +422,7 @@ describe('la vista de los datasets publicados', () => {
     // una, no están en la Auditoría ni en ninguna otra pantalla.
     expect(html).toContain('Los datasets no vencen.');
     expect(html).not.toContain('no se borran');
+    expect(html).toContain('La incidencia de un dataset no desaparece al resolverse');
     expect(html).toContain('la lista de cada una todavía no está en la web');
     expect(html).not.toContain('/auditoria');
   });

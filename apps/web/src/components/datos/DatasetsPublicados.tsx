@@ -1,7 +1,7 @@
 import type { DataDataset, DataDatasets } from '@buoh/contracts';
 import { Badge, Callout, Card } from '@buoh/design-system/react';
 import type { IconName, Tone } from '@buoh/design-system';
-import { formatUtc, formatUtcTime } from '@buoh/prototype-data';
+import { formatUtc } from '@buoh/prototype-data';
 import Link from 'next/link';
 import { datasetEnd, datasetIncidents, datasetPeriod, verificationText } from './datasets';
 import { DATA_DATASETS_LIMIT } from './respuesta';
@@ -55,7 +55,7 @@ function VerificationResult({
 
 /**
  * Los metadatos de la lista (concepto de interfaz §1): la fuente, los símbolos, las reglas, el
- * intervalo, cuánto se guardan y la frescura, la hora de la lectura, sin refresco.
+ * intervalo, cuánto se guardan y la frescura, la fecha y la hora de la lectura, sin refresco.
  */
 function metadataNote(data: DataDatasets, readAtUtc: string | null): string {
   const symbols = [...new Set(data.datasets.flatMap((dataset) => dataset.symbols))].sort();
@@ -66,15 +66,13 @@ function metadataNote(data: DataDatasets, readAtUtc: string | null): string {
       ? ''
       : ` Símbolos: ${symbols.join(', ')}; reglas ${rules.join(', ')}.`;
   const interval =
-    ' Cada dataset tiene unas 6 horas de captura y se publica poco después de las 00:00, 06:00, 12:00 o 18:00 UTC.' +
+    ' Cada dataset tiene unas 6 horas de captura, cortadas cerca de las 00:00, 06:00, 12:00 o 18:00 UTC, y uno nuevo suele llegar poco después de esas horas.' +
     ' Los datasets no vencen: siguen aunque su log ya no exista.';
   const cut = data.truncated
     ? ` Se muestran los ${String(DATA_DATASETS_LIMIT)} más recientes: hay otros más viejos.`
     : '';
   const read =
-    readAtUtc === null
-      ? ''
-      : ` Leído a las ${formatUtcTime(readAtUtc)}; la página no se actualiza sola.`;
+    readAtUtc === null ? '' : ` Leído el ${formatUtc(readAtUtc)}; la página no se actualiza sola.`;
   return `${base}${of}${interval}${cut}${read}`;
 }
 
