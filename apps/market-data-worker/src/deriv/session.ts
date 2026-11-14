@@ -33,6 +33,7 @@ import {
   type DerivPreparation,
   type DerivSchemaSummary,
 } from './adapter.js';
+import type { LogQualityProfileRow } from './log-profile.js';
 import type { DerivConnection, DerivConnectionResult, DerivSessionEnd } from './connection.js';
 import { GapWatch, type GapWatchFailure } from './gap-watch.js';
 import type { HistoryRecoveryOutcome } from './history-recovery.js';
@@ -142,6 +143,12 @@ export interface DerivSessionInput extends Pick<
    */
   readonly durationMs?: number;
   /**
+   * La fila de `log_quality_profile` del log en el que se captura, o `null` o sin ella si no tiene:
+   * la preparación arma con ella el perfil de la sesión (ADR-0020 §4), que usan también la
+   * reparación de cierres, la vigilancia de huecos y el punto de control del estado vivo.
+   */
+  readonly logProfile?: LogQualityProfileRow | null;
+  /**
    * El corte del smoke de reconexión (ADR-0015 §9), en milisegundos: un entero positivo, o
    * `startDerivSession` lanza `TypeError`. Cuenta desde el primer tick durable de la sesión, y al
    * cumplirse corta una sola vez la conexión en curso con `interrupt('smoke_interrupt')`, como una
@@ -229,6 +236,11 @@ export interface DerivSessionResult {
    * conexión (`recoverHistory`, ADR-0015 §4).
    */
   readonly recoveries: readonly HistoryRecoveryOutcome[];
+  /**
+   * El `profile_id` del perfil de calidad de la sesión (ADR-0020 §4), o `null` si la preparación
+   * falló.
+   */
+  readonly quality_profile_id: string | null;
   /** Release y SHA-256 de los esquemas cargados, o `null` si la carga falló. */
   readonly schemas: DerivSchemaSummary | null;
   /**
@@ -577,6 +589,7 @@ class SessionRun {
       connections: [...this.#connections],
       end,
       recoveries,
+      quality_profile_id: this.#preparation?.profile.quality_profile.profile_id ?? null,
       schemas: this.#summary,
       server_time_offset_ms: last?.server_time_offset_ms ?? null,
       stopped_for_retention: this.#stoppedForRetention,

@@ -3,8 +3,14 @@ import { deriveMarketData, emptyLiveDerivationState, foldLiveDerivation } from '
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  derivLogProfileRow,
+  LogProfileUnknownError,
+  type LogQualityProfileRow,
+} from '../src/deriv/log-profile.js';
+import {
   createDerivMeasurementProfile,
   createDerivMeasurementProfileFromSourceSchema,
+  createDerivPublicationProfile,
   DERIV_SOURCE,
 } from '../src/deriv/profile.js';
 import {
@@ -109,6 +115,10 @@ interface ObserveOptions {
   readonly pending?: readonly string[];
   /** Los bytes guardados bajo la clave del esquema de fuente; `null`, ninguno. */
   readonly schema?: Uint8Array | null;
+  /** La fila de `log_quality_profile` del log; por defecto, ninguna (ADR-0020 §4). */
+  readonly logProfile?: LogQualityProfileRow;
+  /** El símbolo pedido; por defecto, `SYMBOL`. */
+  readonly symbol?: string;
 }
 
 /**
@@ -198,6 +208,10 @@ async function observeHarness(options: ObserveOptions = {}) {
       timeline.push('pendingMigrations');
       return Promise.resolve(options.pending ?? []);
     },
+    logProfile: () => {
+      timeline.push('logProfile');
+      return Promise.resolve(options.logProfile ?? null);
+    },
     sourceLog: {
       hasSourceEvent: (source, eventId) => {
         timeline.push(`hasSourceEvent:${source}:${eventId}`);
@@ -229,7 +243,7 @@ async function observeHarness(options: ObserveOptions = {}) {
       },
       ...(progress === undefined ? {} : { progress }),
       stores: { ...stores, ...overrides },
-      symbol: SYMBOL,
+      symbol: options.symbol ?? SYMBOL,
     });
   /**
    * Guarda los puntos de control de esos segmentos cerrados, como `ingest`, y devuelve las filas de
@@ -326,6 +340,21 @@ describe('observeDataHealth: lo que lee (ADR-0015 §8, «Entradas»)', () => {
     expect(comparable(observation.profile)).toEqual(
       comparable(createDerivMeasurementProfile({ schemas: syntheticSchemas(), symbol: SYMBOL })),
     );
+  });
+
+  it('con la fila de log_quality_profile, arma el perfil de publicación del símbolo (ADR-0020 §4)', async () => {
+    const run = await observeHarness({ logProfile: derivLogProfileRow('R_100'), symbol: 'R_100' });
+    const observation = await run.observe();
+    if (observation.status !== 'observed' || observation.profile === null) {
+      throw new TypeError('Se esperaba lo observado con perfil.');
+    }
+    expect(comparable(observation.profile)).toEqual(
+      comparable(createDerivPublicationProfile({ schemas: syntheticSchemas(), symbol: 'R_100' })),
+    );
+    // Después de las migraciones y del esquema de fuente, antes de plegar el log.
+    const at = (entry: string) => run.timeline.indexOf(entry);
+    expect(at('logProfile')).toBeGreaterThan(at('pendingMigrations'));
+    expect(at('logProfile')).toBeLessThan(at('load:deriv_options'));
   });
 
   it('lee el esquema de fuente guardado con la clave de su SHA-256 fijado y como mucho el tamaño máximo de una entrada de esquemas', async () => {
@@ -712,6 +741,18 @@ describe('observeDataHealth: lo incompatible (ADR-0015 §8, regla 2)', () => {
     expect(await run.observe()).toEqual(incompatible('source_schema_mismatch'));
   });
 
+  it('un perfil de log que el código no conoce, o que no lee, es log_not_derivable (ADR-0020 §4)', async () => {
+    // El perfil de publicación de R_100 en un log de SYNTH_100, que no tiene umbrales medidos.
+    const run = await observeHarness({ logProfile: derivLogProfileRow('R_100') });
+    expect(await run.observe()).toEqual(incompatible('log_not_derivable'));
+    const unreadable = await observeHarness();
+    expect(
+      await unreadable.observe({
+        logProfile: () => Promise.reject(new LogProfileUnknownError('forma sintética')),
+      }),
+    ).toEqual(incompatible('log_not_derivable'));
+  });
+
   it('un log cuyo contenido no pasa sus comprobaciones (LogIntegrityError) es log_not_derivable, en el segmento abierto o en uno cerrado', async () => {
     // Un objeto que el índice confirmó y ya no está, en el segmento abierto.
     const open = await observeHarness();
@@ -827,6 +868,7 @@ describe('observeDataHealth: almacenamiento que no responde (ADR-0015 §8, regla
       'el registro operativo',
       () => ({ operational: { load: () => Promise.reject(unavailable()) } }),
     ],
+    ['el perfil del log', () => ({ logProfile: () => Promise.reject(unavailable()) })],
     [
       'el último dataset',
       () => ({ datasets: { lastActiveDatasetId: () => Promise.reject(unavailable()) } }),

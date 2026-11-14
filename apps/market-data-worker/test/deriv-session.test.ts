@@ -117,6 +117,7 @@ describe('startDerivSession: arranque', () => {
         reason: 'archive_sha256_mismatch',
         status: 'failed',
       },
+      quality_profile_id: null,
       recoveries: [],
       schemas: null,
       server_time_offset_ms: null,
@@ -524,6 +525,7 @@ describe('startDerivSession: cómo terminó cada conexión (ADR-0015 §3)', () =
         },
       ],
       end: { status: 'completed' },
+      quality_profile_id: 'deriv_options-measurement-v2-SYNTH_100',
       // El log estaba vacío: no hay hueco que recuperar.
       recoveries: [],
       schemas: {

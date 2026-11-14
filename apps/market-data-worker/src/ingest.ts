@@ -3,6 +3,7 @@ import type { HistoryRecoveryResult } from '@buoh/contracts';
 import { ConfigError, loadConfig, type WorkerConfig } from './config.js';
 import type { DerivSchemaSummary } from './deriv/adapter.js';
 import type { HistoryRecoveryOutcome } from './deriv/history-recovery.js';
+import type { LogQualityProfileRow } from './deriv/log-profile.js';
 import type { CatalogStore, RequestedResponseIncidentStore, Scheduler } from './deriv/ports.js';
 import { DERIV_CONNECTOR_VERSION, DERIV_SOURCE } from './deriv/profile.js';
 import type { ExpectedSchemaArchive } from './deriv/schema-release.js';
@@ -62,6 +63,8 @@ export interface IngestStores {
   readonly sourceLog: SourceLogStore;
   /** Las migraciones del worker que el esquema todavía no tiene, sin aplicar nada. */
   pendingMigrations(): Promise<readonly string[]>;
+  /** La fila de `log_quality_profile` del esquema, o `null` (`readLogQualityProfile`, ADR-0020 §4). */
+  logProfile(): Promise<LogQualityProfileRow | null>;
   /** Libera las conexiones. */
   close(): Promise<void>;
 }
@@ -103,7 +106,9 @@ export interface IngestInput {
    * una y devuelve la función que deja de escucharlas.
    */
   readonly signals: (onSignal: () => void) => () => void;
-  readonly stores: Omit<IngestStores, 'close' | 'pendingMigrations'>;
+  readonly stores: Omit<IngestStores, 'close' | 'logProfile' | 'pendingMigrations'>;
+  /** La fila de `log_quality_profile` del log, o `null` o sin ella si no tiene (ADR-0020 §4). */
+  readonly logProfile?: LogQualityProfileRow | null;
   readonly symbol: string;
   /**
    * Recibe la sesión en cuanto empieza y devuelve la función que deja de vigilarla, a la que se llama
@@ -141,6 +146,11 @@ export interface IngestReport {
   readonly finished_at_utc: string;
   /** Cada recuperación de historia que la sesión pidió, en orden. */
   readonly recoveries: readonly IngestRecovery[];
+  /**
+   * El `profile_id` del perfil de calidad de la sesión, el del log (ADR-0020 §4), o `null` si la
+   * preparación falló.
+   */
+  readonly quality_profile_id: string | null;
   /** Release y SHA-256 de `schemas.zip`, o `null` si no cargaron. */
   readonly schemas: DerivSchemaSummary | null;
   readonly source: string;
@@ -202,6 +212,7 @@ export async function runIngest(input: IngestInput): Promise<IngestReport> {
     ...(input.expected === undefined ? {} : { expected: input.expected }),
     fetch: input.fetch,
     lock: input.lock,
+    ...(input.logProfile === undefined ? {} : { logProfile: input.logProfile }),
     nextId: input.nextId,
     now: input.now,
     openLog: input.openLog,
@@ -243,6 +254,7 @@ export async function runIngest(input: IngestInput): Promise<IngestReport> {
     connector_version: DERIV_CONNECTOR_VERSION,
     end: result.end,
     finished_at_utc: input.now(),
+    quality_profile_id: result.quality_profile_id,
     recoveries: result.recoveries.map(ingestRecovery),
     schemas: result.schemas,
     source: DERIV_SOURCE,
@@ -379,12 +391,14 @@ export async function ingestCommand(
   const capture = async (
     target: WorkerConfig,
     lock: SessionLockProvider,
-    production: boolean,
+    production: { readonly profile: LogQualityProfileRow | null } | null,
     cut?: Pick<IngestInput, 'releaseLock' | 'watchSession'>,
   ): Promise<{ readonly exitCode: 0 | 1 | 2; readonly line: string }> => {
     const stores = openStores(target);
     try {
-      if (!production) {
+      // En `production`, el perfil lo leyó la espera del arranque; fuera, se lee aquí (ADR-0020 §4).
+      let logProfile = production?.profile ?? null;
+      if (production === null) {
         let pending: readonly string[];
         try {
           pending = await stores.pendingMigrations();
@@ -409,10 +423,23 @@ export async function ingestCommand(
             }),
           };
         }
+        try {
+          logProfile = await stores.logProfile();
+        } catch (error) {
+          return {
+            exitCode: 1,
+            line: failureLine({
+              code: 'STORAGE_UNAVAILABLE',
+              message: 'PostgreSQL no respondió al leer el perfil del log.',
+              reason: failureReason(error),
+            }),
+          };
+        }
       }
       const report = await runIngest({
         ...ports,
         lock,
+        logProfile,
         openLog: (held) =>
           openLog(held, {
             objects: stores.objects,
@@ -421,7 +448,7 @@ export async function ingestCommand(
             zlibVersion,
           }),
         // En `production`, la retención la llevan los logs sucesivos (ADR-0018 §4 y §7).
-        retentionMs: production ? null : INGEST_RETENTION_MS,
+        retentionMs: production === null ? INGEST_RETENTION_MS : null,
         signals: stop.signals,
         stores,
         symbol,
@@ -462,6 +489,7 @@ export async function ingestCommand(
               located.target = await locateCaptureLog(reads, { after: cutFrom, now: ports.now });
               return located.target?.log ?? null;
             },
+            logProfile: (log) => reads.logProfile(log),
             pendingMigrations: (log) => reads.pendingMigrations(log),
           },
           scheduler: ports.scheduler,
@@ -477,7 +505,7 @@ export async function ingestCommand(
           line: JSON.stringify({ code: WAIT_STOPPED, status: 'stopped', waiting: waited.waiting }),
         };
       }
-      const { log } = waited;
+      const { log, profile } = waited;
       const skipped = cutFrom === null ? (located.target?.skipped ?? null) : null;
       if (skipped !== null) {
         // El salto al arrancar es un corte forzado sin cierre pedido (ADR-0018 §6, «Al arrancar»):
@@ -497,27 +525,32 @@ export async function ingestCommand(
       let result: { readonly exitCode: 0 | 1 | 2; readonly line: string };
       let next: { readonly after: number; readonly lock: SessionLock | null } | null = null;
       try {
-        result = await capture(withLog(config, log), handedOver, true, {
-          releaseLock: retention.release,
-          watchSession: (session) => {
-            const watch = new LogCutWatch({
-              alert,
-              log,
-              now: ports.now,
-              onCut: () => {
-                retention.retain();
-              },
-              reads,
-              scheduler: ports.scheduler,
-              session,
-            });
-            watches.push(watch);
-            watch.start();
-            return () => {
-              watch.stop();
-            };
+        result = await capture(
+          withLog(config, log),
+          handedOver,
+          { profile },
+          {
+            releaseLock: retention.release,
+            watchSession: (session) => {
+              const watch = new LogCutWatch({
+                alert,
+                log,
+                now: ports.now,
+                onCut: () => {
+                  retention.retain();
+                },
+                reads,
+                scheduler: ports.scheduler,
+                session,
+              });
+              watches.push(watch);
+              watch.start();
+              return () => {
+                watch.stop();
+              };
+            },
           },
-        });
+        );
         const decision = watches[0]?.decision ?? null;
         if (decision !== null && result.exitCode === 0) {
           next = { after: decision.log.number, lock: retention.takeRetained() };
@@ -539,7 +572,7 @@ export async function ingestCommand(
   try {
     const provider = lockProvider(config);
     if (config.environment !== 'production') {
-      return await capture(config, provider, false);
+      return await capture(config, provider, null);
     }
     const reads = openStartupReads(config);
     try {

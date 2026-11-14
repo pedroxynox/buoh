@@ -249,9 +249,9 @@ describe('el usuario por defecto de Render prepara la base (ADR-0018 §8)', () =
 });
 
 describe('db:migrate con el rol dueño (F2-ROLE-001)', () => {
-  it('aplica las seis migraciones como buoh_dueno: el esquema y cada tabla son suyos', async () => {
+  it('aplica las siete migraciones como buoh_dueno: el esquema y cada tabla son suyos', async () => {
     expect(migrateLine).toMatchObject({ exitCode: 0, status: 'migrated' });
-    expect(migrateLine['applied']).toHaveLength(6);
+    expect(migrateLine['applied']).toHaveLength(7);
     const { rows } = await ready(admin).query<{ owner: string }>(
       `SELECT tableowner AS owner FROM pg_tables WHERE schemaname = $1
        UNION ALL
@@ -484,7 +484,7 @@ describe('la espera del arranque de ingest en production con buoh_ingesta (ADR-0
       schema: log.schema,
     });
     try {
-      expect((await migrate(owner, { ownerRole: POSTGRES_ROLES.owner })).applied).toHaveLength(6);
+      expect((await migrate(owner, { ownerRole: POSTGRES_ROLES.owner })).applied).toHaveLength(7);
     } finally {
       await owner.end();
     }
@@ -687,7 +687,7 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
 
   /**
    * Lo que hace `buoh-operaciones` con la credencial dueña de `user` (ADR-0018 §11), con su código:
-   * ajusta los roles, prepara el log `log` como `buoh_dueno`, con su esquema, sus seis migraciones y
+   * ajusta los roles, prepara el log `log` como `buoh_dueno`, con su esquema, sus siete migraciones y
    * sus privilegios, pone una contraseña, guarda un informe en el log, lo encuentra y mide el
    * espacio. No da ninguna pertenencia a `buoh_dueno`.
    */
@@ -700,7 +700,7 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
       await owner.ensureRuntimeRoles();
       await owner.createLogSchema(location);
       const { applied } = await migrate(pool, { ownerRole: POSTGRES_ROLES.owner });
-      expect(applied).toHaveLength(6);
+      expect(applied).toHaveLength(7);
       await owner.grantLogPrivileges(location);
       await owner.setRolePassword(POSTGRES_ROLES.health, passwords.health);
       expect(await owner.checkLogin(POSTGRES_ROLES.health, passwords.health)).toBe('accepted');

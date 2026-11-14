@@ -12,6 +12,7 @@ import {
   apiMigrateEnvironment,
   CHILD_OUTPUT_LIMIT_BYTES,
   ConfigError,
+  derivLogProfileRow,
   healthEnvironment,
   loadOperationsConfig,
   logLocation,
@@ -39,6 +40,7 @@ import {
   type LogDeletion,
   type LogLocation,
   type LoginCheck,
+  type LogProfileAssignment,
   type LogObjects,
   type LogSchemaDrop,
   type OperationalAlert,
@@ -391,8 +393,17 @@ function fakeDatabase(state: {
   space?: SpaceMeasure;
   /** Las publicaciones activas de `production`, en orden de publicación (ADR-0020 §8, paso 7). */
   publications?: readonly { dataset_id: string; publication_id: string }[];
+  /**
+   * Los logs en los que `buoh_ingesta` todavía no tiene el uso del esquema, por su número. Sin él,
+   * ninguno: los de `logs` ya están preparados. Un log que crea `createLogSchema` entra, y sale con
+   * `grantLogPrivileges`.
+   */
+  ungranted?: Set<number>;
 }) {
   const calls: string[] = [];
+  const ungranted = state.ungranted ?? new Set<number>();
+  /** La fila de `log_quality_profile` de cada log, por su número (ADR-0020 §4). */
+  const profiles = new Map<number, LogProfileAssignment>();
   /** La hora con la que se pidió borrar cada esquema. */
   const drops: { log: number; now: string }[] = [];
   const reports: { log: number; row: OperationsReportRow }[] = [];
@@ -429,6 +440,7 @@ function fakeDatabase(state: {
       calls.push(`create:${String(target.number)}`);
       return answer('createLogSchema', () => {
         state.logs.push(log(target.number));
+        ungranted.add(target.number);
       });
     },
     dropExpiredLog: (target, now) => {
@@ -472,7 +484,24 @@ function fakeDatabase(state: {
     },
     grantLogPrivileges: (target) => {
       calls.push(`grant:${String(target.number)}`);
-      return answer('grantLogPrivileges', () => undefined);
+      return answer('grantLogPrivileges', () => {
+        ungranted.delete(target.number);
+      });
+    },
+    assignLogProfile: (target, row) => {
+      calls.push(`profile:${String(target.number)}`);
+      return answer('assignLogProfile', () => {
+        const current = state.logs.find((item) => item.location.number === target.number);
+        if (
+          profiles.has(target.number) ||
+          !ungranted.has(target.number) ||
+          (current?.lastWriteUtc ?? null) !== null
+        ) {
+          return false;
+        }
+        profiles.set(target.number, row);
+        return true;
+      });
     },
     lastCompletedReport: (target, step) => {
       calls.push(`last:${String(target.number)}:${step}`);
@@ -557,7 +586,7 @@ function fakeDatabase(state: {
       });
     },
   };
-  return { calls, database, drops, reports, verifications };
+  return { calls, database, drops, profiles, reports, verifications };
 }
 
 const coded = (code: string) =>
@@ -813,6 +842,7 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       'list',
       'list',
       'create:1',
+      'profile:1',
       'grant:1',
       'login:buoh_ingesta',
       'password:buoh_ingesta',
@@ -853,6 +883,7 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
           passwords_set: ['buoh_ingesta', 'buoh_salud', 'buoh_agente'],
           passwords_unchecked: [],
           prepared: 1,
+          profiles_assigned: [1],
         },
         run_id: uuid(1),
         status: 'completed',
@@ -926,10 +957,12 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
     const { lines, result } = await run(db, children);
 
     // Los pasos 1 y 2; los siguientes tienen sus propias pruebas.
-    expect(db.calls.slice(0, 10)).toEqual([
+    expect(db.calls.slice(0, 12)).toEqual([
       'roles',
       'list',
+      'profile:1',
       'grant:1',
+      'profile:2',
       'grant:2',
       'list',
       'login:buoh_ingesta',
@@ -938,6 +971,7 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       'list',
       'report:1:health',
     ]);
+    expect(db.profiles.size).toBe(0);
     expect(db.reports.map(({ row }) => row.step)).not.toContain('roles_and_logs');
     expect(children.runs.map((item) => [item.child, item.args])).toEqual([
       ['migrate', []],
@@ -957,8 +991,71 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
         passwords_set: [],
         passwords_unchecked: [],
         prepared: null,
+        profiles_assigned: [],
       },
       status: 'completed',
+    });
+  });
+
+  it('el perfil del log (ADR-0020 §4): el log nuevo recibe el de publicación después de sus migraciones y antes de sus privilegios', async () => {
+    const db = fakeDatabase({
+      loggedIn: new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']),
+      logs: [log(1, NOW)],
+    });
+    const { lines } = await run(db, fakeChildren());
+    expect(db.calls.slice(0, 7)).toEqual([
+      'roles',
+      'list',
+      'profile:1',
+      'grant:1',
+      'list',
+      'create:2',
+      'profile:2',
+    ]);
+    expect(db.calls[7]).toBe('grant:2');
+    expect([...db.profiles]).toEqual([
+      [2, { ...derivLogProfileRow('R_100'), assigned_at_utc: NOW, run_id: uuid(1) }],
+    ]);
+    expect(lines[0]).toMatchObject({
+      report: { failures: [], prepared: 2, profiles_assigned: [2] },
+      status: 'completed',
+    });
+  });
+
+  it('un log preparado al que una ejecución cortada no le dio los privilegios recibe el perfil en la siguiente; uno con escrituras o con privilegios, no', async () => {
+    const db = fakeDatabase({
+      loggedIn: new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']),
+      logs: [log(1, NOW), log(2, NOW), log(3)],
+      ungranted: new Set([2, 3]),
+    });
+    const { lines } = await run(db, fakeChildren());
+    expect([...db.profiles.keys()]).toEqual([3]);
+    expect(lines[0]).toMatchObject({ report: { profiles_assigned: [3] } });
+    // Dar un perfil es un cambio: el informe del paso 1 se guarda, aunque no haya otro.
+    expect(db.reports.filter(({ row }) => row.step === 'roles_and_logs')).toHaveLength(1);
+    const again = await run(db, fakeChildren());
+    expect(db.profiles.size).toBe(1);
+    expect(again.lines[0]).toMatchObject({ report: { profiles_assigned: [] } });
+  });
+
+  it('si no puede dar el perfil, no da los privilegios de ese log: falla con su motivo y sigue con los demás', async () => {
+    const db = fakeDatabase({
+      fail: { assignLogProfile: coded('57014') },
+      loggedIn: new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']),
+      logs: [log(1, NOW)],
+    });
+    const { lines } = await run(db, fakeChildren());
+    expect(db.calls.filter((call) => call.startsWith('grant:'))).toEqual([]);
+    expect(lines[0]).toMatchObject({
+      report: {
+        failures: [
+          { action: 'profile', log: 1, reason: '57014' },
+          { action: 'profile', log: 2, reason: '57014' },
+        ],
+        prepared: null,
+        profiles_assigned: [],
+      },
+      status: 'failed',
     });
   });
 
@@ -970,12 +1067,14 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
     const children = fakeChildren();
     const { lines } = await run(db, children);
 
-    expect(db.calls.slice(0, 6)).toEqual([
+    expect(db.calls.slice(0, 8)).toEqual([
       'roles',
       'list',
+      'profile:1',
       'grant:1',
       'list',
       'create:2',
+      'profile:2',
       'grant:2',
     ]);
     expect(lines[0]).toMatchObject({ report: { prepared: 2 } });
@@ -1013,10 +1112,12 @@ describe('runOperations: el esquema y el rol de la API en el paso 1 (ADR-0019 §
         : {},
     );
     const { lines, result } = await run(db, children, { config: API_CONFIG });
-    expect(db.calls.slice(0, 15)).toEqual([
+    expect(db.calls.slice(0, 17)).toEqual([
       'roles',
       'list',
+      'profile:1',
       'grant:1',
+      'profile:2',
       'grant:2',
       'list',
       'api_role',
@@ -1043,6 +1144,7 @@ describe('runOperations: el esquema y el rol de la API en el paso 1 (ADR-0019 §
       passwords_set: ['buoh_api'],
       passwords_unchecked: [],
       prepared: null,
+      profiles_assigned: [],
     };
     expect(lines[0]).toMatchObject({ report, status: 'completed', step: 'roles_and_logs' });
     expect(db.reports[0]?.row.report).toEqual(report);
@@ -1160,10 +1262,12 @@ describe('runOperations: el rol de lectura de la API en el paso 1 (ADR-0019 §7 
     const db = ready();
     const children = fakeChildren();
     const { lines, result } = await run(db, children, { config: READER_CONFIG });
-    expect(db.calls.slice(0, 13)).toEqual([
+    expect(db.calls.slice(0, 15)).toEqual([
       'roles',
       'list',
+      'profile:1',
       'grant:1',
+      'profile:2',
       'grant:2',
       'list',
       'api_reader_role',
@@ -1183,6 +1287,7 @@ describe('runOperations: el rol de lectura de la API en el paso 1 (ADR-0019 §7 
       passwords_set: ['buoh_api_lectura'],
       passwords_unchecked: [],
       prepared: null,
+      profiles_assigned: [],
     };
     expect(lines[0]).toMatchObject({ report, status: 'completed', step: 'roles_and_logs' });
     expect(db.reports[0]?.row.report).toEqual(report);
@@ -1191,7 +1296,7 @@ describe('runOperations: el rol de lectura de la API en el paso 1 (ADR-0019 §7 
   it('con las dos contraseñas de la API, el rol de lectura va después de preparar buoh_api, y su contraseña, después de la de buoh_api', async () => {
     const db = ready();
     const { result } = await run(db, fakeChildren(), { config: API_AND_READER_CONFIG });
-    expect(db.calls.slice(5, 14)).toEqual([
+    expect(db.calls.slice(7, 16)).toEqual([
       'api_role',
       'api_grant',
       'api_reader_role',
@@ -1202,7 +1307,7 @@ describe('runOperations: el rol de lectura de la API en el paso 1 (ADR-0019 §7 
       'password:buoh_api',
       'login:buoh_api_lectura',
     ]);
-    expect(db.calls[14]).toBe('password:buoh_api_lectura');
+    expect(db.calls[16]).toBe('password:buoh_api_lectura');
     expect(result.status).toBe('completed');
   });
 
@@ -1319,6 +1424,7 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
           passwords_set: [],
           passwords_unchecked: [],
           prepared: null,
+          profiles_assigned: [],
         },
         status: 'failed',
         step: 'roles_and_logs',

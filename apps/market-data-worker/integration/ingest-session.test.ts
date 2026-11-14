@@ -328,7 +328,7 @@ function recording(inner: IngestionStatusStore) {
 }
 
 describe('pendingMigrations contra PostgreSQL', () => {
-  it('a un esquema recién creado le faltan las seis migraciones, y después de db:migrate ninguna', () => {
+  it('a un esquema recién creado le faltan las siete migraciones, y después de db:migrate ninguna', () => {
     expect(pendingBefore).toEqual([
       '0001_publicaciones.sql',
       '0002_log_raw_first.sql',
@@ -336,6 +336,7 @@ describe('pendingMigrations contra PostgreSQL', () => {
       '0004_cursor_y_latido.sql',
       '0005_punto_de_control_en_vivo.sql',
       '0006_informes_de_operaciones.sql',
+      '0007_perfil_del_log.sql',
     ]);
     expect(pendingAfter).toEqual([]);
   });

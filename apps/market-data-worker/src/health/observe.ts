@@ -2,7 +2,12 @@ import type { DeploymentEnvironment, IngestionCursor } from '@buoh/contracts';
 import type { PipelineProfile } from '@buoh/domain';
 
 import { checkFoldedContent, foldSinceCheckpoint } from '../deriv/log-check.js';
-import { createDerivMeasurementProfileFromSourceSchema, DERIV_SOURCE } from '../deriv/profile.js';
+import {
+  createDerivLogProfile,
+  LogProfileUnknownError,
+  type LogQualityProfileRow,
+} from '../deriv/log-profile.js';
+import { DERIV_SOURCE } from '../deriv/profile.js';
 import { DERIV_SCHEMA_RELEASE, type ExpectedSchemaArchive } from '../deriv/schema-release.js';
 import { readStoredSourceSchema } from '../deriv/stored-source-schema.js';
 import type { IngestionStatusStore } from '../ingestion/status.js';
@@ -53,6 +58,8 @@ export interface HealthStores {
   lockHolder(source: string): Promise<number | null>;
   /** Las migraciones del worker que el esquema todavía no tiene, sin aplicar nada. */
   pendingMigrations(): Promise<readonly string[]>;
+  /** La fila de `log_quality_profile` del log, o `null` (`readLogQualityProfile`, ADR-0020 §4). */
+  logProfile(): Promise<LogQualityProfileRow | null>;
 }
 
 /**
@@ -251,6 +258,45 @@ async function readSourceSchema(
 }
 
 /**
+ * El perfil del log (ADR-0020 §4) con el esquema de fuente guardado: la fila de
+ * `log_quality_profile` y `createDerivLogProfile`, o `null` sin esquema. Un perfil que el código no
+ * conoce es `log_not_derivable` (regla 2); una lectura de la fila rechazada, un almacén que no
+ * responde (regla 3).
+ */
+async function logProfileOf(
+  stores: HealthStores,
+  sourceSchema: Uint8Array | null,
+  expected: ExpectedSchemaArchive,
+  symbol: string,
+): Promise<PipelineProfile | null> {
+  let row: LogQualityProfileRow | null;
+  try {
+    row = await stores.logProfile();
+  } catch (error) {
+    if (error instanceof LogIntegrityError) {
+      throw incompatible('log_not_derivable');
+    }
+    throw unanswered(failureReason(error));
+  }
+  if (sourceSchema === null) {
+    return null;
+  }
+  try {
+    return createDerivLogProfile({
+      row,
+      source_schema_bytes: sourceSchema,
+      source_schema_release: expected.release,
+      symbol,
+    });
+  } catch (error) {
+    if (error instanceof LogProfileUnknownError) {
+      throw incompatible('log_not_derivable');
+    }
+    throw error;
+  }
+}
+
+/**
  * Lo que observa `data:health` de la fuente de Deriv (ADR-0015 §8, «Entradas»), sin tomar el
  * bloqueo y sin escribir nada, en este orden:
  *
@@ -260,9 +306,10 @@ async function readSourceSchema(
  *    lee el log ya dejó su cierre en él;
  * 3. los símbolos de los cursores de la fuente y el último cursor del símbolo pedido, antes que el
  *    log, como el arranque: un cursor escrito mientras se lee apunta a un evento que el índice ya
- *    tenía; después, el estado del log y su segmento abierto, el esquema de fuente guardado, con el
- *    que arma el perfil de medición, y el log desde su último punto de control válido, con ese
- *    perfil (`readObservedLog`); sin esquema, el perfil es `null` y la evaluación decide;
+ *    tenía; después, el estado del log y su segmento abierto, el esquema de fuente guardado y la
+ *    fila del perfil del log, con los que arma su perfil (`logProfileOf`, ADR-0020 §4), y el log
+ *    desde su último punto de control válido, con ese perfil (`readObservedLog`); sin esquema, el
+ *    perfil es `null` y la evaluación decide;
  * 4. los tipos abiertos del registro operativo y el último dataset activo de la fuente en el
  *    entorno.
  *
@@ -290,14 +337,7 @@ export async function observeDataHealth(input: ObserveDataHealthInput): Promise<
     );
     const log = await openLog(stores, progress);
     const sourceSchema = await readSourceSchema(stores.objects, expected);
-    const profile =
-      sourceSchema === null
-        ? null
-        : createDerivMeasurementProfileFromSourceSchema({
-            source_schema_bytes: sourceSchema,
-            source_schema_release: expected.release,
-            symbol,
-          });
+    const profile = await logProfileOf(stores, sourceSchema, expected, symbol);
     const observedLog = await readObservedLog(log, {
       cursorSymbols,
       latestCursor: latestCursor?.cursor ?? null,

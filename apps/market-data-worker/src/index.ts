@@ -138,6 +138,14 @@ export {
   type MigrationSequence,
 } from './postgres/migrate.js';
 export { DATASETS_PREFIX, DATASETS_SCHEMA } from './datasets/location.js';
+export {
+  createDerivLogProfile,
+  derivLogProfileRow,
+  LOG_PROFILE_SYMBOL,
+  LogProfileUnknownError,
+  type LogQualityProfileRow,
+} from './deriv/log-profile.js';
+export { readLogQualityProfile } from './postgres/log-profile.js';
 export { createPool, PostgresMetadataStore, postgresSslOption } from './postgres/metadata-store.js';
 export {
   AGENT_CONNECTION_LIMIT,
@@ -156,6 +164,7 @@ export {
   grantDatasetsPrivileges,
   grantLogPrivileges,
   INGEST_DENIED_TABLES,
+  INGEST_READ_TABLES,
   INGEST_WRITE_TABLES,
   LOGIN_ROLES,
   MIGRATIONS_TABLE,
@@ -356,6 +365,7 @@ export {
   OPERATIONS_QUERY_TIMEOUT_MS,
   openOwnerDatabase,
   type LoginCheck,
+  type LogProfileAssignment,
   type LogSchemaDrop,
   type OperationsReportRow,
   type DatasetVerificationRow,

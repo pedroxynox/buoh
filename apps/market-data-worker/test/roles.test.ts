@@ -13,6 +13,7 @@ import {
   grantApiPrivileges,
   grantLogPrivileges,
   INGEST_DENIED_TABLES,
+  INGEST_READ_TABLES,
   INGEST_WRITE_TABLES,
   MIGRATIONS_TABLE,
   POSTGRES_ROLES,
@@ -110,7 +111,12 @@ describe('setRolePassword', () => {
 });
 
 describe('grantLogPrivileges', () => {
-  const tables = [MIGRATIONS_TABLE, ...INGEST_WRITE_TABLES, ...INGEST_DENIED_TABLES];
+  const tables = [
+    MIGRATIONS_TABLE,
+    ...INGEST_WRITE_TABLES,
+    ...INGEST_READ_TABLES,
+    ...INGEST_DENIED_TABLES,
+  ];
 
   it('como buoh_dueno, da a buoh_lectura todas las tablas y a buoh_ingesta solo las del log, sin las de datasets', async () => {
     const { client, queries } = fakeClient((text) =>
@@ -135,6 +141,14 @@ describe('grantLogPrivileges', () => {
     expect(grants).toContain(
       `GRANT SELECT ON "buoh_log_000001"."${MIGRATIONS_TABLE}" TO "buoh_ingesta"`,
     );
+    // El perfil del log (ADR-0020 §4): buoh_ingesta solo lo lee; ningún rol de ejecución lo escribe.
+    expect(INGEST_READ_TABLES).toEqual(['log_quality_profile']);
+    expect(grants).toContain(
+      'GRANT SELECT ON "buoh_log_000001"."log_quality_profile" TO "buoh_ingesta"',
+    );
+    expect(
+      grants.filter((text) => text.includes('"log_quality_profile"') && text.includes('INSERT')),
+    ).toEqual([]);
     for (const table of INGEST_DENIED_TABLES) {
       expect(grants.some((text) => text.includes(`"${table}"`))).toBe(false);
     }

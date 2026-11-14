@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  derivLogProfileRow,
   HandedOverLockProvider,
   logLocation,
   STARTUP_ALERT_INTERVAL_MS,
@@ -9,6 +10,7 @@ import {
   STARTUP_WAIT_REASONS,
   waitForProductionStart,
   type LogLocation,
+  type LogQualityProfileRow,
   type OperationalAlert,
   type StartupWaitResult,
 } from '../src/index.js';
@@ -33,6 +35,8 @@ interface ReadsState {
   /** Se llama al empezar cada lectura del log, con su número desde 1. */
   onLocate?: (call: number) => void;
   pending: readonly string[] | Error;
+  /** La fila de `log_quality_profile` del log (ADR-0020 §4), o un error al leerla. */
+  profile?: LogQualityProfileRow | null | Error;
 }
 
 const coded = (code: string) =>
@@ -45,6 +49,8 @@ function waitHarness(locks: readonly LockAnswer[] = []) {
   const alerts: Parameters<OperationalAlert>[0][] = [];
   const provider = new FakeLockProvider(locks, timeline);
   const state: ReadsState = { locate: logLocation(1), pending: [] };
+  /** Los logs cuyo perfil leyó, en orden. Aparte de `timeline`, que sigue el orden de lo demás. */
+  const profileReads: number[] = [];
   const signal: { handler: (() => void) | null; listening: boolean } = {
     handler: null,
     listening: false,
@@ -73,6 +79,11 @@ function waitHarness(locks: readonly LockAnswer[] = []) {
             ? Promise.reject(state.pending)
             : Promise.resolve(state.pending);
         },
+        logProfile: (log) => {
+          profileReads.push(log.number);
+          const answer = state.profile ?? null;
+          return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
+        },
       },
       scheduler: clock.scheduler,
       signals: (handler) => {
@@ -95,6 +106,7 @@ function waitHarness(locks: readonly LockAnswer[] = []) {
   return {
     alerts,
     clock,
+    profileReads,
     provider,
     raise: () => {
       signal.handler?.();
@@ -154,6 +166,7 @@ describe('waitForProductionStart: lo que espera, en orden (ADR-0018 §4)', () =>
     expect(wait.result()).toEqual({
       lock: wait.provider.lock(1),
       log: logLocation(1),
+      profile: null,
       status: 'ready',
     });
     expect(wait.provider.lock(1).held).toBe(true);
@@ -166,6 +179,35 @@ describe('waitForProductionStart: lo que espera, en orden (ADR-0018 §4)', () =>
       { detail: '0006_sintetica.sql', event: 'ingest_waiting', reason: 'migrations_pending' },
       { detail: null, event: 'ingest_waiting', reason: 'source_lock_taken' },
     ]);
+  });
+
+  it('con las migraciones, lee el perfil del log (ADR-0020 §4) y lo da con el log; sin fila, null', async () => {
+    const wait = waitHarness(['lock']);
+    wait.state.profile = derivLogProfileRow('R_100');
+    void wait.run();
+    await settle();
+    expect(wait.profileReads).toEqual([1]);
+    expect(wait.result()).toEqual({
+      lock: wait.provider.lock(1),
+      log: logLocation(1),
+      profile: derivLogProfileRow('R_100'),
+      status: 'ready',
+    });
+  });
+
+  it('si PostgreSQL no responde al leer el perfil, postgres_unavailable con el código, sin tomar el bloqueo, y a los 30 s otra vez', async () => {
+    const wait = waitHarness(['lock']);
+    wait.state.profile = coded('57014');
+    void wait.run();
+    await settle();
+    expect(wait.timeline).toEqual(['locate', 'pending:1']);
+    expect(wait.alerts).toEqual([
+      { detail: '57014', event: 'ingest_waiting', reason: 'postgres_unavailable' },
+    ]);
+    wait.state.profile = null;
+    await wait.clock.advance(STARTUP_RETRY_MS);
+    expect(wait.profileReads).toEqual([1, 1]);
+    expect(wait.result()).toMatchObject({ profile: null, status: 'ready' });
   });
 
   it('si PostgreSQL no responde al leer las migraciones o al tomar el bloqueo, postgres_unavailable con el código, y a los 30 s empieza otra vez por la credencial', async () => {
@@ -204,6 +246,7 @@ describe('waitForProductionStart: lo que espera, en orden (ADR-0018 §4)', () =>
     expect(wait.result()).toEqual({
       lock: wait.provider.lock(2),
       log: logLocation(2),
+      profile: null,
       status: 'ready',
     });
     expect(wait.alerts).toEqual([]);
@@ -225,6 +268,7 @@ describe('waitForProductionStart: lo que espera, en orden (ADR-0018 §4)', () =>
     expect(wait.result()).toEqual({
       lock: wait.provider.lock(2),
       log: logLocation(1),
+      profile: null,
       status: 'ready',
     });
   });
@@ -242,6 +286,7 @@ describe('waitForProductionStart: lo que espera, en orden (ADR-0018 §4)', () =>
     expect(wait.result()).toEqual({
       lock: wait.provider.lock(2),
       log: logLocation(1),
+      profile: null,
       status: 'ready',
     });
   });
