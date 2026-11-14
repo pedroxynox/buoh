@@ -142,10 +142,11 @@ export interface OwnerDatabase {
   /** Da sus privilegios en `buoh_datasets` (`grantDatasetsPrivileges`, ADR-0020 §5). */
   grantDatasetsPrivileges(): Promise<void>;
   /**
-   * El informe más reciente del paso en la tabla `operations_reports` del log, el de mayor
-   * `report_id`, o `null` si no hay ninguno.
+   * El informe más reciente del paso que lleva su estado (`state`) en la tabla `operations_reports`
+   * del log, el de mayor `report_id`, o `null` si no hay ninguno. Un informe sin estado, como el de un
+   * fallo antes de leerlo, no cuenta: el estado sigue siendo el del anterior.
    */
-  latestReport(log: LogLocation, step: string): Promise<StoredReport | null>;
+  latestReportWithState(log: LogLocation, step: string): Promise<StoredReport | null>;
   /**
    * La publicación activa de `production` más antigua (por `published_at_utc` y `publication_id`)
    * que no tiene un resultado en los dos modos en `buoh_datasets.dataset_verifications`, o `null`.
@@ -344,7 +345,7 @@ export function openOwnerDatabase(
         );
         return rows[0]?.last ?? null;
       }),
-    latestReport: (log, step) =>
+    latestReportWithState: (log, step) =>
       asOwner(async (client) => {
         const { rows } = await client.query<{
           report_id: string;
@@ -353,7 +354,8 @@ export function openOwnerDatabase(
         }>(
           `SELECT report_id::text AS report_id, status, report_jcs
              FROM ${pg.escapeIdentifier(log.schema)}.operations_reports
-            WHERE step = $1 ORDER BY report_id DESC LIMIT 1`,
+            WHERE step = $1 AND (report_jcs::jsonb) ? 'state'
+            ORDER BY report_id DESC LIMIT 1`,
           [step],
         );
         const [row] = rows;

@@ -186,7 +186,7 @@ async function loadState<T>(
     if (!log.readable) {
       continue;
     }
-    const found = await input.database.latestReport(log.location, step);
+    const found = await input.database.latestReportWithState(log.location, step);
     if (found !== null && (latest === null || found.report_id > latest.report_id)) {
       latest = found;
     }
@@ -235,6 +235,7 @@ type PublishResult =
   | { readonly kind: 'published'; readonly line: z.infer<typeof publishedLineSchema> }
   | { readonly kind: 'nothing_due'; readonly line: z.infer<typeof nothingDueLineSchema> }
   | {
+      readonly behind: z.infer<typeof behindSchema> | null;
       readonly dataset: { readonly first_segment: number; readonly log: number } | null;
       readonly kind: 'inconclusive' | 'repeat' | 'stop';
       readonly report: Report;
@@ -254,6 +255,8 @@ function classifyPublish(result: ChildResult): PublishResult {
       line.log !== null && line.first_segment !== undefined
         ? { first_segment: line.first_segment, log: line.log }
         : lastAttempt(result.stderr);
+    // El atraso sale también de un fallo: justo cuando el log más viejo no se publica.
+    const behind = line.behind ?? null;
     const report: Report = {
       detail: line.detail,
       exit_code: 1,
@@ -265,12 +268,12 @@ function classifyPublish(result: ChildResult): PublishResult {
     const stops: ReadonlySet<string> = new Set(PUBLICATION_STOP_REASONS);
     if (stops.has(line.reason)) {
       // Sin dataset identificado no hay log que detener: el paso falla y nada más.
-      return { dataset, kind: 'stop', report };
+      return { behind, dataset, kind: 'stop', report };
     }
     if (PUBLICATION_REPEAT_REASONS.has(line.reason)) {
-      return { dataset, kind: 'repeat', report };
+      return { behind, dataset, kind: 'repeat', report };
     }
-    return { dataset, kind: 'inconclusive', report };
+    return { behind, dataset, kind: 'inconclusive', report };
   }
   if (result.exitCode === 2 && !result.timedOut) {
     // Un error de uso o de configuración no es de ningún dataset: lo arregla un cambio del código.
@@ -279,6 +282,7 @@ function classifyPublish(result: ChildResult): PublishResult {
   const reason = childFailure(result, 'publish_output_invalid');
   const dataset = lastAttempt(result.stderr);
   return {
+    behind: null,
     dataset,
     kind: 'inconclusive',
     report: {
@@ -305,11 +309,12 @@ function classifyPublish(result: ChildResult): PublishResult {
  *   mismo dataset, el log se detiene con `publication_incomplete`. Un almacén que no responde o un
  *   `COMMIT` ambiguo se repiten sin contar; una publicación, o nada pendiente, ponen la cuenta a
  *   cero.
- * - **Atraso.** Con `behind`, la alerta `publication_behind`.
+ * - **Atraso.** Con `behind`, también en una línea `failed`, la alerta `publication_behind`.
  *
  * El estado (los logs detenidos y la cuenta) va en el informe del paso, en el log activo, y la
- * ejecución siguiente lo lee del más reciente de cualquier log. El informe se guarda si publicó,
- * si falló o si el estado cambió. El paso falla si la orden falló o hay algún log detenido.
+ * ejecución siguiente lo lee del más reciente de cualquier log que lo lleva: el informe de un fallo
+ * de antes de leerlo no lo lleva, y no lo cambia. El paso falla si la orden falló o hay algún log
+ * detenido. El informe se guarda si publicó, si el paso falló o si el estado cambió.
  */
 export async function publicationStep(
   input: OperationsInput,
@@ -380,6 +385,7 @@ export async function publicationStep(
     case 'inconclusive':
     case 'invalid': {
       failed = true;
+      behind = classified.kind === 'invalid' ? null : classified.behind;
       outcome = { status: 'failed', ...classified.report };
       if (classified.kind === 'stop' && classified.dataset !== null) {
         stopped = [
@@ -431,6 +437,7 @@ export async function publicationStep(
   const changed = JSON.stringify(state) !== JSON.stringify(loaded);
   const reason =
     typeof outcome['reason'] === 'string' ? outcome['reason'] : (stopped[0]?.reason ?? null);
+  const status = failed || stopped.length > 0 ? 'failed' : 'completed';
   return {
     log: null,
     report: {
@@ -441,8 +448,9 @@ export async function publicationStep(
       skipped: skip,
       state,
     },
-    status: failed || stopped.length > 0 ? 'failed' : 'completed',
-    store: failed || classified.kind === 'published' || changed,
+    status,
+    // Siempre que falla (§8), también con un log detenido y nada nuevo; y si el estado cambió.
+    store: status === 'failed' || classified.kind === 'published' || changed,
   };
 }
 
@@ -454,6 +462,7 @@ type ReplayOutcome =
       readonly kind: 'failed';
       readonly maxRssBytes: number | null;
     }
+  | { readonly kind: 'config' }
   | { readonly kind: 'storage' }
   | { readonly code: string; readonly exitCode: number | null; readonly kind: 'inconclusive' };
 
@@ -498,11 +507,11 @@ function classifyReplay(
   if (result.exitCode === null) {
     return { code: 'CHILD_KILLED', exitCode: null, kind: 'inconclusive' };
   }
-  return {
-    code: result.exitCode === 2 ? 'REPLAY_CONFIG_INVALID' : 'REPLAY_OUTPUT_INVALID',
-    exitCode: result.exitCode,
-    kind: 'inconclusive',
-  };
+  if (result.exitCode === 2) {
+    // Un error de uso o de configuración no es del dataset: lo arregla un cambio del código.
+    return { kind: 'config' };
+  }
+  return { code: 'REPLAY_OUTPUT_INVALID', exitCode: result.exitCode, kind: 'inconclusive' };
 }
 
 /**
@@ -518,8 +527,9 @@ function classifyReplay(
  *   vencido, un proceso que muere, `UNEXPECTED` o una salida sin su línea), con la misma alerta: el
  *   modo ya tiene resultado, y el paso sigue.
  *
- * Un almacén que no responde (`STORAGE_UNAVAILABLE`) no guarda nada ni cuenta: el paso falla y lo
- * intenta en la ejecución siguiente. La cuenta va en el informe del paso, como en el 6. El paso
+ * Un almacén que no responde (`STORAGE_UNAVAILABLE`) o una salida 2, un error de uso o de
+ * configuración (`replay_config_invalid`), no guardan nada ni cuentan: el paso falla y lo intenta en
+ * la ejecución siguiente. La cuenta va en el informe del paso, como en el 6. El paso
  * falla si no consiguió un resultado concluyente; un `failed` o un `incomplete` son resultados, con
  * su alerta. El informe se guarda si ejecutó algo o falló.
  */
@@ -599,6 +609,11 @@ export async function datasetVerificationStep(
       if (outcome.kind === 'storage') {
         results.push({ mode, status: 'storage_unavailable' });
         reason = 'storage_unavailable';
+        break;
+      }
+      if (outcome.kind === 'config') {
+        results.push({ mode, status: 'replay_config_invalid' });
+        reason = 'replay_config_invalid';
         break;
       }
       if (outcome.kind === 'passed') {

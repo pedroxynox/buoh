@@ -1272,5 +1272,31 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       report: { result: { status: 'nothing_due' } },
     });
     expect(quiet.step('dataset_verification')).toMatchObject({ report: { dataset_id: null } });
+
+    // El informe de un fallo de antes de leer el estado no lleva `state`, y no lo cambia: el estado
+    // sigue siendo el del último informe que lo lleva.
+    const config = loadOperationsConfig(env);
+    const database = openOwnerDatabase(
+      { ...config, owner: plain(config.owner) },
+      { source: DERIV_SOURCE },
+    );
+    try {
+      const active = logLocation(location.number + 1);
+      const before = await database.latestReportWithState(active, 'publication');
+      expect(before?.report).toMatchObject({ state: { attempts: null, stopped: [] } });
+      await database.appendReport(active, {
+        observed_at_utc: clock.now(),
+        report: { reason: '57014' },
+        report_id: uuid((sequence += 1)),
+        run_id: uuid((sequence += 1)),
+        status: 'failed',
+        step: 'publication',
+      });
+      expect((await database.latestReportWithState(active, 'publication'))?.report_id).toBe(
+        before?.report_id,
+      );
+    } finally {
+      await database.close();
+    }
   });
 });

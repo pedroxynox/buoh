@@ -489,11 +489,14 @@ function fakeDatabase(state: {
         return times.at(-1) ?? null;
       });
     },
-    latestReport: (target, step) => {
+    latestReportWithState: (target, step) => {
       calls.push(`latest:${String(target.number)}:${step}`);
-      return answer('latestReport', () => {
+      return answer('latestReportWithState', () => {
         const found = reports
-          .filter((item) => item.log === target.number && item.row.step === step)
+          .filter(
+            (item) =>
+              item.log === target.number && item.row.step === step && 'state' in item.row.report,
+          )
           .map((item) => item.row)
           .sort((left, right) => left.report_id.localeCompare(right.report_id))
           .at(-1);
@@ -2852,9 +2855,9 @@ const publishedLine = (log: number, first: number, last: number) =>
   });
 const nothingDueLine = (behind: unknown = null) =>
   JSON.stringify({ behind, duration_ms: 100, max_rss_bytes: 90 * 1048576, status: 'nothing_due' });
-const failedLine = (reason: string, log: number | null, first?: number) =>
+const failedLine = (reason: string, log: number | null, first?: number, behind: unknown = null) =>
   JSON.stringify({
-    behind: null,
+    behind,
     detail: 'x',
     duration_ms: 100,
     ...(first === undefined ? {} : { first_segment: first }),
@@ -3355,7 +3358,7 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
     });
   });
 
-  it('con logs detenidos y nada nuevo, el paso falla con su alerta sin volver a guardar el estado', async () => {
+  it('con logs detenidos y nada nuevo, el paso falla con su alerta y guarda su informe, como siempre que falla', async () => {
     const db = datasetsDatabase();
     const children = datasetsChildren({
       publish: (args) =>
@@ -3375,7 +3378,53 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
       reason: 'publication_conflict',
       step: 'publication',
     });
-    expect(db.reports.filter((item) => item.row.step === 'publication')).toHaveLength(before);
+    expect(db.reports.filter((item) => item.row.step === 'publication')).toHaveLength(before + 1);
+  });
+
+  it('una línea failed con behind también deja publication_behind', async () => {
+    const behind = { expires_at_utc: '2026-03-04T00:00:00.000Z', log: 1 };
+    const { alerts, lines } = await run(
+      datasetsDatabase(),
+      datasetsChildren({
+        publish: () => ({ exitCode: 1, stdout: failedLine('storage_unavailable', 1, 0, behind) }),
+      }),
+      { config: DATASETS_CONFIG, nextId: growing },
+    );
+    expect(alerts).toContainEqual({
+      event: 'publication_behind',
+      expires_at_utc: '2026-03-04T00:00:00.000Z',
+      log: '1',
+    });
+    expect(stepLine(lines, 'publication')?.['report']).toMatchObject({ behind });
+  });
+
+  it('un fallo de antes de leer el estado no lo borra: la ejecución siguiente sigue con el anterior', async () => {
+    const db = datasetsDatabase();
+    const children = datasetsChildren({
+      publish: (args) =>
+        args.length === 0
+          ? { exitCode: 1, stdout: failedLine('publication_conflict', 1, 0) }
+          : { exitCode: 0, stdout: nothingDueLine() },
+    });
+    await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    const latest = db.database.latestReportWithState.bind(db.database);
+    db.database.latestReportWithState = (target, step) =>
+      step === 'publication' ? Promise.reject(coded('57014')) : latest(target, step);
+    const broken = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(stepLine(broken.lines, 'publication')).toMatchObject({
+      report: { reason: '57014' },
+      status: 'failed',
+    });
+    db.database.latestReportWithState = latest;
+    const healed = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(children.runs.filter((item) => item.child === 'publish').at(-1)?.args).toEqual([
+      '--skip',
+      '1',
+    ]);
+    expect(stepLine(healed.lines, 'publication')?.['report']).toMatchObject({
+      reason: 'publication_conflict',
+      state: { stopped: [{ first_segment: 0, log: 1, reason: 'publication_conflict' }] },
+    });
   });
 
   it('con un informe del paso que no tiene la forma esperada falla sin publicar', async () => {
@@ -3526,17 +3575,54 @@ describe('el paso 7, dataset_verification (ADR-0020 §8)', () => {
     expect(stepLine(lines, 'dataset_verification')?.['status']).toBe('completed');
   });
 
-  it('un almacén que no responde no guarda nada ni cuenta, y el paso falla', async () => {
+  it.each([
+    [
+      'un almacén que no responde',
+      'storage_unavailable',
+      replayFailedLine('STORAGE_UNAVAILABLE'),
+      1,
+    ],
+    ['una salida 2, de uso o de configuración', 'replay_config_invalid', '{}', 2],
+  ] as const)(
+    '%s no guarda nada ni cuenta, y el paso falla',
+    async (_name, reason, stdout, exitCode) => {
+      const db = datasetsDatabase({ publications: pending.slice(0, 1) });
+      const answers: Partial<ChildResult>[] = [
+        { exitCode: null, stdout: '', timedOut: true },
+        { exitCode, stdout },
+      ];
+      const children = datasetsChildren({ replay: () => answers.shift() ?? {} });
+      await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+      const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+      expect(db.verifications).toEqual([]);
+      expect(children.runs.filter((item) => item.child === 'replay')).toHaveLength(2);
+      expect(stepLine(lines, 'dataset_verification')).toMatchObject({
+        report: {
+          reason,
+          state: { attempts: { count: 1, mode: 'verify-only', publication_id: PUBLICATION } },
+        },
+        status: 'failed',
+      });
+    },
+  );
+
+  it('un fallo de antes de leer el estado no lo borra: la ejecución siguiente sigue con la cuenta', async () => {
     const db = datasetsDatabase({ publications: pending.slice(0, 1) });
     const children = datasetsChildren({
-      replay: () => ({ exitCode: 1, stdout: replayFailedLine('STORAGE_UNAVAILABLE') }),
+      replay: () => ({ exitCode: null, stdout: '', timedOut: true }),
     });
-    const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
-    expect(db.verifications).toEqual([]);
-    expect(children.runs.filter((item) => item.child === 'replay')).toHaveLength(1);
-    expect(stepLine(lines, 'dataset_verification')).toMatchObject({
-      report: { reason: 'storage_unavailable', state: { attempts: null } },
+    await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    const next = db.database.nextPublicationToVerify.bind(db.database);
+    db.database.nextPublicationToVerify = () => Promise.reject(coded('42P01'));
+    const broken = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(stepLine(broken.lines, 'dataset_verification')).toMatchObject({
+      report: { reason: '42P01' },
       status: 'failed',
+    });
+    db.database.nextPublicationToVerify = next;
+    const healed = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(stepLine(healed.lines, 'dataset_verification')?.['report']).toMatchObject({
+      state: { attempts: { count: 2, mode: 'verify-only', publication_id: PUBLICATION } },
     });
   });
 
@@ -3545,7 +3631,6 @@ describe('el paso 7, dataset_verification (ADR-0020 §8)', () => {
     ['CHILD_TIMEOUT', { exitCode: null, stdout: '', timedOut: true }, null],
     ['CHILD_KILLED', { exitCode: null, stdout: '' }, null],
     ['REPLAY_OUTPUT_INVALID', { exitCode: 0, stdout: 'no es JSON' }, null],
-    ['REPLAY_CONFIG_INVALID', { exitCode: 2, stdout: '{}' }, 2],
   ] as const)(
     'tres ejecuciones seguidas sin un resultado concluyente (%s) guardan incomplete, y sigue con el modo siguiente',
     async (code, answer, exit) => {
@@ -3732,8 +3817,8 @@ describe('los pasos 6 y 7: casos que deciden (ADR-0020 §8)', () => {
         log(2, '2026-03-02T09:59:00.000Z'),
         { ...log(3), readable: false },
       ]);
-    const latest = db.database.latestReport.bind(db.database);
-    db.database.latestReport = (target, step) =>
+    const latest = db.database.latestReportWithState.bind(db.database);
+    db.database.latestReportWithState = (target, step) =>
       target.number === 3 ? Promise.reject(coded('42501')) : latest(target, step);
     const { lines } = await run(db, datasetsChildren({}), {
       config: DATASETS_CONFIG,
