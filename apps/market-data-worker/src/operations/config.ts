@@ -1,7 +1,12 @@
 import { z } from 'zod';
 
 import { ConfigError, POSTGRES_SSL_MODES, type WorkerConfig } from '../config.js';
-import { MIN_ROLE_PASSWORD_LENGTH, POSTGRES_ROLES, type LoginRole } from '../postgres/roles.js';
+import {
+  MIN_ROLE_PASSWORD_LENGTH,
+  POSTGRES_ROLES,
+  PUBLICATION_ROLE,
+  type LoginRole,
+} from '../postgres/roles.js';
 
 // La configuración de `buoh-operaciones` (ADR-0018 §11): cada credencial tiene su propio nombre, para
 // que ningún proceso tome la de otro por error, y el servicio no tiene ninguna variable con los
@@ -46,6 +51,12 @@ const operationsEnvironmentSchema = z.object({
    * ella, no lo toca.
    */
   BUOH_API_LECTURA_POSTGRES_PASSWORD: rolePassword.optional(),
+  /**
+   * La contraseña de `buoh_publicacion` (ADR-0020 §5), que Render genera en el propio servicio
+   * (`generateValue`) desde el PR 4 de su §13. Es opcional, como las de la API: con ella, el paso 1
+   * crea `buoh_datasets` y el rol, y corren los pasos 6 y 7; sin ella, no toca los datasets.
+   */
+  BUOH_PUBLICACION_POSTGRES_PASSWORD: rolePassword.optional(),
   /** El token `salud` de R2, de solo lectura, para el proceso de `data:health` (§10). */
   BUOH_SALUD_S3_ACCESS_KEY_ID: nonEmpty,
   BUOH_SALUD_S3_BUCKET: bucket,
@@ -63,6 +74,9 @@ const operationsEnvironmentSchema = z.object({
 /** Las variables que el worker lee y que el servicio no tiene (ADR-0018 §11). */
 const WORKER_VARIABLES = /^BUOH_(?:POSTGRES|S3)_/u;
 
+/** Un commit de Git en hexadecimal, como el que Render da en `RENDER_GIT_COMMIT`. */
+export const CODE_VERSION = /^[0-9a-f]{7,64}$/u;
+
 export interface OperationsConfig {
   /**
    * La contraseña que debe tener `buoh_api` (ADR-0019 §7), o `null` mientras el servicio no la
@@ -74,10 +88,21 @@ export interface OperationsConfig {
    * servicio no la tiene: entonces el paso 1 no crea el rol de lectura de la API.
    */
   readonly apiReaderPassword: string | null;
+  /**
+   * El commit del código que corre, el de `RENDER_GIT_COMMIT`, que Render pone en cada servicio, o
+   * `null` sin él. Un log que la publicación detuvo sigue detenido mientras el código es el mismo
+   * (ADR-0020 §8): repetir con el mismo código no cambia nada.
+   */
+  readonly codeVersion: string | null;
   /** La conexión dueña, con el esquema `public`: los de los logs van con su nombre. */
   readonly owner: WorkerConfig['postgres'];
   /** La contraseña que debe tener cada rol de ejecución que inicia sesión. */
   readonly passwords: Readonly<Record<LoginRole, string>>;
+  /**
+   * La contraseña que debe tener `buoh_publicacion` (ADR-0020 §5), o `null` mientras el servicio
+   * no la tiene: entonces no toca `buoh_datasets` ni corren los pasos 6 y 7.
+   */
+  readonly publicationPassword: string | null;
   /** El almacenamiento de objetos con el token `salud`, sin prefijo: lo pone `data:health`. */
   readonly healthObjects: Omit<WorkerConfig['s3'], 'keyPrefix'>;
   /**
@@ -112,6 +137,9 @@ export function loadOperationsConfig(
   return {
     apiPassword: value.BUOH_API_POSTGRES_PASSWORD ?? null,
     apiReaderPassword: value.BUOH_API_LECTURA_POSTGRES_PASSWORD ?? null,
+    codeVersion: CODE_VERSION.test(env['RENDER_GIT_COMMIT'] ?? '')
+      ? (env['RENDER_GIT_COMMIT'] ?? null)
+      : null,
     healthObjects: {
       accessKeyId: value.BUOH_SALUD_S3_ACCESS_KEY_ID,
       bucket: value.BUOH_SALUD_S3_BUCKET,
@@ -140,6 +168,7 @@ export function loadOperationsConfig(
       [POSTGRES_ROLES.health]: value.BUOH_SALUD_POSTGRES_PASSWORD,
       [POSTGRES_ROLES.ingest]: value.BUOH_INGESTA_POSTGRES_PASSWORD,
     },
+    publicationPassword: value.BUOH_PUBLICACION_POSTGRES_PASSWORD ?? null,
   };
 }
 
@@ -203,4 +232,39 @@ export function healthEnvironment(config: OperationsConfig): Record<string, stri
     BUOH_S3_REGION: config.healthObjects.region,
     BUOH_S3_SECRET_ACCESS_KEY: config.healthObjects.secretAccessKey,
   };
+}
+
+/**
+ * El entorno explícito del proceso de `datasets:publish` (ADR-0020 §8, paso 6): solo el rol
+ * `buoh_publicacion` y el token `operaciones`, con los nombres `BUOH_*` que lee el worker, sin
+ * esquema, porque la orden trabaja siempre sobre `buoh_datasets` y los logs. Necesita la contraseña
+ * de `buoh_publicacion`.
+ */
+export function publishEnvironment(config: OperationsConfig): Record<string, string> {
+  if (config.publicationPassword === null) {
+    throw new TypeError('Sin la contraseña de buoh_publicacion no se publica.');
+  }
+  return {
+    BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+    BUOH_POSTGRES_DB: config.owner.database,
+    BUOH_POSTGRES_HOST: config.owner.host,
+    BUOH_POSTGRES_PASSWORD: config.publicationPassword,
+    BUOH_POSTGRES_PORT: String(config.owner.port),
+    BUOH_POSTGRES_SSLMODE: config.owner.sslMode,
+    BUOH_POSTGRES_USER: PUBLICATION_ROLE,
+    BUOH_S3_ACCESS_KEY_ID: config.operationsObjects.accessKeyId,
+    BUOH_S3_BUCKET: config.operationsObjects.bucket,
+    BUOH_S3_ENDPOINT: config.operationsObjects.endpoint,
+    BUOH_S3_REGION: config.operationsObjects.region,
+    BUOH_S3_SECRET_ACCESS_KEY: config.operationsObjects.secretAccessKey,
+  };
+}
+
+/**
+ * El entorno explícito del proceso de `data:replay` del paso 7 (ADR-0020 §8): el de `data:health`,
+ * con `buoh_salud` y el token `salud`, sin esquema: en `production`, `data:replay` lee siempre
+ * `buoh_datasets` y el prefijo `datasets/`.
+ */
+export function replayEnvironment(config: OperationsConfig): Record<string, string> {
+  return healthEnvironment(config);
 }

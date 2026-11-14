@@ -6,8 +6,10 @@ import { createPool, postgresSslOption } from '../postgres/metadata-store.js';
 import {
   ensureApiReaderRole,
   ensureApiRole,
+  ensurePublicationRole,
   ensureRuntimeRoles,
   grantApiPrivileges,
+  grantDatasetsPrivileges,
   grantLogPrivileges,
   POSTGRES_ROLES,
   setRolePassword,
@@ -22,6 +24,8 @@ import {
   type CaptureLog,
   type LogLocation,
 } from '../successive-logs.js';
+import { DATASETS_SCHEMA } from '../datasets/location.js';
+import type { ReplayMode } from '../replay.js';
 import type { OperationsConfig } from './config.js';
 import { VERIFICATION_SLOTS, type DueSegment } from './verification.js';
 
@@ -75,6 +79,38 @@ export interface OperationsReportRow {
   readonly step: string;
 }
 
+/** Un informe guardado de un paso, el más reciente: su ID (UUIDv7), cómo terminó y su contenido. */
+export interface StoredReport {
+  readonly report: JsonValue;
+  readonly report_id: string;
+  readonly status: 'completed' | 'failed';
+}
+
+/**
+ * La publicación activa de `production` que toca verificar (ADR-0020 §8, paso 7), con los modos que
+ * ya tienen un resultado en `dataset_verifications`.
+ */
+export interface PublicationToVerify {
+  readonly dataset_id: string;
+  readonly modes_done: readonly ReplayMode[];
+  readonly publication_id: string;
+}
+
+/** Una fila de `buoh_datasets.dataset_verifications` (ADR-0020 §8, paso 7). */
+export interface DatasetVerificationRow {
+  readonly dataset_id: string;
+  readonly error_code: string | null;
+  readonly exit_code: number | null;
+  readonly mode: ReplayMode;
+  readonly publication_id: string;
+  /** El informe saneado de `data:replay`, sin precios: se guarda en JCS. */
+  readonly report: Readonly<Record<string, JsonValue>> | null;
+  readonly run_id: string;
+  readonly status: 'failed' | 'incomplete' | 'passed';
+  readonly verification_id: string;
+  readonly verified_at_utc: string;
+}
+
 /**
  * Lo que hace `buoh-operaciones` con la credencial dueña (ADR-0018 §8 y §11). Las lecturas de los
  * logs y las escrituras van como `buoh_dueno` (`SET ROLE`), el dueño de los esquemas: así no
@@ -98,6 +134,26 @@ export interface OwnerDatabase {
    * (`ensureApiReaderRole`, ADR-0019 §7 y §8).
    */
   ensureApiReaderRole(): Promise<void>;
+  /**
+   * Crea el rol `buoh_publicacion`, miembro de `buoh_lectura`, o le vuelve a fijar sus atributos
+   * (`ensurePublicationRole`, ADR-0020 §5).
+   */
+  ensurePublicationRole(): Promise<void>;
+  /** Da sus privilegios en `buoh_datasets` (`grantDatasetsPrivileges`, ADR-0020 §5). */
+  grantDatasetsPrivileges(): Promise<void>;
+  /**
+   * El informe más reciente del paso que lleva su estado (`state`) en la tabla `operations_reports`
+   * del log, el de mayor `report_id`, o `null` si no hay ninguno. Un informe sin estado, como el de un
+   * fallo antes de leerlo, no cuenta: el estado sigue siendo el del anterior.
+   */
+  latestReportWithState(log: LogLocation, step: string): Promise<StoredReport | null>;
+  /**
+   * La publicación activa de `production` más antigua (por `published_at_utc` y `publication_id`)
+   * que no tiene un resultado en los dos modos en `buoh_datasets.dataset_verifications`, o `null`.
+   */
+  nextPublicationToVerify(): Promise<PublicationToVerify | null>;
+  /** Añade el resultado de una verificación a `buoh_datasets.dataset_verifications`, como `buoh_dueno`. */
+  appendDatasetVerification(row: DatasetVerificationRow): Promise<void>;
   /**
    * Si el rol inicia sesión con esa contraseña: `accepted`, `rejected` si PostgreSQL la rechaza
    * (`28P01`), o `unchecked` si no hay conexiones libres (`53300`), como con las 4 de `buoh_agente`
@@ -177,7 +233,29 @@ export function openOwnerDatabase(
       return value;
     });
 
+  const datasets = pg.escapeIdentifier(DATASETS_SCHEMA);
   return {
+    appendDatasetVerification: (row) =>
+      asOwner(async (client) => {
+        await client.query(
+          `INSERT INTO ${datasets}.dataset_verifications
+             (verification_id, dataset_id, publication_id, mode, status, exit_code, error_code,
+              report_jcs, run_id, verified_at_utc)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            row.verification_id,
+            row.dataset_id,
+            row.publication_id,
+            row.mode,
+            row.status,
+            row.exit_code,
+            row.error_code,
+            row.report === null ? null : canonicalJson(row.report),
+            row.run_id,
+            row.verified_at_utc,
+          ],
+        );
+      }),
     appendReport: (log, row) =>
       asOwner(async (client) => {
         await client.query(
@@ -253,8 +331,10 @@ export function openOwnerDatabase(
       }),
     ensureApiReaderRole: () => withClient((client) => ensureApiReaderRole(client)),
     ensureApiRole: () => withClient((client) => ensureApiRole(client)),
+    ensurePublicationRole: () => withClient((client) => ensurePublicationRole(client)),
     ensureRuntimeRoles: () => withClient((client) => ensureRuntimeRoles(client)),
     grantApiPrivileges: () => withClient((client) => grantApiPrivileges(client)),
+    grantDatasetsPrivileges: () => withClient((client) => grantDatasetsPrivileges(client)),
     grantLogPrivileges: (log) => withClient((client) => grantLogPrivileges(client, log.schema)),
     lastCompletedReport: (log, step) =>
       asOwner(async (client) => {
@@ -265,7 +345,48 @@ export function openOwnerDatabase(
         );
         return rows[0]?.last ?? null;
       }),
+    latestReportWithState: (log, step) =>
+      asOwner(async (client) => {
+        const { rows } = await client.query<{
+          report_id: string;
+          report_jcs: string;
+          status: 'completed' | 'failed';
+        }>(
+          `SELECT report_id::text AS report_id, status, report_jcs
+             FROM ${pg.escapeIdentifier(log.schema)}.operations_reports
+            WHERE step = $1 AND (report_jcs::jsonb) ? 'state'
+            ORDER BY report_id DESC LIMIT 1`,
+          [step],
+        );
+        const [row] = rows;
+        return row === undefined
+          ? null
+          : {
+              report: JSON.parse(row.report_jcs) as JsonValue,
+              report_id: row.report_id,
+              status: row.status,
+            };
+      }),
     listLogs: () => asOwner((client) => listCaptureLogs(client, input.source)),
+    nextPublicationToVerify: () =>
+      asOwner(async (client) => {
+        const { rows } = await client.query<{
+          dataset_id: string;
+          modes_done: ReplayMode[];
+          publication_id: string;
+        }>(
+          `SELECT records.dataset_id, records.publication_id::text AS publication_id,
+                  ARRAY(SELECT DISTINCT v.mode FROM ${datasets}.dataset_verifications AS v
+                         WHERE v.publication_id = records.publication_id ORDER BY 1) AS modes_done
+             FROM ${datasets}.published_manifest_records AS records
+            WHERE records.deployment_environment = 'production' AND records.state = 'active'
+              AND (SELECT count(DISTINCT v.mode) FROM ${datasets}.dataset_verifications AS v
+                    WHERE v.publication_id = records.publication_id) < 2
+            ORDER BY records.published_at_utc, records.publication_id
+            LIMIT 1`,
+        );
+        return rows[0] ?? null;
+      }),
     listSegmentsDue: (log, slot) =>
       asOwner(async (client) => {
         const { rows } = await client.query<

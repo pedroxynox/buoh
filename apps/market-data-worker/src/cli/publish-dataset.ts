@@ -10,7 +10,8 @@ import { createUuidV7Generator } from '../ids.js';
  * §8, paso 6): publica como mucho un dataset vivo, el siguiente del log de menor número que no
  * venció y no está en `--skip`, en `buoh_datasets` y bajo el prefijo `datasets/`. Escribe en stdout
  * una sola línea JSON (`published`, `already_published`, `nothing_due` o `failed`), con su duración
- * y su memoria máxima, y en stderr las alertas saneadas del registro. Salida 0: publicado o nada
+ * y su memoria máxima, y en stderr las alertas saneadas del registro y, antes de leer los segmentos de
+ * cada log, su aviso `publication_attempt`. Salida 0: publicado o nada
  * pendiente; 1: falló; 2: error de uso o de configuración.
  */
 const started = performance.now();
@@ -20,6 +21,9 @@ const { exitCode, line } = await publishDatasetCommand(process.argv.slice(2), pr
   nextId: createUuidV7Generator({ now: () => Date.now(), randomBytes }),
   now: () => new Date().toISOString(),
   open: (config) => openPublicationStores(config, { schemas: DERIV_SCHEMA_RELEASE }),
+  progress: (event) => {
+    process.stderr.write(`${JSON.stringify(event)}\n`);
+  },
   schemas: DERIV_SCHEMA_RELEASE,
   zlibVersion: process.versions.zlib,
 });

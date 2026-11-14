@@ -5,9 +5,12 @@ import { WORKER_NODE_FLAGS } from '../node-flags.js';
 
 /**
  * Los comandos que `buoh-operaciones` corre en un proceso aparte (ADR-0018 §11): `data:health` y
- * `db:migrate` del worker, y `db:migrate` de la API (`api_migrate`, ADR-0019 §7).
+ * `db:migrate` del worker, `db:migrate` de la API (`api_migrate`, ADR-0019 §7) y, desde el PR 4
+ * de ADR-0020 §13, las migraciones de `buoh_datasets` (`datasets_migrate`), `datasets:publish`
+ * (`publish`) y `data:replay` (`replay`).
  */
-export type WorkerChild = 'api_migrate' | 'health' | 'migrate';
+export type WorkerChild =
+  'api_migrate' | 'datasets_migrate' | 'health' | 'migrate' | 'publish' | 'replay';
 
 /** Cómo terminó un proceso: su código, su salida y si se cortó por su plazo. */
 export interface ChildResult {
@@ -18,21 +21,29 @@ export interface ChildResult {
   readonly timedOut: boolean;
 }
 
-/** Corre un comando del worker con esos argumentos y ese entorno, y nada más. */
+/**
+ * Corre un comando del worker con esos argumentos y ese entorno, y nada más. Con `timeoutMs`, su
+ * plazo es el menor entre ese y el suyo (`CHILD_TIMEOUT_MS`).
+ */
 export type RunChild = (
   child: WorkerChild,
   args: readonly string[],
   env: Readonly<Record<string, string>>,
+  options?: { readonly timeoutMs?: number },
 ) => Promise<ChildResult>;
 
 /**
  * El plazo de cada proceso. `data:health` responde en unos 35 s como mucho (`HEALTH_DEADLINE_MS` y
- * `HEALTH_CLOSE_DEADLINE_MS`); los dos `db:migrate` aplican migraciones que solo añaden.
+ * `HEALTH_CLOSE_DEADLINE_MS`); los `db:migrate` aplican migraciones que solo añaden. La publicación
+ * y la verificación tienen 60 s cada paso (ADR-0020 §8).
  */
 export const CHILD_TIMEOUT_MS: Readonly<Record<WorkerChild, number>> = {
   api_migrate: 120_000,
+  datasets_migrate: 120_000,
   health: 60_000,
   migrate: 120_000,
+  publish: 60_000,
+  replay: 60_000,
 };
 
 /**
@@ -41,8 +52,11 @@ export const CHILD_TIMEOUT_MS: Readonly<Record<WorkerChild, number>> = {
  */
 const CHILD_SCRIPTS: Readonly<Record<WorkerChild, URL>> = {
   api_migrate: new URL('../../../api/dist/cli/migrate.js', import.meta.url),
+  datasets_migrate: new URL('../cli/migrate-datasets.js', import.meta.url),
   health: new URL('../cli/health.js', import.meta.url),
   migrate: new URL('../cli/migrate.js', import.meta.url),
+  publish: new URL('../cli/publish-dataset.js', import.meta.url),
+  replay: new URL('../cli/replay.js', import.meta.url),
 };
 
 /** Lo que se guarda, como mucho, de stdout y de stderr de un proceso. */
@@ -109,16 +123,18 @@ export function workerChildScript(
   child: WorkerChild,
   args: readonly string[],
   env: Readonly<Record<string, string>>,
+  options: { readonly timeoutMs?: number } = {},
 ): Parameters<typeof runNodeScript>[0] {
+  const own = CHILD_TIMEOUT_MS[child];
   return {
     args,
     env,
     nodeFlags: WORKER_NODE_FLAGS,
     script: fileURLToPath(CHILD_SCRIPTS[child]),
-    timeoutMs: CHILD_TIMEOUT_MS[child],
+    timeoutMs: Math.max(1, Math.min(own, options.timeoutMs ?? own)),
   };
 }
 
 /** Un comando de `WorkerChild` en un proceso aparte (`workerChildScript`). */
-export const runWorkerChild: RunChild = (child, args, env) =>
-  runNodeScript(workerChildScript(child, args, env));
+export const runWorkerChild: RunChild = (child, args, env, options) =>
+  runNodeScript(workerChildScript(child, args, env, options));
