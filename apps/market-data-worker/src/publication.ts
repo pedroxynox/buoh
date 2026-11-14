@@ -177,8 +177,14 @@ export async function writePublication(
   }
 
   // Paso 3: objetos físicos en claves content-addressed, verificados por lectura, `concurrency` a la
-  // vez. Tras el primer fallo no empieza ninguno más, espera a los que van y lanza ese fallo.
-  const pending = [...publication.manifest.storage_objects];
+  // vez. Dos artefactos con los mismos bytes, como dos partes vacías, comparten clave: se escribe una
+  // vez, para que dos escrituras condicionales de la misma clave no vayan a la vez. Tras el primer
+  // fallo no empieza ninguna más, espera a las que van y lanza ese fallo.
+  const pending = [
+    ...new Map(
+      publication.manifest.storage_objects.map((object) => [object.uri, object] as const),
+    ).values(),
+  ];
   const failures: unknown[] = [];
   const worker = async (): Promise<void> => {
     for (let object = pending.shift(); object !== undefined; object = pending.shift()) {

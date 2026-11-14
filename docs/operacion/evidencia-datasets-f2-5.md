@@ -20,7 +20,7 @@ El script crea una base y un bucket desechables y escribe en ellos, con el `Sour
 - El log 1 dura 12 horas: 22 559 eventos en 144 segmentos cerrados. Su primera conexión cae a la hora, sin historia, y la segunda sigue hasta el final. La continuidad queda pendiente, así que ningún final posible es limpio y el primer dataset termina en el último segmento que cabe en el techo (§7).
 - El log 2 dura 5 minutos, para que el 1 esté terminado.
 
-Después corre 3 repeticiones, cada una sobre una copia nueva de `buoh_datasets`, y en cada una tres procesos aparte con `WORKER_NODE_FLAGS`:
+Después corre 3 repeticiones, cada una sobre una copia nueva de `buoh_datasets`, y en cada una tres procesos aparte con `WORKER_NODE_FLAGS`. Los objetos del bucket se quedan entre repeticiones, así que solo la primera escribe objetos nuevos, y las otras dos los encuentran ya escritos (`exists`) y los verifican:
 
 1. `datasets:publish` (`dist/cli/publish-dataset.js`), que publica el primer dataset del log 1;
 2. `data:replay --verify-only` (`dist/cli/replay.js`), con `buoh_datasets`;
@@ -45,7 +45,7 @@ En las 3 repeticiones, el dataset es el mismo, de los segmentos 0 a 101, con 15 
 
 Una ejecución anterior, con el mismo código salvo una corrección de lint en la escritura concurrente, dio 191,0, 168,4 y 191,8 MiB y 6274 ms: la memoria varía unos pocos MiB entre ejecuciones.
 
-La duración de la publicación es la que informa el proceso, desde que arranca hasta que escribe su línea, e incluye el plan del dataset, la lectura de sus 102 segmentos, su derivación, la escritura de sus objetos 8 a la vez y el `COMMIT`. La de la verificación es la del proceso entero, medida desde fuera.
+La duración de la publicación es la que informa el proceso (`duration_ms`), desde que terminó de cargar sus módulos hasta que escribe su línea: medido desde fuera, el proceso entero tardó unos 0,2 s más (como mucho 6309 ms). Incluye el plan del dataset, la lectura de sus 102 segmentos, su derivación, la escritura de sus objetos 8 a la vez y el `COMMIT`. La de la verificación es la del proceso entero, medida desde fuera.
 
 ## Lectura
 

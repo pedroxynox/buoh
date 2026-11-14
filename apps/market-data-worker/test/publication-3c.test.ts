@@ -168,6 +168,40 @@ describe('los objetos varios a la vez (ADR-0020 §8)', () => {
     expect(objects.writes).toBe(count + 1);
   });
 
+  it('dos artefactos con los mismos bytes comparten clave y se escriben una sola vez', async () => {
+    const fixture = await loadSyntheticFixture(VECTORS);
+    const zero = fixture.scenarios.find((item) => item.name === 'zero-valid-ticks');
+    if (zero === undefined) throw new TypeError('Falta zero-valid-ticks.');
+    const live = preparePublication({
+      derivedCompression: 'gzip',
+      environment: 'test',
+      keyPrefix: 'datasets/',
+      objects: new MemoryObjectStore('buoh-captura'),
+      profile: fixture.profile,
+      publication_id: PUBLICATION,
+      published_at_utc: '2026-01-01T00:00:09.000Z',
+      segments: zero.segments,
+      zlibVersion: 'test-zlib',
+    });
+    const uris = live.manifest.storage_objects.map((object) => object.uri);
+    const distinct = new Set(uris).size;
+    // Las partes vacías, en gzip, tienen los mismos bytes.
+    expect(distinct).toBeLessThan(uris.length);
+    const objects = new CountingStore('buoh-captura');
+    const metadata = new MemoryMetadataStore();
+    await writePublication(live, { concurrency: 8, environment: 'test', metadata, objects });
+    expect(objects.writes).toBe(distinct + 1);
+    const report = await replayDataset({
+      datasetId: live.dataset_id,
+      environment: 'test',
+      keyPrefix: 'datasets/',
+      metadata,
+      mode: 'recompute',
+      objects,
+    });
+    expect(report.dataset_id).toBe(live.dataset_id);
+  });
+
   it('por defecto, de uno en uno', async () => {
     const live = await prepared('datasets/');
     const objects = new CountingStore('buoh-captura');

@@ -313,8 +313,9 @@ async function nextFirstSegment(stores: PublicationStores, log: number): Promise
  *   detalle saneado (`publicationFailure`);
  * - un error de uso o de configuración (salida 2), sin abrir nada.
  *
- * Todas las líneas que no son de uso llevan `behind`: el log más viejo que no venció, con segmentos
- * cerrados sin publicar y menos de 3 días para vencer, o `null` (`publication_behind`).
+ * Las líneas que no son de uso llevan `behind`: el log más viejo que no venció, con segmentos
+ * cerrados sin publicar y menos de 3 días para vencer, o `null` (`publication_behind`). Un `failed` de
+ * antes de saberlo, como uno sin la lista de los logs, no lo lleva.
  */
 export async function publishDatasetCommand(
   argv: readonly string[],
@@ -339,8 +340,9 @@ export async function publishDatasetCommand(
     duration_ms: dependencies.elapsedMs(),
     max_rss_bytes: dependencies.maxRssBytes(),
   });
+  // `behind` es `undefined` mientras no se sabe: un `failed` de antes no lo lleva.
   const context: { behind: unknown; first: number | null; log: number | null } = {
-    behind: null,
+    behind: undefined,
     first: null,
     log: null,
   };
@@ -356,6 +358,7 @@ export async function publishDatasetCommand(
       .sort((left, right) => left.location.number - right.location.number);
 
     // El log más viejo con segmentos cerrados sin publicar y menos de 3 días para vencer.
+    let behind: unknown = null;
     for (const log of live) {
       const expires = expiresAt(log);
       if (expires === null || Date.parse(expires) - Date.parse(now) >= PUBLICATION_BEHIND_MS) {
@@ -366,10 +369,11 @@ export async function publishDatasetCommand(
       const pending = await opened.log(log.location).closedSegments(first);
       stage = undefined;
       if (pending.length > 0) {
-        context.behind = { expires_at_utc: expires, log: log.location.number };
+        behind = { expires_at_utc: expires, log: log.location.number };
         break;
       }
     }
+    context.behind = behind;
 
     for (const log of live) {
       const number = log.location.number;
@@ -377,6 +381,7 @@ export async function publishDatasetCommand(
         continue;
       }
       context.log = number;
+      context.first = null;
       const first = await nextFirstSegment(opened, number);
       context.first = first;
       stage = 'plan';

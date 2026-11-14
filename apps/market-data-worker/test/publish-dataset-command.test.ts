@@ -1,3 +1,4 @@
+import { sha256Hex } from '@buoh/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -302,6 +303,17 @@ describe('datasets:publish (ADR-0020 §8, paso 6)', () => {
       expires_at_utc: expires,
       log: 1,
     });
+    // Con dos logs atrasados, el más viejo.
+    const three = await fakeLog(3, [requested(T0 + 2 * HOUR, T0 + 2 * HOUR + 20 * 60_000)]);
+    // Los dos con menos de 3 días: el 3 terminó 2 horas después del 1.
+    const both = harness(
+      [one, three, two],
+      new Date(T0 + 2 * HOUR + 20 * 60_000 + 27 * DAY + 1).toISOString(),
+    );
+    expect((await both.run(['--skip', '1,3'])).report['behind']).toEqual({
+      expires_at_utc: expires,
+      log: 1,
+    });
     // Publicado entero, ya no está atrasado.
     expect((await late.run()).report['status']).toBe('published');
     expect((await late.run(['--skip', '1'])).report['behind']).toBe(null);
@@ -376,6 +388,63 @@ describe('datasets:publish (ADR-0020 §8, paso 6)', () => {
       status: 'failed',
     });
     expect(down.opened.closed).toBe(1);
+    // Sin la lista de logs no se sabe si alguno va atrasado: la línea no lo dice.
+    expect(report).not.toHaveProperty('behind');
+  });
+
+  it('un fallo al leer el rango de un log no lleva el primer segmento del log anterior', async () => {
+    const one = await fakeLog(1, [requested(T0, T0 + 20 * 60_000)]);
+    const two = await fakeLog(2, [], { schema: false });
+    const { datasets, run } = harness([one, two], '2026-11-10T01:00:00.000Z');
+    const original = datasets.lastLogRange.bind(datasets);
+    datasets.lastLogRange = (number) =>
+      number === 2
+        ? Promise.reject(Object.assign(new Error('caído'), { code: 'ECONNRESET' }))
+        : original(number);
+    const { report } = await run();
+    expect(report).toMatchObject({ log: 2, reason: 'storage_unavailable', status: 'failed' });
+    expect(report).not.toHaveProperty('first_segment');
+    expect(report['behind']).toBe(null);
+  });
+
+  it('un perfil que no se arma con el esquema guardado es publication_not_derivable, no unexpected', async () => {
+    const one = await fakeLog(1, [requested(T0, T0 + 20 * 60_000)], { schema: false });
+    const two = await fakeLog(2, [requested(T0 + DAY, T0 + DAY + 10 * 60_000)]);
+    // Unos bytes con el SHA-256 que espera la release, pero que no son un esquema JSON.
+    const garbage = new TextEncoder().encode('no es un esquema');
+    const expected = {
+      ...fixture.expected,
+      entries_sha256: {
+        ...fixture.expected.entries_sha256,
+        [SOURCE_SCHEMA_ENTRY]: sha256Hex(garbage),
+      },
+    };
+    await one.objects.putIfAbsent(contentKey(sha256Hex(garbage)), garbage);
+    const { dependencies } = harness([one, two], '2026-11-11T01:00:00.000Z');
+    const opened = dependencies.open;
+    const result = await publishDatasetCommand([], ENV, {
+      ...dependencies,
+      open: (config) => {
+        const stores = opened(config);
+        return {
+          ...stores,
+          log: (location) =>
+            logReader({
+              objects: location.number === 1 ? one.objects : two.objects,
+              schemas: expected,
+              source: DERIV_SOURCE,
+              store: location.number === 1 ? one.store : two.store,
+            }),
+        };
+      },
+      schemas: expected,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.line)).toMatchObject({
+      log: 1,
+      reason: 'publication_not_derivable',
+      stage: 'plan',
+    });
   });
 
   it('una escritura que falla: failed con su etapa, y la incidencia en el registro de buoh_datasets', async () => {
