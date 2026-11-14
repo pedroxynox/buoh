@@ -183,6 +183,11 @@ services:
         generateValue: true
       - key: BUOH_AGENTE_POSTGRES_PASSWORD
         generateValue: true
+      # La contraseña de buoh_publicacion, el rol de la publicación de los datasets vivos (ADR-0020
+      # §5 y §8). Solo la usa este servicio: el paso 1 se la pone al rol y el paso 6 se la da al
+      # proceso de datasets:publish. Render la genera al crear la variable.
+      - key: BUOH_PUBLICACION_POSTGRES_PASSWORD
+        generateValue: true
       # Token salud de R2, de solo lectura, para el proceso de data:health (ADR-0018 §10).
       - key: BUOH_SALUD_S3_ENDPOINT
         sync: false

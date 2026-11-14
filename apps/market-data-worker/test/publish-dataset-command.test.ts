@@ -247,6 +247,44 @@ describe('datasets:publish (ADR-0020 §8, paso 6)', () => {
     expect((await run()).report['status']).toBe('nothing_due');
   }, 60_000);
 
+  it('avisa qué dataset intenta antes de leer sus segmentos, también si después falla', async () => {
+    const one = await fakeLog(1, [requested(T0, T0 + 20 * 60_000)]);
+    const two = await fakeLog(2, [requested(T0 + DAY, T0 + DAY + 10 * 60_000)]);
+    const { dependencies } = harness([one, two], '2026-11-11T01:00:00.000Z');
+    const events: unknown[] = [];
+    let readBefore = -1;
+    const result = await publishDatasetCommand([], ENV, {
+      ...dependencies,
+      open: (config) => {
+        const stores = dependencies.open(config);
+        return {
+          ...stores,
+          log: (location) => {
+            const reader = stores.log(location);
+            return {
+              ...reader,
+              readSegment: (index) => {
+                readBefore = events.length;
+                return reader.readSegment(index);
+              },
+            };
+          },
+        };
+      },
+      progress: (event) => events.push(event),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(events).toEqual([{ event: 'publication_attempt', first_segment: 0, log: 1 }]);
+    expect(readBefore).toBe(1);
+    // Con el log 1 publicado y el 2 sin segmentos cerrados nuevos, no avisa de nada.
+    events.length = 0;
+    await publishDatasetCommand([], ENV, {
+      ...dependencies,
+      progress: (event) => events.push(event),
+    });
+    expect(events.filter((item) => (item as { log: number }).log === 1)).toEqual([]);
+  });
+
   it('sin nada pendiente: nothing_due, salida 0; el log activo espera a su marca', async () => {
     // El log 1 ya está publicado entero; el 2 es el activo y no llegó a su primera marca.
     const one = await fakeLog(1, [requested(T0, T0 + 20 * 60_000)]);

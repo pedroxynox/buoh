@@ -499,7 +499,11 @@ test('buoh-operaciones: las variables de loadOperationsConfig, con la credencial
     'generateValue',
   );
   assert.equal(sourceOf(variables('buoh-ingesta').get('BUOH_POSTGRES_PASSWORD')), 'generateValue');
-  for (const key of ['BUOH_SALUD_POSTGRES_PASSWORD', 'BUOH_AGENTE_POSTGRES_PASSWORD']) {
+  for (const key of [
+    'BUOH_SALUD_POSTGRES_PASSWORD',
+    'BUOH_AGENTE_POSTGRES_PASSWORD',
+    'BUOH_PUBLICACION_POSTGRES_PASSWORD',
+  ]) {
     assert.equal(sourceOf(vars.get(key)), 'generateValue', key);
   }
   for (const token of ['SALUD', 'OPERACIONES']) {

@@ -672,6 +672,7 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
     return {
       apiPassword: null,
       apiReaderPassword: null,
+      codeVersion: null,
       healthObjects: config.s3,
       operationsObjects: config.s3,
       owner: { ...roleConfig(user, password).postgres, schema: 'public' },
@@ -680,6 +681,7 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
         [POSTGRES_ROLES.health]: passwords.health,
         [POSTGRES_ROLES.ingest]: passwords.ingest,
       },
+      publicationPassword: null,
     };
   }
 

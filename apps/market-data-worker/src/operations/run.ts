@@ -3,7 +3,13 @@ import { healthReportSchema, type HealthReport, type JsonValue } from '@buoh/con
 import { ConfigError } from '../config.js';
 import type { Scheduler } from '../deriv/ports.js';
 import type { OperationalAlert } from '../operational/registry.js';
-import { API_READER_ROLE, API_ROLE, LOGIN_ROLES, type PasswordRole } from '../postgres/roles.js';
+import {
+  API_READER_ROLE,
+  API_ROLE,
+  LOGIN_ROLES,
+  PUBLICATION_ROLE,
+  type PasswordRole,
+} from '../postgres/roles.js';
 import { failureReason } from '../source-log/source-event-log.js';
 import {
   isLogExpired,
@@ -21,6 +27,7 @@ import {
   migrateEnvironment,
   type OperationsConfig,
 } from './config.js';
+import { datasetVerificationStep, publicationStep } from './datasets-steps.js';
 import type { OwnerDatabase, OperationsReportRow } from './owner-database.js';
 import {
   deleteKeys,
@@ -45,7 +52,9 @@ import {
 
 /**
  * Los pasos de una ejecución, en orden. `final_health` es la segunda parte del paso 2 de §11: el
- * informe final de un log que terminó (§6, «Traspaso»). `retention` es el paso 3.
+ * informe final de un log que terminó (§6, «Traspaso»). `retention` es el paso 3. `publication` y
+ * `dataset_verification` son los pasos 6 y 7 de ADR-0020 §8, que solo corren con la contraseña de
+ * `buoh_publicacion`.
  */
 export const OPERATIONS_STEPS = [
   'roles_and_logs',
@@ -54,6 +63,8 @@ export const OPERATIONS_STEPS = [
   'retention',
   'verification',
   'space',
+  'publication',
+  'dataset_verification',
 ] as const;
 export type OperationsStep = (typeof OPERATIONS_STEPS)[number];
 
@@ -61,7 +72,7 @@ export type OperationsStep = (typeof OPERATIONS_STEPS)[number];
 type Report = Record<string, JsonValue>;
 
 /** Lo que dejó un paso, y el log en cuya tabla de informes se guarda, si lo hay. */
-interface StepOutcome {
+export interface StepOutcome {
   readonly log: LogLocation | null;
   readonly report: Report;
   readonly status: 'completed' | 'failed';
@@ -142,7 +153,7 @@ function migrateFailure(stdout: string, exitCode: number | null, timedOut: boole
  */
 async function runMigrate(
   input: OperationsInput,
-  child: 'api_migrate' | 'migrate',
+  child: 'api_migrate' | 'datasets_migrate' | 'migrate',
   env: Readonly<Record<string, string>>,
 ): Promise<{ readonly applied: string[] } | { readonly reason: string }> {
   const result = await input.runChild(child, [], env);
@@ -221,6 +232,37 @@ async function prepareApiReader(input: OperationsInput, failures: Report[]): Pro
 }
 
 /**
+ * Los datasets vivos (ADR-0020 §5): crea o ajusta `buoh_publicacion`, migra `buoh_datasets` con
+ * sus propias migraciones, en un proceso aparte con solo la credencial dueña, y da los privilegios de
+ * sus roles. Anota los fallos y las migraciones aplicadas. Da si el rol existe, para ponerle después
+ * su contraseña.
+ */
+async function prepareDatasets(
+  input: OperationsInput,
+  failures: Report[],
+  applied: string[],
+): Promise<boolean> {
+  try {
+    await input.database.ensurePublicationRole();
+  } catch (error) {
+    failures.push({ action: 'publication_role', reason: failureReason(error) });
+    return false;
+  }
+  const result = await runMigrate(input, 'datasets_migrate', apiMigrateEnvironment(input.config));
+  if ('reason' in result) {
+    failures.push({ action: 'datasets_migrate', reason: result.reason });
+    return true;
+  }
+  applied.push(...result.applied);
+  try {
+    await input.database.grantDatasetsPrivileges();
+  } catch (error) {
+    failures.push({ action: 'datasets_grant', reason: failureReason(error) });
+  }
+  return true;
+}
+
+/**
  * Paso 1 (ADR-0018 §11): crea y ajusta los roles; aplica las migraciones pendientes a cada log que
  * existe, cada uno con `db:migrate` en un proceso aparte, y le da los privilegios; prepara el log
  * siguiente, o el log 1 si no hay ninguno (`nextLogToPrepare`); y pone la contraseña a cada rol de
@@ -232,13 +274,16 @@ async function prepareApiReader(input: OperationsInput, failures: Report[]): Pro
  * ADR-0019 §7) y le pone esa contraseña; el informe lleva entonces `api_migrated`. Sin ella no toca
  * la API: así es en producción hasta el PR 6 de ADR-0019 §14. Con la de `buoh_api_lectura`, crea o
  * ajusta ese rol (`prepareApiReader`, ADR-0019 §8) y le pone su contraseña; sin ella, no lo toca.
+ * Con la de `buoh_publicacion`, prepara `buoh_datasets` (`prepareDatasets`, ADR-0020 §5) y le
+ * pone su contraseña; el informe lleva entonces `datasets_migrated`. Sin ella, no los toca.
  */
 async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
   const { database } = input;
-  const { apiPassword, apiReaderPassword } = input.config;
+  const { apiPassword, apiReaderPassword, publicationPassword } = input.config;
   const failures: Report[] = [];
   const migrated: Report[] = [];
   const apiMigrated: string[] = [];
+  const datasetsMigrated: string[] = [];
   const passwordsSet: string[] = [];
   const passwordsUnchecked: string[] = [];
   let prepared: number | null = null;
@@ -246,6 +291,7 @@ async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
     log: null,
     report: {
       ...(apiPassword === null ? {} : { api_migrated: apiMigrated }),
+      ...(publicationPassword === null ? {} : { datasets_migrated: datasetsMigrated }),
       failures,
       migrated,
       passwords_set: passwordsSet,
@@ -257,6 +303,7 @@ async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
       failures.length > 0 ||
       migrated.length > 0 ||
       apiMigrated.length > 0 ||
+      datasetsMigrated.length > 0 ||
       prepared !== null ||
       passwordsSet.length > 0,
   });
@@ -301,6 +348,8 @@ async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
   }
   const apiRoleReady = apiPassword !== null && (await prepareApi(input, failures, apiMigrated));
   const apiReaderReady = apiReaderPassword !== null && (await prepareApiReader(input, failures));
+  const publicationReady =
+    publicationPassword !== null && (await prepareDatasets(input, failures, datasetsMigrated));
   const passwords: (readonly [PasswordRole, string])[] = LOGIN_ROLES.map(
     (role) => [role, input.config.passwords[role]] as const,
   );
@@ -309,6 +358,9 @@ async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
   }
   if (apiReaderReady) {
     passwords.push([API_READER_ROLE, apiReaderPassword]);
+  }
+  if (publicationReady) {
+    passwords.push([PUBLICATION_ROLE, publicationPassword]);
   }
   for (const [role, password] of passwords) {
     try {
@@ -779,7 +831,8 @@ async function space(input: OperationsInput): Promise<StepOutcome> {
  * alerta `operations_step_failed` con el primer motivo. El informe de cada paso se guarda en la
  * tabla `operations_reports` de su log (el de la salud) o del log activo después del paso, salvo
  * el del paso 1 cuando no cambió nada, el de la retención cuando no había ningún log vencido y el
- * del espacio cuando ya se midió ese día. Si no se puede
+ * del espacio cuando ya se midió ese día, y los de los pasos 6 y 7 cuando no hicieron nada. Sin la
+ * contraseña de `buoh_publicacion`, los pasos 6 y 7 no corren ni dejan línea. Si no se puede
  * guardar, deja la alerta `operations_report_unavailable` y la ejecución termina `failed`. La
  * última línea (`operations_run`) dice cómo terminó.
  */
@@ -792,11 +845,19 @@ export async function runOperations(input: OperationsInput): Promise<OperationsR
     final_health: () => finalHealth(input),
     health: () => health(input),
     retention: () => retention(input),
+    dataset_verification: () => datasetVerificationStep(input, startedAt, runId),
+    publication: () => publicationStep(input, startedAt),
     roles_and_logs: () => rolesAndLogs(input),
     space: () => space(input),
     verification: () => verification(input, startedAt),
   };
-  for (const step of OPERATIONS_STEPS) {
+  // Los pasos 6 y 7 solo existen con la contraseña de buoh_publicacion (ADR-0020 §13, PR 4).
+  const enabled = OPERATIONS_STEPS.filter(
+    (step) =>
+      input.config.publicationPassword !== null ||
+      (step !== 'publication' && step !== 'dataset_verification'),
+  );
+  for (const step of enabled) {
     let outcome: StepOutcome;
     try {
       outcome = await steps[step]();

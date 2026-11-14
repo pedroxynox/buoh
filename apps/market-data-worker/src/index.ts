@@ -326,9 +326,22 @@ export {
   apiMigrateEnvironment,
   healthEnvironment,
   loadOperationsConfig,
+  CODE_VERSION,
   migrateEnvironment,
+  publishEnvironment,
+  replayEnvironment,
   type OperationsConfig,
 } from './operations/config.js';
+export {
+  DATASET_VERIFICATION_STEP,
+  DATASETS_START_LIMIT_MS,
+  DATASETS_STEP_DEADLINE_MS,
+  datasetVerificationStep,
+  INCONCLUSIVE_RUNS,
+  PUBLICATION_STEP,
+  PUBLICATION_STOP_REASONS,
+  publicationStep,
+} from './operations/datasets-steps.js';
 export {
   parseStoredHealthObservation,
   readLatestStoredHealth,
@@ -345,7 +358,10 @@ export {
   type LoginCheck,
   type LogSchemaDrop,
   type OperationsReportRow,
+  type DatasetVerificationRow,
   type OwnerDatabase,
+  type PublicationToVerify,
+  type StoredReport,
   type SpaceMeasure,
 } from './operations/owner-database.js';
 export {

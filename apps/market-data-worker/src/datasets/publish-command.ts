@@ -89,6 +89,16 @@ export interface PublishCommandDependencies {
   readonly maxRssBytes: () => number;
   /** UUIDv7 de cada intento de publicación. */
   readonly nextId: () => string;
+  /**
+   * Recibe `{ event: 'publication_attempt', log, first_segment }` antes de leer los segmentos del
+   * dataset de un log: si el proceso muere después, por su plazo o sin memoria, sin escribir su
+   * línea, `buoh-operaciones` sabe con este aviso qué dataset intentaba (ADR-0020 §8). En stderr.
+   */
+  readonly progress?: (event: {
+    readonly event: 'publication_attempt';
+    readonly first_segment: number;
+    readonly log: number;
+  }) => void;
   readonly now: () => string;
   /** Abre los almacenes con la configuración de `buoh_datasets`. */
   readonly open: (config: WorkerConfig) => PublicationStores;
@@ -396,6 +406,7 @@ export async function publishDatasetCommand(
         stage = undefined;
         continue;
       }
+      dependencies.progress?.({ event: 'publication_attempt', first_segment: first, log: number });
       const schema = await reader.sourceSchema();
       if (schema.status !== 'found') {
         throw new NotDerivableError(`source_schema_${schema.status}`);

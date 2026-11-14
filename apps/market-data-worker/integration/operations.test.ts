@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 
 import { DeleteObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
-import { auditEventSchema, canonicalJson } from '@buoh/contracts';
+import { auditEventSchema, canonicalJson, sha256Hex } from '@buoh/contracts';
 import pg, { type Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -10,6 +10,9 @@ import {
   API_READER_ROLE,
   API_ROLE,
   createPool,
+  createS3Client,
+  DATASETS_PREFIX,
+  DATASETS_SCHEMA,
   DROP_LOG_LOCK_TIMEOUT_MS,
   findActiveLog,
   healthCommand,
@@ -20,15 +23,21 @@ import {
   logLocation,
   migrate,
   migrateCommand,
+  migrateDatasets,
   openHealthStores,
   openLogDeletion,
   openLogObjects,
   openOwnerDatabase,
+  openPublicationStores,
   openStores,
   operationsCommand,
   parseStoredHealthObservation,
   POSTGRES_ROLES,
+  PostgresSourceLogStore,
+  PUBLICATION_ROLE,
+  publishDatasetCommand,
   readLatestStoredHealth,
+  replayCommand,
   runNodeScript,
   S3ObjectStore,
   SourceEventLog,
@@ -39,8 +48,13 @@ import {
   type WorkerConfig,
 } from '../src/index.js';
 import { START, uuid } from '../test/support/connection-harness.js';
+import { contentKey } from '../src/object-keys.js';
 import { waitForNoSessions } from '../test/support/databases.js';
+import { syntheticSchemas } from '../test/support/connection-harness.js';
 import { ManualClock, syntheticSchemaArchive } from '../test/support/deriv-fixtures.js';
+import { liveEvents, writeLiveLog } from '../test/support/live-log.js';
+import { createDerivPublicationProfile } from '../src/deriv/profile.js';
+import { SOURCE_SCHEMA_ENTRY } from '../src/deriv/schema-release.js';
 import { previousConnectionEvents } from '../test/support/recovery-harness.js';
 
 /**
@@ -51,7 +65,8 @@ import { previousConnectionEvents } from '../test/support/recovery-harness.js';
  * el log 1 y el siguiente, sus migraciones, sus privilegios, las contraseñas, la verificación por
  * partes con los objetos reales bajo el prefijo de cada log, el espacio y los informes.
  *
- * Los procesos de `db:migrate` y de `data:health` corren en el mismo proceso de la prueba, con el
+ * Los procesos de `db:migrate`, `data:health`, `datasets:publish` y `data:replay` corren en el
+ * mismo proceso de la prueba, con el
  * entorno explícito que les da el servicio (`migrateCommand` y `healthCommand`), porque el servidor
  * local no tiene TLS y en `production` los dos lo exigen: solo sus conexiones van con `disable`, en
  * sus dependencias. Que el entorno de cada proceso sea ese y nada más lo prueban
@@ -63,6 +78,7 @@ import { previousConnectionEvents } from '../test/support/recovery-harness.js';
 const DATABASE = 'buoh_integration_ops';
 const RENDER_USER = 'buoh_integration_ops_render';
 const TEST_ROLES = [
+  PUBLICATION_ROLE,
   ...LOGIN_ROLES,
   API_ROLE,
   API_READER_ROLE,
@@ -81,6 +97,7 @@ const passwords = {
   api: secret(),
   health: secret(),
   ingest: secret(),
+  publication: secret(),
   reader: secret(),
   render: secret(),
 };
@@ -147,12 +164,39 @@ const inProcess: RunChild = async (child, args, env) => {
       }),
     );
   }
-  if (child === 'migrate') {
+  if (child === 'migrate' || child === 'datasets_migrate') {
     const { exitCode, line } = await migrateCommand(env, {
       createPool: (postgres) => createPool(plain(postgres)),
-      migrate,
+      migrate: child === 'migrate' ? migrate : migrateDatasets,
     });
     return { exitCode, stderr: '', stdout: `${line}\n`, timedOut: false } satisfies ChildResult;
+  }
+  if (child === 'publish') {
+    const progress: string[] = [];
+    const { exitCode, line } = await publishDatasetCommand(args, env, {
+      alert: () => undefined,
+      elapsedMs: () => 0,
+      maxRssBytes: () => 0,
+      nextId: () => uuid((sequence += 1)),
+      now: clock.now,
+      open: (config) => openPublicationStores(plainConfig(config), { schemas: fixture.expected }),
+      progress: (event) => progress.push(JSON.stringify(event)),
+      schemas: fixture.expected,
+      zlibVersion: process.versions.zlib,
+    });
+    return {
+      exitCode,
+      stderr: progress.map((text) => `${text}\n`).join(''),
+      stdout: `${line}\n`,
+      timedOut: false,
+    };
+  }
+  if (child === 'replay') {
+    const { exitCode, line } = await replayCommand(args, env, {
+      maxRssBytes: () => 0,
+      openStores: (config) => openStores(plainConfig(config)),
+    });
+    return { exitCode, stderr: '', stdout: `${line}\n`, timedOut: false };
   }
   const result = await healthCommand(args, env, {
     expected: fixture.expected,
@@ -715,6 +759,26 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
         ]),
       );
       const secondRows = await captureRows(LOG_2);
+      // Un dataset vivo: un objeto bajo datasets/ y el esquema buoh_datasets, de buoh_dueno, con una
+      // fila. La retención de un log no los toca (ADR-0020 §5 y §12).
+      const datasetKey = `${DATASETS_PREFIX}sha256/${sha256Hex('retencion-dataset')}`;
+      const root = new S3ObjectStore(createS3Client(local.s3), local.s3.bucket, '');
+      await root.putIfAbsent(datasetKey, new TextEncoder().encode('retencion-dataset'), 'x/y');
+      root.destroy();
+      await migrateDatasets(ready(admin), { ownerRole: POSTGRES_ROLES.owner });
+      await ready(admin).query(
+        `INSERT INTO ${DATASETS_SCHEMA}.datasets (dataset_id, state, source, manifest_core_jcs)
+         VALUES ('sha256:' || encode(sha256('{}'), 'hex'), 'published', $1, '{}')`,
+        [DERIV_SOURCE],
+      );
+      const datasetRows = async (): Promise<unknown[]> => {
+        const result = await ready(admin).query<Record<string, unknown>>(
+          `SELECT * FROM ${DATASETS_SCHEMA}.datasets`,
+        );
+        return result.rows;
+      };
+      const datasetsBefore = await datasetRows();
+      expect(datasetsBefore).toHaveLength(1);
 
       // El borrado del esquema vuelve a mirar la última escritura en su transacción: antes de vencer
       // no borra nada; un log que no existe no es un fallo; y con alguien leyendo sus tablas espera
@@ -776,6 +840,9 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       });
       expect(await keysUnder('logs/000001/')).toEqual([]);
       expect(await schemaExists(LOG_1)).toBe(false);
+      expect(await keysUnder(datasetKey)).toEqual([datasetKey]);
+      expect(await schemaExists(DATASETS_SCHEMA)).toBe(true);
+      expect(await datasetRows()).toEqual(datasetsBefore);
       expect(await keysUnder('logs/000002/')).toEqual(secondKeys);
       expect(await captureRows(LOG_2)).toEqual(secondRows);
       expect(await schemaExists(LOG_3)).toBe(true);
@@ -800,6 +867,8 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       });
       expect(await keysUnder('logs/000002/')).toEqual([]);
       expect(await schemaExists(LOG_2)).toBe(false);
+      expect(await keysUnder(datasetKey)).toEqual([datasetKey]);
+      expect(await datasetRows()).toEqual(datasetsBefore);
       expect(await schemaExists(LOG_3)).toBe(true);
       expect(stopped.steps[0]?.['report']).toMatchObject({ prepared: null });
       expect((await reportsOf(LOG_3)).map((item) => item.step)).toContain('retention');
@@ -1092,5 +1161,116 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       report: { api_migrated: [], failures: [], passwords_set: [] },
       status: 'completed',
     });
+  });
+
+  it('con la contraseña de buoh_publicacion: el paso 1 crea buoh_datasets y el rol, el 6 publica el log terminado y el 7 lo verifica en los dos modos (ADR-0020 §8)', async () => {
+    const env = {
+      ...operationsEnvironment(),
+      BUOH_PUBLICACION_POSTGRES_PASSWORD: passwords.publication,
+    };
+    const first = await operations(env);
+    expect(first.step('roles_and_logs')).toMatchObject({
+      report: { failures: [], passwords_set: [PUBLICATION_ROLE] },
+      status: 'completed',
+    });
+    // buoh_datasets ya existía, con su migración: no aplica nada.
+    expect(first.step('roles_and_logs')?.['report']).toMatchObject({ datasets_migrated: [] });
+    expect(first.step('publication')).toMatchObject({ status: 'completed' });
+    expect(
+      await sqlStateAs(
+        PUBLICATION_ROLE,
+        passwords.publication,
+        `SELECT count(*) FROM ${DATASETS_SCHEMA}.datasets`,
+      ),
+    ).toBeNull();
+
+    // Una captura sintética de 20 minutos en el log activo, con su esquema de fuente.
+    const location = await findActiveLog(ready(admin), { now: clock.now, source: DERIV_SOURCE });
+    if (location === null) {
+      throw new TypeError('Sin log activo.');
+    }
+    const target = withLog(
+      { ...local, postgres: { ...local.postgres, database: DATABASE } },
+      location,
+    );
+    const objects = S3ObjectStore.fromConfig(target.s3);
+    const pool = createPool(target.postgres);
+    try {
+      await objects.putIfAbsent(
+        contentKey(fixture.expected.entries_sha256[SOURCE_SCHEMA_ENTRY]),
+        fixture.entries[SOURCE_SCHEMA_ENTRY],
+        'application/json',
+      );
+      const end = Date.parse(clock.now()) - 60_000;
+      const profile = createDerivPublicationProfile({
+        schemas: syntheticSchemas(),
+        symbol: 'R_100',
+      });
+      await writeLiveLog({
+        events: liveEvents(profile, [{ end: 'requested', fromMs: end - 20 * 60_000, toMs: end }]),
+        objects,
+        source: DERIV_SOURCE,
+        store: new PostgresSourceLogStore(pool),
+      });
+    } finally {
+      objects.destroy();
+      await pool.end();
+    }
+    // El servicio prepara el log siguiente; una escritura en él termina el de la captura.
+    const prepared = await operations(env);
+    const next = (prepared.step('roles_and_logs')?.['report'] as { prepared: number | null })
+      .prepared;
+    expect(next).toBe(location.number + 1);
+    expect(
+      await sqlStateAs(
+        POSTGRES_ROLES.ingest,
+        passwords.ingest,
+        `INSERT INTO ${logLocation(location.number + 1).schema}.ingestion_heartbeats
+           (heartbeat_id, source, run_id, observed_at_utc, pg_backend_pid, connection_state,
+            backlog_count, backlog_bytes)
+         VALUES ('${uuid(9401)}', '${DERIV_SOURCE}', '${uuid(9402)}', '${clock.now()}', 4343,
+                 'connecting', 0, 0)`,
+      ),
+    ).toBeNull();
+
+    const published = await operations(env);
+    expect(published.step('publication')).toMatchObject({
+      report: { result: { first_segment: 0, log: location.number, status: 'published' } },
+      status: 'completed',
+    });
+    const result = (published.step('publication')?.['report'] as { result: { dataset_id: string } })
+      .result;
+    expect(published.step('dataset_verification')).toMatchObject({
+      report: {
+        dataset_id: result.dataset_id,
+        results: [
+          { mode: 'verify-only', status: 'passed' },
+          { mode: 'recompute', status: 'passed' },
+        ],
+      },
+      status: 'completed',
+    });
+    const { rows } = await ready(admin).query<{ mode: string; status: string }>(
+      `SELECT mode, status FROM ${DATASETS_SCHEMA}.dataset_verifications WHERE dataset_id = $1
+        ORDER BY verified_at_utc, mode`,
+      [result.dataset_id],
+    );
+    expect(rows.map((row) => [row.mode, row.status]).sort()).toEqual([
+      ['recompute', 'passed'],
+      ['verify-only', 'passed'],
+    ]);
+    // Los informes de los dos pasos quedan en el log activo, y ninguno lleva un precio.
+    const reports = await reportsOf(logLocation(location.number + 1).schema);
+    expect(reports.map((item) => item.step)).toEqual(
+      expect.arrayContaining(['publication', 'dataset_verification']),
+    );
+    expect(JSON.stringify(reports)).not.toContain('1234.56');
+
+    // La ejecución siguiente no tiene nada que publicar ni que verificar.
+    const quiet = await operations(env);
+    expect(quiet.step('publication')).toMatchObject({
+      report: { result: { status: 'nothing_due' } },
+    });
+    expect(quiet.step('dataset_verification')).toMatchObject({ report: { dataset_id: null } });
   });
 });

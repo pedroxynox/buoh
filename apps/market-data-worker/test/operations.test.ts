@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { gzipSync } from 'node:zlib';
 
-import { canonicalJson, sha256Hex, type HealthReport } from '@buoh/contracts';
+import { canonicalJson, sha256Hex, type HealthReport, type JsonValue } from '@buoh/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -17,6 +17,8 @@ import {
   logLocation,
   migrateEnvironment,
   nextLogToPrepare,
+  publishEnvironment,
+  replayEnvironment,
   ObjectReadError,
   OPERATIONS_STEPS,
   operationsCommand,
@@ -32,6 +34,7 @@ import {
   workerChildScript,
   type CaptureLog,
   type ChildResult,
+  type DatasetVerificationRow,
   type DueSegment,
   type LogDeletion,
   type LogLocation,
@@ -152,6 +155,7 @@ describe('loadOperationsConfig (ADR-0018 §11)', () => {
     expect(CONFIG).toEqual({
       apiPassword: null,
       apiReaderPassword: null,
+      codeVersion: null,
       healthObjects: {
         accessKeyId: 'clave-salud-sintetica',
         bucket: 'buoh-captura',
@@ -180,6 +184,7 @@ describe('loadOperationsConfig (ADR-0018 §11)', () => {
         buoh_ingesta: 'ingesta-sintetica-0123456789',
         buoh_salud: 'salud-sintetica-0123456789',
       },
+      publicationPassword: null,
     });
   });
 
@@ -384,11 +389,14 @@ function fakeDatabase(state: {
   /** Los segmentos cerrados de cada log, por su número. */
   segments?: Readonly<Record<number, readonly DueSegment[]>>;
   space?: SpaceMeasure;
+  /** Las publicaciones activas de `production`, en orden de publicación (ADR-0020 §8, paso 7). */
+  publications?: readonly { dataset_id: string; publication_id: string }[];
 }) {
   const calls: string[] = [];
   /** La hora con la que se pidió borrar cada esquema. */
   const drops: { log: number; now: string }[] = [];
   const reports: { log: number; row: OperationsReportRow }[] = [];
+  const verifications: DatasetVerificationRow[] = [];
   const answer = <T>(name: keyof OwnerDatabase, value: () => T): Promise<T> => {
     const error = state.fail?.[name];
     if (error !== undefined) {
@@ -397,6 +405,12 @@ function fakeDatabase(state: {
     return Promise.resolve(value());
   };
   const database: OwnerDatabase = {
+    appendDatasetVerification: (row) => {
+      calls.push(`verification:${row.mode}`);
+      return answer('appendDatasetVerification', () => {
+        verifications.push(row);
+      });
+    },
     appendReport: (target, row) => {
       calls.push(`report:${String(target.number)}:${row.step}`);
       return answer('appendReport', () => {
@@ -440,6 +454,10 @@ function fakeDatabase(state: {
       calls.push('api_role');
       return answer('ensureApiRole', () => undefined);
     },
+    ensurePublicationRole: () => {
+      calls.push('publication_role');
+      return answer('ensurePublicationRole', () => undefined);
+    },
     ensureRuntimeRoles: () => {
       calls.push('roles');
       return answer('ensureRuntimeRoles', () => undefined);
@@ -447,6 +465,10 @@ function fakeDatabase(state: {
     grantApiPrivileges: () => {
       calls.push('api_grant');
       return answer('grantApiPrivileges', () => undefined);
+    },
+    grantDatasetsPrivileges: () => {
+      calls.push('datasets_grant');
+      return answer('grantDatasetsPrivileges', () => undefined);
     },
     grantLogPrivileges: (target) => {
       calls.push(`grant:${String(target.number)}`);
@@ -467,6 +489,23 @@ function fakeDatabase(state: {
         return times.at(-1) ?? null;
       });
     },
+    latestReport: (target, step) => {
+      calls.push(`latest:${String(target.number)}:${step}`);
+      return answer('latestReport', () => {
+        const found = reports
+          .filter((item) => item.log === target.number && item.row.step === step)
+          .map((item) => item.row)
+          .sort((left, right) => left.report_id.localeCompare(right.report_id))
+          .at(-1);
+        return found === undefined
+          ? null
+          : {
+              report: JSON.parse(JSON.stringify(found.report)) as JsonValue,
+              report_id: found.report_id,
+              status: found.status,
+            };
+      });
+    },
     listLogs: () => {
       calls.push('list');
       return answer('listLogs', () => [...state.logs]);
@@ -478,6 +517,24 @@ function fakeDatabase(state: {
           (segment) => segment.segment_index % 288 === slot,
         ),
       );
+    },
+    nextPublicationToVerify: () => {
+      calls.push('to_verify');
+      return answer('nextPublicationToVerify', () => {
+        for (const publication of state.publications ?? []) {
+          const modes = [
+            ...new Set(
+              verifications
+                .filter((row) => row.publication_id === publication.publication_id)
+                .map((row) => row.mode),
+            ),
+          ].sort();
+          if (modes.length < 2) {
+            return { ...publication, modes_done: modes };
+          }
+        }
+        return null;
+      });
     },
     measureSpace: () => {
       calls.push('space');
@@ -497,7 +554,7 @@ function fakeDatabase(state: {
       });
     },
   };
-  return { calls, database, drops, reports };
+  return { calls, database, drops, reports, verifications };
 }
 
 const coded = (code: string) =>
@@ -507,12 +564,21 @@ const coded = (code: string) =>
 function fakeChildren(
   answer: (child: string, args: readonly string[]) => Partial<ChildResult> = () => ({}),
 ) {
-  const runs: { args: readonly string[]; child: string; env: Readonly<Record<string, string>> }[] =
-    [];
-  const runChild: RunChild = (child, args, env) => {
-    runs.push({ args, child, env });
+  const runs: {
+    args: readonly string[];
+    child: string;
+    env: Readonly<Record<string, string>>;
+    timeoutMs?: number;
+  }[] = [];
+  const runChild: RunChild = (child, args, env, options) => {
+    runs.push({
+      args,
+      child,
+      env,
+      ...(options?.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+    });
     const defaults: ChildResult =
-      child === 'migrate' || child === 'api_migrate'
+      child === 'migrate' || child === 'api_migrate' || child === 'datasets_migrate'
         ? {
             exitCode: 0,
             stderr: '',
@@ -683,6 +749,8 @@ async function run(
   options: {
     readonly config?: OperationsConfig;
     readonly deletion?: ReturnType<typeof fakeDeletion>;
+    /** Los IDs; por defecto, `uuid(1)`, `uuid(2)`… desde el principio en cada ejecución. */
+    readonly nextId?: () => string;
     readonly now?: () => string;
     readonly objects?: ReturnType<typeof fakeObjects>;
     readonly scheduler?: Scheduler;
@@ -697,7 +765,7 @@ async function run(
     database: db.database,
     deletion: (options.deletion ?? fakeDeletion()).open,
     forwardChildStderr: (text) => forwarded.push(text),
-    nextId: () => uuid((sequence += 1)),
+    nextId: options.nextId ?? (() => uuid((sequence += 1))),
     now: options.now ?? (() => NOW),
     objects: (options.objects ?? fakeObjects()).objects,
     runChild: children.runChild,
@@ -720,6 +788,8 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       'retention',
       'verification',
       'space',
+      'publication',
+      'dataset_verification',
     ]);
     const db = fakeDatabase({ loggedIn: new Set(), logs: [] });
     const children = fakeChildren((child) =>
@@ -2741,3 +2811,1081 @@ describe('workerChildScript: el proceso de cada comando del worker (ADR-0018 §1
 
 // `LogLocation` se usa en los tipos de las bases falsas.
 export type { LogLocation };
+
+// Los datasets vivos en `buoh-operaciones` (ADR-0020 §5, §8 y §9; PR 4 de su §13): el paso 1 con
+// `buoh_datasets` y `buoh_publicacion`, el paso 6 (`publication`) y el paso 7
+// (`dataset_verification`). Las expectativas salen de §8: los entornos explícitos, como mucho una
+// publicación por ejecución, los logs detenidos hasta un cambio del código, las tres ejecuciones sin
+// un resultado concluyente, el límite de 150 s y los tres estados de la verificación.
+
+const PUBLICATION_PASSWORD = 'publicacion-sintetica-0123456789';
+const COMMIT_A = 'a'.repeat(40);
+const COMMIT_B = 'b'.repeat(40);
+const DATASETS_CONFIG = loadOperationsConfig({
+  ...ENV,
+  BUOH_PUBLICACION_POSTGRES_PASSWORD: PUBLICATION_PASSWORD,
+  RENDER_GIT_COMMIT: COMMIT_A,
+});
+const DATASET = `sha256:${'d'.repeat(64)}`;
+const PUBLICATION = '019b76da-a800-7000-8000-00000000d001';
+const PUBLICATION_2 = '019b76da-a800-7000-8000-00000000d002';
+const DATASET_2 = `sha256:${'e'.repeat(64)}`;
+
+const publishedLine = (log: number, first: number, last: number) =>
+  JSON.stringify({
+    behind: null,
+    clean: true,
+    dataset_id: DATASET,
+    duration_ms: 4000,
+    elements: 1000,
+    first_segment: first,
+    incident_count: 0,
+    last_segment: last,
+    log,
+    max_rss_bytes: 150 * 1048576,
+    normalized_tick_count: 900,
+    open_condition_types: [],
+    pending_continuity_symbols: [],
+    publication_id: PUBLICATION,
+    source_event_count: 1000,
+    status: 'published',
+  });
+const nothingDueLine = (behind: unknown = null) =>
+  JSON.stringify({ behind, duration_ms: 100, max_rss_bytes: 90 * 1048576, status: 'nothing_due' });
+const failedLine = (reason: string, log: number | null, first?: number) =>
+  JSON.stringify({
+    behind: null,
+    detail: 'x',
+    duration_ms: 100,
+    ...(first === undefined ? {} : { first_segment: first }),
+    log,
+    max_rss_bytes: 90 * 1048576,
+    reason,
+    stage: 'plan',
+    status: 'failed',
+  });
+const attempt = (log: number, first: number) =>
+  `${JSON.stringify({ event: 'publication_attempt', first_segment: first, log })}\n`;
+const replayLine = (
+  mode: 'recompute' | 'verify-only',
+  publication = PUBLICATION,
+  dataset = DATASET,
+) =>
+  JSON.stringify({
+    condition_event_count: 0,
+    dataset_id: dataset,
+    deployment_environment: 'production',
+    incident_count: 0,
+    logical_artifact_count: 6,
+    max_rss_bytes: 170 * 1048576,
+    mode,
+    normalized_tick_count: 900,
+    publication_id: publication,
+    raw_frame_count: 1000,
+    source_event_count: 1000,
+    status: mode === 'recompute' ? 'reproduced' : 'verified',
+    storage_object_count: 8,
+  });
+const replayFailedLine = (code: string) =>
+  JSON.stringify({
+    code,
+    dataset_id: DATASET,
+    details: { artifact_id: 'normalized_ticks:000000' },
+    max_rss_bytes: 100 * 1048576,
+    message: 'texto del replay',
+    mode: 'recompute',
+    status: 'failed',
+  });
+
+/** Una base con el log 1 terminado y el 2 activo, con sus contraseñas. */
+function datasetsDatabase(
+  extra: Partial<Parameters<typeof fakeDatabase>[0]> = {},
+): ReturnType<typeof fakeDatabase> {
+  return fakeDatabase({
+    loggedIn: new Set(['buoh_agente', 'buoh_ingesta', 'buoh_salud', 'buoh_publicacion']),
+    logs: [log(1, '2026-03-01T00:00:00.000Z'), log(2, '2026-03-02T09:59:00.000Z'), log(3)],
+    ...extra,
+  });
+}
+
+/** Procesos con una respuesta para `publish` y otra para `replay`; los demás, los de siempre. */
+function datasetsChildren(answers: {
+  publish?: (args: readonly string[]) => Partial<ChildResult>;
+  replay?: (args: readonly string[]) => Partial<ChildResult>;
+}) {
+  return fakeChildren((child, args) => {
+    if (child === 'publish') {
+      return answers.publish?.(args) ?? { exitCode: 0, stdout: nothingDueLine() };
+    }
+    if (child === 'replay') {
+      return answers.replay?.(args) ?? { exitCode: 1, stdout: replayFailedLine('UNEXPECTED') };
+    }
+    return {};
+  });
+}
+
+/** IDs que crecen de una ejecución a otra, como los UUIDv7 del servicio. */
+let datasetsSequence = 10_000;
+const growing = () => uuid((datasetsSequence += 1));
+
+const stepLine = (lines: readonly Record<string, unknown>[], step: string) =>
+  lines.find((line) => line['step'] === step);
+
+describe('la configuración de los datasets vivos (ADR-0020 §5 y §8)', () => {
+  it('lee la contraseña de buoh_publicacion y el commit de Render, que es opcional', () => {
+    expect(DATASETS_CONFIG.publicationPassword).toBe(PUBLICATION_PASSWORD);
+    expect(DATASETS_CONFIG.codeVersion).toBe(COMMIT_A);
+    expect(CONFIG.publicationPassword).toBeNull();
+    for (const value of ['', 'xyz', 'A'.repeat(40), '123456']) {
+      expect(loadOperationsConfig({ ...ENV, RENDER_GIT_COMMIT: value }).codeVersion, value).toBe(
+        null,
+      );
+    }
+    expect(() =>
+      loadOperationsConfig({ ...ENV, BUOH_PUBLICACION_POSTGRES_PASSWORD: 'corta' }),
+    ).toThrow(ConfigError);
+  });
+
+  it('la publicación recibe solo buoh_publicacion y el token operaciones, sin esquema', () => {
+    expect(publishEnvironment(DATASETS_CONFIG)).toEqual({
+      BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+      BUOH_POSTGRES_DB: 'buoh',
+      BUOH_POSTGRES_HOST: 'pg-sintetico.invalid',
+      BUOH_POSTGRES_PASSWORD: PUBLICATION_PASSWORD,
+      BUOH_POSTGRES_PORT: '5432',
+      BUOH_POSTGRES_SSLMODE: 'require',
+      BUOH_POSTGRES_USER: 'buoh_publicacion',
+      BUOH_S3_ACCESS_KEY_ID: 'clave-operaciones-sintetica',
+      BUOH_S3_BUCKET: 'buoh-captura',
+      BUOH_S3_ENDPOINT: 'https://cuenta-sintetica.r2.invalid',
+      BUOH_S3_REGION: 'auto',
+      BUOH_S3_SECRET_ACCESS_KEY: 'secreto-operaciones-sintetico',
+    });
+    expect(() => publishEnvironment(CONFIG)).toThrow(TypeError);
+  });
+
+  it('la verificación recibe solo buoh_salud y el token salud, sin esquema', () => {
+    expect(replayEnvironment(DATASETS_CONFIG)).toEqual(healthEnvironment(DATASETS_CONFIG));
+    expect(replayEnvironment(DATASETS_CONFIG)).toMatchObject({
+      BUOH_POSTGRES_USER: 'buoh_salud',
+      BUOH_S3_ACCESS_KEY_ID: 'clave-salud-sintetica',
+    });
+    expect(replayEnvironment(DATASETS_CONFIG)).not.toHaveProperty('BUOH_POSTGRES_SCHEMA');
+  });
+
+  it('los procesos de los datasets son los del worker, con sus tamaños de V8 y sus plazos', () => {
+    for (const [child, script] of [
+      ['datasets_migrate', 'migrate-datasets.js'],
+      ['publish', 'publish-dataset.js'],
+      ['replay', 'replay.js'],
+    ] as const) {
+      const spec = workerChildScript(child, [], {});
+      expect(
+        spec.script.endsWith(`/dist/cli/${script}`) || spec.script.endsWith(`/src/cli/${script}`),
+      ).toBe(true);
+      expect(spec.nodeFlags).toEqual(WORKER_NODE_FLAGS);
+    }
+    expect(workerChildScript('publish', [], {}).timeoutMs).toBe(60_000);
+    expect(workerChildScript('replay', [], {}, { timeoutMs: 12_000 }).timeoutMs).toBe(12_000);
+    expect(workerChildScript('replay', [], {}, { timeoutMs: 90_000 }).timeoutMs).toBe(60_000);
+    expect(workerChildScript('datasets_migrate', [], {}).timeoutMs).toBe(120_000);
+  });
+});
+
+describe('el paso 1 con los datasets vivos (ADR-0020 §5)', () => {
+  it('sin la contraseña de buoh_publicacion no toca los datasets, y los pasos 6 y 7 no corren', async () => {
+    const db = datasetsDatabase();
+    const children = datasetsChildren({});
+    const { lines } = await run(db, children);
+    expect(db.calls).not.toContain('publication_role');
+    expect(children.runs.map((item) => item.child)).not.toContain('datasets_migrate');
+    expect(children.runs.map((item) => item.child)).not.toContain('publish');
+    expect(lines.map((line) => line['step']).filter(Boolean)).not.toContain('publication');
+    expect(lines.map((line) => line['step']).filter(Boolean)).not.toContain('dataset_verification');
+    expect(stepLine(lines, 'roles_and_logs')?.['report']).not.toHaveProperty('datasets_migrated');
+  });
+
+  it('con ella: el rol, las migraciones de buoh_datasets con la credencial dueña, los privilegios y su contraseña', async () => {
+    const db = datasetsDatabase({
+      loggedIn: new Set(['buoh_agente', 'buoh_ingesta', 'buoh_salud']),
+    });
+    const children = fakeChildren((child) =>
+      child === 'datasets_migrate'
+        ? {
+            stdout: JSON.stringify({
+              applied: ['0001_datasets.sql'],
+              current: ['0001_datasets.sql'],
+              status: 'migrated',
+            }),
+          }
+        : child === 'publish'
+          ? { exitCode: 0, stdout: nothingDueLine() }
+          : {},
+    );
+    const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    const step1 = db.calls.slice(0, db.calls.indexOf('login:buoh_publicacion') + 2);
+    expect(step1.filter((call) => /publication|datasets|buoh_publicacion/u.test(call))).toEqual([
+      'publication_role',
+      'datasets_grant',
+      'login:buoh_publicacion',
+      'password:buoh_publicacion',
+    ]);
+    const migrateRun = children.runs.find((item) => item.child === 'datasets_migrate');
+    expect(migrateRun?.env).toEqual(apiMigrateEnvironment(DATASETS_CONFIG));
+    expect(stepLine(lines, 'roles_and_logs')).toMatchObject({
+      report: {
+        datasets_migrated: ['0001_datasets.sql'],
+        failures: [],
+        passwords_set: ['buoh_publicacion'],
+      },
+      status: 'completed',
+    });
+  });
+
+  it('sin el rol no pone su contraseña; con las migraciones fallidas sí, y no da privilegios', async () => {
+    const noRole = datasetsDatabase({ fail: { ensurePublicationRole: coded('42501') } });
+    const one = await run(noRole, datasetsChildren({}), {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+    });
+    expect(noRole.calls).not.toContain('login:buoh_publicacion');
+    expect(stepLine(one.lines, 'roles_and_logs')).toMatchObject({
+      report: { failures: [{ action: 'publication_role', reason: '42501' }] },
+      status: 'failed',
+    });
+    const noMigrate = datasetsDatabase();
+    const children = fakeChildren((child) =>
+      child === 'datasets_migrate'
+        ? { exitCode: 1, stdout: JSON.stringify({ code: 'MIGRATION_FAILED', reason: '42501' }) }
+        : child === 'publish'
+          ? { exitCode: 0, stdout: nothingDueLine() }
+          : {},
+    );
+    const two = await run(noMigrate, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(noMigrate.calls).toContain('login:buoh_publicacion');
+    expect(noMigrate.calls).not.toContain('datasets_grant');
+    expect(stepLine(two.lines, 'roles_and_logs')?.['report']).toMatchObject({
+      failures: [{ action: 'datasets_migrate', reason: '42501' }],
+    });
+    const noGrant = datasetsDatabase({ fail: { grantDatasetsPrivileges: coded('XX000') } });
+    const three = await run(noGrant, datasetsChildren({}), {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+    });
+    expect(stepLine(three.lines, 'roles_and_logs')?.['report']).toMatchObject({
+      failures: [{ action: 'datasets_grant', reason: 'XX000' }],
+    });
+  });
+});
+
+describe('el paso 6, publication (ADR-0020 §8)', () => {
+  it('corre datasets:publish con su entorno y 60 s, y guarda en el log activo lo que publicó', async () => {
+    const db = datasetsDatabase();
+    const children = datasetsChildren({
+      publish: () => ({ exitCode: 0, stdout: publishedLine(1, 0, 71) }),
+    });
+    const { alerts, lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    const publish = children.runs.filter((item) => item.child === 'publish');
+    expect(publish).toEqual([
+      { args: [], child: 'publish', env: publishEnvironment(DATASETS_CONFIG), timeoutMs: 60_000 },
+    ]);
+    expect(alerts).toEqual([]);
+    const line = stepLine(lines, 'publication');
+    expect(line).toMatchObject({ log: null, status: 'completed' });
+    expect(line?.['report']).toEqual({
+      behind: null,
+      code_version: COMMIT_A,
+      result: {
+        clean: true,
+        dataset_id: DATASET,
+        duration_ms: 4000,
+        elements: 1000,
+        first_segment: 0,
+        incident_count: 0,
+        last_segment: 71,
+        log: 1,
+        max_rss_bytes: 150 * 1048576,
+        normalized_tick_count: 900,
+        open_condition_types: [],
+        pending_continuity_symbols: [],
+        publication_id: PUBLICATION,
+        source_event_count: 1000,
+        status: 'published',
+      },
+      skipped: [],
+      state: { attempts: null, stopped: [] },
+    });
+    // El informe va al log activo, el 2.
+    expect(
+      db.reports.filter((item) => item.row.step === 'publication').map((item) => item.log),
+    ).toEqual([2]);
+  });
+
+  it('sin nada pendiente y sin estado no guarda nada; con atraso deja publication_behind', async () => {
+    const db = datasetsDatabase();
+    const quiet = await run(db, datasetsChildren({}), { config: DATASETS_CONFIG, nextId: growing });
+    expect(stepLine(quiet.lines, 'publication')).toMatchObject({ status: 'completed' });
+    expect(db.reports.some((item) => item.row.step === 'publication')).toBe(false);
+    expect(quiet.alerts).toEqual([]);
+    const behind = { expires_at_utc: '2026-03-04T00:00:00.000Z', log: 1 };
+    const late = await run(
+      datasetsDatabase(),
+      datasetsChildren({ publish: () => ({ exitCode: 0, stdout: nothingDueLine(behind) }) }),
+      { config: DATASETS_CONFIG, nextId: growing },
+    );
+    expect(late.alerts).toEqual([
+      { event: 'publication_behind', expires_at_utc: '2026-03-04T00:00:00.000Z', log: '1' },
+    ]);
+    expect(stepLine(late.lines, 'publication')?.['report']).toMatchObject({ behind });
+  });
+
+  it.each([
+    'publication_segment_too_large',
+    'publication_limit_exceeded',
+    'publication_conflict',
+    'publication_not_derivable',
+  ])(
+    '%s detiene el log: la ejecución siguiente lo salta, con su alerta, hasta otro commit',
+    async (reason) => {
+      const db = datasetsDatabase();
+      let publishes = 0;
+      const children = datasetsChildren({
+        publish: () => {
+          publishes += 1;
+          return publishes === 1
+            ? { exitCode: 1, stdout: failedLine(reason, 1, 72) }
+            : { exitCode: 0, stdout: nothingDueLine() };
+        },
+      });
+      const first = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+      expect(stepLine(first.lines, 'publication')).toMatchObject({
+        report: {
+          reason,
+          state: {
+            attempts: null,
+            stopped: [{ code_version: COMMIT_A, first_segment: 72, log: 1, reason }],
+          },
+        },
+        status: 'failed',
+      });
+      expect(first.alerts).toContainEqual({ event: reason, first_segment: '72', log: '1' });
+      const second = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+      expect(children.runs.filter((item) => item.child === 'publish').at(-1)?.args).toEqual([
+        '--skip',
+        '1',
+      ]);
+      expect(second.alerts).toContainEqual({ event: reason, first_segment: '72', log: '1' });
+      expect(stepLine(second.lines, 'publication')).toMatchObject({ status: 'failed' });
+      // Con otro commit, el log vuelve a intentarse.
+      const other = loadOperationsConfig({
+        ...ENV,
+        BUOH_PUBLICACION_POSTGRES_PASSWORD: PUBLICATION_PASSWORD,
+        RENDER_GIT_COMMIT: COMMIT_B,
+      });
+      const third = await run(db, children, { config: other, nextId: growing });
+      expect(children.runs.filter((item) => item.child === 'publish').at(-1)?.args).toEqual([]);
+      expect(stepLine(third.lines, 'publication')).toMatchObject({
+        report: { state: { stopped: [] } },
+        status: 'completed',
+      });
+      expect(third.alerts.some((item) => item['event'] === reason)).toBe(false);
+    },
+  );
+
+  it('un log detenido que venció deja de contar', async () => {
+    const db = datasetsDatabase();
+    const children = datasetsChildren({
+      publish: () => ({ exitCode: 1, stdout: failedLine('publication_conflict', 1, 0) }),
+    });
+    await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    // 30 días después de la última escritura del log 1.
+    const later = '2026-03-31T00:00:00.000Z';
+    const after = datasetsChildren({});
+    await run(db, after, { config: DATASETS_CONFIG, nextId: growing, now: () => later });
+    expect(after.runs.find((item) => item.child === 'publish')?.args).toEqual([]);
+  });
+
+  it.each([
+    ['un plazo vencido', { exitCode: null, stderr: attempt(1, 144), stdout: '', timedOut: true }],
+    ['un proceso que muere sin memoria', { exitCode: null, stderr: attempt(1, 144), stdout: '' }],
+    ['una salida sin su línea', { exitCode: 0, stderr: attempt(1, 144), stdout: 'no es JSON' }],
+    ['un error inesperado', { exitCode: 1, stdout: failedLine('unexpected', 1, 144) }],
+  ] as const)(
+    '%s, tres veces seguidas con el mismo dataset, detiene el log con publication_incomplete',
+    async (_name, answer) => {
+      const db = datasetsDatabase();
+      const children = datasetsChildren({ publish: () => answer });
+      const one = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+      expect(stepLine(one.lines, 'publication')).toMatchObject({
+        report: { state: { attempts: { count: 1, first_segment: 144, log: 1 }, stopped: [] } },
+        status: 'failed',
+      });
+      const two = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+      expect(stepLine(two.lines, 'publication')?.['report']).toMatchObject({
+        state: { attempts: { count: 2, first_segment: 144, log: 1 } },
+      });
+      const three = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+      expect(stepLine(three.lines, 'publication')?.['report']).toMatchObject({
+        reason: expect.any(String) as unknown,
+        state: {
+          attempts: null,
+          stopped: [
+            {
+              code_version: COMMIT_A,
+              first_segment: 144,
+              log: 1,
+              reason: 'publication_incomplete',
+            },
+          ],
+        },
+      });
+      expect(three.alerts).toContainEqual({
+        event: 'publication_incomplete',
+        first_segment: '144',
+        log: '1',
+      });
+      await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+      expect(children.runs.filter((item) => item.child === 'publish').at(-1)?.args).toEqual([
+        '--skip',
+        '1',
+      ]);
+    },
+  );
+
+  it('la cuenta es por dataset: otro dataset empieza en 1, y una publicación la pone a cero', async () => {
+    const db = datasetsDatabase();
+    const answers: Partial<ChildResult>[] = [
+      { exitCode: null, stderr: attempt(1, 144), stdout: '', timedOut: true },
+      { exitCode: null, stderr: attempt(1, 144), stdout: '', timedOut: true },
+      { exitCode: null, stderr: attempt(1, 216), stdout: '', timedOut: true },
+      { exitCode: 0, stdout: publishedLine(1, 216, 287) },
+      { exitCode: null, stderr: attempt(1, 288), stdout: '', timedOut: true },
+    ];
+    const children = datasetsChildren({ publish: () => answers.shift() ?? {} });
+    const counts: unknown[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+      const report = stepLine(lines, 'publication')?.['report'] as { state: { attempts: unknown } };
+      counts.push(report.state.attempts);
+    }
+    expect(counts).toEqual([
+      { count: 1, first_segment: 144, log: 1 },
+      { count: 2, first_segment: 144, log: 1 },
+      { count: 1, first_segment: 216, log: 1 },
+      null,
+      { count: 1, first_segment: 288, log: 1 },
+    ]);
+  });
+
+  it('un almacén que no responde o un COMMIT ambiguo se repiten sin contar', async () => {
+    const db = datasetsDatabase();
+    const answers: Partial<ChildResult>[] = [
+      { exitCode: null, stderr: attempt(1, 144), stdout: '', timedOut: true },
+      { exitCode: 1, stdout: failedLine('storage_unavailable', 1, 144) },
+      { exitCode: 1, stdout: failedLine('commit_outcome_unknown', 1, 144) },
+      { exitCode: null, stderr: attempt(1, 144), stdout: '', timedOut: true },
+    ];
+    const children = datasetsChildren({ publish: () => answers.shift() ?? {} });
+    const counts: unknown[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+      const line = stepLine(lines, 'publication');
+      expect(line?.['status']).toBe('failed');
+      counts.push((line?.['report'] as { state: { attempts: unknown } }).state.attempts);
+    }
+    expect(counts).toEqual([
+      { count: 1, first_segment: 144, log: 1 },
+      { count: 1, first_segment: 144, log: 1 },
+      { count: 1, first_segment: 144, log: 1 },
+      { count: 2, first_segment: 144, log: 1 },
+    ]);
+  });
+
+  it('un proceso que muere sin decir qué intentaba no cuenta; un error de configuración tampoco', async () => {
+    const db = datasetsDatabase();
+    const answers: Partial<ChildResult>[] = [
+      { exitCode: null, stdout: '', timedOut: true },
+      { exitCode: 2, stdout: JSON.stringify({ code: 'ConfigError', status: 'failed' }) },
+    ];
+    const children = datasetsChildren({ publish: () => answers.shift() ?? {} });
+    const one = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(stepLine(one.lines, 'publication')).toMatchObject({
+      report: { reason: 'child_timeout', state: { attempts: null, stopped: [] } },
+      status: 'failed',
+    });
+    const two = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(stepLine(two.lines, 'publication')).toMatchObject({
+      report: { reason: 'publish_config_invalid', state: { attempts: null, stopped: [] } },
+      status: 'failed',
+    });
+  });
+
+  it('el estado sigue al log activo nuevo: lee el informe más reciente de cualquier log', async () => {
+    const db = datasetsDatabase();
+    const children = datasetsChildren({
+      publish: () => ({ exitCode: 1, stdout: failedLine('publication_conflict', 1, 0) }),
+    });
+    await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(db.reports.find((item) => item.row.step === 'publication')?.log).toBe(2);
+    // Corte: el log 3 recibe escrituras y pasa a ser el activo, con los informes de antes.
+    const after = datasetsChildren({
+      publish: () => ({ exitCode: 1, stdout: failedLine('publication_limit_exceeded', 3, 0) }),
+    });
+    const moved = fakeDatabase({
+      loggedIn: new Set(['buoh_agente', 'buoh_ingesta', 'buoh_salud', 'buoh_publicacion']),
+      logs: [
+        log(1, '2026-03-01T00:00:00.000Z'),
+        log(2, '2026-03-02T09:00:00.000Z'),
+        log(3, '2026-03-02T09:59:00.000Z'),
+        log(4),
+      ],
+    });
+    for (const item of db.reports) {
+      moved.reports.push(item);
+    }
+    await run(moved, after, { config: DATASETS_CONFIG, nextId: growing });
+    expect(after.runs.find((item) => item.child === 'publish')?.args).toEqual(['--skip', '1']);
+    const stored = moved.reports.filter((item) => item.row.step === 'publication').at(-1);
+    expect(stored?.log).toBe(3);
+    expect(stored?.row.report['state']).toMatchObject({
+      stopped: [
+        { log: 1, reason: 'publication_conflict' },
+        { log: 3, reason: 'publication_limit_exceeded' },
+      ],
+    });
+  });
+
+  it('con logs detenidos y nada nuevo, el paso falla con su alerta sin volver a guardar el estado', async () => {
+    const db = datasetsDatabase();
+    const children = datasetsChildren({
+      publish: (args) =>
+        args.length === 0
+          ? { exitCode: 1, stdout: failedLine('publication_conflict', 1, 0) }
+          : { exitCode: 0, stdout: nothingDueLine() },
+    });
+    await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    const before = db.reports.filter((item) => item.row.step === 'publication').length;
+    const again = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(stepLine(again.lines, 'publication')).toMatchObject({
+      report: { reason: 'publication_conflict' },
+      status: 'failed',
+    });
+    expect(again.alerts).toContainEqual({
+      event: 'operations_step_failed',
+      reason: 'publication_conflict',
+      step: 'publication',
+    });
+    expect(db.reports.filter((item) => item.row.step === 'publication')).toHaveLength(before);
+  });
+
+  it('con un informe del paso que no tiene la forma esperada falla sin publicar', async () => {
+    const db = datasetsDatabase();
+    db.reports.push({
+      log: 2,
+      row: {
+        observed_at_utc: NOW,
+        report: { state: { stopped: 'roto' } },
+        report_id: uuid(999),
+        run_id: uuid(998),
+        status: 'failed',
+        step: 'publication',
+      },
+    });
+    const children = datasetsChildren({});
+    const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(stepLine(lines, 'publication')).toMatchObject({
+      report: { reason: 'publication_state_invalid' },
+      status: 'failed',
+    });
+    expect(children.runs.some((item) => item.child === 'publish')).toBe(false);
+  });
+
+  it('solo empieza si la ejecución lleva menos de 150 s', async () => {
+    let calls = 0;
+    const start = Date.parse(NOW);
+    // La primera hora es la del inicio de la ejecución; después, 150 s más tarde.
+    const now = () => new Date(calls++ === 0 ? start : start + 150_000).toISOString();
+    const children = datasetsChildren({});
+    const { lines } = await run(datasetsDatabase(), children, {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+      now,
+    });
+    expect(stepLine(lines, 'publication')).toMatchObject({
+      report: { deferred: true },
+      status: 'completed',
+    });
+    expect(stepLine(lines, 'dataset_verification')).toMatchObject({ report: { deferred: true } });
+    expect(children.runs.some((item) => item.child === 'publish' || item.child === 'replay')).toBe(
+      false,
+    );
+    let early = 0;
+    const justInTime = () => new Date(early++ === 0 ? start : start + 149_999).toISOString();
+    const second = datasetsChildren({});
+    await run(datasetsDatabase(), second, {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+      now: justInTime,
+    });
+    expect(second.runs.some((item) => item.child === 'publish')).toBe(true);
+  });
+
+  it('la línea del proceso pasa al informe solo con sus campos conocidos', async () => {
+    const line = JSON.parse(publishedLine(1, 0, 71)) as Record<string, unknown>;
+    const db = datasetsDatabase();
+    const children = datasetsChildren({
+      publish: () => ({ exitCode: 0, stdout: JSON.stringify({ ...line, quote: '1234.56' }) }),
+    });
+    const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(JSON.stringify(stepLine(lines, 'publication'))).not.toContain('1234.56');
+  });
+});
+
+describe('el paso 7, dataset_verification (ADR-0020 §8)', () => {
+  const pending = [
+    { dataset_id: DATASET, publication_id: PUBLICATION },
+    { dataset_id: DATASET_2, publication_id: PUBLICATION_2 },
+  ];
+
+  it('verifica la publicación más antigua en los dos modos, con buoh_salud y el plazo del paso, y guarda cada resultado como passed', async () => {
+    const db = datasetsDatabase({ publications: pending });
+    const children = datasetsChildren({
+      replay: (args) => ({
+        exitCode: 0,
+        stdout: replayLine(args.includes('--verify-only') ? 'verify-only' : 'recompute'),
+      }),
+    });
+    const { alerts, lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    const replays = children.runs.filter((item) => item.child === 'replay');
+    expect(replays.map((item) => item.args)).toEqual([
+      ['--dataset', DATASET, '--verify-only'],
+      ['--dataset', DATASET],
+    ]);
+    expect(
+      replays.every(
+        (item) => canonicalJson(item.env) === canonicalJson(replayEnvironment(DATASETS_CONFIG)),
+      ),
+    ).toBe(true);
+    expect(
+      replays.every((item) => (item.timeoutMs ?? 0) > 0 && (item.timeoutMs ?? 0) <= 60_000),
+    ).toBe(true);
+    expect(
+      db.verifications.map((row) => [row.mode, row.status, row.exit_code, row.error_code]),
+    ).toEqual([
+      ['verify-only', 'passed', 0, null],
+      ['recompute', 'passed', 0, null],
+    ]);
+    const [first] = db.verifications;
+    expect(first).toMatchObject({
+      dataset_id: DATASET,
+      publication_id: PUBLICATION,
+      verified_at_utc: NOW,
+    });
+    expect(first?.report).toMatchObject({ max_rss_bytes: 170 * 1048576, status: 'verified' });
+    // La ejecución de la verificación es la de buoh-operaciones.
+    const runLine = lines.at(-1);
+    expect(first?.run_id).toBe(runLine?.['run_id']);
+    expect(alerts).toEqual([]);
+    expect(stepLine(lines, 'dataset_verification')).toMatchObject({
+      report: { dataset_id: DATASET, publication_id: PUBLICATION, state: { attempts: null } },
+      status: 'completed',
+    });
+    // La siguiente pasa a la publicación siguiente.
+    await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(
+      children.runs
+        .filter((item) => item.child === 'replay')
+        .at(-1)
+        ?.args.slice(0, 2),
+    ).toEqual(['--dataset', DATASET_2]);
+  });
+
+  it('un fallo de integridad o de recomputación queda como failed, con su código, sin el mensaje, y su alerta', async () => {
+    const db = datasetsDatabase({ publications: pending.slice(0, 1) });
+    const children = datasetsChildren({
+      replay: (args) =>
+        args.includes('--verify-only')
+          ? { exitCode: 1, stdout: replayFailedLine('OBJECT_INTEGRITY') }
+          : { exitCode: 1, stdout: replayFailedLine('RECOMPUTATION_MISMATCH') },
+    });
+    const { alerts, lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(
+      db.verifications.map((row) => [row.mode, row.status, row.exit_code, row.error_code]),
+    ).toEqual([
+      ['verify-only', 'failed', 1, 'OBJECT_INTEGRITY'],
+      ['recompute', 'failed', 1, 'RECOMPUTATION_MISMATCH'],
+    ]);
+    expect(JSON.stringify(db.verifications)).not.toMatch(/texto del replay|normalized_ticks/u);
+    expect(alerts).toContainEqual({
+      dataset_id: DATASET,
+      error_code: 'OBJECT_INTEGRITY',
+      event: 'dataset_verification_failed',
+      mode: 'verify-only',
+    });
+    // Es un resultado: el paso no falla.
+    expect(stepLine(lines, 'dataset_verification')?.['status']).toBe('completed');
+  });
+
+  it('un almacén que no responde no guarda nada ni cuenta, y el paso falla', async () => {
+    const db = datasetsDatabase({ publications: pending.slice(0, 1) });
+    const children = datasetsChildren({
+      replay: () => ({ exitCode: 1, stdout: replayFailedLine('STORAGE_UNAVAILABLE') }),
+    });
+    const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(db.verifications).toEqual([]);
+    expect(children.runs.filter((item) => item.child === 'replay')).toHaveLength(1);
+    expect(stepLine(lines, 'dataset_verification')).toMatchObject({
+      report: { reason: 'storage_unavailable', state: { attempts: null } },
+      status: 'failed',
+    });
+  });
+
+  it.each([
+    ['UNEXPECTED', { exitCode: 1, stdout: replayFailedLine('UNEXPECTED') }, 1],
+    ['CHILD_TIMEOUT', { exitCode: null, stdout: '', timedOut: true }, null],
+    ['CHILD_KILLED', { exitCode: null, stdout: '' }, null],
+    ['REPLAY_OUTPUT_INVALID', { exitCode: 0, stdout: 'no es JSON' }, null],
+    ['REPLAY_CONFIG_INVALID', { exitCode: 2, stdout: '{}' }, 2],
+  ] as const)(
+    'tres ejecuciones seguidas sin un resultado concluyente (%s) guardan incomplete, y sigue con el modo siguiente',
+    async (code, answer, exit) => {
+      const db = datasetsDatabase({ publications: pending.slice(0, 1) });
+      const children = datasetsChildren({
+        replay: (args) =>
+          args.includes('--verify-only')
+            ? answer
+            : { exitCode: 0, stdout: replayLine('recompute') },
+      });
+      for (const expected of [1, 2]) {
+        const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+        expect(stepLine(lines, 'dataset_verification')).toMatchObject({
+          report: {
+            state: {
+              attempts: { count: expected, mode: 'verify-only', publication_id: PUBLICATION },
+            },
+          },
+          status: 'failed',
+        });
+        expect(db.verifications).toEqual([]);
+      }
+      const { alerts, lines } = await run(db, children, {
+        config: DATASETS_CONFIG,
+        nextId: growing,
+      });
+      expect(
+        db.verifications.map((row) => [row.mode, row.status, row.exit_code, row.error_code]),
+      ).toEqual([
+        ['verify-only', 'incomplete', exit, code],
+        ['recompute', 'passed', 0, null],
+      ]);
+      expect(alerts).toContainEqual({
+        dataset_id: DATASET,
+        error_code: code,
+        event: 'dataset_verification_failed',
+        mode: 'verify-only',
+      });
+      expect(stepLine(lines, 'dataset_verification')?.['report']).toMatchObject({
+        state: { attempts: null },
+      });
+    },
+  );
+
+  it('una línea de otro dataset, de otra publicación o de otro modo no cuenta como passed', async () => {
+    for (const line of [
+      replayLine('verify-only', PUBLICATION, DATASET_2),
+      replayLine('verify-only', PUBLICATION_2),
+      replayLine('recompute'),
+    ]) {
+      const db = datasetsDatabase({ publications: pending.slice(0, 1) });
+      const children = datasetsChildren({ replay: () => ({ exitCode: 0, stdout: line }) });
+      const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+      expect(db.verifications).toEqual([]);
+      expect(stepLine(lines, 'dataset_verification')?.['report']).toMatchObject({
+        state: { attempts: { count: 1, mode: 'verify-only' } },
+      });
+    }
+  });
+
+  it('solo corre los modos que faltan, y los dos dentro de los 60 s del paso', async () => {
+    const db = datasetsDatabase({ publications: pending.slice(0, 1) });
+    db.verifications.push({
+      dataset_id: DATASET,
+      error_code: null,
+      exit_code: 0,
+      mode: 'verify-only',
+      publication_id: PUBLICATION,
+      report: {},
+      run_id: uuid(990),
+      status: 'passed',
+      verification_id: uuid(991),
+      verified_at_utc: NOW,
+    });
+    const children = datasetsChildren({
+      replay: () => ({ exitCode: 0, stdout: replayLine('recompute') }),
+    });
+    await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(
+      children.runs.filter((item) => item.child === 'replay').map((item) => item.args),
+    ).toEqual([['--dataset', DATASET]]);
+
+    // Con la primera verificación tardando 59 s, a la segunda le queda 1 s; con 60 s, no corre.
+    for (const [spent, expected] of [
+      [59_000, 1_000],
+      [60_000, null],
+    ] as const) {
+      let clock = Date.parse(NOW);
+      const db2 = datasetsDatabase({ publications: pending.slice(0, 1) });
+      const timed = datasetsChildren({
+        replay: (args) => {
+          if (args.includes('--verify-only')) {
+            clock += spent;
+            return { exitCode: 0, stdout: replayLine('verify-only') };
+          }
+          return { exitCode: 0, stdout: replayLine('recompute') };
+        },
+      });
+      const { lines } = await run(db2, timed, {
+        config: DATASETS_CONFIG,
+        nextId: growing,
+        now: () => new Date(clock).toISOString(),
+      });
+      const second = timed.runs.filter((item) => item.child === 'replay')[1];
+      expect(second?.timeoutMs ?? null).toBe(expected);
+      if (expected === null) {
+        expect(stepLine(lines, 'dataset_verification')).toMatchObject({
+          report: { reason: 'deadline_exceeded' },
+          status: 'failed',
+        });
+      }
+    }
+  });
+
+  it('sin nada que verificar no guarda nada, y un PostgreSQL que no responde es un fallo', async () => {
+    const db = datasetsDatabase();
+    const { lines } = await run(db, datasetsChildren({}), {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+    });
+    expect(stepLine(lines, 'dataset_verification')).toMatchObject({ status: 'completed' });
+    expect(db.reports.some((item) => item.row.step === 'dataset_verification')).toBe(false);
+    const down = datasetsDatabase({ fail: { nextPublicationToVerify: coded('ECONNREFUSED') } });
+    const failed = await run(down, datasetsChildren({}), {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+    });
+    expect(stepLine(failed.lines, 'dataset_verification')).toMatchObject({
+      report: { reason: 'ECONNREFUSED' },
+      status: 'failed',
+    });
+  });
+
+  it('si no puede guardar un resultado, el paso falla con su motivo', async () => {
+    const db = datasetsDatabase({
+      fail: { appendDatasetVerification: coded('23514') },
+      publications: pending.slice(0, 1),
+    });
+    const children = datasetsChildren({
+      replay: () => ({ exitCode: 0, stdout: replayLine('verify-only') }),
+    });
+    const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(stepLine(lines, 'dataset_verification')).toMatchObject({
+      report: { reason: '23514' },
+      status: 'failed',
+    });
+    expect(children.runs.filter((item) => item.child === 'replay')).toHaveLength(1);
+  });
+});
+
+describe('los pasos 6 y 7: casos que deciden (ADR-0020 §8)', () => {
+  const stateReport = (logNumber: number, id: number, step: string, state: unknown) => ({
+    log: logNumber,
+    row: {
+      observed_at_utc: NOW,
+      report: { state } as Record<string, JsonValue>,
+      report_id: uuid(id),
+      run_id: uuid(id + 1),
+      status: 'failed' as const,
+      step,
+    },
+  });
+  const stop = (logNumber: number) => ({
+    code_version: COMMIT_A,
+    first_segment: 0,
+    log: logNumber,
+    reason: 'publication_conflict',
+  });
+
+  it('el estado es el del informe más reciente de cualquier log, no el del primero que lo tiene', async () => {
+    const db = datasetsDatabase();
+    db.reports.push(stateReport(2, 500, 'publication', { attempts: null, stopped: [stop(1)] }));
+    db.reports.push(stateReport(3, 501, 'publication', { attempts: null, stopped: [] }));
+    const children = datasetsChildren({});
+    await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(children.runs.find((item) => item.child === 'publish')?.args).toEqual([]);
+  });
+
+  it('no lee los informes de un log que no se puede leer', async () => {
+    const db = datasetsDatabase();
+    db.database.listLogs = () =>
+      Promise.resolve([
+        log(1, '2026-03-01T00:00:00.000Z'),
+        log(2, '2026-03-02T09:59:00.000Z'),
+        { ...log(3), readable: false },
+      ]);
+    const latest = db.database.latestReport.bind(db.database);
+    db.database.latestReport = (target, step) =>
+      target.number === 3 ? Promise.reject(coded('42501')) : latest(target, step);
+    const { lines } = await run(db, datasetsChildren({}), {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+    });
+    expect(stepLine(lines, 'publication')?.['status']).toBe('completed');
+  });
+
+  it('cada fallo sin resultado lleva su motivo', async () => {
+    for (const [answer, reason] of [
+      [{ exitCode: null, stderr: attempt(1, 1), stdout: '', timedOut: true }, 'child_timeout'],
+      [{ exitCode: null, stderr: attempt(1, 1), stdout: '' }, 'child_killed'],
+      [{ exitCode: 3, stderr: attempt(1, 1), stdout: '' }, 'publish_output_invalid'],
+      // Una línea de publicación con otra salida, o una de fallo con salida 0, no valen.
+      [
+        { exitCode: 1, stderr: attempt(1, 1), stdout: publishedLine(1, 1, 2) },
+        'publish_output_invalid',
+      ],
+      [
+        { exitCode: 0, stderr: attempt(1, 1), stdout: failedLine('publication_conflict', 1, 1) },
+        'publish_output_invalid',
+      ],
+    ] as const) {
+      const db = datasetsDatabase();
+      const { lines } = await run(db, datasetsChildren({ publish: () => answer }), {
+        config: DATASETS_CONFIG,
+        nextId: growing,
+      });
+      expect(stepLine(lines, 'publication')?.['report'], reason).toMatchObject({
+        reason,
+        state: { attempts: { count: 1, first_segment: 1, log: 1 }, stopped: [] },
+      });
+    }
+  });
+
+  it('un fallo sin primer segmento toma el dataset del aviso; un motivo que detiene sin dataset no detiene nada', async () => {
+    const db = datasetsDatabase();
+    const one = await run(
+      db,
+      datasetsChildren({
+        publish: () => ({
+          exitCode: 1,
+          stderr: attempt(1, 144),
+          stdout: failedLine('unexpected', 1),
+        }),
+      }),
+      { config: DATASETS_CONFIG, nextId: growing },
+    );
+    expect(stepLine(one.lines, 'publication')?.['report']).toMatchObject({
+      state: { attempts: { count: 1, first_segment: 144, log: 1 } },
+    });
+    const other = datasetsDatabase();
+    const two = await run(
+      other,
+      datasetsChildren({
+        publish: () => ({ exitCode: 1, stdout: failedLine('publication_conflict', null) }),
+      }),
+      { config: DATASETS_CONFIG, nextId: growing },
+    );
+    expect(stepLine(two.lines, 'publication')).toMatchObject({
+      report: { reason: 'publication_conflict', state: { attempts: null, stopped: [] } },
+      status: 'failed',
+    });
+  });
+
+  it('la cuenta de un log que venció se olvida, y nada pendiente la pone a cero', async () => {
+    const db = datasetsDatabase();
+    const timeout = { exitCode: null, stderr: attempt(1, 144), stdout: '', timedOut: true };
+    await run(db, datasetsChildren({ publish: () => timeout }), {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+    });
+    // 30 días después de la última escritura del log 1: otro intento del mismo dataset empieza en 1.
+    const later = await run(db, datasetsChildren({ publish: () => timeout }), {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+      now: () => '2026-03-31T00:00:00.000Z',
+    });
+    expect(stepLine(later.lines, 'publication')?.['report']).toMatchObject({
+      state: { attempts: { count: 1, first_segment: 144, log: 1 } },
+    });
+    const fresh = datasetsDatabase();
+    await run(fresh, datasetsChildren({ publish: () => timeout }), {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+    });
+    const quiet = await run(fresh, datasetsChildren({}), {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+    });
+    expect(stepLine(quiet.lines, 'publication')?.['report']).toMatchObject({
+      result: { status: 'nothing_due' },
+      state: { attempts: null },
+    });
+    // El estado cambió: se guarda aunque no publicó ni falló.
+    expect(fresh.reports.filter((item) => item.row.step === 'publication')).toHaveLength(2);
+  });
+
+  it('la cuenta es por log y primer segmento: el mismo segmento de otro log empieza en 1', async () => {
+    const db = datasetsDatabase();
+    const answers = [attempt(1, 0), attempt(2, 0)];
+    const children = datasetsChildren({
+      publish: () => ({
+        exitCode: null,
+        stderr: answers.shift() ?? '',
+        stdout: '',
+        timedOut: true,
+      }),
+    });
+    await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(stepLine(lines, 'publication')?.['report']).toMatchObject({
+      state: { attempts: { count: 1, first_segment: 0, log: 2 } },
+    });
+  });
+
+  it('la cuenta de la verificación es por publicación y por modo', async () => {
+    for (const previous of [
+      { count: 2, mode: 'verify-only', publication_id: PUBLICATION },
+      { count: 2, mode: 'recompute', publication_id: PUBLICATION_2 },
+    ]) {
+      const db = datasetsDatabase({
+        publications: [{ dataset_id: DATASET_2, publication_id: PUBLICATION_2 }],
+      });
+      db.reports.push(stateReport(2, 600, 'dataset_verification', { attempts: previous }));
+      const children = datasetsChildren({
+        replay: () => ({ exitCode: null, stdout: '', timedOut: true }),
+      });
+      const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+      expect(db.verifications).toEqual([]);
+      expect(stepLine(lines, 'dataset_verification')?.['report']).toMatchObject({
+        state: { attempts: { count: 1, mode: 'verify-only', publication_id: PUBLICATION_2 } },
+      });
+    }
+  });
+
+  it('el paso 1 guarda su informe cuando solo migró buoh_datasets', async () => {
+    const db = datasetsDatabase();
+    const children = fakeChildren((child) =>
+      child === 'datasets_migrate'
+        ? {
+            stdout: JSON.stringify({
+              applied: ['0001_datasets.sql'],
+              current: ['0001_datasets.sql'],
+              status: 'migrated',
+            }),
+          }
+        : child === 'publish'
+          ? { exitCode: 0, stdout: nothingDueLine() }
+          : {},
+    );
+    await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(db.reports.filter((item) => item.row.step === 'roles_and_logs')).toHaveLength(1);
+  });
+});
