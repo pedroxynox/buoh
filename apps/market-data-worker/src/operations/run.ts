@@ -27,6 +27,7 @@ import {
   migrateEnvironment,
   type OperationsConfig,
 } from './config.js';
+import { derivLogProfileRow, LOG_PROFILE_SYMBOL } from '../deriv/log-profile.js';
 import { datasetVerificationStep, publicationStep } from './datasets-steps.js';
 import type { OwnerDatabase, OperationsReportRow } from './owner-database.js';
 import {
@@ -277,7 +278,7 @@ async function prepareDatasets(
  * Con la de `buoh_publicacion`, prepara `buoh_datasets` (`prepareDatasets`, ADR-0020 §5) y le
  * pone su contraseña; el informe lleva entonces `datasets_migrated`. Sin ella, no los toca.
  */
-async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
+async function rolesAndLogs(input: OperationsInput, runId: string): Promise<StepOutcome> {
   const { database } = input;
   const { apiPassword, apiReaderPassword, publicationPassword } = input.config;
   const failures: Report[] = [];
@@ -286,6 +287,7 @@ async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
   const datasetsMigrated: string[] = [];
   const passwordsSet: string[] = [];
   const passwordsUnchecked: string[] = [];
+  const profilesAssigned: number[] = [];
   let prepared: number | null = null;
   const outcome = (): StepOutcome => ({
     log: null,
@@ -297,6 +299,7 @@ async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
       passwords_set: passwordsSet,
       passwords_unchecked: passwordsUnchecked,
       prepared,
+      profiles_assigned: profilesAssigned,
     },
     status: failures.length === 0 ? 'completed' : 'failed',
     store:
@@ -305,6 +308,7 @@ async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
       apiMigrated.length > 0 ||
       datasetsMigrated.length > 0 ||
       prepared !== null ||
+      profilesAssigned.length > 0 ||
       passwordsSet.length > 0,
   });
   try {
@@ -313,7 +317,11 @@ async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
     failures.push({ action: 'ensure_roles', reason: failureReason(error) });
     return outcome();
   }
-  /** Migra el log y, si migró, le da los privilegios. */
+  const profile = derivLogProfileRow(LOG_PROFILE_SYMBOL);
+  /**
+   * Migra el log, le da su perfil si todavía no lo usa nadie (ADR-0020 §4) y, si las dos cosas
+   * salieron, le da los privilegios: un log sin su perfil no llega a `buoh_ingesta`.
+   */
   const prepareSchema = async (log: LogLocation): Promise<boolean> => {
     const result = await migrateLog(input, log);
     if ('reason' in result) {
@@ -322,6 +330,15 @@ async function rolesAndLogs(input: OperationsInput): Promise<StepOutcome> {
     }
     if (result.applied.length > 0) {
       migrated.push({ applied: result.applied, log: log.number });
+    }
+    try {
+      const row = { ...profile, assigned_at_utc: input.now(), run_id: runId };
+      if (await database.assignLogProfile(log, row)) {
+        profilesAssigned.push(log.number);
+      }
+    } catch (error) {
+      failures.push({ action: 'profile', log: log.number, reason: failureReason(error) });
+      return false;
     }
     try {
       await database.grantLogPrivileges(log);
@@ -847,7 +864,7 @@ export async function runOperations(input: OperationsInput): Promise<OperationsR
     retention: () => retention(input),
     dataset_verification: () => datasetVerificationStep(input, startedAt, runId),
     publication: () => publicationStep(input, startedAt),
-    roles_and_logs: () => rolesAndLogs(input),
+    roles_and_logs: () => rolesAndLogs(input, runId),
     space: () => space(input),
     verification: () => verification(input, startedAt),
   };

@@ -129,6 +129,13 @@ export {
   type SchemaEntryName,
   type SchemaKind,
 } from './deriv/schema-release.js';
+// El perfil de cada log, desde su fila de `log_quality_profile` (ADR-0020 §4).
+export {
+  createDerivLogProfile,
+  LogProfileUnknownError,
+  type LogQualityProfileRow,
+} from './deriv/log-profile.js';
+export { readLogQualityProfile } from './postgres/log-profile.js';
 export {
   readStoredSourceSchema,
   SOURCE_SCHEMA_MAX_BYTES,

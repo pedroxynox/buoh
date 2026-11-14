@@ -4,6 +4,7 @@ import { DERIV_SOURCE } from '../deriv/profile.js';
 import { openWsSocket } from '../deriv/socket.js';
 import { createUuidV7Generator } from '../ids.js';
 import { ingestCommand } from '../ingest.js';
+import { readLogQualityProfile } from '../postgres/log-profile.js';
 import { pendingMigrations } from '../postgres/migrate.js';
 import { openLockedSourceLog, PostgresSessionLockProvider } from '../postgres/session-lock.js';
 import { openStartupReads, openStores } from '../runtime.js';
@@ -37,7 +38,11 @@ const { exitCode, line } = await ingestCommand(process.argv.slice(2), process.en
   openStartupReads: (config) => openStartupReads(config, { now, source: DERIV_SOURCE }),
   openStores: (config) => {
     const stores = openStores(config);
-    return { ...stores, pendingMigrations: () => pendingMigrations(stores.pool) };
+    return {
+      ...stores,
+      logProfile: () => readLogQualityProfile(stores.pool),
+      pendingMigrations: () => pendingMigrations(stores.pool),
+    };
   },
   // El azar de la espera entre intentos (ADR-0015 §3), de `node:crypto`.
   random: () => randomInt(RANDOM_RANGE) / RANDOM_RANGE,

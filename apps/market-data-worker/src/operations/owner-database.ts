@@ -25,6 +25,7 @@ import {
   type LogLocation,
 } from '../successive-logs.js';
 import { DATASETS_SCHEMA } from '../datasets/location.js';
+import type { LogQualityProfileRow } from '../deriv/log-profile.js';
 import type { ReplayMode } from '../replay.js';
 import type { OperationsConfig } from './config.js';
 import { VERIFICATION_SLOTS, type DueSegment } from './verification.js';
@@ -79,6 +80,12 @@ export interface OperationsReportRow {
   readonly step: string;
 }
 
+/** La fila de `log_quality_profile` que inserta `buoh-operaciones`, con su ejecución y su hora. */
+export interface LogProfileAssignment extends LogQualityProfileRow {
+  readonly assigned_at_utc: string;
+  readonly run_id: string;
+}
+
 /** Un informe guardado de un paso, el más reciente: su ID (UUIDv7), cómo terminó y su contenido. */
 export interface StoredReport {
   readonly report: JsonValue;
@@ -125,6 +132,13 @@ export interface OwnerDatabase {
   grantLogPrivileges(log: LogLocation): Promise<void>;
   /** Crea el esquema del log como `buoh_dueno`, si no existe. */
   createLogSchema(log: LogLocation): Promise<void>;
+  /**
+   * Da su perfil al log (ADR-0020 §4): como `buoh_dueno`, inserta la fila de `log_quality_profile`
+   * solo si el log no tiene ninguna, no tiene escrituras (ni source events ni latidos) y
+   * `buoh_ingesta` todavía no tiene el uso de su esquema, en una sola sentencia. `true` si la
+   * insertó. Necesita la migración 0007 del log.
+   */
+  assignLogProfile(log: LogLocation, row: LogProfileAssignment): Promise<boolean>;
   /** Crea el rol `buoh_api` o le vuelve a fijar sus atributos (`ensureApiRole`, ADR-0019 §7). */
   ensureApiRole(): Promise<void>;
   /** Da a `buoh_api` sus privilegios en el esquema de la API (`grantApiPrivileges`). */
@@ -300,6 +314,28 @@ export function openOwnerDatabase(
       return 'accepted';
     },
     close: () => pool.end(),
+    assignLogProfile: (log, row) =>
+      asOwner(async (client) => {
+        const s = pg.escapeIdentifier(log.schema);
+        const { rowCount } = await client.query(
+          `INSERT INTO ${s}.log_quality_profile
+             (profile_id, quality_profile_sha256, run_id, assigned_at_utc)
+           SELECT $1, $2, $3, $4
+            WHERE NOT has_schema_privilege($5, $6, 'USAGE')
+              AND NOT EXISTS (SELECT 1 FROM ${s}.source_event_index)
+              AND NOT EXISTS (SELECT 1 FROM ${s}.ingestion_heartbeats)
+           ON CONFLICT (profile_slot) DO NOTHING`,
+          [
+            row.profile_id,
+            row.quality_profile_sha256,
+            row.run_id,
+            row.assigned_at_utc,
+            POSTGRES_ROLES.ingest,
+            log.schema,
+          ],
+        );
+        return rowCount === 1;
+      }),
     createLogSchema: (log) =>
       asOwner(async (client) => {
         await client.query(`CREATE SCHEMA IF NOT EXISTS ${pg.escapeIdentifier(log.schema)}`);

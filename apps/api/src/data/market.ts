@@ -1,6 +1,6 @@
 import { DATA_CHART_MAX_HOURS, type DataCatalog, type DataChart } from '@buoh/contracts';
 import {
-  createDerivMeasurementProfileFromSourceSchema,
+  createDerivLogProfile,
   DERIV_SCHEMA_RELEASE,
   DERIV_SOURCE,
   failureReason,
@@ -10,6 +10,7 @@ import {
   PostgresCatalogStore,
   PostgresSourceLogStore,
   readChartWindow,
+  readLogQualityProfile,
   readStoredSourceSchema,
   S3ObjectStore,
   SourceEventLog,
@@ -41,8 +42,8 @@ export interface MarketDataReader {
   catalog(): Promise<DataCatalog>;
   /**
    * El gráfico de R_100 de las últimas `hours` horas del log activo (`DataChart`), hasta la hora de
-   * la lectura. Rechaza como `catalog`, y además con `LogIntegrityError`, `LogNotDerivableError` o
-   * `ChartCheckpointError` del log, y con `SourceSchemaMissingError` si el log tiene eventos y no su
+   * la lectura. Rechaza como `catalog`, y además con `LogIntegrityError`, `LogNotDerivableError`,
+   * `LogProfileUnknownError` (ADR-0020 §4) o `ChartCheckpointError` del log, y con `SourceSchemaMissingError` si el log tiene eventos y no su
    * esquema de fuente. Lee un gráfico a la vez: una petición que llega con otro en curso lo espera.
    */
   chart(hours: number): Promise<DataChart>;
@@ -279,16 +280,18 @@ async function unwrapped<T>(read: () => Promise<T>): Promise<T> {
 /** Para `SourceEventLog.open`: estas lecturas nunca cierran un segmento, así que no comprimen. */
 const UNUSED_WRITER_VERSION = 'api-read-only';
 
-type MeasurementProfile = ReturnType<typeof createDerivMeasurementProfileFromSourceSchema>;
+type LogProfile = ReturnType<typeof createDerivLogProfile>;
 
 export function createMarketDataReader(deps: MarketDataReaderDeps): MarketDataReader {
   const release = deps.schemaRelease ?? DERIV_SCHEMA_RELEASE;
   const objectsCache = new ObjectBytesCache(OBJECT_CACHE_BYTES, OBJECT_CACHE_MAX_OBJECT_BYTES);
   const segments = new LruCache<readonly ChartItem[]>(CHART_CACHE_SEGMENTS);
-  /** El perfil de medición sale del esquema fijado en la release: es el mismo en todos los logs. */
-  let profile: MeasurementProfile | null = null;
-  /** El último log en el que se comprobó que `ingest` guardó ese esquema. */
-  let verifiedLog: number | null = null;
+  /**
+   * El perfil del último log en el que se armó (ADR-0020 §4): sale de su fila de
+   * `log_quality_profile` y del esquema fijado en la release, que `ingest` guardó en él. Se vuelve a
+   * armar en cada log nuevo, que puede tener otro perfil.
+   */
+  let profiled: { readonly log: number; readonly profile: LogProfile } | null = null;
   /** La cola de los gráficos: uno a la vez. */
   let queue: Promise<unknown> = Promise.resolve();
 
@@ -303,16 +306,15 @@ export function createMarketDataReader(deps: MarketDataReaderDeps): MarketDataRe
   });
 
   /**
-   * El perfil de medición, si `ingest` guardó en el log el esquema de fuente de la release (ADR-0015
-   * §7), o `null` si no lo guardó. Se comprueba en cada log nuevo: uno escrito con otra release no
-   * tiene ese esquema.
+   * El perfil del log (ADR-0020 §4), si `ingest` guardó en él el esquema de fuente de la release
+   * (ADR-0015 §7), o `null` si no lo guardó: el de medición sin fila de `log_quality_profile`, y el
+   * de publicación con la suya (`createDerivLogProfile`). Se arma en cada log nuevo: uno escrito con
+   * otra release no tiene ese esquema, y uno preparado después del PR 5 tiene su fila. Un perfil que
+   * el código no conoce rechaza con `LogProfileUnknownError`.
    */
-  const profileOf = async (
-    log: LogLocation,
-    objects: ObjectStore,
-  ): Promise<MeasurementProfile | null> => {
-    if (profile !== null && verifiedLog === log.number) {
-      return profile;
+  const profileOf = async (log: LogLocation, objects: ObjectStore): Promise<LogProfile | null> => {
+    if (profiled?.log === log.number) {
+      return profiled.profile;
     }
     const stored = await readStoredSourceSchema(objects, release);
     switch (stored.status) {
@@ -320,14 +322,16 @@ export function createMarketDataReader(deps: MarketDataReaderDeps): MarketDataRe
         return null;
       case 'mismatch':
         throw new SourceSchemaMismatchError();
-      case 'found':
-        profile ??= createDerivMeasurementProfileFromSourceSchema({
+      case 'found': {
+        const profile = createDerivLogProfile({
+          row: await readLogQualityProfile(deps.pool, log.schema),
           source_schema_bytes: stored.bytes,
           source_schema_release: release.release,
           symbol: CHART_SYMBOL,
         });
-        verifiedLog = log.number;
+        profiled = { log: log.number, profile };
         return profile;
+      }
     }
   };
 
@@ -358,8 +362,8 @@ export function createMarketDataReader(deps: MarketDataReaderDeps): MarketDataRe
     if (started === null) {
       return { ...base, log: log.number, log_started_at_utc: null, ticks: empty, gaps: [] };
     }
-    const measurement = await profileOf(log, objects);
-    if (measurement === null) {
+    const profile = await profileOf(log, objects);
+    if (profile === null) {
       throw new SourceSchemaMissingError();
     }
     const window = await unwrapped(() =>
@@ -370,7 +374,7 @@ export function createMarketDataReader(deps: MarketDataReaderDeps): MarketDataRe
         lookup: new LiveCheckpointLookup({
           // Un punto de control rechazado lo avisa `data:health` (`checkpoint_rejected`).
           alert: () => undefined,
-          profile: measurement,
+          profile,
           symbol: CHART_SYMBOL,
         }),
         segments: store,

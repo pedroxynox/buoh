@@ -47,6 +47,8 @@ import {
   type RunChild,
   type WorkerConfig,
 } from '../src/index.js';
+import { derivLogProfileRow } from '../src/deriv/log-profile.js';
+import { readLogQualityProfile } from '../src/postgres/log-profile.js';
 import { START, uuid } from '../test/support/connection-harness.js';
 import { contentKey } from '../src/object-keys.js';
 import { waitForNoSessions } from '../test/support/databases.js';
@@ -307,7 +309,7 @@ afterAll(async () => {
 });
 
 describe('buoh-operaciones (ADR-0018 §11)', () => {
-  it('la primera ejecución crea los roles y el log 1, con sus seis migraciones como buoh_dueno, sus privilegios y las contraseñas, y guarda en él la salud, la verificación y el espacio', async () => {
+  it('la primera ejecución crea los roles y el log 1, con sus siete migraciones como buoh_dueno, sus privilegios y las contraseñas, y guarda en él la salud, la verificación y el espacio', async () => {
     const run = await operations();
     expect(run.alerts).toEqual([]);
     // data:health leyó el log sin ninguna alerta: ni un almacén sin responder ni un rechazo.
@@ -343,7 +345,21 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     );
     expect(owners.rows).toEqual([{ owner: POSTGRES_ROLES.owner }]);
     const migrations = await ready(admin).query(`SELECT name FROM ${LOG_1}.buoh_schema_migrations`);
-    expect(migrations.rowCount).toBe(6);
+    expect(migrations.rowCount).toBe(7);
+    // El perfil del log nuevo (ADR-0020 §4): el de publicación, que dio esta ejecución.
+    expect(run.steps[0]?.['report']).toMatchObject({ profiles_assigned: [1] });
+    const profile = await ready(admin).query(
+      `SELECT profile_slot, profile_id, quality_profile_sha256, run_id::text, assigned_at_utc
+         FROM ${LOG_1}.log_quality_profile`,
+    );
+    expect(profile.rows).toEqual([
+      {
+        ...derivLogProfileRow('R_100'),
+        assigned_at_utc: START,
+        profile_slot: 1,
+        run_id: run.steps[0]?.['run_id'],
+      },
+    ]);
 
     const reports = await reportsOf(LOG_1);
     expect(reports.map((item) => [item.step, item.status])).toEqual([
@@ -379,6 +395,36 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     expect(await sqlStateAs(POSTGRES_ROLES.agent, passwords.agent, reports)).toBeNull();
   });
 
+  it('log_quality_profile (ADR-0020 §4): buoh_ingesta y buoh_lectura solo la leen (42501 al insertar), es append-only y admite una sola fila', async () => {
+    const table = `${LOG_1}.log_quality_profile`;
+    const insert = (slot: number) =>
+      `INSERT INTO ${table} (profile_slot, profile_id, quality_profile_sha256, run_id, assigned_at_utc)
+       VALUES (${String(slot)}, 'deriv_options-publication-v1-R_100', '${'a'.repeat(64)}',
+               '${uuid(9301)}', '${START}')`;
+    for (const [role, password] of [
+      [POSTGRES_ROLES.ingest, passwords.ingest],
+      [POSTGRES_ROLES.health, passwords.health],
+      [POSTGRES_ROLES.agent, passwords.agent],
+    ] as const) {
+      expect(await sqlStateAs(role, password, `SELECT count(*) FROM ${table}`), role).toBeNull();
+      expect(await sqlStateAs(role, password, insert(1)), role).toBe('42501');
+    }
+    const asOwner = (statement: string) =>
+      sqlStateAs(RENDER_USER, passwords.render, `SET ROLE ${POSTGRES_ROLES.owner}; ${statement}`);
+    // Una segunda fila: la clave constante la rechaza, y otra clave, su CHECK.
+    expect(await asOwner(insert(1))).toBe('23505');
+    expect(await asOwner(insert(2))).toBe('23514');
+    for (const statement of [
+      `UPDATE ${table} SET profile_id = 'otro'`,
+      `DELETE FROM ${table}`,
+      `TRUNCATE ${table}`,
+    ]) {
+      expect(await asOwner(statement), statement).toBe('23001');
+    }
+    const rows = await ready(admin).query(`SELECT profile_id FROM ${table}`);
+    expect(rows.rows).toEqual([{ profile_id: 'deriv_options-publication-v1-R_100' }]);
+  });
+
   it('operations_reports es append-only: UPDATE, DELETE y TRUNCATE fallan con 23001, también como buoh_dueno, su dueño', async () => {
     const before = await reportsOf(LOG_1);
     expect(before.length).toBeGreaterThan(0);
@@ -407,6 +453,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       passwords_set: [],
       passwords_unchecked: [],
       prepared: null,
+      profiles_assigned: [],
     });
     // El espacio ya se midió hoy: no vuelve a medir ni guarda su informe.
     expect(run.step('space')?.['report']).toMatchObject({ measured: false });
@@ -475,6 +522,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
         passwords_set: [],
         passwords_unchecked: [POSTGRES_ROLES.agent],
         prepared: null,
+        profiles_assigned: [],
       });
 
       // PostgreSQL rechaza una contraseña mala (28P01) antes de mirar el límite del rol.
@@ -531,6 +579,82 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       expect(await indexes(2)).toEqual([]);
     } finally {
       await database.close();
+    }
+  });
+
+  it('assignLogProfile solo da el perfil a un log sin fila, sin escrituras y sin el uso de buoh_ingesta; readLogQualityProfile la lee (ADR-0020 §4)', async () => {
+    // Esquemas que no son de un log, para que ninguna ejecución los vea, con las migraciones de un log.
+    const schemas = {
+      fresh: 'buoh_integration_ops_profile_fresh',
+      granted: 'buoh_integration_ops_profile_granted',
+      heartbeat: 'buoh_integration_ops_profile_heartbeat',
+      written: 'buoh_integration_ops_profile_written',
+    } as const;
+    const location = (schema: string) => ({ number: 999_999, prefix: 'logs/999999/', schema });
+    for (const schema of Object.values(schemas)) {
+      await ready(admin).query(`CREATE SCHEMA ${schema} AUTHORIZATION ${POSTGRES_ROLES.owner}`);
+      const pool = createPool({
+        ...local.postgres,
+        database: DATABASE,
+        password: passwords.render,
+        schema,
+        user: RENDER_USER,
+      });
+      try {
+        await migrate(pool, { ownerRole: POSTGRES_ROLES.owner });
+      } finally {
+        await pool.end();
+      }
+    }
+    await ready(admin).query(
+      `GRANT USAGE ON SCHEMA ${schemas.granted} TO ${POSTGRES_ROLES.ingest}`,
+    );
+    await ready(admin).query(
+      `INSERT INTO ${schemas.heartbeat}.ingestion_heartbeats
+         (heartbeat_id, source, run_id, observed_at_utc, pg_backend_pid, connection_state,
+          backlog_count, backlog_bytes)
+       VALUES ('${uuid(9311)}', 'synthetic', '${uuid(9312)}', '${START}', 4343, 'connecting', 0, 0)`,
+    );
+    await ready(admin).query(
+      // Su disparador busca los segmentos del log con el search_path: el del esquema.
+      `SET search_path TO ${schemas.written};
+       INSERT INTO ${schemas.written}.source_event_index
+         (source, segment_index, position, event_id, kind, event_time_utc, object_sha256, byte_length)
+       VALUES ('synthetic', 0, 0, '${uuid(9314)}', 'connection_opened', '${START}', '${'c'.repeat(64)}', 10);
+       RESET search_path`,
+    );
+    const config = loadOperationsConfig(operationsEnvironment());
+    const database = openOwnerDatabase(
+      { ...config, owner: plain(config.owner) },
+      { source: DERIV_SOURCE },
+    );
+    const row = { ...derivLogProfileRow('R_100'), assigned_at_utc: START, run_id: uuid(9313) };
+    try {
+      expect(await database.assignLogProfile(location(schemas.fresh), row)).toBe(true);
+      // Ya tiene su fila: la segunda vez no inserta nada, tampoco con otro perfil.
+      expect(
+        await database.assignLogProfile(location(schemas.fresh), {
+          ...row,
+          profile_id: 'otro',
+        }),
+      ).toBe(false);
+      expect(await database.assignLogProfile(location(schemas.granted), row)).toBe(false);
+      expect(await database.assignLogProfile(location(schemas.heartbeat), row)).toBe(false);
+      expect(await database.assignLogProfile(location(schemas.written), row)).toBe(false);
+      const reader = ready(admin);
+      expect(await readLogQualityProfile(reader, schemas.fresh)).toEqual(
+        derivLogProfileRow('R_100'),
+      );
+      expect(await readLogQualityProfile(reader, schemas.granted)).toBeNull();
+      expect(await readLogQualityProfile(reader, schemas.heartbeat)).toBeNull();
+      expect(await readLogQualityProfile(reader, schemas.written)).toBeNull();
+      // Un esquema sin la tabla, como un log sin la migración 0007: tampoco tiene perfil.
+      expect(await readLogQualityProfile(reader, 'public')).toBeNull();
+    } finally {
+      await database.close();
+      for (const schema of Object.values(schemas)) {
+        await ready(admin).query(`DROP SCHEMA ${schema} CASCADE`);
+      }
     }
   });
 

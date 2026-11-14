@@ -17,6 +17,7 @@ import {
   openStartupReads,
   openStores,
   pendingMigrations,
+  readLogQualityProfile,
   PostgresSessionLockProvider,
   S3ObjectStore,
   SourceLock,
@@ -254,7 +255,11 @@ describe('el corte de un log al siguiente (ADR-0018 §6)', () => {
         }),
       openStores: (config) => {
         const stores = openStores(local(config));
-        return { ...stores, pendingMigrations: () => pendingMigrations(stores.pool) };
+        return {
+          ...stores,
+          logProfile: () => readLogQualityProfile(stores.pool),
+          pendingMigrations: () => pendingMigrations(stores.pool),
+        };
       },
       random: () => 0,
       scheduler: clock.scheduler,

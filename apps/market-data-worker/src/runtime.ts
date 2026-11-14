@@ -5,6 +5,7 @@ import { stderrAlert, type OperationalAlert } from './operational/registry.js';
 import { PostgresCatalogStore } from './postgres/catalog-store.js';
 import { PostgresIngestionStatusStore } from './postgres/ingestion-status-store.js';
 import { PostgresMetadataStore, createPool } from './postgres/metadata-store.js';
+import { readLogQualityProfile } from './postgres/log-profile.js';
 import { pendingMigrations } from './postgres/migrate.js';
 import { PostgresOperationalStore } from './postgres/operational-store.js';
 import { PostgresRequestedResponseIncidentStore } from './postgres/requested-response-store.js';
@@ -107,6 +108,7 @@ export function openHealthStores(
     ingestionStatus: stores.ingestionStatus,
     lockHolder: (source) => sourceLockHolder(stores.pool, source),
     objects: stores.objects,
+    logProfile: () => readLogQualityProfile(stores.pool),
     operational: stores.operational,
     pendingMigrations: () => pendingMigrations(stores.pool),
     sourceLog: stores.sourceLog,
@@ -151,6 +153,7 @@ export function openStartupReads(
         : 'migrations_pending';
     },
     locateLog: () => findActiveLog(pool, { now: input.now, source: input.source }),
+    logProfile: (log) => readLogQualityProfile(pool, log.schema),
     pendingMigrations: (log) => pendingMigrations(pool, log.schema),
   };
 }

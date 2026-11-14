@@ -106,11 +106,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const { corpus, eventsOf, measurement, publication, randomStimuli, vectorProfile } = liveCorpus({
-  createPipelineProfile,
-  deriveMarketData,
-  ingestSyntheticStimuli,
-});
+const { corpus, eventsOf, measurement, publication, publicationV3, randomStimuli, vectorProfile } =
+  liveCorpus({
+    createPipelineProfile,
+    deriveMarketData,
+    ingestSyntheticStimuli,
+  });
 
 function compareStrings(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -300,20 +301,31 @@ describe('derivación en pliegue del estado vivo (ADR-0017)', () => {
     expectEquivalentAtEveryBoundary(eventsOf(stimuli, profile), profile);
   });
 
+  // ADR-0020 §12: el estado vivo de un log con el perfil de publicación, con las reglas 3.0.0. Solo
+  // los logs escritos para un perfil con umbrales: en los demás, la sesión pidió una historia que con
+  // umbrales no habría pedido, porque la separación ya decidía el hueco.
+  it.each(corpus.filter(([, , profile]) => profile === publication))(
+    '%s, con el perfil de publicación de las reglas 3.0.0: igual en cada límite',
+    (_name, stimuli) => {
+      expectEquivalentAtEveryBoundary(eventsOf(stimuli, publicationV3), publicationV3);
+    },
+  );
+
   it.each(VECTOR_SCENARIOS)('el vector %s: igual en cada límite', (_name, files) => {
     expectEquivalentAtEveryBoundary(vectorSegments(files).flat(), vectorProfile());
   });
 
   it(
-    '300 logs aleatorios del dominio de §3, con los dos perfiles: igual en cada límite',
+    '450 logs aleatorios del dominio de §3, con los tres perfiles: igual en cada límite',
     {
       timeout: 60_000,
     },
     () => {
-      // Semillas distintas por perfil, para que los 300 logs sean distintos.
+      // Semillas distintas por perfil, para que los 450 logs sean distintos.
       const profiles = [
         ['medición', measurement, 0],
         ['publicación', publication, 1000],
+        ['publicación con las reglas 3.0.0', publicationV3, 2000],
       ] as const;
       for (const [name, profile, first] of profiles) {
         for (let seed = first + 1; seed <= first + 150; seed += 1) {

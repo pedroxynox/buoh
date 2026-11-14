@@ -159,6 +159,7 @@ async function commandHarness(options: CommandOptions = {}) {
     ingestionStatus: status,
     lockHolder: () =>
       Promise.resolve(options.writerPid === undefined ? WRITER_PID : options.writerPid),
+    logProfile: () => Promise.resolve(null),
     objects,
     operational,
     pendingMigrations: () => Promise.resolve([]),

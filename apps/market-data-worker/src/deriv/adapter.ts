@@ -9,7 +9,12 @@ import {
 import type { SourceEventLog } from '../source-log/source-event-log.js';
 import { DerivConnection, type DerivConnectionResult, type DerivSessionEnd } from './connection.js';
 import type { CatalogStore, RequestedResponseIncidentStore, Scheduler } from './ports.js';
-import { createDerivMeasurementProfile, DERIV_PUBLIC_ENDPOINT } from './profile.js';
+import {
+  createDerivLogProfile,
+  LogProfileUnknownError,
+  type LogQualityProfileRow,
+} from './log-profile.js';
+import { DERIV_PUBLIC_ENDPOINT } from './profile.js';
 import { encodeRequest, type DerivRequest } from './requests.js';
 import {
   loadDerivSchemas,
@@ -66,6 +71,11 @@ export type DerivPreparationInput = Pick<
   'expected' | 'fetch' | 'nextId' | 'now' | 'registry' | 'scheduler' | 'schemaUrl' | 'symbol'
 > & {
   /**
+   * La fila de `log_quality_profile` del log en el que se captura, o `null` o sin ella si no tiene
+   * (ADR-0020 §4): con ella, el perfil de publicación del símbolo; sin ella, el de medición.
+   */
+  readonly logProfile?: LogQualityProfileRow | null;
+  /**
    * Último source event durable de la fuente, o `[]` si no existe: lo cita la incidencia de un
    * límite de esquema. La sesión de ingesta prepara los esquemas antes de tomar el bloqueo y abrir
    * el log, así que pasa `[]` (contratos de dominio, «Registro operativo de persistencia y
@@ -76,7 +86,7 @@ export type DerivPreparationInput = Pick<
 
 /**
  * Lo que la sesión prepara una vez (ADR-0015 §3): los esquemas de la release fijada, ya cargados y
- * con las seis peticiones comprobadas, su resumen y el perfil de medición del símbolo.
+ * con las seis peticiones comprobadas, su resumen y el perfil del log para el símbolo (ADR-0020 §4).
  */
 export interface DerivPreparation {
   readonly profile: PipelineProfile;
@@ -203,8 +213,10 @@ async function loadSchemas(input: DerivPreparationInput): Promise<SchemaLoadResu
 /**
  * La preparación de la sesión (ADR-0015 §3), una sola vez antes de sus intentos: carga los esquemas
  * de la release fijada (ver «Carga de los esquemas de Deriv» en el runbook), comprueba con ellos las
- * seis peticiones de la conexión y arma el perfil de medición del símbolo. Si algo falla, devuelve
- * el fin `failed`, y no hay que conectar.
+ * seis peticiones de la conexión y arma el perfil del log para el símbolo (`createDerivLogProfile`,
+ * ADR-0020 §4): el de medición sin fila de `log_quality_profile`, y el de publicación con la suya. Si
+ * algo falla, devuelve el fin `failed`, y no hay que conectar: un perfil que el código no conoce, con
+ * `log_not_derivable`.
  */
 export async function prepareDerivAdapter(
   input: DerivPreparationInput,
@@ -232,8 +244,26 @@ export async function prepareDerivAdapter(
       summary,
     };
   }
+  let profile: PipelineProfile;
+  try {
+    profile = createDerivLogProfile({
+      row: input.logProfile ?? null,
+      source_schema_bytes: schemas.schema('ticks', 'response').bytes,
+      source_schema_release: schemas.release,
+      symbol: input.symbol,
+    });
+  } catch (error) {
+    if (error instanceof LogProfileUnknownError) {
+      return {
+        end: { detail: error.name, reason: 'log_not_derivable', status: 'failed' },
+        status: 'failed',
+        summary,
+      };
+    }
+    throw error;
+  }
   return {
-    profile: createDerivMeasurementProfile({ schemas, symbol: input.symbol }),
+    profile,
     schemas,
     status: 'prepared',
     summary,

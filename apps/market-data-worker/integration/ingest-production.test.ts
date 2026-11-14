@@ -15,6 +15,7 @@ import {
   openStartupReads,
   openStores,
   pendingMigrations,
+  readLogQualityProfile,
   PostgresSessionLockProvider,
   S3ObjectStore,
   SourceLock,
@@ -207,7 +208,11 @@ describe('ingest en production (ADR-0018 §4)', () => {
       openStores: (config) => {
         opened.push(config);
         const stores = openStores(local(config));
-        return { ...stores, pendingMigrations: () => pendingMigrations(stores.pool) };
+        return {
+          ...stores,
+          logProfile: () => readLogQualityProfile(stores.pool),
+          pendingMigrations: () => pendingMigrations(stores.pool),
+        };
       },
       random: () => 0,
       scheduler: clock.scheduler,
@@ -261,6 +266,7 @@ describe('ingest en production (ADR-0018 §4)', () => {
         expect((await migrate(logPool)).applied).toEqual([
           '0005_punto_de_control_en_vivo.sql',
           '0006_informes_de_operaciones.sql',
+          '0007_perfil_del_log.sql',
         ]);
         await clock.advance(STARTUP_RETRY_MS);
         await eventually(() => waiting('source_lock_taken').length === 1);

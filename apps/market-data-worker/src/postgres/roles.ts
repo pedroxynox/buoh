@@ -95,6 +95,13 @@ export const INGEST_WRITE_TABLES = [
 ] as const;
 
 /**
+ * Las tablas de un log que `buoh_ingesta` solo lee: el perfil del log (`0007`, ADR-0020 §4), que
+ * inserta solo `buoh-operaciones`, como `buoh_dueno`. Ningún rol de ejecución puede dar perfil a un
+ * log.
+ */
+export const INGEST_READ_TABLES = ['log_quality_profile'] as const;
+
+/**
  * Las tablas de un log que `buoh_ingesta` no toca: las de datasets de `0001`, que no viven en un
  * log de producción (ADR-0018 §7), y la de informes de `buoh-operaciones` (`0006`, §11), que solo
  * escribe ese servicio como `buoh_dueno`.
@@ -249,7 +256,8 @@ export async function ensureRuntimeRoles(client: Client): Promise<void> {
  * transacción y como `buoh_dueno`, el dueño de sus tablas. Es idempotente.
  * - `buoh_lectura`: uso del esquema y `SELECT` en todas sus tablas.
  * - `buoh_ingesta`: uso del esquema, `SELECT` e `INSERT` en `INGEST_WRITE_TABLES`, `SELECT` en la
- *   tabla de migraciones y uso de las secuencias; nada en `INGEST_DENIED_TABLES`.
+ *   tabla de migraciones y en `INGEST_READ_TABLES` y uso de las secuencias; nada en
+ *   `INGEST_DENIED_TABLES`.
  *
  * Antes comprueba que cada tabla del esquema esté en una de esas listas: una tabla nueva sin
  * privilegios decididos lanza `UnclassifiedTableError` sin dar ninguno.
@@ -259,6 +267,7 @@ export async function grantLogPrivileges(client: Client, schema: string): Promis
   const known = new Set<string>([
     MIGRATIONS_TABLE,
     ...INGEST_WRITE_TABLES,
+    ...INGEST_READ_TABLES,
     ...INGEST_DENIED_TABLES,
   ]);
   await inTransaction(client, async () => {
@@ -283,8 +292,10 @@ export async function grantLogPrivileges(client: Client, schema: string): Promis
         await client.query(`GRANT SELECT, INSERT ON ${s}.${ident(table)} TO ${ingest}`);
       }
     }
-    if (present.has(MIGRATIONS_TABLE)) {
-      await client.query(`GRANT SELECT ON ${s}.${ident(MIGRATIONS_TABLE)} TO ${ingest}`);
+    for (const table of [MIGRATIONS_TABLE, ...INGEST_READ_TABLES]) {
+      if (present.has(table)) {
+        await client.query(`GRANT SELECT ON ${s}.${ident(table)} TO ${ingest}`);
+      }
     }
     await client.query(`GRANT USAGE ON ALL SEQUENCES IN SCHEMA ${s} TO ${ingest}`);
   });

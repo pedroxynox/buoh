@@ -8,7 +8,12 @@ import {
   type DerivAttempt,
   type DerivPreparation,
 } from '../src/deriv/adapter.js';
-import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
+import { derivLogProfileRow, type LogQualityProfileRow } from '../src/deriv/log-profile.js';
+import {
+  createDerivMeasurementProfile,
+  createDerivPublicationProfile,
+  DERIV_SOURCE,
+} from '../src/deriv/profile.js';
 import { RawFirstIngestor } from '../src/ingestion/raw-first-ingestor.js';
 import { contentKey } from '../src/object-keys.js';
 import { OperationalRegistry, type OperationalAlert } from '../src/operational/registry.js';
@@ -117,6 +122,55 @@ describe('prepareDerivAdapter: lo que la sesión prepara una vez', () => {
     );
     // La descarga ya no tiene tiempo de espera pendiente.
     expect(ports.clock.pendingDelays()).toEqual([]);
+  });
+
+  it('con el perfil del log (ADR-0020 §4): con la fila de publicación, ese perfil, con los esquemas cargados; sin fila, el de medición', async () => {
+    const fixture = syntheticSchemaArchive();
+    const prepare = async (logProfile: LogQualityProfileRow | null, symbol = 'R_100') => {
+      const ports = await preparationPorts();
+      return prepareDerivAdapter({
+        expected: fixture.expected,
+        fetch: fakeFetch(() => new Response(fixture.archive, { status: 200 })),
+        logProfile,
+        nextId: ports.nextId,
+        now: ports.clock.now,
+        registry: ports.registry,
+        related_refs: [],
+        scheduler: ports.clock.scheduler,
+        schemaUrl: SCHEMA_URL,
+        symbol,
+      });
+    };
+    const publication = await prepare(derivLogProfileRow('R_100'));
+    if (publication.status !== 'prepared') {
+      throw new TypeError(`La preparación no pasó: ${publication.end.reason}.`);
+    }
+    expect(publication.profile.quality_profile.profile_id).toBe(
+      'deriv_options-publication-v1-R_100',
+    );
+    expect(publication.profile.quality_profile_sha256).toBe(
+      createDerivPublicationProfile({ schemas: publication.schemas, symbol: 'R_100' })
+        .quality_profile_sha256,
+    );
+    const measurement = await prepare(null);
+    expect(measurement).toMatchObject({
+      profile: { quality_profile: { profile_id: 'deriv_options-measurement-v2-R_100' } },
+      status: 'prepared',
+    });
+    // Un perfil que el código no conoce, o el de otro símbolo: falla cerrado, sin conectar.
+    for (const [row, symbol] of [
+      [
+        { ...derivLogProfileRow('R_100'), profile_id: 'deriv_options-publication-v9-R_100' },
+        'R_100',
+      ],
+      [derivLogProfileRow('R_100'), 'SYNTH_100'],
+    ] as const) {
+      expect(await prepare(row, symbol)).toEqual({
+        end: { detail: 'LogProfileUnknownError', reason: 'log_not_derivable', status: 'failed' },
+        status: 'failed',
+        summary: { archive_sha256: fixture.expected.archive_sha256, release: 'synthetic-deriv-1' },
+      });
+    }
   });
 
   it('si los esquemas no son los fijados, devuelve el fin failed sin resumen', async () => {

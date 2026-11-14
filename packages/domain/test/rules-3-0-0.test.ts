@@ -634,6 +634,30 @@ describe('vector sintético de las reglas 3.0.0 (ADR-0020 §3)', () => {
     expect(open.map((item) => item.condition_type)).toEqual(['event_gap_unresolved']);
   });
 
+  it('en cada límite de segmento, el pliegue desde el estado del límite da el de todo el log y los huecos de la derivación completa (ADR-0020 §12)', () => {
+    const whole = liveDerivationView(
+      foldLiveDerivation(emptyLiveDerivationState(), SEGMENTS.flat(), v3),
+    );
+    for (let boundary = 0; boundary <= SEGMENTS.length; boundary += 1) {
+      const before = SEGMENTS.slice(0, boundary);
+      const state = foldLiveDerivation(emptyLiveDerivationState(), before.flat(), v3);
+      const derived = deriveMarketData(before, v3);
+      const view = liveDerivationView(state);
+      expect(view.pendingGaps, `límite ${String(boundary)}`).toEqual(derived.pendingGaps);
+      expect(view.openConditionTypes, `límite ${String(boundary)}`).toEqual(
+        derived.openConditionTypes,
+      );
+      expect(view.pendingContinuitySymbols, `límite ${String(boundary)}`).toEqual(
+        derived.pendingContinuitySymbols,
+      );
+      const rest = SEGMENTS.slice(boundary).flat();
+      expect(
+        liveDerivationView(foldLiveDerivation(state, rest, v3)),
+        `límite ${String(boundary)}`,
+      ).toEqual(whole);
+    }
+  });
+
   it('los ticks de la historia llevan el pip_size de su página, y los posteriores se comparan con ellos', () => {
     // Todo con pip_size 2, como Deriv; la página lo escribe 2.0, como la historia real. Los dos últimos
     // ticks del flujo llegan tarde, con la hora de uno recuperado: uno lo repite y el otro no.

@@ -11,6 +11,7 @@ import {
 import {
   buildRawSourceFrame,
   createPool as createWorkerPool,
+  derivLogProfileRow,
   loadConfig,
   logLocation,
   migrate,
@@ -521,6 +522,42 @@ describe('GET /api/v1/datos/grafico y /api/v1/datos/catalogo contra PostgreSQL y
     });
     expect(lines.flatMap((line) => (line.event === 'api_error' ? [line.error] : []))).toEqual([
       'SourceSchemaMissingError',
+    ]);
+  });
+
+  it('el gráfico arma el perfil de cada log desde su fila de log_quality_profile; uno que el código no conoce es internal (ADR-0020 §4)', async () => {
+    const { get, lines } = apiWith();
+    const assign = async (
+      schema: string,
+      row: { profile_id: string; quality_profile_sha256: string },
+    ) => {
+      await ready(admin).query(
+        `INSERT INTO ${schema}.log_quality_profile
+           (profile_id, quality_profile_sha256, run_id, assigned_at_utc)
+         VALUES ($1, $2, $3, $4)`,
+        [row.profile_id, row.quality_profile_sha256, id(), iso(NOW)],
+      );
+    };
+    // El log 3, con el perfil de publicación de R_100 y la captura de siempre.
+    const three = await createLog(3);
+    await assign(three, derivLogProfileRow('R_100'));
+    await writeCapture(three, 3);
+    const chart = await get('/api/v1/datos/grafico?hours=1');
+    expect(chart.status).toBe(200);
+    expect(dataChartSchema.parse(chart.body)).toMatchObject({ log: 3 });
+    // El log 4, con un perfil que este código no arma.
+    const four = await createLog(4);
+    await assign(four, {
+      ...derivLogProfileRow('R_100'),
+      profile_id: 'deriv_options-publication-v9-R_100',
+    });
+    await writeCapture(four, 4);
+    expect(await get('/api/v1/datos/grafico?hours=1')).toMatchObject({
+      body: { error: { code: 'internal' } },
+      status: 500,
+    });
+    expect(lines.flatMap((line) => (line.event === 'api_error' ? [line.error] : []))).toEqual([
+      'LogProfileUnknownError',
     ]);
   });
 });

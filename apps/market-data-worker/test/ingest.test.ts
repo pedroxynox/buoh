@@ -16,9 +16,11 @@ import {
   type IngestDependencies,
   type IngestStores,
   type LogLocation,
+  type LogQualityProfileRow,
   type OperationalAlert,
   type WorkerConfig,
 } from '../src/index.js';
+import { derivLogProfileRow } from '../src/deriv/log-profile.js';
 import { settle, START, START_EPOCH, uuid } from './support/connection-harness.js';
 import {
   derivMessages,
@@ -114,6 +116,8 @@ interface StartupState {
   pending: readonly string[];
   /** Los logs preparados para el corte, por número (ADR-0018 §6). */
   prepared: Set<number>;
+  /** La fila de `log_quality_profile` de cada log, por número; sin ella, ninguna (ADR-0020 §4). */
+  profiles: Map<number, LogQualityProfileRow>;
 }
 
 interface IngestHarnessOptions {
@@ -125,6 +129,8 @@ interface IngestHarnessOptions {
   readonly pending?: readonly string[];
   /** La lectura de las migraciones falla con este error. */
   readonly pendingError?: Error;
+  /** Fuera de `production`, la fila de `log_quality_profile` del esquema, o el error al leerla. */
+  readonly profile?: LogQualityProfileRow | Error;
 }
 
 /**
@@ -166,6 +172,12 @@ async function ingestHarness(options: IngestHarnessOptions = {}) {
         options.pendingError === undefined
           ? Promise.resolve(options.pending ?? [])
           : Promise.reject(options.pendingError),
+      logProfile: () => {
+        timeline.push('profile');
+        return options.profile instanceof Error
+          ? Promise.reject(options.profile)
+          : Promise.resolve(options.profile ?? null);
+      },
       requestedResponses: new MemoryRequestedResponseIncidentStore(),
       sourceLog: logStore,
     }) satisfies IngestStores;
@@ -194,7 +206,10 @@ async function ingestHarness(options: IngestHarnessOptions = {}) {
     locate: logLocation(2),
     pending: [],
     prepared: new Set(),
+    profiles: new Map(),
   };
+  /** Los logs cuyo perfil leyó la espera del arranque, en orden. Aparte de `timeline`. */
+  const profileReads: number[] = [];
   /** Las lecturas del corte, en orden: `first:<log>` y `prepared:<log>`. */
   const cutReads: string[] = [];
   const deps: IngestDependencies = {
@@ -249,6 +264,10 @@ async function ingestHarness(options: IngestHarnessOptions = {}) {
           timeline.push(`pending:${log.schema}`);
           return Promise.resolve(startup.pending);
         },
+        logProfile: (log) => {
+          profileReads.push(log.number);
+          return Promise.resolve(startup.profiles.get(log.number) ?? null);
+        },
       };
     },
     openStores: (config) => {
@@ -299,6 +318,7 @@ async function ingestHarness(options: IngestHarnessOptions = {}) {
     cutReads,
     deps,
     fixture,
+    profileReads,
     provider,
     raise,
     signal,
@@ -444,11 +464,60 @@ describe('ingestCommand: migraciones', () => {
   });
 });
 
+describe('ingestCommand: el perfil del log (ADR-0020 §4)', () => {
+  // Un perfil de publicación que el código no arma para SYNTH_100, que no tiene umbrales medidos: la
+  // sesión lo recibe y falla cerrado antes de conectar.
+  const unknownForSymbol = derivLogProfileRow('R_100');
+
+  it('fuera de production, lee el perfil del esquema después de las migraciones y la sesión lo usa', async () => {
+    const run = await ingestHarness({ profile: unknownForSymbol });
+    const { exitCode, line } = await (await start(run)).command;
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(line)).toMatchObject({
+      end: { detail: 'LogProfileUnknownError', reason: 'log_not_derivable', status: 'failed' },
+      quality_profile_id: null,
+    });
+    expect(run.timeline).toEqual(['open', 'profile', 'close']);
+    expect(run.sockets).toEqual([]);
+  });
+
+  it('fuera de production, si PostgreSQL no responde al leer el perfil, salida 1 con STORAGE_UNAVAILABLE y el motivo saneado', async () => {
+    const run = await ingestHarness({
+      profile: Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432'), {
+        code: 'ECONNREFUSED',
+      }),
+    });
+    const result = await ingestCommand(['--live'], ENV, run.deps);
+    expect(result).toEqual({
+      exitCode: 1,
+      line: JSON.stringify({
+        code: 'STORAGE_UNAVAILABLE',
+        message: 'PostgreSQL no respondió al leer el perfil del log.',
+        reason: 'ECONNREFUSED',
+        status: 'failed',
+      }),
+    });
+    expect(run.timeline).toEqual(['open', 'profile', 'close']);
+  });
+
+  it('en production, la sesión usa el perfil que leyó la espera del arranque para ese log', async () => {
+    const run = await ingestHarness();
+    run.startup.profiles.set(2, unknownForSymbol);
+    const { exitCode, line } = await (await startProduction(run)).command;
+    expect(run.profileReads).toEqual([2]);
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(line)).toMatchObject({
+      end: { detail: 'LogProfileUnknownError', reason: 'log_not_derivable', status: 'failed' },
+    });
+    expect(run.sockets).toEqual([]);
+  });
+});
+
 describe('ingestCommand: la captura', () => {
   it('corre la sesión con sus almacenes, el bloqueo y el log protegido; guarda el esquema de fuente; para con la primera señal; y da una línea JSON sin precios, con salida 0', async () => {
     const run = await ingestHarness();
     const { command } = await start(run);
-    expect(run.timeline).toEqual(['open', 'acquire:1', 'connect:1']);
+    expect(run.timeline).toEqual(['open', 'profile', 'acquire:1', 'connect:1']);
     // El esquema y el bucket de la configuración.
     expect(run.configs.map((config) => [config.postgres.schema, config.s3.bucket])).toEqual([
       ['buoh_captura', 'buoh-captura'],
@@ -488,6 +557,7 @@ describe('ingestCommand: la captura', () => {
       connector_version: 'deriv-options-ws-1.1.0',
       end: { status: 'completed' },
       finished_at_utc: START,
+      quality_profile_id: 'deriv_options-measurement-v2-SYNTH_100',
       recoveries: [],
       schemas: {
         archive_sha256: run.fixture.expected.archive_sha256,
@@ -501,7 +571,14 @@ describe('ingestCommand: la captura', () => {
       waits_ms: [],
     });
     expect(run.signal.listening).toBe(false);
-    expect(run.timeline).toEqual(['open', 'acquire:1', 'connect:1', 'release:1', 'close']);
+    expect(run.timeline).toEqual([
+      'open',
+      'profile',
+      'acquire:1',
+      'connect:1',
+      'release:1',
+      'close',
+    ]);
     // El cursor del cierre pedido y el del final, y los latidos de la ejecución con el PID.
     expect(run.stores.ingestionStatus.cursors.map((item) => item.version)).toEqual([1, 2]);
     expect(
@@ -533,13 +610,13 @@ describe('ingestCommand: la captura', () => {
       status: 'failed',
       stopped_for_retention: false,
     });
-    expect(run.timeline).toEqual(['open', 'acquire:1', 'release:1', 'close']);
+    expect(run.timeline).toEqual(['open', 'profile', 'acquire:1', 'release:1', 'close']);
   });
 
   it('pasa 23 horas de retención: con el evento más antiguo de hace 23 horas menos 1 ms, conecta y para sola al cumplirlas', async () => {
     const run = await ingestHarness({ events: logSince('2026-03-01T11:00:00.001Z') });
     const { command } = await start(run);
-    expect(run.timeline).toEqual(['open', 'acquire:1', 'connect:1']);
+    expect(run.timeline).toEqual(['open', 'profile', 'acquire:1', 'connect:1']);
     await run.clock.advance(1);
 
     const { exitCode, line } = await command;
@@ -560,7 +637,7 @@ describe('ingestCommand: la captura', () => {
       end: { detail: null, reason: 'source_lock_taken', status: 'failed' },
       status: 'failed',
     });
-    expect(run.timeline).toEqual(['open', 'acquire:taken', 'close']);
+    expect(run.timeline).toEqual(['open', 'profile', 'acquire:taken', 'close']);
   });
 
   it('un símbolo que el esquema de la petición ticks no admite es un error de uso: salida 2, sin tomar el bloqueo', async () => {
@@ -572,7 +649,7 @@ describe('ingestCommand: la captura', () => {
       end: { detail: 'ticks', reason: 'request_invalid', status: 'failed' },
       symbol: 'R',
     });
-    expect(run.timeline).toEqual(['open', 'close']);
+    expect(run.timeline).toEqual(['open', 'profile', 'close']);
   });
 
   it('una recuperación de historia sale con su estado, su motivo, sus intentos, sus páginas y lo recuperado, sin horas ni precios', async () => {
@@ -997,6 +1074,8 @@ describe('ingestCommand en production: el corte semanal (ADR-0018 §6)', () => {
     expect(new Set(log3.ingestionStatus.heartbeats.map((item) => item.pg_backend_pid))).toEqual(
       new Set([pid]),
     );
+    // La sesión nueva del corte arma el perfil del log 3, que lee la espera (ADR-0020 §4).
+    expect(run.profileReads).toEqual([2, 3]);
   });
 
   it('al arrancar con la hora de corte pasada hace menos de 24 horas, retoma el log activo y lo corta en cuanto está limpio', async () => {

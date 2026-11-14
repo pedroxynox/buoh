@@ -303,6 +303,18 @@ export function liveCorpus(domain: CorpusDomain) {
     maximum_event_gap_ms: 2000,
     profile_id: 'synthetic-v2-publication',
   });
+  /**
+   * Perfil de publicación con las reglas 3.0.0 (ADR-0020 §2), como el del estado vivo de un log con
+   * `log_quality_profile` (§4): los mismos umbrales y `history` entre las respuestas que no son ticks.
+   */
+  const publicationV3 = profileFrom({
+    ...baseProfile,
+    maximum_delivery_delay_ms: 2000,
+    maximum_event_gap_ms: 2000,
+    non_tick_msg_types: ['history', 'ping'],
+    profile_id: 'synthetic-v3-publication',
+    quality_rule_version: '3.0.0',
+  });
   /** Perfil de medición, como el de la sesión: solo la historia decide un hueco. */
   const measurement = profileFrom({
     ...baseProfile,
@@ -576,6 +588,7 @@ export function liveCorpus(domain: CorpusDomain) {
     measurement,
     profileFrom,
     publication,
+    publicationV3,
     randomStimuli,
     vectorProfile,
   };

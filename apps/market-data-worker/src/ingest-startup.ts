@@ -4,6 +4,7 @@ import {
   type SessionLock,
   type SessionLockProvider,
 } from './deriv/session.js';
+import type { LogQualityProfileRow } from './deriv/log-profile.js';
 import type { LogCutReads } from './log-cut.js';
 import type { OperationalAlert } from './operational/registry.js';
 import { failureReason } from './source-log/source-event-log.js';
@@ -41,6 +42,8 @@ const LOCK_LOST = 'source_lock_lost';
 export interface StartupReads extends LogCutReads {
   /** Las migraciones del worker que le faltan al esquema del log, sin aplicar nada. */
   pendingMigrations(log: LogLocation): Promise<readonly string[]>;
+  /** La fila de `log_quality_profile` del log, o `null` (`readLogQualityProfile`, ADR-0020 §4). */
+  logProfile(log: LogLocation): Promise<LogQualityProfileRow | null>;
   /** Libera las conexiones. */
   close(): Promise<void>;
 }
@@ -52,7 +55,7 @@ export interface StartupWaitInput {
   readonly lock: SessionLockProvider;
   /** La hora UTC con milisegundos (`toISOString()`), para repetir la alerta cada minuto. */
   readonly now: () => string;
-  readonly reads: Pick<StartupReads, 'locateLog' | 'pendingMigrations'>;
+  readonly reads: Pick<StartupReads, 'locateLog' | 'logProfile' | 'pendingMigrations'>;
   /** El temporizador de las esperas entre intentos. */
   readonly scheduler: Scheduler;
   /** Escucha la parada: llama a `onSignal` con cada señal y devuelve la función que deja de escucharla. */
@@ -60,22 +63,29 @@ export interface StartupWaitInput {
 }
 
 /**
- * Cómo terminó la espera: lista, con el log activo y el bloqueo de la fuente tomado, o parada por
- * una señal, con el motivo por el que esperaba, o `null` si todavía no esperaba nada.
+ * Cómo terminó la espera: lista, con el log activo, la fila de su perfil (ADR-0020 §4) y el bloqueo
+ * de la fuente tomado, o parada por una señal, con el motivo por el que esperaba, o `null` si
+ * todavía no esperaba nada.
  */
 export type StartupWaitResult =
-  | { readonly lock: SessionLock; readonly log: LogLocation; readonly status: 'ready' }
+  | {
+      readonly lock: SessionLock;
+      readonly log: LogLocation;
+      readonly profile: LogQualityProfileRow | null;
+      readonly status: 'ready';
+    }
   | { readonly status: 'stopped'; readonly waiting: StartupWaitReason | null };
 
 /** Lo que dio una comprobación de la credencial, el log y sus migraciones, o una parada. */
 type PreparedCheck =
-  | { readonly log: LogLocation }
+  | { readonly log: LogLocation; readonly profile: LogQualityProfileRow | null }
   | { readonly detail: string | null; readonly reason: StartupWaitReason }
   | { readonly stopped: true };
 
 /**
- * La credencial, el log y sus migraciones, en ese orden (ADR-0018 §4). La primera lectura del log
- * activo es la que prueba la credencial: si PostgreSQL la rechaza o no responde, o si falla
+ * La credencial, el log y sus migraciones, en ese orden (ADR-0018 §4), y con ellas el perfil del log
+ * (ADR-0020 §4), que no cambia una vez que `buoh_ingesta` puede leer el log. La primera lectura del
+ * log activo es la que prueba la credencial: si PostgreSQL la rechaza o no responde, o si falla
  * cualquier lectura, el motivo es `postgres_unavailable`, con el código o el nombre del error
  * (`failureReason`), nunca su mensaje. Si llegó la parada mientras buscaba el log, no lee las
  * migraciones.
@@ -103,7 +113,14 @@ async function checkPrepared(
     return { detail: failureReason(error), reason: 'postgres_unavailable' };
   }
   const [first] = pending;
-  return first === undefined ? { log } : { detail: first, reason: 'migrations_pending' };
+  if (first !== undefined) {
+    return { detail: first, reason: 'migrations_pending' };
+  }
+  try {
+    return { log, profile: await reads.logProfile(log) };
+  } catch (error) {
+    return { detail: failureReason(error), reason: 'postgres_unavailable' };
+  }
 }
 
 /**
@@ -170,6 +187,7 @@ class StartupWait {
   async run(): Promise<StartupWaitResult> {
     const { lock: provider, reads } = this.#input;
     let prepared: LogLocation | null = null;
+    let profile: LogQualityProfileRow | null = null;
     for (;;) {
       if (this.#stopRequested()) {
         return this.#stoppedResult();
@@ -185,6 +203,7 @@ class StartupWait {
           await this.#pause(STARTUP_RETRY_MS);
         } else {
           prepared = check.log;
+          ({ profile } = check);
         }
         continue;
       }
@@ -242,7 +261,7 @@ class StartupWait {
         await lock.release();
         return this.#stoppedResult();
       }
-      return { lock, log: prepared, status: 'ready' };
+      return { lock, log: prepared, profile, status: 'ready' };
     }
   }
 }
