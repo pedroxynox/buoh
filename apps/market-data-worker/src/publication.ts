@@ -7,7 +7,7 @@ import {
 
 import { createStorageEncoder, storageContentType } from './encoding.js';
 import { PublicationConflictError, PublicationError, PublicationLimitError } from './errors.js';
-import { contentKey, keyFromUri, manifestKey, objectUri } from './object-keys.js';
+import { contentKey, KEY_PREFIX, keyFromUri, manifestKey, objectUri } from './object-keys.js';
 import type { DatasetLogRange, MetadataStore, ObjectStore } from './ports.js';
 import { REPLAY_READ_LIMITS, type ReplayReadLimits } from './replay.js';
 
@@ -18,6 +18,12 @@ export interface PublishDatasetInput {
    */
   readonly derivedCompression?: 'gzip' | 'none';
   readonly environment: DeploymentEnvironment;
+  /**
+   * El prefijo de las claves de los objetos y del documento en el bucket, que también llevan sus URI:
+   * `datasets/` en los datasets vivos (ADR-0020 §5). Vacío por defecto, como en F1.3. Son segmentos
+   * de minúsculas, cifras, `_` y `-`, cada uno con su barra.
+   */
+  readonly keyPrefix?: string;
   /** Los límites de lectura del replay que se comprueban antes de escribir; por defecto, los suyos. */
   readonly limits?: ReplayReadLimits;
   readonly metadata: MetadataStore;
@@ -111,6 +117,12 @@ export function preparePublication(
   input: Omit<PublishDatasetInput, 'metadata'>,
 ): DatasetPublication {
   const { bucket } = input.objects;
+  const prefix = input.keyPrefix ?? '';
+  if (!KEY_PREFIX.test(prefix)) {
+    throw new TypeError(
+      'El prefijo de las claves son segmentos de minúsculas, cifras, _ y -, cada uno con su /.',
+    );
+  }
   const encode = createStorageEncoder(input.zlibVersion, {
     derived: input.derivedCompression ?? 'none',
   });
@@ -120,9 +132,9 @@ export function preparePublication(
       logicalSizes.set(object.artifact_id, object.logical_bytes.byteLength);
       return encode(object);
     },
-    locateManifest: (ids) => objectUri(bucket, manifestKey(ids)),
+    locateManifest: (ids) => objectUri(bucket, prefix + manifestKey(ids)),
     locateObject: (_artifactId, object) =>
-      objectUri(bucket, contentKey(object.object_bytes_sha256)),
+      objectUri(bucket, prefix + contentKey(object.object_bytes_sha256)),
     profile: input.profile,
     publication_id: input.publication_id,
     published_at_utc: input.published_at_utc,
@@ -141,10 +153,16 @@ export function preparePublication(
 export async function writePublication(
   publication: DatasetPublication,
   input: Pick<PublishDatasetInput, 'environment' | 'metadata' | 'objects'> & {
+    /** Los objetos que se escriben a la vez; por defecto, de uno en uno. */
+    readonly concurrency?: number;
     readonly logRange?: DatasetLogRange;
   },
 ): Promise<DatasetPublication> {
   const { bucket } = input.objects;
+  const concurrency = input.concurrency ?? 1;
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+    throw new TypeError('concurrency tiene que ser un entero positivo.');
+  }
   let active;
   try {
     active = await input.metadata.findActivePublication(publication.dataset_id, input.environment);
@@ -158,23 +176,40 @@ export async function writePublication(
     throw new PublicationConflictError(publication.dataset_id, { step: 'precondition' });
   }
 
-  // Paso 3: objetos físicos en claves content-addressed, verificados por lectura.
-  for (const object of publication.manifest.storage_objects) {
-    const bytes = publication.objects.get(object.artifact_id);
-    const key = keyFromUri(object.uri, bucket);
-    if (bytes === undefined || key === null) {
-      throw new PublicationError(
-        'normalized_object_write',
-        `Objeto sin bytes o ubicación: ${object.artifact_id}`,
-      );
+  // Paso 3: objetos físicos en claves content-addressed, verificados por lectura, `concurrency` a la
+  // vez. Tras el primer fallo no empieza ninguno más, espera a los que van y lanza ese fallo.
+  const pending = [...publication.manifest.storage_objects];
+  const failures: unknown[] = [];
+  const worker = async (): Promise<void> => {
+    for (let object = pending.shift(); object !== undefined; object = pending.shift()) {
+      if (failures.length > 0) {
+        return;
+      }
+      try {
+        const bytes = publication.objects.get(object.artifact_id);
+        const key = keyFromUri(object.uri, bucket);
+        if (bytes === undefined || key === null) {
+          throw new PublicationError(
+            'normalized_object_write',
+            `Objeto sin bytes o ubicación: ${object.artifact_id}`,
+          );
+        }
+        await writeVerified(
+          input.objects,
+          key,
+          bytes,
+          storageContentType(object),
+          'normalized_object_write',
+        );
+      } catch (error) {
+        failures.push(error);
+        return;
+      }
     }
-    await writeVerified(
-      input.objects,
-      key,
-      bytes,
-      storageContentType(object),
-      'normalized_object_write',
-    );
+  };
+  await Promise.all(Array.from({ length: concurrency }, worker));
+  if (failures.length > 0) {
+    throw failures[0];
   }
 
   // Pasos 5-6: documento JCS sin newline y verificación de sus bytes.

@@ -128,12 +128,35 @@ describe('publishLiveDataset (ADR-0020 §9)', () => {
       const report = await replayDataset({
         datasetId,
         environment: 'test',
+        keyPrefix: 'datasets/',
         metadata: store,
         mode,
         objects,
       });
       expect(report.dataset_id).toBe(datasetId);
     }
+  });
+
+  it('escribe los objetos del dataset varios a la vez, como mucho 8', async () => {
+    const { publish, objects } = await harness();
+    let active = 0;
+    let peak = 0;
+    const put = objects.putIfAbsent.bind(objects);
+    objects.putIfAbsent = async (key: string, bytes: Uint8Array) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((done) => {
+        setTimeout(done, 2);
+      });
+      active -= 1;
+      return put(key, bytes);
+    };
+    const outcome = await publish(await plan('principal'), ATTEMPT_1, AT_1);
+    expect(outcome.status).toBe('published');
+    const count =
+      outcome.status === 'published' ? outcome.publication.manifest.storage_objects.length : 0;
+    expect(peak).toBe(Math.min(8, count));
+    expect(peak).toBeGreaterThan(1);
   });
 
   it('un final que no fue limpio queda en su fila de rango', async () => {

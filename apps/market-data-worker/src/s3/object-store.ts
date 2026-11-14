@@ -8,6 +8,7 @@ import {
 
 import type { WorkerConfig } from '../config.js';
 import { ObjectReadError } from '../errors.js';
+import { KEY_PREFIX } from '../object-keys.js';
 import type { ObjectStore } from '../ports.js';
 
 function statusOf(error: unknown): number | undefined {
@@ -123,9 +124,6 @@ export function createS3Client(
     responseChecksumValidation: 'WHEN_REQUIRED',
   });
 }
-
-/** Un prefijo de claves: vacío, o segmentos de minúsculas, cifras, `_` y `-`, cada uno con su `/`. */
-const KEY_PREFIX = /^(?:[a-z0-9][a-z0-9_-]*\/)*$/u;
 
 export interface S3ObjectStoreOptions {
   /**

@@ -440,7 +440,8 @@ describe('los privilegios de buoh_datasets (ADR-0020 §5)', () => {
 });
 
 describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
-  const objects = () => new S3ObjectStore(createS3Client(config.s3), config.s3.bucket, KEY_PREFIX);
+  /** El bucket sin prefijo: las claves de los datasets llevan el suyo, `KEY_PREFIX`. */
+  const objects = () => new S3ObjectStore(createS3Client(config.s3), config.s3.bucket, '');
 
   function plan(
     scenario: 'principal' | 'zero-valid-ticks',
@@ -538,6 +539,7 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
       publish: (due: ReturnType<typeof plan>, publication_id: string, at: string) =>
         publishLiveDataset({
           environment: 'test',
+          keyPrefix: KEY_PREFIX,
           logNumber,
           now: () => at.replace(/\.000Z$/u, '.500Z'),
           objects: target,
@@ -591,6 +593,7 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
       const report = await replayDataset({
         datasetId,
         environment: 'test',
+        keyPrefix: KEY_PREFIX,
         metadata: store,
         mode,
         objects: target,

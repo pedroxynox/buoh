@@ -11,21 +11,30 @@ import type { DatasetLogRange, DatasetStore, ObjectStore } from '../ports.js';
 import { preparePublication, writePublication } from '../publication.js';
 import type { ReplayReadLimits } from '../replay.js';
 import { failureReason } from '../source-log/source-event-log.js';
+import { DATASETS_PREFIX } from './location.js';
 import type { DatasetPlan } from './plan.js';
 
 // La publicación de un dataset vivo en `buoh_datasets` (ADR-0020 §5, §7 y §9): la del plan que da
 // `planDataset`, con sus derivados en gzip, su fila de rango en el mismo commit y el registro
 // operativo de la publicación. Decide qué segmentos y con qué perfil quien la llama.
 
+/** Los objetos de un dataset que se escriben a la vez, como el borrado de la retención (ADR-0020 §8). */
+export const DATASET_WRITE_CONCURRENCY = 8;
+
 export interface PublishLiveDatasetInput {
   readonly environment: DeploymentEnvironment;
+  /**
+   * El prefijo de las claves de sus objetos y de su documento en el bucket, que llevan también sus
+   * URI: por defecto, `datasets/` (ADR-0020 §5). `objects` escribe en el bucket sin prefijo.
+   */
+  readonly keyPrefix?: string;
   /** Los límites de lectura del replay; por defecto, los suyos. */
   readonly limits?: ReplayReadLimits;
   /** El número del log de los segmentos del plan. */
   readonly logNumber: number;
   /** Reloj UTC inyectado, para la hora de una incidencia. */
   readonly now: () => string;
-  /** Los objetos bajo el prefijo `datasets/` del bucket. */
+  /** Los objetos del bucket, sin prefijo: las claves ya llevan el de `keyPrefix`. */
   readonly objects: ObjectStore;
   /** El dataset que decidió `planDataset`. */
   readonly plan: Extract<DatasetPlan, { status: 'due' }>;
@@ -139,6 +148,7 @@ export async function publishLiveDataset(
   const publication = preparePublication({
     derivedCompression: 'gzip',
     environment: input.environment,
+    keyPrefix: input.keyPrefix ?? DATASETS_PREFIX,
     ...(input.limits === undefined ? {} : { limits: input.limits }),
     objects: input.objects,
     profile: input.profile,
@@ -172,6 +182,7 @@ export async function publishLiveDataset(
 
   try {
     await writePublication(publication, {
+      concurrency: DATASET_WRITE_CONCURRENCY,
       environment: input.environment,
       logRange: range,
       metadata: input.store,

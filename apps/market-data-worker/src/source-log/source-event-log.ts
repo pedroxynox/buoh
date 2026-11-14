@@ -296,6 +296,29 @@ export class SourceEventLog {
   }
 
   /**
+   * Solo los segmentos cerrados del log, leídos y verificados como en `readClosedSegment`, sin leer
+   * su estado ni su segmento abierto, ni poder escribir: lo que lee la publicación de los datasets
+   * vivos (ADR-0020 §7), que solo usa segmentos cerrados.
+   */
+  static closedSegmentReader(
+    input: OpenSourceEventLogInput,
+  ): Pick<SourceEventLog, 'readClosedSegment' | 'source'> {
+    const log = new SourceEventLog(input, {
+      firstEventTime: null,
+      lastEventId: null,
+      lastEventTime: null,
+      lastRawObservationId: null,
+      lines: [],
+      segmentIndex: 0,
+      stats: EMPTY_SEGMENT_STATS,
+      totalEventCount: 0,
+    });
+    // Nunca escribe: sus escrituras fallan como tras un fallo de persistencia.
+    log.#failed = true;
+    return { readClosedSegment: (index) => log.readClosedSegment(index), source: log.source };
+  }
+
+  /**
    * La hora del evento durable más antiguo del log, el primero (segmento 0, posición 0), o `null`
    * si no tiene ninguno: la de recepción de un frame y `occurred_at_utc` de los demás. Tras
    * reabrirse incluye un evento que el índice confirmó aunque informó error, que el log adopta. Sale
