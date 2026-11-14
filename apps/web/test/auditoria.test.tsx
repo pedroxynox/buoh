@@ -113,6 +113,9 @@ describe('la respuesta de los eventos de datos, como el contrato', () => {
       events: Array.from({ length: DATA_EVENTS_LIMIT }, () => CATALOG),
       truncated: true,
     },
+    // Una publicación de un log que ya no se lee: los datasets no vencen (ADR-0020 §10).
+    { logs: [4], events: [{ ...PUBLICATION, log: 1 }], truncated: false },
+    { logs: [], events: [{ ...PUBLICATION, log: 1 }], truncated: false },
   ];
 
   it('acepta lo que acepta el esquema', () => {
@@ -136,8 +139,9 @@ describe('la respuesta de los eventos de datos, como el contrato', () => {
     const invalid: unknown[] = [
       // Del más viejo al más nuevo.
       { ...EVENTS, events: [...EVENTS.events].reverse() },
-      // Un evento de un log que no se leyó.
-      { ...EVENTS, logs: [4, 3] },
+      // Un evento que no es una publicación, de un log que no se leyó.
+      { ...EVENTS, logs: [4] },
+      { logs: [4], events: [{ ...CATALOG, log: 1 }], truncated: false },
       // Los logs sin orden, o repetidos.
       { ...EVENTS, logs: [2, 3, 4] },
       { ...EVENTS, logs: [4, 3, 3, 2] },
@@ -359,6 +363,7 @@ describe('la vista de los eventos de datos', () => {
     expect(html).toContain('Severidad');
     expect(html).toContain('Se leyeron los logs 4, 3 y 2.');
     expect(html).toContain('se borra con él, a los 30 días de su última escritura');
+    expect(html).toContain('Las publicaciones de los datasets no vencen');
     expect(html).not.toContain('más recientes');
     // Solo muestra: ningún control para cambiar nada, y ningún dato ficticio.
     expect(html).not.toMatch(/<button|<input|<form/u);
@@ -437,7 +442,7 @@ describe('la lectura de los eventos de datos, sin el token CSRF', () => {
     expect(requests[0]?.init?.credentials).toBe('same-origin');
     expect(JSON.stringify(requests[0]?.init?.headers ?? {})).not.toMatch(/csrf/iu);
     expect(requests[0]?.init?.body).toBeUndefined();
-    stubFetch(200, { ...EVENTS, logs: [3] });
+    stubFetch(200, { ...EVENTS, logs: [4] });
     await expect(api.dataEvents()).rejects.toMatchObject({ failure: { code: 'unexpected' } });
   });
 

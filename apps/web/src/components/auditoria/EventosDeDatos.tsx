@@ -14,7 +14,7 @@ export type DataEventsState =
 /** Cuánto se guardan y de qué logs salen, para que se sepa qué falta (ADR-0019 §5). */
 function retentionNote(data: DataEvents | null): string {
   const base =
-    'Cada evento sigue en el log de su semana y se borra con él, a los 30 días de su última escritura.';
+    'Cada evento sigue en el log de su semana y se borra con él, a los 30 días de su última escritura. Las publicaciones de los datasets no vencen: siguen aunque su log ya no exista.';
   if (data === null || data.logs.length === 0) {
     return base;
   }

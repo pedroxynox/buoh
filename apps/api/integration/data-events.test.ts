@@ -11,8 +11,10 @@ import {
 } from '@buoh/contracts';
 import {
   createPool as createWorkerPool,
+  DATASETS_SCHEMA,
   logLocation,
   migrate,
+  migrateDatasets,
   OperationalRegistry,
   PostgresOperationalStore,
   PostgresRequestedResponseIncidentStore,
@@ -205,8 +207,11 @@ async function catalogVersion(schema: string, version: number, received: string)
   }
 }
 
-/** Un dataset publicado en `environment`, con su `PublishedManifestRecord`. */
-async function publication(
+/**
+ * Un dataset publicado en `environment` en las tablas del log, donde producción no publica: desde el
+ * 6b de F2.4, la Auditoría no las lee (ADR-0020 §10).
+ */
+async function logTablePublication(
   schema: string,
   environment: string,
   published: string,
@@ -227,6 +232,75 @@ async function publication(
      VALUES ($1, $2, $3, '1.0.0', $4, 's3://buoh-local/manifests/x.json', $4, $5, 'active')`,
     [publicationId, environment, datasetId, sha256(core), published],
   );
+  return { datasetId, publicationId };
+}
+
+/**
+ * `buoh_datasets` vacío, con sus migraciones y lo que tiene `buoh_lectura` en él (ADR-0020 §5), o, con
+ * `migrated: false`, sin el esquema. Sus tablas son append-only: para empezar de cero se borra.
+ */
+async function resetDatasets({ migrated = true } = {}): Promise<void> {
+  await ready(admin).query(`DROP SCHEMA IF EXISTS ${DATASETS_SCHEMA} CASCADE`);
+  nextSegment.clear();
+  if (!migrated) {
+    return;
+  }
+  await migrateDatasets(ready(admin));
+  await ready(admin).query(`GRANT USAGE ON SCHEMA ${DATASETS_SCHEMA} TO ${READER_USER}`);
+  await ready(admin).query(
+    `GRANT SELECT ON ALL TABLES IN SCHEMA ${DATASETS_SCHEMA} TO ${READER_USER}`,
+  );
+}
+
+/** El primer segmento del dataset siguiente de cada log en `buoh_datasets`. */
+const nextSegment = new Map<number, number>();
+
+/**
+ * Un dataset del log `log` publicado en `environment` en `buoh_datasets`, con su
+ * `PublishedManifestRecord` y su fila de `dataset_log_ranges`, de 6 segmentos y seguido del anterior
+ * del log, como los de `datasets:publish` (ADR-0020 §5 y §7).
+ */
+async function datasetPublication(
+  log: number,
+  environment: string,
+  published: string,
+  publicationId = nextUuid(),
+): Promise<{ readonly datasetId: string; readonly publicationId: string }> {
+  const core = `{"log":${String(log)},"publicacion":"${published}","entorno":"${environment}"}`;
+  const datasetId = `sha256:${sha256(core)}`;
+  const first = nextSegment.get(log) ?? 0;
+  nextSegment.set(log, first + 6);
+  const client = await ready(admin).connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO ${DATASETS_SCHEMA}.datasets (dataset_id, state, source, manifest_core_jcs)
+       VALUES ($1, 'published', $2, $3)`,
+      [datasetId, SOURCE, core],
+    );
+    await client.query(
+      `INSERT INTO ${DATASETS_SCHEMA}.published_manifest_records
+         (publication_id, deployment_environment, dataset_id, schema_version,
+          manifest_document_sha256, manifest_object_uri, manifest_object_bytes_sha256,
+          published_at_utc, state)
+       VALUES ($1, $2, $3, '1.0.0', $4, 's3://buoh-captura/datasets/manifests/x.json', $4, $5,
+               'active')`,
+      [publicationId, environment, datasetId, sha256(core), published],
+    );
+    await client.query(
+      `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
+         (dataset_id, publication_id, log_number, first_segment, last_segment, clean,
+          pending_continuity_symbols, open_condition_types)
+       VALUES ($1, $2, $3, $4, $5, true, '{}', '{}')`,
+      [datasetId, publicationId, log, first, first + 5],
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
   return { datasetId, publicationId };
 }
 
@@ -272,6 +346,7 @@ beforeAll(async () => {
   await platform.query(`CREATE DATABASE ${DATABASE}`);
   admin = new pg.Pool({ ...local, database: DATABASE, ssl: false, max: 2 });
   reader = createReaderPool(readerConfig());
+  await resetDatasets();
 });
 
 afterAll(async () => {
@@ -302,8 +377,8 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
     await heartbeat(log2, '2026-11-08T23:59:59.000Z');
     await catalogVersion(log2, 1, '2026-11-02T00:00:09.338Z');
     await catalogVersion(log2, 2, '2026-11-06T21:12:31.681Z');
-    const published = await publication(log2, 'test', '2026-11-07T00:00:00.000Z');
-    await publication(log2, 'production', '2026-11-07T00:00:01.000Z');
+    // En las tablas del log, donde producción no publica: no cuenta (ADR-0020 §10).
+    await logTablePublication(log2, 'test', '2026-11-07T00:00:00.000Z');
 
     const log3 = await createLog(3);
     await heartbeat(log3, '2026-11-12T11:59:00.000Z');
@@ -395,8 +470,6 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
       ['condition', 3, '2026-11-09T14:00:00.124Z'],
       ['incident', 3, '2026-11-09T14:00:00.124Z'],
       ['catalog_version', 3, '2026-11-09T00:00:06.105Z'],
-      // Solo la publicación de este entorno, `test`.
-      ['publication', 2, '2026-11-07T00:00:00.000Z'],
       ['catalog_version', 2, '2026-11-06T21:12:31.681Z'],
       ['catalog_version', 2, '2026-11-02T00:00:09.338Z'],
     ]);
@@ -443,16 +516,70 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
       symbol: null,
       evidence: { stage: 'raw_object_write', reason: 'ServiceUnavailable' },
     });
-    expect(body.events[6]).toEqual({
-      kind: 'publication',
-      log: 2,
-      at_utc: '2026-11-07T00:00:00.000Z',
-      source: SOURCE,
-      dataset_id: published.datasetId,
-      publication_id: published.publicationId,
-      state: 'active',
+    expect(body.events[6]).toMatchObject({ version: 2, entry_count: 89 });
+  });
+
+  it('las publicaciones salen de buoh_datasets, con el log de su dataset aunque ya no se lea, y solo las de este entorno (ADR-0020 §10)', async () => {
+    // Los logs de la prueba anterior: el 1 venció; el 2 y el 3, no.
+    const old = await datasetPublication(1, 'test', '2026-10-09T12:00:00.000Z');
+    const recent = await datasetPublication(2, 'test', '2026-11-07T00:00:00.000Z');
+    await datasetPublication(2, 'production', '2026-11-07T00:00:01.000Z');
+    const body = dataEventsSchema.parse((await getEvents()).body);
+    expect(body.logs).toEqual([3, 2]);
+    const publications = body.events.filter((event) => event.kind === 'publication');
+    expect(publications).toEqual([
+      {
+        kind: 'publication',
+        log: 2,
+        at_utc: '2026-11-07T00:00:00.000Z',
+        source: SOURCE,
+        dataset_id: recent.datasetId,
+        publication_id: recent.publicationId,
+        state: 'active',
+      },
+      {
+        kind: 'publication',
+        log: 1,
+        at_utc: '2026-10-09T12:00:00.000Z',
+        source: SOURCE,
+        dataset_id: old.datasetId,
+        publication_id: old.publicationId,
+        state: 'active',
+      },
+    ]);
+    // Van entre los demás eventos, por su hora.
+    expect(body.events.slice(-4).map((event) => [event.kind, event.at_utc])).toEqual([
+      ['publication', '2026-11-07T00:00:00.000Z'],
+      ['catalog_version', '2026-11-06T21:12:31.681Z'],
+      ['catalog_version', '2026-11-02T00:00:09.338Z'],
+      ['publication', '2026-10-09T12:00:00.000Z'],
+    ]);
+
+    // Sin `buoh_datasets`, como antes de la primera publicación, los demás eventos y ninguna.
+    await resetDatasets({ migrated: false });
+    const without = await getEvents();
+    expect(without.status).toBe(200);
+    expect(
+      dataEventsSchema.parse(without.body).events.filter((event) => event.kind === 'publication'),
+    ).toEqual([]);
+    await resetDatasets();
+  });
+
+  it('una publicación de buoh_datasets sin UUIDv7 es internal, con DataEventIntegrityError', async () => {
+    await datasetPublication(
+      2,
+      'test',
+      '2026-11-08T00:00:00.000Z',
+      '00000000-0000-4000-8000-000000000001',
+    );
+    const response = await getEvents();
+    expect(response.status).toBe(500);
+    expect(response.lines).toContainEqual({
+      event: 'api_error',
+      request_id: '00000000-0000-4000-8000-000000000000',
+      error: 'DataEventIntegrityError',
     });
-    expect(body.events[7]).toMatchObject({ version: 2, entry_count: 89 });
+    await resetDatasets();
   });
 
   it(`con ${String(DATA_EVENTS_LIMIT)} eventos, la lista entera; con más, los más recientes y cortada`, async () => {
@@ -580,7 +707,7 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
     });
   });
 
-  it('una condición que no es JSON, una respuesta pedida con otro motivo, una publicación sin UUIDv7, una versión con una fecha imposible y un motivo que no es un código son internal', async () => {
+  it('una condición que no es JSON, una respuesta pedida con otro motivo, una versión con una fecha imposible y un motivo que no es un código son internal', async () => {
     const persistenceBody: Record<string, JsonValue> = {
       evidence: { reason: 'con un mensaje', stage: 'raw_object_write' },
       incident_type: 'persistence_unavailable',
@@ -643,33 +770,13 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
         },
       },
       {
-        at: '2027-12-01T00:00:00.000Z',
-        write: async (schema) => {
-          const core = '{"publicacion":"sin-uuidv7"}';
-          await ready(admin).query(
-            `INSERT INTO ${schema}.datasets (dataset_id, state, source, manifest_core_jcs)
-             VALUES ($1, 'published', $2, $3)`,
-            [`sha256:${sha256(core)}`, SOURCE, core],
-          );
-          await ready(admin).query(
-            `INSERT INTO ${schema}.published_manifest_records
-               (publication_id, deployment_environment, dataset_id, schema_version,
-                manifest_document_sha256, manifest_object_uri, manifest_object_bytes_sha256,
-                published_at_utc, state)
-             VALUES ('00000000-0000-4000-8000-000000000001', 'test', $1, '1.0.0', $2,
-                     's3://buoh-local/manifests/x.json', $2, '2027-01-01T00:00:00.000Z', 'active')`,
-            [`sha256:${sha256(core)}`, sha256(core)],
-          );
-        },
-      },
-      {
         at: '2028-02-01T00:00:00.000Z',
         write: (schema) => catalogVersion(schema, 1, '2027-02-30T00:00:00.000Z'),
       },
       {
         at: '2028-04-01T00:00:00.000Z',
         write: async (schema) => {
-          const pool = logPool(13);
+          const pool = logPool(12);
           try {
             await new PostgresOperationalStore(pool).append({
               conditions: [],
@@ -678,7 +785,7 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
           } finally {
             await pool.end();
           }
-          expect(schema).toBe(logLocation(13).schema);
+          expect(schema).toBe(logLocation(12).schema);
         },
       },
     ];

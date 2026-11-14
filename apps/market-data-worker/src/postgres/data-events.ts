@@ -15,12 +15,14 @@ import {
 import pg, { type Pool } from 'pg';
 import type { z } from 'zod';
 
+import { DATASETS_SCHEMA } from '../datasets/location.js';
 import { SANITIZED } from '../operations/sanitized.js';
-import type { LogLocation } from '../successive-logs.js';
+import { MAX_LOG_NUMBER, type LogLocation } from '../successive-logs.js';
 
 // Los eventos de datos de un log para la sección Auditoría (ADR-0019 §5 y §8): las versiones del
-// catálogo, las publicaciones, las incidencias y las condiciones que guardan sus tablas append-only
-// (migraciones `0001` a `0003`). Lo escriben `ingest` y la publicación; aquí solo se lee, con el
+// catálogo, las incidencias y las condiciones que guardan sus tablas append-only (migraciones `0002`
+// y `0003`), y las publicaciones de los datasets, que desde el 6b de F2.4 salen de `buoh_datasets`
+// (ADR-0020 §10) y no de las tablas de cada log. Lo escriben `ingest` y la publicación; aquí solo se lee, con el
 // esquema del log en cada consulta, para un pool cuyas sesiones no lo tienen en el `search_path`,
 // como el de la API. Cada fila se comprueba contra su contrato antes de devolverla, y sus motivos
 // tienen que ser códigos saneados, como los escribe el worker: la Auditoría nunca muestra un mensaje.
@@ -35,10 +37,14 @@ export interface StoredCatalogVersion {
   readonly receivedAtUtc: string;
 }
 
-/** Una publicación: su `PublishedManifestRecord` y la fuente de su dataset. */
+/**
+ * Una publicación de `buoh_datasets`: su `PublishedManifestRecord`, la fuente de su dataset y el log
+ * del que salió (`dataset_log_ranges`).
+ */
 export interface StoredPublication {
   readonly source: string;
   readonly record: PublishedManifestRecord;
+  readonly log: number;
 }
 
 type IncidentOf<T extends DataQualityIncident['incident_type']> = Extract<
@@ -58,16 +64,21 @@ export type StoredDataIncident =
 /** Los eventos de datos de un log, cada lista de la más nueva a la más vieja. */
 export interface LogDataEvents {
   readonly catalogVersions: readonly StoredCatalogVersion[];
-  readonly publications: readonly StoredPublication[];
   readonly incidents: readonly StoredDataIncident[];
   readonly conditions: readonly OperationalConditionEvent[];
 }
 
 export interface ReadLogDataEventsInput {
   readonly source: string;
+  /** Cuántas filas lee como mucho de cada clase de evento: las más recientes. */
+  readonly limit: number;
+}
+
+export interface ReadDatasetPublicationsInput {
+  readonly source: string;
   /** Solo las publicaciones de este entorno (`published_manifest_records.deployment_environment`). */
   readonly environment: DeploymentEnvironment;
-  /** Cuántas filas lee como mucho de cada clase de evento: las más recientes. */
+  /** Cuántas lee como mucho: las más recientes. */
   readonly limit: number;
 }
 
@@ -93,6 +104,7 @@ interface CatalogRow {
 }
 
 interface PublicationRow {
+  log_number: number;
   source: string;
   schema_version: string;
   publication_id: string;
@@ -183,12 +195,12 @@ function catalogVersionOf(row: CatalogRow): StoredCatalogVersion {
 }
 
 function publicationOf(row: PublicationRow): StoredPublication {
-  const { source, ...columns } = row;
+  const { log_number: log, source, ...columns } = row;
   const parsed = publishedManifestRecordSchema.safeParse(columns);
-  if (!parsed.success) {
+  if (!parsed.success || !Number.isSafeInteger(log) || log < 1 || log > MAX_LOG_NUMBER) {
     throw new DataEventIntegrityError();
   }
-  return { source, record: parsed.data };
+  return { log, record: parsed.data, source };
 }
 
 function operationalIncidentOf(row: OperationalIncidentRow): StoredDataIncident {
@@ -250,8 +262,8 @@ function newestIncidentFirst(a: StoredDataIncident, b: StoredDataIncident): numb
 /**
  * Los eventos de datos del log (ADR-0019 §5 y §8): de cada clase, las `limit` filas más recientes de
  * `source`, cada una comprobada contra su contrato, con su documento en JCS y sus columnas iguales a
- * las de su documento. Las publicaciones son solo las de `environment`. Lanza
- * `DataEventIntegrityError` si una fila no pasa esas comprobaciones. No escribe nada.
+ * las de su documento. Las publicaciones no: salen de `buoh_datasets` (`readDatasetPublications`).
+ * Lanza `DataEventIntegrityError` si una fila no pasa esas comprobaciones. No escribe nada.
  */
 export async function readLogDataEvents(
   pool: Pick<Pool, 'query'>,
@@ -269,17 +281,6 @@ export async function readLogDataEvents(
       ORDER BY version DESC
       LIMIT $2`,
     [input.source, input.limit],
-  );
-  const publications = await pool.query<PublicationRow>(
-    `SELECT d.source, r.schema_version, r.publication_id::text AS publication_id, r.dataset_id,
-            r.manifest_document_sha256, r.manifest_object_uri, r.manifest_object_bytes_sha256,
-            r.published_at_utc, r.state
-       FROM ${schema}.published_manifest_records r
-       JOIN ${schema}.datasets d USING (dataset_id)
-      WHERE d.source = $1 AND r.deployment_environment = $2
-      ORDER BY r.published_at_utc DESC, r.publication_id DESC
-      LIMIT $3`,
-    [input.source, input.environment, input.limit],
   );
   const operational = await pool.query<OperationalIncidentRow>(
     `SELECT incident_id, incident_type, severity, source, symbol, observed_at_utc, incident_jcs
@@ -315,8 +316,48 @@ export async function readLogDataEvents(
     .slice(0, input.limit);
   return {
     catalogVersions: catalog.rows.map(catalogVersionOf),
-    publications: publications.rows.map(publicationOf),
     incidents,
     conditions: conditions.rows.map(conditionOf),
   };
+}
+
+/** El esquema que no existe (`3F000`) o una tabla que no existe (`42P01`). */
+const MISSING = new Set(['3F000', '42P01']);
+
+/**
+ * Las publicaciones de los datasets (ADR-0020 §10): las `limit` más recientes de `source` en
+ * `environment` de `buoh_datasets.published_manifest_records`, cada una con el log de su dataset
+ * (`dataset_log_ranges`) y comprobada contra su contrato. Sin el esquema `buoh_datasets`, que crea
+ * `buoh-operaciones` antes de la primera publicación, no hay ninguna. Lanza `DataEventIntegrityError`
+ * si una fila no pasa esas comprobaciones. No escribe nada, y nombra el esquema en cada tabla, para
+ * un pool sin él en el `search_path`.
+ */
+export async function readDatasetPublications(
+  pool: Pick<Pool, 'query'>,
+  input: ReadDatasetPublicationsInput,
+): Promise<StoredPublication[]> {
+  if (!Number.isSafeInteger(input.limit) || input.limit < 1) {
+    throw new TypeError('El límite de publicaciones es un entero positivo.');
+  }
+  const schema = pg.escapeIdentifier(DATASETS_SCHEMA);
+  try {
+    const { rows } = await pool.query<PublicationRow>(
+      `SELECT g.log_number, d.source, r.schema_version, r.publication_id::text AS publication_id,
+              r.dataset_id, r.manifest_document_sha256, r.manifest_object_uri,
+              r.manifest_object_bytes_sha256, r.published_at_utc, r.state
+         FROM ${schema}.published_manifest_records r
+         JOIN ${schema}.datasets d USING (dataset_id)
+         JOIN ${schema}.dataset_log_ranges g USING (dataset_id)
+        WHERE d.source = $1 AND r.deployment_environment = $2
+        ORDER BY r.published_at_utc DESC, r.publication_id DESC
+        LIMIT $3`,
+      [input.source, input.environment, input.limit],
+    );
+    return rows.map(publicationOf);
+  } catch (error) {
+    if (MISSING.has(String((error as { code?: unknown } | null)?.code))) {
+      return [];
+    }
+    throw error;
+  }
 }
