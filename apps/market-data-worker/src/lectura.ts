@@ -156,11 +156,14 @@ export {
 export { PostgresCatalogStore } from './postgres/catalog-store.js';
 export type { CatalogStore, CatalogVersion } from './deriv/ports.js';
 
-// Los eventos de datos de un log, para la sección Auditoría (ADR-0019 §5 y §8).
+// Los eventos de datos de un log y las publicaciones de `buoh_datasets`, para la sección Auditoría
+// (ADR-0019 §5 y §8; ADR-0020 §10).
 export {
   DataEventIntegrityError,
+  readDatasetPublications,
   readLogDataEvents,
   type LogDataEvents,
+  type ReadDatasetPublicationsInput,
   type ReadLogDataEventsInput,
   type StoredCatalogVersion,
   type StoredDataIncident,

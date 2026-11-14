@@ -3,8 +3,8 @@
  * antes de dibujarla (ADR-0019 §5 y §8; CONTRIBUTING, «Reglas de implementación»). Como las de la
  * salud y de Mercados, no usa los esquemas de `@buoh/contracts`, cuya entrada principal carga módulos
  * de Node, y repite sus reglas: objetos estrictos, los valores y formatos de cada campo, y las reglas
- * entre campos (los logs de mayor a menor, los eventos del más nuevo al más viejo y de un log leído,
- * la lista cortada solo si está llena, el motivo solo en una resolución y la clave de cada condición).
+ * entre campos (los logs de mayor a menor, los eventos del más nuevo al más viejo y, salvo las
+ * publicaciones, de un log leído, la lista cortada solo si está llena, el motivo solo en una resolución y la clave de cada condición).
  * Lo que no pasa es una respuesta inesperada, nunca un evento inventado. `test/auditoria.test.tsx`
  * la contrasta con el esquema.
  */
@@ -250,13 +250,14 @@ export function readDataEvents(value: unknown): DataEvents | null {
     return null;
   }
   const valid =
-    // Los logs van de mayor a menor, sin repetir; solo se corta una lista llena; cada evento es de
-    // un log leído, y van del más nuevo al más viejo.
+    // Los logs van de mayor a menor, sin repetir; solo se corta una lista llena; cada evento que no
+    // es una publicación es de un log leído (las publicaciones no vencen: ADR-0020 §10), y van del
+    // más nuevo al más viejo.
     logs.every((log, index) => index === 0 || log < (logs[index - 1] ?? 0)) &&
     (!truncated || events.length === DATA_EVENTS_LIMIT) &&
     events.every(
       (event, index) =>
-        logs.includes(event.log) &&
+        (event.kind === 'publication' || logs.includes(event.log)) &&
         (index === 0 || (events[index - 1]?.at_utc ?? '') >= event.at_utc),
     );
   return valid ? (value as unknown as DataEvents) : null;

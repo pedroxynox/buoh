@@ -798,11 +798,35 @@ describe('DataEvents (ADR-0019 §5 y §8)', () => {
     expect(accepts(dataEventsSchema, { logs: [3], events: full, truncated: true })).toBe(true);
   });
 
+  it('una publicación es de un dataset de buoh_datasets, que no vence: su log puede no estar entre los leídos (ADR-0020 §10)', () => {
+    expect(
+      accepts(dataEventsSchema, {
+        logs: [4],
+        events: [{ ...publication, log: 1 }],
+        truncated: false,
+      }),
+    ).toBe(true);
+    expect(
+      accepts(dataEventsSchema, {
+        logs: [],
+        events: [{ ...publication, log: 1 }],
+        truncated: false,
+      }),
+    ).toBe(true);
+    // Las demás clases, no: siguen en su log y se borran con él.
+    for (const event of [catalog, incident, opened]) {
+      expect(
+        accepts(dataEventsSchema, { logs: [4], events: [{ ...event, log: 1 }], truncated: false }),
+        event.kind,
+      ).toBe(false);
+    }
+  });
+
   it('rechaza el orden, los logs, el corte y las condiciones que no cumplen sus reglas', () => {
     const full = Array.from({ length: DATA_EVENTS_LIMIT }, () => catalog);
     for (const value of [
       { ...events, events: [...events.events].reverse() },
-      { ...events, logs: [4, 3] },
+      { ...events, logs: [4] },
       { ...events, logs: [2, 3, 4] },
       { ...events, logs: [4, 4, 3, 2] },
       { ...events, truncated: true },

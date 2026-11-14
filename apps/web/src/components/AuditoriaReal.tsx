@@ -108,7 +108,7 @@ export function AuditoriaReal() {
       <PageHeader
         eyebrow="Auditoría"
         title="¿Qué pasó, cuándo y quién lo hizo?"
-        summary="Registros que solo crecen: nada se edita. Los eventos de la cuenta se guardan siempre, y los de datos, 30 días con su log."
+        summary="Registros que solo crecen: nada se edita. Los eventos de la cuenta y las publicaciones de los datasets se guardan siempre, y los demás de datos, 30 días con su log."
       />
 
       <Card title="Eventos de la cuenta" subtitle="Registro inmutable" headingLevel={2}>

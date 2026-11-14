@@ -554,7 +554,11 @@ const catalogVersionEventSchema = z.strictObject({
   entry_count: positiveCountSchema,
 });
 
-/** La publicación de un dataset (ADR-0004 §8): su `PublishedManifestRecord`, por su identificador. */
+/**
+ * La publicación de un dataset (ADR-0004 §8): su `PublishedManifestRecord`, por su identificador.
+ * Desde el 6b de F2.4 sale de `buoh_datasets` (ADR-0020 §10), y su `log` es el del dataset
+ * (`dataset_log_ranges`): los datasets no vencen, así que puede ser un log que ya no se lee.
+ */
 const publicationEventSchema = z.strictObject({
   ...dataEventBase,
   kind: z.literal('publication'),
@@ -624,8 +628,10 @@ const dataEventSchema = z.discriminatedUnion('kind', [
 /**
  * La respuesta de `GET /api/v1/datos/eventos` (ADR-0019 §5 y §8): los eventos de datos que guardan
  * los logs que no han vencido, para la sección Auditoría. Siguen en su log y se borran con él, a los
- * 30 días de su última escritura (ADR-0018 §7).
- * - `logs`: los logs leídos, de mayor a menor número, sin repetir.
+ * 30 días de su última escritura (ADR-0018 §7). Las publicaciones, desde el 6b de F2.4, salen de
+ * `buoh_datasets` y no vencen (ADR-0020 §6 y §10).
+ * - `logs`: los logs leídos, de mayor a menor número, sin repetir. Cada evento que no es una
+ *   publicación es de uno de ellos.
  * - `events`: los `DATA_EVENTS_LIMIT` más recientes como mucho, del más nuevo al más viejo.
  * - `truncated`: si quedaron fuera otros más viejos.
  */
@@ -646,8 +652,12 @@ export const dataEventsSchema = z
       issue('Solo se corta una lista llena.', ['truncated']);
     }
     for (const [index, event] of value.events.entries()) {
-      if (!value.logs.includes(event.log)) {
-        issue('Cada evento es de un log leído.', ['events', index, 'log']);
+      if (event.kind !== 'publication' && !value.logs.includes(event.log)) {
+        issue('Cada evento que no es una publicación es de un log leído.', [
+          'events',
+          index,
+          'log',
+        ]);
       }
       const previous = value.events[index - 1];
       if (previous !== undefined && previous.at_utc < event.at_utc) {

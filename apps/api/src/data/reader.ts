@@ -9,6 +9,7 @@ import {
   DERIV_SOURCE,
   isLogExpired,
   listCaptureLogs,
+  readDatasetPublications,
   readLatestStoredHealth,
   readLogDataEvents,
   selectActiveLog,
@@ -17,6 +18,7 @@ import {
   type LogLocation,
   type StoredDataIncident,
   type StoredHealthObservation,
+  type StoredPublication,
 } from '@buoh/market-data-worker/lectura';
 import type { Pool } from 'pg';
 
@@ -35,8 +37,8 @@ export interface DataReader {
   health(): Promise<DataHealth>;
   /**
    * Los eventos de datos de los logs que no han vencido (`DataEvents`): las versiones del catálogo,
-   * las publicaciones de este entorno, las incidencias y las condiciones, los `DATA_EVENTS_LIMIT`
-   * más recientes. Rechaza con el error de PostgreSQL si no responde, con `DataEventIntegrityError`
+   * las incidencias y las condiciones, y las publicaciones de este entorno de `buoh_datasets`, que no
+   * vencen (ADR-0020 §10), los `DATA_EVENTS_LIMIT` más recientes. Rechaza con el error de PostgreSQL si no responde, con `DataEventIntegrityError`
    * si una fila no pasa sus comprobaciones, y con `LogsUnreadableError` si hay logs y el rol no
    * puede leer ninguno.
    */
@@ -143,7 +145,20 @@ function incidentEvent(log: number, incident: StoredDataIncident): DataEvent {
   }
 }
 
-/** Los eventos de un log en la forma de `DataEvents`. */
+/** Una publicación de `buoh_datasets` en la forma de `DataEvents`, con el log de su dataset. */
+function publicationEvent({ log, record, source }: StoredPublication): DataEvent {
+  return {
+    kind: 'publication',
+    log,
+    at_utc: record.published_at_utc,
+    source,
+    dataset_id: record.dataset_id,
+    publication_id: record.publication_id,
+    state: record.state,
+  };
+}
+
+/** Los eventos de un log en la forma de `DataEvents`, sin las publicaciones. */
 function eventsOf(log: number, stored: LogDataEvents): DataEvent[] {
   return [
     ...stored.catalogVersions.map((version): DataEvent => ({
@@ -155,15 +170,6 @@ function eventsOf(log: number, stored: LogDataEvents): DataEvent[] {
       snapshot_id: version.snapshotId,
       content_sha256: version.contentSha256,
       entry_count: version.entryCount,
-    })),
-    ...stored.publications.map(({ record, source }): DataEvent => ({
-      kind: 'publication',
-      log,
-      at_utc: record.published_at_utc,
-      source,
-      dataset_id: record.dataset_id,
-      publication_id: record.publication_id,
-      state: record.state,
     })),
     ...stored.incidents.map((incident) => incidentEvent(log, incident)),
     ...stored.conditions.map((condition): DataEvent => ({
@@ -234,11 +240,18 @@ export function createDataReader(deps: DataReaderDeps): DataReader {
         // Una fila más que el límite en cada clase: así se sabe si quedan otras fuera.
         const stored = await readLogDataEvents(deps.pool, log, {
           source: DERIV_SOURCE,
-          environment: deps.environment,
           limit: DATA_EVENTS_LIMIT + 1,
         });
         events.push(...eventsOf(log.number, stored));
       }
+      // Las publicaciones salen de `buoh_datasets`, también las de un log que ya venció: los
+      // datasets no vencen (ADR-0020 §6 y §10).
+      const publications = await readDatasetPublications(deps.pool, {
+        source: DERIV_SOURCE,
+        environment: deps.environment,
+        limit: DATA_EVENTS_LIMIT + 1,
+      });
+      events.push(...publications.map(publicationEvent));
       events.sort(newestFirst);
       return {
         logs: read.map((log) => log.number),
