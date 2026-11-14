@@ -394,6 +394,7 @@ describe('GET /api/v1/datos/datasets contra PostgreSQL (ADR-0020 §10)', () => {
       published: '2026-11-14T12:31:10.317Z',
     });
     // Una publicación sustituida del primero: el dataset sale una vez, por la activa.
+    const superseded = nextUuid();
     const core = await ready(admin).query<{ manifest_core_jcs: string }>(
       `SELECT manifest_core_jcs FROM ${DATASETS_SCHEMA}.datasets WHERE dataset_id = $1`,
       [first.datasetId],
@@ -405,7 +406,16 @@ describe('GET /api/v1/datos/datasets contra PostgreSQL (ADR-0020 §10)', () => {
           published_at_utc, state)
        VALUES ($1, 'test', $2, '1.0.0', $3, 's3://buoh-captura/datasets/manifests/y.json', $3,
                '2026-11-14T12:40:00.000Z', 'superseded')`,
-      [nextUuid(), first.datasetId, sha256(core.rows[0]?.manifest_core_jcs ?? '')],
+      [superseded, first.datasetId, sha256(core.rows[0]?.manifest_core_jcs ?? '')],
+    );
+    // Una verificación de la publicación sustituida, más nueva: no cuenta.
+    await ready(admin).query(
+      `INSERT INTO ${DATASETS_SCHEMA}.dataset_verifications
+         (verification_id, dataset_id, publication_id, mode, status, exit_code, error_code,
+          report_jcs, run_id, verified_at_utc)
+       VALUES ($1, $2, $3, 'recompute', 'failed', 1, 'RECOMPUTED_MISMATCH', NULL, $4,
+               '2026-11-14T12:50:00.000Z')`,
+      [nextUuid(), first.datasetId, superseded, nextUuid()],
     );
 
     const response = await getDatasets();
@@ -506,6 +516,63 @@ describe('GET /api/v1/datos/datasets contra PostgreSQL (ADR-0020 §10)', () => {
     });
     expect(JSON.stringify(response)).not.toContain('deriv_options-publication-v1');
     await resetDatasets();
+  });
+
+  it('un dataset activo sin su fila de rango, con incidencias que no suman las de su núcleo o con listas sin orden o repetidas es internal con DatasetIntegrityError: no se calla', async () => {
+    const expectIntegrity = async () => {
+      const response = await getDatasets();
+      expect(response.status).toBe(500);
+      expect(response.lines).toContainEqual({
+        event: 'api_error',
+        request_id: '00000000-0000-4000-8000-000000000000',
+        error: 'DatasetIntegrityError',
+      });
+    };
+    // Quita las filas de un dataset de una tabla append-only, como un error de programación
+    // (ADR-0020 §9).
+    const remove = async (table: string, datasetId: string) => {
+      await ready(admin).query(`ALTER TABLE ${DATASETS_SCHEMA}.${table} DISABLE TRIGGER USER`);
+      await ready(admin).query(`DELETE FROM ${DATASETS_SCHEMA}.${table} WHERE dataset_id = $1`, [
+        datasetId,
+      ]);
+      await ready(admin).query(`ALTER TABLE ${DATASETS_SCHEMA}.${table} ENABLE TRIGGER USER`);
+    };
+    const published = '2026-11-14T12:00:00.000Z';
+    // Sin rango: no se omite.
+    await remove('dataset_log_ranges', (await publishDataset({ log: 5, published })).datasetId);
+    await expectIntegrity();
+    await resetDatasets();
+    // Una incidencia de más: su núcleo dice que no tiene ninguna.
+    const extra = await publishDataset({ log: 5, published });
+    await ready(admin).query(
+      `INSERT INTO ${DATASETS_SCHEMA}.dataset_quality_incidents
+         (dataset_id, incident_id, incident_type, severity, symbol, observed_at_utc, incident_jcs)
+       VALUES ($1, $2, 'connection_lost', 'warning', 'R_100', '2026-11-01T01:00:00.000Z', '{}')`,
+      [extra.datasetId, `sha256:${sha256('de más')}`],
+    );
+    await expectIntegrity();
+    await resetDatasets();
+    // Una de menos: su núcleo cuenta una.
+    const missing = await publishDataset({
+      incidents: [['connection_lost', 'warning']],
+      log: 5,
+      published,
+    });
+    await remove('dataset_quality_incidents', missing.datasetId);
+    await expectIntegrity();
+    await resetDatasets();
+    // Los tipos de condición abiertos sin orden o desconocidos, y los símbolos pendientes repetidos o
+    // vacíos: la base no los comprueba.
+    for (const lists of [
+      { open: ['event_gap_unresolved', 'connection_lost'] },
+      { open: ['desconocida'] },
+      { pending: ['R_100', 'R_100'] },
+      { pending: [''] },
+    ]) {
+      await publishDataset({ ...lists, log: 5, published });
+      await expectIntegrity();
+      await resetDatasets();
+    }
   });
 
   it('con el esquema y sin una de sus tablas, o con un rol sin privilegios, internal: no se calla', async () => {

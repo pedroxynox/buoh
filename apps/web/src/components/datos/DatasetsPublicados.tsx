@@ -1,16 +1,19 @@
 import type { DataDataset, DataDatasets } from '@buoh/contracts';
 import { Badge, Callout, Card } from '@buoh/design-system/react';
 import type { IconName, Tone } from '@buoh/design-system';
-import { formatUtc } from '@buoh/prototype-data';
+import { formatUtc, formatUtcTime } from '@buoh/prototype-data';
 import Link from 'next/link';
 import { datasetEnd, datasetIncidents, datasetPeriod, verificationText } from './datasets';
 import { DATA_DATASETS_LIMIT } from './respuesta';
 
-/** Lo que se sabe de los datasets: leyendo, un fallo con su texto fijo, o la respuesta. */
+/**
+ * Lo que se sabe de los datasets: leyendo, un fallo con su texto fijo, o la respuesta, con la hora
+ * UTC en que llegó.
+ */
 export type DatasetsState =
   | { readonly kind: 'loading' }
   | { readonly kind: 'error'; readonly message: string; readonly unauthenticated: boolean }
-  | { readonly kind: 'ready'; readonly data: DataDatasets };
+  | { readonly kind: 'ready'; readonly data: DataDatasets; readonly readAtUtc: string };
 
 type Verification = DataDataset['verifications']['verify_only'];
 
@@ -29,7 +32,8 @@ function verificationLook(verification: Verification): { tone: Tone; icon: IconN
   }
 }
 
-function VerificationBadge({
+/** El último resultado de un modo y, si lo hay, su hora, en texto a la vista. */
+function VerificationResult({
   label,
   verification,
 }: {
@@ -38,30 +42,40 @@ function VerificationBadge({
 }) {
   const { icon, tone } = verificationLook(verification);
   return (
-    <Badge
-      tone={tone}
-      icon={icon}
-      {...(verification === null ? {} : { title: formatUtc(verification.verified_at_utc) })}
-    >
-      {`${label}: ${verificationText(verification)}`}
-    </Badge>
+    <div>
+      <Badge tone={tone} icon={icon}>
+        {`${label}: ${verificationText(verification)}`}
+      </Badge>
+      {verification === null ? null : (
+        <div className="b-secondary b-num w-small">{formatUtc(verification.verified_at_utc)}</div>
+      )}
+    </div>
   );
 }
 
-/** Los metadatos de la lista (concepto de interfaz §1): la fuente, los símbolos y las reglas. */
-function metadataNote(data: DataDatasets): string {
+/**
+ * Los metadatos de la lista (concepto de interfaz §1): la fuente, los símbolos, las reglas, el
+ * intervalo, cuánto se guardan y la frescura, la hora de la lectura, sin refresco.
+ */
+function metadataNote(data: DataDatasets, readAtUtc: string | null): string {
   const symbols = [...new Set(data.datasets.flatMap((dataset) => dataset.symbols))].sort();
   const rules = [...new Set(data.datasets.map((dataset) => dataset.quality_rule_version))].sort();
-  const base =
-    'Captura de Deriv. Las horas son UTC. Los datasets no vencen: siguen aunque su log ya no exista.';
+  const base = 'Captura de Deriv. Las horas son UTC.';
   const of =
     data.datasets.length === 0
       ? ''
       : ` Símbolos: ${symbols.join(', ')}; reglas ${rules.join(', ')}.`;
+  const interval =
+    ' Cada dataset tiene unas 6 horas de captura y se publica poco después de las 00:00, 06:00, 12:00 o 18:00 UTC.' +
+    ' Los datasets no vencen: siguen aunque su log ya no exista.';
   const cut = data.truncated
     ? ` Se muestran los ${String(DATA_DATASETS_LIMIT)} más recientes: hay otros más viejos.`
     : '';
-  return `${base}${of}${cut}`;
+  const read =
+    readAtUtc === null
+      ? ''
+      : ` Leído a las ${formatUtcTime(readAtUtc)}; la página no se actualiza sola.`;
+  return `${base}${of}${interval}${cut}${read}`;
 }
 
 /**
@@ -87,7 +101,10 @@ export function DatasetsPublicadosView({ state }: { readonly state: DatasetsStat
           ) : null}
         </Callout>
       ) : state.data.datasets.length === 0 ? (
-        <p className="b-secondary">Todavía no hay datasets publicados.</p>
+        <p className="b-secondary">
+          Todavía no hay datasets publicados: buoh publica uno con cada 6 horas de captura. Vuelve a
+          abrir la página más tarde.
+        </p>
       ) : (
         <div className="w-table-wrap">
           <table className="b-table">
@@ -123,11 +140,11 @@ export function DatasetsPublicadosView({ state }: { readonly state: DatasetsStat
                   </td>
                   <td>
                     <div className="w-stack">
-                      <VerificationBadge
+                      <VerificationResult
                         label="Comprobación"
                         verification={dataset.verifications.verify_only}
                       />
-                      <VerificationBadge
+                      <VerificationResult
                         label="Recálculo"
                         verification={dataset.verifications.recompute}
                       />
@@ -141,7 +158,9 @@ export function DatasetsPublicadosView({ state }: { readonly state: DatasetsStat
         </div>
       )}
       <p className="b-secondary w-small">
-        {metadataNote(state.kind === 'ready' ? state.data : { datasets: [], truncated: false })}
+        {state.kind === 'ready'
+          ? metadataNote(state.data, state.readAtUtc)
+          : metadataNote({ datasets: [], truncated: false }, null)}
       </p>
     </Card>
   );

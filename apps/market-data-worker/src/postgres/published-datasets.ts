@@ -2,8 +2,10 @@ import {
   conditionTypeSchema,
   datasetManifestCoreSchema,
   deriveDatasetId,
+  isSortedUnique,
   qualityIncidentTypeSchema,
   severitySchema,
+  symbolSchema,
   utcTimestampMsSchema,
   uuidV7Schema,
   type DatasetManifestCore,
@@ -65,8 +67,10 @@ export interface ReadPublishedDatasetsInput {
 /**
  * Una fila de un dataset publicado que no pasa sus comprobaciones: un `manifest_core` que no es JSON,
  * que no cumple su contrato, un identificador que no es el SHA-256 del JCS de su núcleo, otra
- * fuente, o un rango, una incidencia o una verificación que no tienen sus formatos. No repite nada de
- * su contenido.
+ * fuente, un dataset activo sin su fila de rango, un rango, una incidencia o una verificación que no
+ * tienen sus formatos, unos símbolos pendientes o unos tipos de condición abiertos sin orden o
+ * repetidos, o unas incidencias que no suman el `incident_count` de su núcleo. No repite nada de su
+ * contenido.
  */
 export class DatasetIntegrityError extends TypeError {
   constructor() {
@@ -84,18 +88,19 @@ function check(condition: boolean): void {
 /** Una tabla que no existe: con el nombre del esquema, también si es el esquema el que falta. */
 const UNDEFINED_TABLE = '42P01';
 
+// Las columnas del rango son null en un dataset sin su fila de `dataset_log_ranges` (LEFT JOIN).
 interface DatasetRow {
   publication_id: string;
   published_at_utc: string;
   dataset_id: string;
   source: string;
   manifest_core_jcs: string;
-  log_number: number;
-  first_segment: number;
-  last_segment: number;
-  clean: boolean;
-  pending_continuity_symbols: string[];
-  open_condition_types: string[];
+  log_number: number | null;
+  first_segment: number | null;
+  last_segment: number | null;
+  clean: boolean | null;
+  pending_continuity_symbols: string[] | null;
+  open_condition_types: string[] | null;
 }
 
 interface IncidentRow {
@@ -115,6 +120,55 @@ interface VerificationRow {
 
 const isSegment = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+const isLogNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= MAX_LOG_NUMBER;
+
+/** El log y los segmentos de un dataset, y cómo terminó (`dataset_log_ranges`). */
+type StoredDatasetRange = Pick<
+  StoredPublishedDataset,
+  | 'clean'
+  | 'first_segment'
+  | 'last_segment'
+  | 'log'
+  | 'open_condition_types'
+  | 'pending_continuity_symbols'
+>;
+
+/**
+ * El rango del dataset, comprobado: su log y sus segmentos, y lo que dejó abierto, en orden y sin
+ * repetir, como lo escribe la publicación y lo pide el contrato. Un dataset activo sin su fila de
+ * rango, que la publicación inserta en el mismo `COMMIT` que lo hace visible, llega con esas columnas
+ * en null y no pasa: es un error de programación (ADR-0020 §9), y la lista no lo omite en silencio.
+ */
+function rangeOf(row: DatasetRow): StoredDatasetRange {
+  const { clean, first_segment: first, last_segment: last, log_number: log } = row;
+  const pending = row.pending_continuity_symbols;
+  const open = row.open_condition_types;
+  if (
+    !isLogNumber(log) ||
+    !isSegment(first) ||
+    !isSegment(last) ||
+    last < first ||
+    typeof clean !== 'boolean' ||
+    !Array.isArray(pending) ||
+    !pending.every((symbol) => symbolSchema.safeParse(symbol).success) ||
+    !isSortedUnique(pending) ||
+    !Array.isArray(open) ||
+    !open.every((type) => conditionTypeSchema.safeParse(type).success) ||
+    !isSortedUnique(open)
+  ) {
+    throw new DatasetIntegrityError();
+  }
+  return {
+    clean,
+    first_segment: first,
+    last_segment: last,
+    log,
+    open_condition_types: open as StoredPublishedDataset['open_condition_types'],
+    pending_continuity_symbols: pending,
+  };
+}
 
 /**
  * El núcleo del manifiesto, validado con su contrato y con su identificador, el SHA-256 de su JCS: el
@@ -172,7 +226,8 @@ async function schemaMissing(pool: Pick<Pool, 'query'>, error: unknown): Promise
  * publicación (por `verification_id`, un UUIDv7), o `null` si no tiene. Sin el esquema
  * `buoh_datasets`, ninguno; con el esquema, un fallo al leerlo, como sin privilegios (`42501`) o sin
  * una de sus tablas, rechaza con el error de PostgreSQL. Lanza `DatasetIntegrityError` si una fila no
- * pasa sus comprobaciones. No escribe nada.
+ * pasa sus comprobaciones, también si a un dataset activo le falta su rango, que no se omite. No
+ * escribe nada.
  */
 export async function readPublishedDatasets(
   pool: Pick<Pool, 'query'>,
@@ -192,7 +247,7 @@ export async function readPublishedDatasets(
               g.pending_continuity_symbols, g.open_condition_types
          FROM ${schema}.published_manifest_records r
          JOIN ${schema}.datasets d USING (dataset_id)
-         JOIN ${schema}.dataset_log_ranges g USING (dataset_id)
+         LEFT JOIN ${schema}.dataset_log_ranges g USING (dataset_id)
         WHERE d.source = $1 AND r.deployment_environment = $2 AND r.state = 'active'
         ORDER BY r.published_at_utc DESC, r.publication_id DESC
         LIMIT $3`,
@@ -224,19 +279,10 @@ export async function readPublishedDatasets(
   return datasets.map((row) => {
     check(
       uuidV7Schema.safeParse(row.publication_id).success &&
-        utcTimestampMsSchema.safeParse(row.published_at_utc).success &&
-        Number.isSafeInteger(row.log_number) &&
-        row.log_number >= 1 &&
-        row.log_number <= MAX_LOG_NUMBER &&
-        isSegment(row.first_segment) &&
-        isSegment(row.last_segment) &&
-        row.last_segment >= row.first_segment &&
-        typeof row.clean === 'boolean' &&
-        Array.isArray(row.pending_continuity_symbols) &&
-        row.pending_continuity_symbols.every((symbol) => symbol.length > 0) &&
-        Array.isArray(row.open_condition_types) &&
-        row.open_condition_types.every((type) => conditionTypeSchema.safeParse(type).success),
+        utcTimestampMsSchema.safeParse(row.published_at_utc).success,
     );
+    const range = rangeOf(row);
+    const core = coreOf(row);
     const own = incidents
       .filter((item) => item.dataset_id === row.dataset_id)
       .map((item): StoredDatasetIncidentCount => {
@@ -254,6 +300,8 @@ export async function readPublishedDatasets(
         const right = `${b.incident_type} ${b.severity}`;
         return left < right ? -1 : left > right ? 1 : 0;
       });
+    // Las incidencias de su núcleo, ni una más ni una menos: los grupos suman su `incident_count`.
+    check(own.reduce((sum, item) => sum + item.count, 0) === core.incident_count);
     const latest = (mode: string) => {
       const found = verifications.find(
         (item) => item.publication_id === row.publication_id && item.mode === mode,
@@ -261,16 +309,15 @@ export async function readPublishedDatasets(
       return found === undefined ? null : verificationOf(found);
     };
     return {
-      clean: row.clean,
-      core: coreOf(row),
+      clean: range.clean,
+      core,
       dataset_id: row.dataset_id,
-      first_segment: row.first_segment,
+      first_segment: range.first_segment,
       incidents: own,
-      last_segment: row.last_segment,
-      log: row.log_number,
-      open_condition_types:
-        row.open_condition_types as StoredPublishedDataset['open_condition_types'],
-      pending_continuity_symbols: row.pending_continuity_symbols,
+      last_segment: range.last_segment,
+      log: range.log,
+      open_condition_types: range.open_condition_types,
+      pending_continuity_symbols: range.pending_continuity_symbols,
       publication_id: row.publication_id,
       published_at_utc: row.published_at_utc,
       verifications: { recompute: latest('recompute'), verify_only: latest('verify-only') },

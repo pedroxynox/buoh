@@ -220,7 +220,7 @@ En `apps/web/out-api`, el tema noche o día se guarda por cuenta (`F2-UI-001` de
 
 En `apps/web/out-api`, la sección Datos muestra los datasets publicados de producción (`F2-UI-001` del [plan de Fase 2](../plan/fase-2-laboratorio-y-bot-shadow.md); [ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) §10). `apps/web/out`, el escritorio, no cambia: sigue con los datos ficticios y sin llamar a la API.
 
-- **De dónde salen.** De `GET /api/v1/datos/datasets` (`DataDatasets`): los de `buoh_datasets` en el entorno de la API, cada uno por su publicación activa, los 200 más recientes, del más nuevo al más viejo. Solo lee PostgreSQL, nunca R2. Como la salud (§10), la lectura va sin el token CSRF y se comprueba en el navegador con las reglas del contrato antes de dibujarse. Se pide al abrir la página, sin refresco: un dataset nuevo llega cada unas 6 horas.
+- **De dónde salen.** De `GET /api/v1/datos/datasets` (`DataDatasets`): los de `buoh_datasets` en el entorno de la API, cada uno por su publicación activa, los 200 más recientes, del más nuevo al más viejo. Solo lee PostgreSQL, nunca R2. Como la salud (§10), la lectura va sin el token CSRF y se comprueba en el navegador con las reglas del contrato antes de dibujarse. Se pide al abrir la página, sin refresco: un dataset nuevo llega más o menos cada 6 horas.
 - **Qué muestra.** Una tabla «Datasets publicados», una fila por dataset, sin controles para cambiar nada:
 
   | Columna | Qué dice |
@@ -231,12 +231,13 @@ En `apps/web/out-api`, la sección Datos muestra los datasets publicados de prod
   | Ticks | cuántos ticks tiene |
   | Incidencias | cuántas tiene y de qué tipos, como «3: 1 conexión perdida, 2 duplicados exactos», o «Ninguna» |
   | Final | «Limpio», o lo que dejó abierto: la continuidad pendiente de cada símbolo y las condiciones abiertas |
-  | Verificación | el último resultado de cada modo: «Comprobación» (`--verify-only`) y «Recálculo», cada uno «Pasó», «Falló» con su código, «Sin resultado» o «Pendiente» si todavía no se verificó, con la hora en su título |
+  | Verificación | el último resultado de cada modo: «Comprobación» (`--verify-only`) y «Recálculo», cada uno «Pasó», «Falló» con su código, «Sin resultado» o «Pendiente» si todavía no se verificó, y debajo de cada resultado, en texto, su hora UTC |
   | Identificador | el principio de su `dataset_id` |
 
-  Cada insignia lleva su texto y su icono, nunca solo el color. Debajo, dos tarjetas explican cómo se verifica y qué nunca pasa, y enlazan a la Auditoría, donde están las incidencias y las condiciones de la captura.
-- **Metadatos y calidad.** Debajo de la tabla, la vista dice la fuente, la captura de Deriv; los símbolos y las reglas de los datasets que muestra; que las horas son UTC; y, si la lista está cortada, que se muestran los 200 más recientes. La frescura es la de la lectura, al abrir la página. La calidad de cada dataset son su final, sus incidencias y su verificación.
+  Cada insignia lleva su texto y su icono, nunca solo el color. Debajo, dos tarjetas explican cómo se verifica y qué nunca pasa.
+- **Las incidencias, una por una.** La columna las cuenta por tipo y gravedad, porque un dataset puede tener cientos. Cada una sigue en su dataset, en `dataset_quality_incidents` y en sus artefactos, pero ninguna pantalla las muestra todavía una por una, tampoco la Auditoría, cuyos eventos de datos son los de los logs y las publicaciones (§12). Queda pendiente, y la tarjeta «Qué nunca pasa» lo dice: la lista de cada una todavía no está en la web.
+- **Metadatos y calidad.** Debajo de la tabla, la vista dice la fuente, la captura de Deriv; los símbolos y las reglas de los datasets que muestra; que las horas son UTC; el intervalo, unas 6 horas de captura por dataset, publicado poco después de las 00:00, 06:00, 12:00 o 18:00 UTC ([ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) §7); y, si la lista está cortada, que se muestran los 200 más recientes. La frescura es la de la lectura: la vista dice a qué hora leyó y que la página no se actualiza sola. La calidad de cada dataset son su final, sus incidencias y su verificación.
 - **Cuánto se guardan.** Los datasets no vencen ([ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) §6), y la vista lo dice: siguen aunque su log ya no exista.
-- **Estados (§5).** Cargando: «Cargando los datasets publicados…». Vacío: «Todavía no hay datasets publicados.». Error: el texto fijo de su código y, sin sesión, el enlace para iniciarla. Degradado: no hay estado degradado de la lista; un dataset que no terminó limpio o cuya verificación falló lo dice en su fila.
+- **Estados (§5).** Cargando: «Cargando los datasets publicados…». Vacío: «Todavía no hay datasets publicados», con por qué, uno con cada 6 horas de captura, y qué hacer, volver a abrir la página más tarde. Error: el texto fijo de su código y, sin sesión, el enlace para iniciarla. Degradado: no hay estado degradado de la lista; un dataset que no terminó limpio o cuya verificación falló lo dice en su fila.
 - **Pruebas.** `apps/web/test/datos.test.tsx` contrasta la comprobación de la respuesta con el esquema de `@buoh/contracts`, también en miles de respuestas cambiadas al azar, y prueba los textos, la vista en cada estado y la lectura sin el token CSRF. `apps/web/test/out-api.test.ts` comprueba que la exportación pide los datasets y no lleva las tablas ficticias.
 

@@ -1,7 +1,6 @@
 'use client';
 
 import { Card } from '@buoh/design-system/react';
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { PageHeader } from './AppShell';
 import { api, ApiCallError, describeFailure } from './auth/api';
@@ -9,8 +8,9 @@ import { DatasetsPublicadosView, type DatasetsState } from './datos/DatasetsPubl
 
 /**
  * Datos de la web servida por la API (concepto de interfaz §14; ADR-0020 §10): pide al abrir la página
- * los datasets publicados, del más nuevo al más viejo, con su verificación. Las incidencias y las
- * condiciones de la captura están en la Auditoría. Sin sesión, invita a iniciarla.
+ * los datasets publicados, del más nuevo al más viejo, con su verificación, y guarda la hora de la
+ * lectura, porque no se actualiza sola. Las incidencias de cada dataset se cuentan por tipo y
+ * gravedad: ninguna pantalla las muestra todavía una por una. Sin sesión, invita a iniciarla.
  */
 export function DatosReal() {
   const [state, setState] = useState<DatasetsState>({ kind: 'loading' });
@@ -20,7 +20,7 @@ export function DatosReal() {
     api
       .dataDatasets()
       .then((data) => {
-        if (active) setState({ kind: 'ready', data });
+        if (active) setState({ kind: 'ready', data, readAtUtc: new Date().toISOString() });
       })
       .catch((caught: unknown) => {
         if (active) {
@@ -45,7 +45,7 @@ export function DatosReal() {
       <PageHeader
         eyebrow="Datos"
         title="¿Puedo confiar en estos datos?"
-        summary="Cada dataset publicado tiene un identificador que permite reconstruirlo igual, y buoh lo comprueba en dos modos poco después de publicarlo. Los datasets no se borran."
+        summary="Cada dataset publicado tiene un identificador que permite reconstruirlo igual, y buoh lo comprueba en dos modos poco después de publicarlo. Los datasets no vencen."
       />
 
       <DatasetsPublicadosView state={state} />
@@ -68,11 +68,8 @@ export function DatosReal() {
             <li>Un dato crudo no se reescribe.</li>
             <li>Un hueco no se rellena ni se suaviza.</li>
             <li>
-              Una incidencia no desaparece al resolverse: queda su historia, en la{' '}
-              <Link className="w-link" href="/auditoria/">
-                Auditoría
-              </Link>
-              .
+              Una incidencia no desaparece al resolverse: queda en su dataset, que no vence. Aquí se
+              cuentan por tipo; la lista de cada una todavía no está en la web.
             </li>
           </ul>
         </Card>

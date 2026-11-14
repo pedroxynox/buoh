@@ -337,19 +337,30 @@ describe('la vista de los datasets publicados', () => {
   const render = (state: DatasetsState) =>
     renderToStaticMarkup(<DatasetsPublicadosView state={state} />);
 
-  it('con datasets: una fila por dataset, con la fuente, los símbolos, las reglas y cuánto se guardan', () => {
-    const html = render({ kind: 'ready', data: DATASETS });
+  const READ_AT = '2026-11-14T15:50:12.345Z';
+
+  it('con datasets: una fila por dataset, con la fuente, los símbolos, las reglas, el intervalo, cuánto se guardan y la hora de la lectura', () => {
+    const html = render({ kind: 'ready', data: DATASETS, readAtUtc: READ_AT });
     expect(html.match(/<tr>/gu)?.length).toBe(DATASETS.datasets.length + 1);
     expect(html).toContain('14 nov 2026, 12:21:23 UTC');
     expect(html).toContain('Log 1 · segmentos 0–71');
     expect(html).toContain('11190');
     expect(html).toContain('Limpio');
     expect(html).toContain('Falló: STORAGE_OBJECT_MISMATCH');
+    // La hora de cada verificación, en texto a la vista, no en un atributo.
+    expect(html).toContain('>14 nov 2026, 12:21:33 UTC<');
+    expect(html).toContain('>14 nov 2026, 12:21:46 UTC<');
+    expect(html).toContain('>14 nov 2026, 12:16:10 UTC<');
+    expect(html).not.toMatch(/title="[^"]*UTC"/u);
     expect(html).toContain('sha256:111111111111');
     expect(html).toContain('Deriv');
     expect(html).toContain('R_100');
     expect(html).toContain('reglas 3.0.0');
+    expect(html).toContain(
+      'Cada dataset tiene unas 6 horas de captura y se publica poco después de las 00:00, 06:00, 12:00 o 18:00 UTC.',
+    );
     expect(html).toContain('Los datasets no vencen');
+    expect(html).toContain('Leído a las 15:50:12 UTC; la página no se actualiza sola.');
     expect(html).not.toContain('más recientes');
     // Solo muestra: ningún control para cambiar nada, y ningún dato ficticio.
     expect(html).not.toMatch(/<button|<input|<form/u);
@@ -366,15 +377,25 @@ describe('la vista de los datasets publicados', () => {
         })),
         truncated: true,
       },
+      readAtUtc: READ_AT,
     });
     expect(html).toContain(`Se muestran los ${String(DATA_DATASETS_LIMIT)} más recientes`);
   });
 
   it('cargando, vacío y con un error, con el enlace para iniciar sesión si falta', () => {
-    expect(render({ kind: 'loading' })).toContain('Cargando los datasets publicados…');
-    expect(render({ kind: 'ready', data: { datasets: [], truncated: false } })).toContain(
-      'Todavía no hay datasets publicados.',
+    const loading = render({ kind: 'loading' });
+    expect(loading).toContain('Cargando los datasets publicados…');
+    expect(loading).not.toContain('Leído');
+    // Vacío: por qué y qué hacer (concepto de interfaz §5).
+    const empty = render({
+      kind: 'ready',
+      data: { datasets: [], truncated: false },
+      readAtUtc: READ_AT,
+    });
+    expect(empty).toContain(
+      'Todavía no hay datasets publicados: buoh publica uno con cada 6 horas de captura. Vuelve a abrir la página más tarde.',
     );
+    expect(empty).toContain('Leído a las 15:50:12 UTC');
     const unauthenticated = render({
       kind: 'error',
       message: 'Tu sesión no es válida. Vuelve a iniciar sesión.',
@@ -396,6 +417,12 @@ describe('la vista de los datasets publicados', () => {
     expect(html).toContain('Datasets publicados');
     expect(html).toContain('Cargando los datasets publicados…');
     expect(html).not.toContain('Incidencias de calidad');
+    // Lo que promete es lo que hay: los datasets no vencen, y las incidencias de cada uno, una por
+    // una, no están en la Auditoría ni en ninguna otra pantalla.
+    expect(html).toContain('Los datasets no vencen.');
+    expect(html).not.toContain('no se borran');
+    expect(html).toContain('la lista de cada una todavía no está en la web');
+    expect(html).not.toContain('/auditoria');
   });
 });
 
