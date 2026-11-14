@@ -1,5 +1,8 @@
 import {
+  DATA_DATASETS_LIMIT,
   DATA_EVENTS_LIMIT,
+  type DataDataset,
+  type DataDatasets,
   type DataEvent,
   type DataEvents,
   type DataHealth,
@@ -12,6 +15,7 @@ import {
   readDatasetPublications,
   readLatestStoredHealth,
   readLogDataEvents,
+  readPublishedDatasets,
   selectActiveLog,
   type CaptureLog,
   type LogDataEvents,
@@ -19,6 +23,7 @@ import {
   type StoredDataIncident,
   type StoredHealthObservation,
   type StoredPublication,
+  type StoredPublishedDataset,
 } from '@buoh/market-data-worker/lectura';
 import type { Pool } from 'pg';
 
@@ -43,6 +48,14 @@ export interface DataReader {
    * puede leer ninguno.
    */
   events(): Promise<DataEvents>;
+  /**
+   * Los datasets publicados en este entorno (`DataDatasets`, ADR-0020 §10), de `buoh_datasets`, los
+   * `DATA_DATASETS_LIMIT` más recientes, con su período, sus conteos, cómo terminaron, sus
+   * incidencias y la última verificación de cada modo. No lee R2. Sin el esquema, ninguno. Rechaza
+   * con el error de PostgreSQL si no responde o no se puede leer el esquema, y con
+   * `DatasetIntegrityError` si una fila no pasa sus comprobaciones.
+   */
+  datasets(): Promise<DataDatasets>;
 }
 
 export interface DataReaderDeps {
@@ -226,8 +239,54 @@ function newestFirst(a: DataEvent, b: DataEvent): number {
   return idA < idB ? 1 : idA > idB ? -1 : 0;
 }
 
+/** Un dataset de `buoh_datasets` en la forma de `DataDatasets`. */
+function datasetOf(stored: StoredPublishedDataset): DataDataset {
+  const { core } = stored;
+  return {
+    dataset_id: stored.dataset_id,
+    publication_id: stored.publication_id,
+    published_at_utc: stored.published_at_utc,
+    source: core.source,
+    symbols: [...core.symbols],
+    log: stored.log,
+    first_segment: stored.first_segment,
+    last_segment: stored.last_segment,
+    event_time_from_utc: core.event_time_from_utc,
+    event_time_to_utc: core.event_time_to_utc,
+    source_event_count: core.source_event_count,
+    raw_frame_count: core.raw_frame_count,
+    normalized_tick_count: core.normalized_tick_count,
+    incident_count: core.incident_count,
+    condition_event_count: core.condition_event_count,
+    quality_rule_version: core.quality_rule_version,
+    quality_profile_id: core.quality_profile_id,
+    clean: stored.clean,
+    pending_continuity_symbols: [...stored.pending_continuity_symbols],
+    open_condition_types: [...stored.open_condition_types],
+    incidents: stored.incidents.map((item) => ({ ...item })),
+    verifications: {
+      verify_only:
+        stored.verifications.verify_only === null ? null : { ...stored.verifications.verify_only },
+      recompute:
+        stored.verifications.recompute === null ? null : { ...stored.verifications.recompute },
+    },
+  };
+}
+
 export function createDataReader(deps: DataReaderDeps): DataReader {
   return {
+    datasets: async () => {
+      // Uno más que el límite: así se sabe si quedan otros fuera.
+      const stored = await readPublishedDatasets(deps.pool, {
+        source: DERIV_SOURCE,
+        environment: deps.environment,
+        limit: DATA_DATASETS_LIMIT + 1,
+      });
+      return {
+        datasets: stored.slice(0, DATA_DATASETS_LIMIT).map(datasetOf),
+        truncated: stored.length > DATA_DATASETS_LIMIT,
+      };
+    },
     events: async () => {
       const logs = await readableCaptureLogs(deps);
       const now = new Date(deps.clock()).toISOString();

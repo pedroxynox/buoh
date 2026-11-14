@@ -112,6 +112,7 @@ describe('la tabla de rutas', () => {
       'GET /api/v1/auditoria',
       'GET /api/v1/datos/salud',
       'GET /api/v1/datos/eventos',
+      'GET /api/v1/datos/datasets',
       'GET /api/v1/datos/grafico',
       'GET /api/v1/datos/catalogo',
     ]);

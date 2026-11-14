@@ -85,7 +85,7 @@ describe('variante servida por la API (out-api)', () => {
 
   it('la marca de datos ficticios va solo en las secciones que siguen con datos ficticios', () => {
     const real = NAV_ITEMS.filter((item) => item.realInApi === true).map((item) => item.href);
-    expect(real).toEqual(['/', '/mercados/', '/auditoria/']);
+    expect(real).toEqual(['/', '/mercados/', '/datos/', '/auditoria/']);
     for (const item of NAV_ITEMS) {
       const text = textOf(topBarOf(read(pageOf(item.href))));
       if (item.realInApi === true) {
@@ -157,6 +157,18 @@ describe('variante servida por la API (out-api)', () => {
   it('su JavaScript sí llama a la API, bajo /api/v1/', () => {
     const calling = files(OUT_API, '.js').filter((script) =>
       readFileSync(script, 'utf8').includes('/api/v1/'),
+    );
+    expect(calling.length).toBeGreaterThan(0);
+  });
+
+  it('la sección Datos es la variante real: pide los datasets a la API, no las tablas ficticias', () => {
+    const text = textOf(read(['datos', 'index.html']));
+    expect(text).toContain('Datasets publicados');
+    expect(text).toContain('Cargando los datasets publicados');
+    // El título de la tabla ficticia del escritorio no aparece en la variante real.
+    expect(text).not.toContain('Incidencias de calidad');
+    const calling = files(OUT_API, '.js').filter((script) =>
+      readFileSync(script, 'utf8').includes('/api/v1/datos/datasets'),
     );
     expect(calling.length).toBeGreaterThan(0);
   });

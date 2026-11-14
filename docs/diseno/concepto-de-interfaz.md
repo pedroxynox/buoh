@@ -157,7 +157,7 @@ En `apps/web/out-api`, el Observatorio y las insignias de modo y salud de la bar
 - **Último dataset.** El `last_published_dataset_id` del informe. Hasta F2.5 no hay ninguno, y la tarjeta lo dice.
 - **Lo que todavía no existe.** Las estrategias en shadow y las señales muestran su estado vacío, con su porqué, y el kill switch conserva su candado de Fase 4. Sin informe, el último dataset y las condiciones dicen por qué: leyendo, la salud no se pudo leer, todavía no hay ninguna observación o la última falló. El Observatorio de `out-api` no muestra ningún dato ficticio, así que no lleva la marca.
 - **Estados (§5).** Cargando: un esqueleto quieto. Vacío: sin log o sin observaciones, con su porqué. Error: qué falló y, sin sesión, el enlace para iniciarla; si falla una actualización después de una buena, lo dice y conserva la anterior, con su hora. Degradado: la insignia cambia y la causa lo explica.
-- **La marca «Datos ficticios».** En `out-api` va en la barra superior solo en las secciones que siguen con datos ficticios: no en el Observatorio, en Mercados (§11) ni en la Auditoría, que muestran datos reales, ni en el inicio de sesión ni en el enlace, que no muestran datos. Cada sección dice en la navegación (`realInApi`, en `apps/web/src/navigation.ts`) cuándo pasa a datos reales. Una ruta que no existe, la del 404, la lleva.
+- **La marca «Datos ficticios».** En `out-api` va en la barra superior solo en las secciones que siguen con datos ficticios: no en el Observatorio, en Mercados (§11), en Datos (§14) ni en la Auditoría, que muestran datos reales, ni en el inicio de sesión ni en el enlace, que no muestran datos. Cada sección dice en la navegación (`realInApi`, en `apps/web/src/navigation.ts`) cuándo pasa a datos reales. Una ruta que no existe, la del 404, la lleva.
 - **Pruebas.** `apps/web/test/salud.test.ts` comprueba la forma de la respuesta contra el contrato, la causa de cada estado, la frescura, el refresco y la marca de cada sección, y compara la lectura de la causa, con su gravedad, con la derivación real del dominio (`deriveLiveHealthReport`) en todas las combinaciones de sus entradas, y la gravedad de cada alerta con la evaluación real de `data:health` del worker (`evaluateDataHealth`). `apps/web/test/observatorio.test.tsx` dibuja el Observatorio y la insignia, y `apps/web/test/out-api.test.ts` comprueba la exportación.
 
 ## 11. Mercados con datos reales (F2.4)
@@ -215,3 +215,28 @@ En `apps/web/out-api`, el tema noche o día se guarda por cuenta (`F2-UI-001` de
 - **Al abrir la página.** Empieza con noche, el tema por defecto ([guía de marca](marca-buoh.md)). Con sesión, el menú de la sesión lee el tema de la cuenta y lo pone en `data-theme` (`noche` o `dia`), con el esquema de color de cada tema para los controles del navegador. Sin sesión, o si la lectura falla, sigue con noche. La lectura va sin el token CSRF, así que no renueva la inactividad de la sesión. Con el tema día, la página se ve un momento en noche antes de cambiar.
 - **El botón.** En el menú de la sesión, «Usar el tema día» o «Usar el tema noche», según el que esté puesto. Guarda el otro tema con el token CSRF y lo pone en la página al responder la API. Si falla, el menú dice por qué, con el texto fijo de su código, y el tema no cambia.
 - **Pruebas.** `apps/web/test/tema.test.ts` contrasta la comprobación de la respuesta con el esquema de `@buoh/contracts` y prueba el tema en la página, lo que elige y dice el botón, y las dos lecturas. El cableado del menú (`SessionMenu.tsx`: leer al abrir, poner el tema, guardar al pulsar) no tiene prueba propia, como el resto del menú de la sesión. `apps/web/test/out-api.test.ts` comprueba que la exportación las pide, y `no-api-call.test.ts`, que el escritorio no.
+
+## 14. Datos con los datasets publicados (F2.4)
+
+En `apps/web/out-api`, la sección Datos muestra los datasets publicados de producción (`F2-UI-001` del [plan de Fase 2](../plan/fase-2-laboratorio-y-bot-shadow.md); [ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) §10). `apps/web/out`, el escritorio, no cambia: sigue con los datos ficticios y sin llamar a la API.
+
+- **De dónde salen.** De `GET /api/v1/datos/datasets` (`DataDatasets`): los de `buoh_datasets` en el entorno de la API, cada uno por su publicación activa, los 200 más recientes, del más nuevo al más viejo. Solo lee PostgreSQL, nunca R2. Como la salud (§10), la lectura va sin el token CSRF y se comprueba en el navegador con las reglas del contrato antes de dibujarse. Se pide al abrir la página, sin refresco: un dataset nuevo llega cada unas 6 horas.
+- **Qué muestra.** Una tabla «Datasets publicados», una fila por dataset, sin controles para cambiar nada:
+
+  | Columna | Qué dice |
+  |---|---|
+  | Publicado | la hora UTC de su publicación |
+  | Período | la hora UTC de su primer tick y la del último, o «Sin ticks» |
+  | Origen | su log y sus segmentos, como «Log 1 · segmentos 0–71» |
+  | Ticks | cuántos ticks tiene |
+  | Incidencias | cuántas tiene y de qué tipos, como «3: 1 conexión perdida, 2 duplicados exactos», o «Ninguna» |
+  | Final | «Limpio», o lo que dejó abierto: la continuidad pendiente de cada símbolo y las condiciones abiertas |
+  | Verificación | el último resultado de cada modo: «Comprobación» (`--verify-only`) y «Recálculo», cada uno «Pasó», «Falló» con su código, «Sin resultado» o «Pendiente» si todavía no se verificó, con la hora en su título |
+  | Identificador | el principio de su `dataset_id` |
+
+  Cada insignia lleva su texto y su icono, nunca solo el color. Debajo, dos tarjetas explican cómo se verifica y qué nunca pasa, y enlazan a la Auditoría, donde están las incidencias y las condiciones de la captura.
+- **Metadatos y calidad.** Debajo de la tabla, la vista dice la fuente, la captura de Deriv; los símbolos y las reglas de los datasets que muestra; que las horas son UTC; y, si la lista está cortada, que se muestran los 200 más recientes. La frescura es la de la lectura, al abrir la página. La calidad de cada dataset son su final, sus incidencias y su verificación.
+- **Cuánto se guardan.** Los datasets no vencen ([ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) §6), y la vista lo dice: siguen aunque su log ya no exista.
+- **Estados (§5).** Cargando: «Cargando los datasets publicados…». Vacío: «Todavía no hay datasets publicados.». Error: el texto fijo de su código y, sin sesión, el enlace para iniciarla. Degradado: no hay estado degradado de la lista; un dataset que no terminó limpio o cuya verificación falló lo dice en su fila.
+- **Pruebas.** `apps/web/test/datos.test.tsx` contrasta la comprobación de la respuesta con el esquema de `@buoh/contracts`, también en miles de respuestas cambiadas al azar, y prueba los textos, la vista en cada estado y la lectura sin el token CSRF. `apps/web/test/out-api.test.ts` comprueba que la exportación pide los datasets y no lleva las tablas ficticias.
+

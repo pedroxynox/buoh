@@ -137,6 +137,7 @@ curl -sI https://<dirección>/api/salud
 curl -s -o /dev/null -w '%{http_code}\n' https://<dirección>/api/v1/desconocida
 curl -s https://<dirección>/api/v1/datos/salud
 curl -s https://<dirección>/api/v1/datos/eventos
+curl -s https://<dirección>/api/v1/datos/datasets
 curl -s https://<dirección>/api/v1/preferencias
 curl -s 'https://<dirección>/api/v1/datos/grafico?hours=1'
 curl -s https://<dirección>/api/v1/datos/catalogo
@@ -145,7 +146,7 @@ curl -s https://<dirección>/api/v1/datos/catalogo
 - `/api/salud` responde `200` cuando la API responde y tiene sus migraciones; si le faltan, `503 not_ready`.
 - Toda respuesta lleva las cabeceras de seguridad de §9 (`Strict-Transport-Security`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `X-Frame-Options`, `X-Robots-Tag`); el HTML, su política de contenido con los hashes de sus scripts en línea; el JSON y los demás archivos de la web, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`; y el JSON, `Cache-Control: no-store` (`F2-API-001`).
 - Una ruta `/api/` que no existe responde `404 not_found` en JSON; cualquier otra ruta desconocida, el `404.html` de la web.
-- `GET /api/v1/datos/salud`, `GET /api/v1/datos/eventos`, `GET /api/v1/datos/grafico?hours=1`, `GET /api/v1/datos/catalogo` y `GET /api/v1/preferencias` sin sesión responden `401 unauthenticated`: las rutas existen y no dan nada sin sesión.
+- `GET /api/v1/datos/salud`, `GET /api/v1/datos/eventos`, `GET /api/v1/datos/datasets` (desde la segunda parte del 6b de F2.4), `GET /api/v1/datos/grafico?hours=1`, `GET /api/v1/datos/catalogo` y `GET /api/v1/preferencias` sin sesión responden `401 unauthenticated`: las rutas existen y no dan nada sin sesión.
 - La comprobación completa de §13 incluye que ninguna respuesta ni ningún registro lleva la contraseña, el secreto TOTP, los códigos, el identificador de la sesión, el token CSRF, el del enlace ni las tres claves, cada uno solo en su canal (`F2-API-001`, `F2-AUTH-001`).
 
 ### El límite por dirección

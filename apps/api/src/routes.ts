@@ -5,6 +5,7 @@ import {
   dataCatalogSchema,
   dataChartQuerySchema,
   dataChartSchema,
+  dataDatasetsSchema,
   dataEventsSchema,
   dataHealthSchema,
   emptyRequestSchema,
@@ -262,6 +263,20 @@ const DATOS_EVENTOS = {
   },
 } as const satisfies ApiRouteSpec;
 
+const DATOS_DATASETS = {
+  method: 'GET',
+  url: '/api/v1/datos/datasets',
+  operationId: 'getDatosDatasets',
+  summary:
+    'Los datasets publicados más recientes, del más nuevo al más viejo: su período, sus conteos, cómo terminaron, sus incidencias y la última verificación de cada modo, leídos de buoh_datasets (ADR-0020 §10).',
+  querystring: NO_QUERY,
+  responses: { 200: dataDatasetsSchema },
+  errors: {
+    401: UNAUTHENTICATED,
+    503: 'Faltan las migraciones de la API o la credencial de lectura de los datos (not_ready), o PostgreSQL no responde (postgres_unavailable).',
+  },
+} as const satisfies ApiRouteSpec;
+
 const R2_NOT_READY =
   'Faltan las migraciones de la API, la credencial de lectura de los datos o el token api de R2 (not_ready), o no responden PostgreSQL (postgres_unavailable) o R2 (storage_unavailable).';
 
@@ -305,6 +320,7 @@ export const API_ROUTE_SPECS: readonly ApiRouteSpec[] = [
   AUDITORIA,
   DATOS_SALUD,
   DATOS_EVENTOS,
+  DATOS_DATASETS,
   DATOS_GRAFICO,
   DATOS_CATALOGO,
 ];
@@ -606,6 +622,19 @@ export function apiRoutes(deps: ApiRouteDeps): readonly ApiRoute[] {
           throw new ApiRequestError(NOT_READY_FAILURE);
         }
         return { status: 200, body: await deps.data.events() };
+      },
+    },
+    {
+      ...DATOS_DATASETS,
+      handler: async (request) => {
+        requireReady(deps.readiness);
+        // Como la salud: datos del sistema que solo lee una sesión (ADR-0019 §8).
+        const session = await requireSession(request, deps);
+        await renewIfOwnerRequest(request, session, deps);
+        if (deps.data === null) {
+          throw new ApiRequestError(NOT_READY_FAILURE);
+        }
+        return { status: 200, body: await deps.data.datasets() };
       },
     },
     {
