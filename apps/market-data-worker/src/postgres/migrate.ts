@@ -4,11 +4,37 @@ import { sha256Hex } from '@buoh/contracts';
 import pg, { type Pool } from 'pg';
 
 import { POSTGRES_IDENTIFIER } from '../config.js';
+import { DATASETS_SCHEMA } from '../datasets/location.js';
 
-const MIGRATIONS_DIRECTORY = new URL('../../migrations/', import.meta.url);
 const MIGRATION_FILE = /^(\d{4})_[a-z0-9_]+\.sql$/u;
-/** Clave fija de `pg_advisory_xact_lock` para serializar migraciones concurrentes. */
-const MIGRATION_LOCK_KEY = 4_100_013;
+
+/**
+ * Una secuencia de migraciones del worker: su directorio, la clave fija de `pg_advisory_xact_lock`
+ * que serializa sus migraciones concurrentes y, si la tiene, el esquema fijo en el que se aplican.
+ * Sin esquema, se aplican en el `search_path` del pool, como las de cada log.
+ */
+export interface MigrationSequence {
+  readonly directory: URL;
+  readonly lockKey: number;
+  readonly schema?: string;
+}
+
+/** Las migraciones de cada log (ADR-0018 §6), en el esquema del `search_path` del pool. */
+export const LOG_MIGRATIONS: MigrationSequence = {
+  directory: new URL('../../migrations/', import.meta.url),
+  lockKey: 4_100_013,
+};
+
+/**
+ * Las migraciones de `buoh_datasets` (ADR-0020 §5), su propia secuencia, siempre en ese esquema, que
+ * crean si no existe. Su clave no es la de los logs (4 100 013) ni las de la API (4 100 019 y
+ * 4 100 020).
+ */
+export const DATASETS_MIGRATIONS: MigrationSequence = {
+  directory: new URL('../../migrations-datasets/', import.meta.url),
+  lockKey: 4_100_021,
+  schema: DATASETS_SCHEMA,
+};
 
 /**
  * Las migraciones del worker o las ya aplicadas no cuadran: un archivo fuera de secuencia, una
@@ -58,10 +84,10 @@ export interface Migration {
   readonly sql: string;
 }
 
-export async function loadMigrations(): Promise<Migration[]> {
-  const names = (await readdir(MIGRATIONS_DIRECTORY))
-    .filter((name) => name.endsWith('.sql'))
-    .sort();
+export async function loadMigrations(
+  sequence: MigrationSequence = LOG_MIGRATIONS,
+): Promise<Migration[]> {
+  const names = (await readdir(sequence.directory)).filter((name) => name.endsWith('.sql')).sort();
   return Promise.all(
     names.map(async (name, index) => {
       const match = MIGRATION_FILE.exec(name);
@@ -72,7 +98,7 @@ export async function loadMigrations(): Promise<Migration[]> {
           `Migración fuera de secuencia: ${name}`,
         );
       }
-      const sql = await readFile(new URL(name, MIGRATIONS_DIRECTORY), 'utf8');
+      const sql = await readFile(new URL(name, sequence.directory), 'utf8');
       return { name, sha256: sha256Hex(sql), sql };
     }),
   );
@@ -123,11 +149,31 @@ export async function migrate(
   pool: Pick<Pool, 'connect'>,
   options: MigrateOptions = {},
 ): Promise<{ applied: string[]; current: string[] }> {
+  return migrateSequence(pool, LOG_MIGRATIONS, options);
+}
+
+/**
+ * Las migraciones de `buoh_datasets` (ADR-0020 §5), como `migrate`, pero siempre en ese esquema:
+ * con `ownerRole`, lo crea ese rol si no existe, y las tablas, la tabla de migraciones y las
+ * funciones quedan en él, sea cual sea el `search_path` del pool.
+ */
+export async function migrateDatasets(
+  pool: Pick<Pool, 'connect'>,
+  options: MigrateOptions = {},
+): Promise<{ applied: string[]; current: string[] }> {
+  return migrateSequence(pool, DATASETS_MIGRATIONS, options);
+}
+
+async function migrateSequence(
+  pool: Pick<Pool, 'connect'>,
+  sequence: MigrationSequence,
+  options: MigrateOptions,
+): Promise<{ applied: string[]; current: string[] }> {
   const { ownerRole } = options;
   if (ownerRole !== undefined && !POSTGRES_IDENTIFIER.test(ownerRole)) {
     throw new TypeError('ownerRole debe ser un nombre de rol de minúsculas, cifras y _.');
   }
-  const migrations = await loadMigrations();
+  const migrations = await loadMigrations(sequence);
   const client = await pool.connect();
   // Mientras el cliente está fuera del pool, un corte de la conexión emite `error` en él, y sin
   // oyente tumbaría el proceso. La consulta en curso, o la siguiente, falla con ese error.
@@ -136,9 +182,15 @@ export async function migrate(
   const applied: string[] = [];
   try {
     await client.query('BEGIN');
-    await client.query('SELECT pg_advisory_xact_lock($1)', [MIGRATION_LOCK_KEY]);
+    await client.query('SELECT pg_advisory_xact_lock($1)', [sequence.lockKey]);
     if (ownerRole !== undefined) {
       await client.query(`SET LOCAL ROLE ${pg.escapeIdentifier(ownerRole)}`);
+    }
+    if (sequence.schema !== undefined) {
+      // Las migraciones nombran sus tablas sin esquema, como las de la API.
+      const schema = pg.escapeIdentifier(sequence.schema);
+      await client.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
+      await client.query(`SET LOCAL search_path TO ${schema}`);
     }
     await client.query(
       `CREATE TABLE IF NOT EXISTS buoh_schema_migrations (

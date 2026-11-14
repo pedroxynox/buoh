@@ -11,6 +11,7 @@ import {
   schemaVersionSchema,
   symbolSchema,
   utcTimestampMsSchema,
+  uuidV7Schema,
 } from './scalars.js';
 import { sourceEventSchema, type SourceEvent } from './source-events.js';
 
@@ -105,8 +106,26 @@ export function deriveSourceLimitConditionKey(source: string, resource: string):
   return deriveConditionKey('source_limit_exceeded', { resource, source });
 }
 
+/**
+ * Una publicación confirmada del registro operativo de `buoh_datasets` (ADR-0020 §9): su
+ * `publication_id` y la hora de su `published_at_utc`.
+ */
+export const confirmedPublicationSchema = z.strictObject({
+  publication_id: uuidV7Schema,
+  published_at_utc: utcTimestampMsSchema,
+});
+
+export type ConfirmedPublication = z.infer<typeof confirmedPublicationSchema>;
+
 export interface ConditionCausalityInput {
   conditions: readonly unknown[];
+  /**
+   * Solo en el registro operativo de la publicación, en `buoh_datasets` (ADR-0020 §9): las
+   * publicaciones confirmadas que citan sus condiciones. Con ellas, su `publication_id` es una
+   * referencia conocida, y cada resolución de `persistence_unavailable` cita una de ellas, a su hora
+   * y después de la apertura. Los demás registros y los datasets no las pasan.
+   */
+  confirmedPublications?: readonly unknown[];
   incidents: readonly unknown[];
   sourceEvents: readonly unknown[];
 }
@@ -123,6 +142,7 @@ export type ContractContextErrorCode =
   | 'CONDITION_OPEN_DUPLICATE'
   | 'CONDITION_OPEN_REQUIRES_INCIDENT'
   | 'CONDITION_OPERATIONAL_EVIDENCE_MISSING'
+  | 'CONDITION_PUBLICATION_MISMATCH'
   | 'CONDITION_RECOVERY_MISMATCH'
   | 'CONDITION_RECONNECT_MISMATCH'
   | 'CONDITION_REFERENCE_UNKNOWN'
@@ -217,6 +237,12 @@ export function validateConditionCausality(
   const conditions = input.conditions.map((condition) =>
     operationalConditionEventSchema.parse(condition),
   );
+  const publications = input.confirmedPublications?.map((publication) =>
+    confirmedPublicationSchema.parse(publication),
+  );
+  const publicationById = new Map(
+    (publications ?? []).map((publication) => [publication.publication_id, publication]),
+  );
   const sourceById = new Map(sourceEvents.map((event) => [getSourceEventId(event), event]));
   const incidentById = new Map(incidents.map((incident) => [incident.incident_id, incident]));
   const sortedConditions = conditions.toSorted((left, right) =>
@@ -235,7 +261,8 @@ export function validateConditionCausality(
       if (
         !sourceById.has(reference) &&
         !incidentById.has(reference) &&
-        !seenConditions.has(reference)
+        !seenConditions.has(reference) &&
+        !publicationById.has(reference)
       ) {
         failContext({
           code: 'CONDITION_REFERENCE_UNKNOWN',
@@ -366,6 +393,25 @@ export function validateConditionCausality(
           code: 'CONDITION_OPERATIONAL_EVIDENCE_MISSING',
           context: { condition_key: condition.condition_key },
           message: `Resolución operativa sin evidencia adicional: ${condition.condition_key}`,
+          path: ['conditions', condition.condition_event_id, 'cause_refs'],
+        });
+      } else if (
+        publications !== undefined &&
+        condition.condition_type === 'persistence_unavailable' &&
+        !condition.cause_refs.some((reference) => {
+          const publication = publicationById.get(reference);
+          return (
+            publication?.published_at_utc === condition.occurred_at_utc &&
+            publication.published_at_utc > opening.condition.occurred_at_utc
+          );
+        })
+      ) {
+        // En el registro de la publicación, lo que demuestra la capacidad restaurada es la primera
+        // publicación confirmada después de la apertura, a su hora (ADR-0020 §9).
+        failContext({
+          code: 'CONDITION_PUBLICATION_MISMATCH',
+          context: { condition_key: condition.condition_key },
+          message: `Resolución sin una publicación confirmada posterior: ${condition.condition_key}`,
           path: ['conditions', condition.condition_event_id, 'cause_refs'],
         });
       }

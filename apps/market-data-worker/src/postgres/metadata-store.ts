@@ -7,11 +7,12 @@ import {
 } from '@buoh/contracts';
 import pg from 'pg';
 
-import { PublicationConflictError, PublicationError } from '../errors.js';
+import { CommitOutcomeUnknownError, PublicationConflictError } from '../errors.js';
 import type { CommitPublicationInput, MetadataStore } from '../ports.js';
 import type { WorkerConfig } from '../config.js';
 
 const UNIQUE_VIOLATION = '23505';
+const STATEMENT_COMPLETION_UNKNOWN = '40003';
 const ONE_ACTIVE_INDEX = 'published_manifest_records_one_active';
 
 interface RecordRow {
@@ -134,69 +135,119 @@ export class PostgresMetadataStore implements MetadataStore {
   }
 
   async commitPublication(input: CommitPublicationInput): Promise<void> {
-    const { core, environment, incidents, record } = input;
-    const coreJcs = canonicalJson(core);
-    const client = await this.#pool.connect();
-    try {
-      await client.query('BEGIN');
+    if (input.logRange !== undefined) {
+      throw new TypeError('Las tablas de publicación de un log no tienen fila de rango.');
+    }
+    await commitPublicationIn(this.#pool, input, () => Promise.resolve());
+  }
+}
+
+/**
+ * Un error del `COMMIT` que asegura que la transacción se deshizo: el servidor la rechazó con una
+ * violación de integridad (clase `23`) o un fallo de serialización (clase `40`). Cualquier otro, como
+ * la conexión que cae (sin `SQLSTATE`, o de las clases `08` y `57`), deja sin saber si se confirmó.
+ */
+function commitDefinitelyRejected(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return (
+    typeof code === 'string' &&
+    /^(23|40)[0-9A-Z]{3}$/u.test(code) &&
+    // `statement_completion_unknown`: el servidor tampoco sabe cómo terminó.
+    code !== STATEMENT_COMPLETION_UNKNOWN
+  );
+}
+
+/**
+ * ADR-0004 §8 paso 7, en una transacción del pool: el dataset, sus incidencias, su record activo y lo
+ * que añada `extra` con el mismo cliente, como la fila de rango de `buoh_datasets`. Si el `COMMIT`
+ * falla sin que se sepa si se confirmó, lanza `CommitOutcomeUnknownError` (ADR-0020 §9); un fallo
+ * anterior al `COMMIT` lo deshace entero.
+ */
+export async function commitPublicationIn(
+  pool: pg.Pool,
+  input: CommitPublicationInput,
+  extra: (client: pg.PoolClient) => Promise<void>,
+): Promise<void> {
+  const { core, environment, incidents, record } = input;
+  const coreJcs = canonicalJson(core);
+  const client = await pool.connect();
+  // Mientras el cliente está fuera del pool, un corte de la conexión emite `error` en él, y sin
+  // oyente tumbaría el proceso. La consulta en curso, o la siguiente, falla con ese error.
+  const ignoreConnectionError = (): void => undefined;
+  client.on('error', ignoreConnectionError);
+  let committing = false;
+  let failed = false;
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO datasets (dataset_id, state, source, manifest_core_jcs)
+       VALUES ($1, 'published', $2, $3)
+       ON CONFLICT (dataset_id) DO NOTHING`,
+      [record.dataset_id, core.source, coreJcs],
+    );
+    const stored = await client.query<{ manifest_core_jcs: string }>(
+      'SELECT manifest_core_jcs FROM datasets WHERE dataset_id = $1',
+      [record.dataset_id],
+    );
+    if (stored.rows[0]?.manifest_core_jcs !== coreJcs) {
+      // Un dataset_id con otro core: repetir no lo cambia.
+      throw new PublicationConflictError(record.dataset_id, {
+        kind: 'core_mismatch',
+        message: `El dataset ${record.dataset_id} ya existe con otro core.`,
+      });
+    }
+    if (incidents.length > 0) {
       await client.query(
-        `INSERT INTO datasets (dataset_id, state, source, manifest_core_jcs)
-         VALUES ($1, 'published', $2, $3)
-         ON CONFLICT (dataset_id) DO NOTHING`,
-        [record.dataset_id, core.source, coreJcs],
-      );
-      const stored = await client.query<{ manifest_core_jcs: string }>(
-        'SELECT manifest_core_jcs FROM datasets WHERE dataset_id = $1',
-        [record.dataset_id],
-      );
-      if (stored.rows[0]?.manifest_core_jcs !== coreJcs) {
-        throw new PublicationError('manifest_commit', 'El dataset existente tiene otro core.');
-      }
-      if (incidents.length > 0) {
-        await client.query(
-          `INSERT INTO dataset_quality_incidents
-             (dataset_id, incident_id, incident_type, severity, symbol, observed_at_utc, incident_jcs)
-           SELECT $1, *
-             FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[])
-           ON CONFLICT (dataset_id, incident_id) DO NOTHING`,
-          [
-            record.dataset_id,
-            incidents.map((incident) => incident.incident_id),
-            incidents.map((incident) => incident.incident_type),
-            incidents.map((incident) => incident.severity),
-            incidents.map((incident) => incident.symbol),
-            incidents.map((incident) => incident.observed_at_utc),
-            incidents.map((incident) => canonicalJson(incident as JsonValue)),
-          ],
-        );
-      }
-      await client.query(
-        `INSERT INTO published_manifest_records
-           (publication_id, deployment_environment, dataset_id, schema_version,
-            manifest_document_sha256, manifest_object_uri, manifest_object_bytes_sha256,
-            published_at_utc, state)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        `INSERT INTO dataset_quality_incidents
+           (dataset_id, incident_id, incident_type, severity, symbol, observed_at_utc, incident_jcs)
+         SELECT $1, *
+           FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[])
+         ON CONFLICT (dataset_id, incident_id) DO NOTHING`,
         [
-          record.publication_id,
-          environment,
           record.dataset_id,
-          record.schema_version,
-          record.manifest_document_sha256,
-          record.manifest_object_uri,
-          record.manifest_object_bytes_sha256,
-          record.published_at_utc,
-          record.state,
+          incidents.map((incident) => incident.incident_id),
+          incidents.map((incident) => incident.incident_type),
+          incidents.map((incident) => incident.severity),
+          incidents.map((incident) => incident.symbol),
+          incidents.map((incident) => incident.observed_at_utc),
+          incidents.map((incident) => canonicalJson(incident as JsonValue)),
         ],
       );
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK').catch(() => undefined);
-      if (isActiveConflict(error)) {
-        throw new PublicationConflictError(record.dataset_id, { cause: error });
-      }
-      throw error;
-    } finally {
-      client.release();
     }
+    await client.query(
+      `INSERT INTO published_manifest_records
+         (publication_id, deployment_environment, dataset_id, schema_version,
+          manifest_document_sha256, manifest_object_uri, manifest_object_bytes_sha256,
+          published_at_utc, state)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        record.publication_id,
+        environment,
+        record.dataset_id,
+        record.schema_version,
+        record.manifest_document_sha256,
+        record.manifest_object_uri,
+        record.manifest_object_bytes_sha256,
+        record.published_at_utc,
+        record.state,
+      ],
+    );
+    await extra(client);
+    committing = true;
+    await client.query('COMMIT');
+  } catch (error) {
+    failed = true;
+    await client.query('ROLLBACK').catch(() => undefined);
+    if (committing && !commitDefinitelyRejected(error)) {
+      throw new CommitOutcomeUnknownError(record.dataset_id, { cause: error });
+    }
+    if (isActiveConflict(error)) {
+      throw new PublicationConflictError(record.dataset_id, { cause: error });
+    }
+    throw error;
+  } finally {
+    client.off('error', ignoreConnectionError);
+    // Tras un fallo, la conexión puede estar rota: el cliente no vuelve al pool.
+    client.release(failed);
   }
 }

@@ -19,6 +19,7 @@ export {
   MAX_SOURCE_SEGMENT_BYTES,
 } from './encoding.js';
 export {
+  CommitOutcomeUnknownError,
   ObjectReadError,
   PublicationConflictError,
   PublicationError,
@@ -116,14 +117,27 @@ export {
 } from './source-log/source-event-log.js';
 export { driveSyntheticStimuli, type SyntheticDriverHooks } from './synthetic-driver.js';
 export { contentKey, keyFromUri, manifestKey, objectUri } from './object-keys.js';
-export { type CommitPublicationInput, type MetadataStore, type ObjectStore } from './ports.js';
 export {
+  type CommitPublicationInput,
+  type DatasetLogRange,
+  type DatasetStore,
+  type MetadataStore,
+  type ObjectStore,
+  type PublishedDataset,
+} from './ports.js';
+export {
+  DATASETS_MIGRATIONS,
+  loadMigrations,
+  LOG_MIGRATIONS,
   migrate,
+  migrateDatasets,
   MigrationApplyError,
   MigrationIntegrityError,
   pendingMigrations,
   type MigrateOptions,
+  type MigrationSequence,
 } from './postgres/migrate.js';
+export { DATASETS_PREFIX, DATASETS_SCHEMA } from './datasets/location.js';
 export { createPool, PostgresMetadataStore, postgresSslOption } from './postgres/metadata-store.js';
 export {
   AGENT_CONNECTION_LIMIT,
@@ -132,10 +146,14 @@ export {
   API_SCHEMA,
   AGENT_IDLE_IN_TRANSACTION_TIMEOUT,
   AGENT_STATEMENT_TIMEOUT,
+  DATASETS_OWNER_TABLES,
+  DATASETS_PUBLICATION_TABLES,
   ensureApiReaderRole,
   ensureApiRole,
+  ensurePublicationRole,
   ensureRuntimeRoles,
   grantApiPrivileges,
+  grantDatasetsPrivileges,
   grantLogPrivileges,
   INGEST_DENIED_TABLES,
   INGEST_WRITE_TABLES,
@@ -143,6 +161,7 @@ export {
   MIGRATIONS_TABLE,
   MIN_ROLE_PASSWORD_LENGTH,
   POSTGRES_ROLES,
+  PUBLICATION_ROLE,
   SCRAM_ITERATIONS,
   scramSha256Verifier,
   setRolePassword,
@@ -150,7 +169,18 @@ export {
   type LoginRole,
   type PasswordRole,
 } from './postgres/roles.js';
-export { publishDataset, type PublishDatasetInput } from './publication.js';
+export {
+  preparePublication,
+  publishDataset,
+  writePublication,
+  type PublishDatasetInput,
+} from './publication.js';
+export {
+  publishLiveDataset,
+  type PublishLiveDatasetInput,
+  type PublishLiveOutcome,
+} from './datasets/publish-live.js';
+export { PostgresDatasetStore } from './postgres/dataset-store.js';
 export {
   DATASET_ELEMENT_CEILING,
   DATASET_END_STEP_SEGMENTS,
