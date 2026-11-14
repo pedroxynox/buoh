@@ -1,6 +1,6 @@
 # Evidencia de los datasets vivos de F2.5
 
-Evidencia de memoria y de duración de la publicación y de la verificación de un dataset vivo ([ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) §7 y §8), reunida el 2026-11-14 con el código del PR 3c de su §13. Con un dataset en el techo de 16 000 elementos, el máximo de memoria residente (RSS) de `datasets:publish` llegó a **191,0 MiB**, y el de `data:replay`, a **168,4 MiB** en `--verify-only` y a **191,8 MiB** en recomputación: los tres por debajo de los 256 MiB del criterio de §7, así que el techo de 16 000 elementos se queda. La publicación tardó como mucho **6,3 s**, y cada verificación, como mucho 1,3 s y 2,3 s, dentro del plazo de 60 s de cada paso (§8).
+Evidencia de memoria y de duración de la publicación y de la verificación de un dataset vivo ([ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) §7 y §8), reunida el 2026-11-14 con el código del PR 3c de su §13, el de su primer commit, `b8550ee`. Con un dataset en el techo de 16 000 elementos, el máximo de memoria residente (RSS) de `datasets:publish` llegó a **195,8 MiB**, y el de `data:replay`, a **171,7 MiB** en `--verify-only` y a **191,9 MiB** en recomputación: los tres por debajo de los 256 MiB del criterio de §7, así que el techo de 16 000 elementos se queda. La publicación tardó como mucho **6,1 s**, y cada verificación, como mucho 1,2 s y 2,3 s, dentro del plazo de 60 s de cada paso (§8).
 
 La medición no usa datos de mercado: la captura es sintética, con precios inventados, y ningún proceso se conecta a Deriv. Este documento solo trae memoria, tiempos, conteos y estados. Las credenciales locales se generaron en el sandbox, viajaron solo por el entorno de los procesos y nunca quedaron en Git.
 
@@ -34,19 +34,21 @@ pnpm exec node scripts/evidencia-f2-5/medir-datasets.mjs --salida <archivo.json>
 
 ## Resultado
 
-En las 3 repeticiones, el dataset es el mismo: `sha256:6a295377bf93437ec793d131a3f7557d5044c1940000f72aaa5080e8d565b8c6`, de los segmentos 0 a 101, con 15 984 elementos (15 984 source events, sin ticks de la historia) y 15 299 ticks, y un final que no fue limpio. Ningún proceso dejó alertas.
+En las 3 repeticiones, el dataset es el mismo, de los segmentos 0 a 101, con 15 984 elementos (15 984 source events, sin ticks de la historia) y 15 299 ticks, y un final que no fue limpio. Ningún proceso dejó alertas. Su `dataset_id` cambia en cada ejecución del script, porque las horas de la captura salen del reloj.
 
 | Repetición | Publicar | Su duración | `--verify-only` | Su duración | Recomputación | Su duración |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1 | 167,0 MiB | 6246 ms | 167,2 MiB | 1297 ms | 187,4 MiB | 2280 ms |
-| 2 | 175,3 MiB | 6204 ms | 168,4 MiB | 1302 ms | 189,8 MiB | 2287 ms |
-| 3 | 191,0 MiB | 6274 ms | 166,9 MiB | 1299 ms | 191,8 MiB | 2299 ms |
-| **Máximo** | **191,0 MiB** | **6274 ms** | **168,4 MiB** | 1302 ms | **191,8 MiB** | 2299 ms |
+| 1 | 195,8 MiB | 6092 ms | 170,5 MiB | 1224 ms | 191,9 MiB | 2313 ms |
+| 2 | 183,1 MiB | 6080 ms | 170,3 MiB | 1231 ms | 191,6 MiB | 2157 ms |
+| 3 | 194,3 MiB | 6092 ms | 171,7 MiB | 1231 ms | 189,1 MiB | 2302 ms |
+| **Máximo** | **195,8 MiB** | **6092 ms** | **171,7 MiB** | 1231 ms | **191,9 MiB** | 2313 ms |
+
+Una ejecución anterior, con el mismo código salvo una corrección de lint en la escritura concurrente, dio 191,0, 168,4 y 191,8 MiB y 6274 ms: la memoria varía unos pocos MiB entre ejecuciones.
 
 La duración de la publicación es la que informa el proceso, desde que arranca hasta que escribe su línea, e incluye el plan del dataset, la lectura de sus 102 segmentos, su derivación, la escritura de sus objetos 8 a la vez y el `COMMIT`. La de la verificación es la del proceso entero, medida desde fuera.
 
 ## Lectura
 
-- **Memoria.** Los tres procesos quedan por debajo de 256 MiB, con 64 MiB de margen la recomputación, la más alta. Con el código de antes de ADR-0020, unos 15 800 eventos daban 190,7 MiB al publicar y como mucho 229,0 MiB al reproducir en el mismo proceso («Medición» de ADR-0020): ahora cada verificación corre en su propio proceso, como el paso 7 de §8. La memoria de la publicación varía entre repeticiones porque depende de cuándo recoge V8 la basura.
+- **Memoria.** Los tres procesos quedan por debajo de 256 MiB, con unos 60 MiB de margen la publicación, la más alta. Con el código de antes de ADR-0020, unos 15 800 eventos daban 190,7 MiB al publicar y como mucho 229,0 MiB al reproducir en el mismo proceso («Medición» de ADR-0020): ahora cada verificación corre en su propio proceso, como el paso 7 de §8. La memoria de la publicación varía entre repeticiones porque depende de cuándo recoge V8 la basura.
 - **Duración.** Unos 6 s en local, por debajo de los 15 a 30 s que estimaba §8 para producción, donde R2 está lejos y la escritura de cada objeto tarda más. El PR 6 la mide en producción.
 - **Límites.** Un solo dataset sintético en el techo, en el sandbox. No mide un dataset con muchos ticks de la historia ni la red de producción.

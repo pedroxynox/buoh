@@ -630,7 +630,7 @@ Escribe en stdout una sola línea JSON, y en stderr las alertas saneadas del reg
 
 Las líneas de las salidas 0 y 1 llevan `duration_ms`, `max_rss_bytes` y `behind`: el log más viejo que no venció con segmentos cerrados sin publicar y menos de 3 días para vencer, `{ "log", "expires_at_utc" }`, también si está en `--skip`, o `null`. Con él, el paso deja la alerta `publication_behind`, urgente.
 
-**Memoria y duración** (§7 y §8). Con un dataset en el techo de 16 000 elementos, `datasets:publish` llegó a 191,0 MiB y tardó como mucho 6,3 s, y `data:replay`, a 168,4 MiB en `--verify-only` y a 191,8 MiB en recomputación, por debajo de los 256 MiB del criterio ([evidencia de los datasets vivos](evidencia-datasets-f2-5.md)). Se mide con `scripts/evidencia-f2-5/medir-datasets.mjs` contra los servicios de «Entorno local y replay».
+**Memoria y duración** (§7 y §8). Con un dataset en el techo de 16 000 elementos, `datasets:publish` llegó a 195,8 MiB y tardó como mucho 6,1 s, y `data:replay`, a 171,7 MiB en `--verify-only` y a 191,9 MiB en recomputación, por debajo de los 256 MiB del criterio ([evidencia de los datasets vivos](evidencia-datasets-f2-5.md)). Se mide con `scripts/evidencia-f2-5/medir-datasets.mjs` contra los servicios de «Entorno local y replay».
 
 La prueba de integración `apps/market-data-worker/integration/datasets-publish.test.ts` usa su propia base, `buoh_integration_publish`, con dos logs sucesivos, el 201 y el 202, que ninguna otra prueba usa porque el bucket es compartido, y `buoh_datasets`: publica con `buoh_publicacion` y reproduce el dataset en los dos modos con `buoh_salud` y el `data:replay` compilado. La de `buoh_datasets`, sus roles y el `COMMIT` cortado es `integration/datasets.test.ts`, con la base `buoh_integration_datasets`.
 
