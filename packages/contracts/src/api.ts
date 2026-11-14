@@ -5,6 +5,7 @@ import {
   conditionTypeSchema,
   limitUnitSchema,
   persistenceStageSchema,
+  qualityIncidentTypeSchema,
   severitySchema,
   sourceResourceSchema,
 } from './enums.js';
@@ -675,6 +676,167 @@ export const dataEventsSchema = z
   })
   .meta({ id: 'DataEvents', title: 'DataEvents' });
 
+// --- F2.4, 6b: los datasets publicados (ADR-0020 §10) ---
+
+/**
+ * Cuántos datasets devuelve como mucho `GET /api/v1/datos/datasets`, los más recientes. Producción
+ * publica unos 4 al día (ADR-0020 §7), así que caben los de unos 50 días.
+ */
+export const DATA_DATASETS_LIMIT = 200;
+
+/** El código saneado de un fallo de `data:replay` (`ReplayErrorCode`), como lo guarda la base. */
+const replayErrorCodeSchema = z.string().regex(/^[A-Z][A-Z0-9_]{0,62}$/u);
+
+/**
+ * El último resultado de la verificación de un dataset en un modo de `data:replay` (ADR-0020 §8,
+ * paso 7): `passed`, sin código; `failed`, con el código del fallo; `incomplete`, con el de su
+ * última ejecución, si lo tiene.
+ */
+const datasetVerificationSchema = z.strictObject({
+  status: z.enum(['passed', 'failed', 'incomplete']),
+  verified_at_utc: utcTimestampMsSchema,
+  error_code: replayErrorCodeSchema.nullable(),
+});
+
+/** Cuántas incidencias de calidad de un tipo y una gravedad tiene un dataset. */
+const datasetIncidentCountSchema = z.strictObject({
+  incident_type: qualityIncidentTypeSchema,
+  severity: severitySchema,
+  count: positiveCountSchema,
+});
+
+/**
+ * Un dataset publicado de `buoh_datasets`, por su publicación activa (ADR-0020 §5 y §10): su
+ * identificador, su publicación, su fuente y sus símbolos, su log y sus segmentos, su período
+ * (`null` sin ticks) y sus conteos, los de su `DatasetManifestCore`; sus reglas y su perfil; cómo
+ * terminó (`dataset_log_ranges`); sus incidencias, por tipo y gravedad; y la última verificación de
+ * cada modo, o `null` si todavía no tiene.
+ */
+const publishedDatasetSchema = z.strictObject({
+  dataset_id: datasetIdSchema,
+  publication_id: uuidV7Schema,
+  published_at_utc: utcTimestampMsSchema,
+  source: nonEmptyStringSchema,
+  symbols: z.array(symbolSchema).min(1),
+  log: logNumberSchema,
+  first_segment: nonNegativeIntegerSchema,
+  last_segment: nonNegativeIntegerSchema,
+  event_time_from_utc: utcTimestampMsSchema.nullable(),
+  event_time_to_utc: utcTimestampMsSchema.nullable(),
+  source_event_count: nonNegativeIntegerSchema,
+  raw_frame_count: nonNegativeIntegerSchema,
+  normalized_tick_count: nonNegativeIntegerSchema,
+  incident_count: nonNegativeIntegerSchema,
+  condition_event_count: nonNegativeIntegerSchema,
+  quality_rule_version: z.string().regex(/^\d+\.\d+\.\d+$/u),
+  quality_profile_id: nonEmptyStringSchema,
+  clean: z.boolean(),
+  pending_continuity_symbols: z.array(symbolSchema),
+  open_condition_types: z.array(conditionTypeSchema),
+  incidents: z.array(datasetIncidentCountSchema),
+  verifications: z.strictObject({
+    verify_only: datasetVerificationSchema.nullable(),
+    recompute: datasetVerificationSchema.nullable(),
+  }),
+});
+
+/**
+ * La respuesta de `GET /api/v1/datos/datasets` (ADR-0020 §10): los datasets publicados del entorno
+ * de la API, para la sección Datos, del más nuevo al más viejo por su publicación. No vencen
+ * (ADR-0020 §6). `truncated` dice si quedaron fuera otros más viejos, así que solo puede ser `true`
+ * con la lista llena.
+ */
+export const dataDatasetsSchema = z
+  .strictObject({
+    datasets: z.array(publishedDatasetSchema).max(DATA_DATASETS_LIMIT),
+    truncated: z.boolean(),
+  })
+  .superRefine((value, context) => {
+    const issue = (message: string, path: readonly (number | string)[]) => {
+      context.addIssue({ code: 'custom', message, path: [...path] });
+    };
+    if (value.truncated && value.datasets.length < DATA_DATASETS_LIMIT) {
+      issue('Solo se corta una lista llena.', ['truncated']);
+    }
+    const ids = new Set<string>();
+    for (const [index, dataset] of value.datasets.entries()) {
+      const at = (field: string) => ['datasets', index, field];
+      if (ids.has(dataset.dataset_id)) {
+        issue('Cada dataset sale una vez.', at('dataset_id'));
+      }
+      ids.add(dataset.dataset_id);
+      const previous = value.datasets[index - 1];
+      if (previous !== undefined && previous.published_at_utc < dataset.published_at_utc) {
+        issue('Los datasets van del más nuevo al más viejo.', at('published_at_utc'));
+      }
+      if (dataset.last_segment < dataset.first_segment) {
+        issue('El último segmento no va antes del primero.', at('last_segment'));
+      }
+      const noRange = dataset.event_time_from_utc === null && dataset.event_time_to_utc === null;
+      const partialRange =
+        (dataset.event_time_from_utc === null) !== (dataset.event_time_to_utc === null);
+      if (partialRange || (dataset.normalized_tick_count === 0) !== noRange) {
+        issue('El período es null exactamente cuando no hay ticks.', at('event_time_from_utc'));
+      }
+      if (
+        dataset.event_time_from_utc !== null &&
+        dataset.event_time_to_utc !== null &&
+        dataset.event_time_from_utc > dataset.event_time_to_utc
+      ) {
+        issue('El período va en orden.', at('event_time_to_utc'));
+      }
+      if (dataset.raw_frame_count > dataset.source_event_count) {
+        issue('Los frames crudos son source events.', at('raw_frame_count'));
+      }
+      for (const field of [
+        'symbols',
+        'pending_continuity_symbols',
+        'open_condition_types',
+      ] as const) {
+        if (!isSortedUnique(dataset[field])) {
+          issue('Va en orden y sin repetir.', at(field));
+        }
+      }
+      const clean =
+        dataset.pending_continuity_symbols.length === 0 &&
+        !dataset.open_condition_types.includes('connection_lost');
+      if (dataset.clean !== clean) {
+        issue('Limpio es sin continuidad pendiente ni connection_lost abierta.', at('clean'));
+      }
+      const keys = dataset.incidents.map((item) => `${item.incident_type} ${item.severity}`);
+      if (!isSortedUnique(keys)) {
+        issue('Las incidencias van por tipo y gravedad, sin repetir.', at('incidents'));
+      }
+      const total = dataset.incidents.reduce((sum, item) => sum + item.count, 0);
+      if (total !== dataset.incident_count) {
+        issue('Las incidencias suman incident_count.', at('incidents'));
+      }
+      for (const mode of ['verify_only', 'recompute'] as const) {
+        const result = dataset.verifications[mode];
+        if (result === null) {
+          continue;
+        }
+        if (result.status === 'passed' && result.error_code !== null) {
+          issue('Una verificación que pasó no lleva código.', [
+            'datasets',
+            index,
+            'verifications',
+            mode,
+          ]);
+        }
+        if (result.status === 'failed' && result.error_code === null) {
+          issue('Una verificación que falló lleva su código.', [
+            'datasets',
+            index,
+            'verifications',
+            mode,
+          ]);
+        }
+      }
+    }
+  })
+  .meta({ id: 'DataDatasets', title: 'DataDatasets' });
+
 // --- F2.4: las preferencias de la cuenta (F2-UI-001) ---
 
 /**
@@ -717,6 +879,8 @@ export type DataChartGap = DataChart['gaps'][number];
 export type DataCatalog = z.infer<typeof dataCatalogSchema>;
 export type DataEvents = z.infer<typeof dataEventsSchema>;
 export type DataEvent = DataEvents['events'][number];
+export type DataDatasets = z.infer<typeof dataDatasetsSchema>;
+export type DataDataset = DataDatasets['datasets'][number];
 export type Theme = z.infer<typeof themeSchema>;
 export type AccountPreferences = z.infer<typeof accountPreferencesSchema>;
 export type PreferencesRequest = z.infer<typeof preferencesRequestSchema>;
