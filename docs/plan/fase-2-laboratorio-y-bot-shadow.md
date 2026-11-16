@@ -13,7 +13,7 @@ last_reviewed_utc: "2026-11-16T06:00:00.000Z"
 
 Transformar una hipótesis en una estrategia viva, explicable y no ejecutora, para uso propio ([roadmap](../producto/roadmap.md), Fase 2). La fase termina cuando una estrategia en modo `shadow` reproduce cada decisión desde datos y versiones fijados y se detiene sola ante una degradación de los datos (§13).
 
-Para llegar ahí, el sistema de datos de la Fase 1 pasa a un servidor y funciona todo el día ([ADR-0016](../arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)). Un motor de investigación estudia sin parar los datos de buoh y de mercados reales de Deriv, busca patrones y prueba millones de estrategias de reglas, siempre buscando rentabilidad después de los costos, con entrenamiento, validación y prueba fuera de muestra. Propone las pocas que pasan una búsqueda honesta (`F2-SEARCH-001`). El propietario las revisa en su cuenta de buoh y aprueba las que pasan al bot, que las sigue en vivo con señales y posiciones hipotéticas, sin enviar órdenes. Así lo decidió el propietario el 2026-11-16 (§12); hasta entonces, este plan decía que el propietario creaba las estrategias.
+Para llegar ahí, el sistema de datos de la Fase 1 pasa a un servidor y funciona todo el día ([ADR-0016](../arquitectura/adr/0016-alojamiento-del-sistema-de-datos.md)). Un motor de investigación estudia sin parar los datos de buoh y de mercados reales de Deriv, busca patrones y prueba millones de estrategias de reglas, siempre buscando rentabilidad después de los costos, con datos de entrenamiento y de validación. Propone las pocas que pasan una búsqueda honesta (`F2-SEARCH-001`). La prueba fuera de muestra no entra en la búsqueda: usa solo datos posteriores a la congelación de cada candidata (`F2-EVAL-001`). Que el motor busque las estrategias lo decidió el propietario el 2026-11-16 (§12); hasta entonces, este plan decía que él las creaba. El propietario revisa la evidencia y autoriza cada estrategia que pasa al bot, como describe la [visión de producto](../producto/vision-y-alcance.md) (§3, «Usuarios»). Esa aprobación es una propuesta de la dirección técnica, porque sus palabras de ese día no hablan de quién autoriza, y el propietario la aprueba al fusionar este plan. El bot las sigue en vivo con señales y posiciones hipotéticas, sin enviar órdenes.
 
 La Fase 2 no intenta demostrar una estrategia rentable. Un resultado negativo es un resultado válido y se muestra entero.
 
@@ -35,14 +35,14 @@ Hechos comprobados al cerrar la Fase 1 y al decidir el alojamiento ([`PROJECT_ST
 - **Datasets vivos.** No se publican mientras no haya umbrales live de retraso y de hueco, que se fijan con mediciones reales («Decisiones vigentes relevantes»). El perfil de Deriv es de medición, y la publicación lo rechaza.
 - **Gráficos.** P-V1-04 de la [especificación de pendientes](especificacion-de-pendientes.md) propone resolver su accesibilidad, sus pruebas y sus unidades antes de mostrar datos reales.
 - **Lo que no existe.** API, cuentas, estrategias, backtests, señales, posiciones y `execution-gateway`. `HealthReport` solo admite `execution_mode = disabled`, y `StrategyDefinition` y `SignalEvent` solo están nombrados ([contratos de dominio](../arquitectura/contratos-de-dominio.md), «Contratos futuros»).
-- **Alcance ya decidido.** La Fase 2 empieza solo con R_100, y el alojamiento cuesta unos 15 USD al mes, unos 22 con la API (ADR-0016 §2).
+- **Alcance ya decidido al empezar la fase** (cambió el 2026-11-16, §12). La Fase 2 empieza solo con R_100, y el alojamiento cuesta unos 15 USD al mes, unos 22 con la API (ADR-0016 §2).
 - **Medido el 2026-11-16, para el cambio de alcance** (§12), con consultas de solo lectura al canal público de Deriv, sin guardar precios:
   - el canal que ya usa buoh ofrece mercados reales: 4 metales, entre ellos el oro (`frxXAUUSD`), 25 pares de divisas, 12 índices de bolsa, Bitcoin y Ethereum;
-  - `ticks_history` da velas de 1 minuto a 1 día de hasta un año atrás, por tramos (las más antiguas, del 2025-11-17), y de ticks solo los últimos 1000;
+  - `ticks_history` da velas de 1 minuto a 1 día y ticks de hasta un año atrás, pedidos por tramos con `start` y `end`: en el oro y en R_100, cada tramo de 10 minutos pedido de hace 3 a 360 días llegó entero, salvo con el mercado cerrado, y las velas más antiguas fueron del 2025-11-17. Una petición de ticks sin `start` devuelve los últimos, hasta 1000;
   - el oro manda un tick por segundo y R_100 uno cada 2 segundos;
-  - lo que cobra Deriv, con una apuesta de 10 USD: un sube/baja del oro a 15 minutos paga 17,66, así que hay que acertar el 56,6 % solo para no perder, y uno de R_100 a 5 ticks paga 19,54 (51,2 %). La comisión del multiplicador ×100 es el 0,018 % de la exposición en el oro y el 0,036 % en R_100;
+  - lo que cobra Deriv: para no perder con un sube/baja hay que acertar alrededor del 57 % de las veces en el oro a 15 minutos y del 51 % en R_100 a 5 ticks. La comisión del multiplicador ×100 ronda el 0,02 % de la exposición en el oro y el 0,04 % en R_100;
   - la comisión del multiplicador frente a la desviación de los retornos de 1 hora: R_100, 0,03; el oro, 0,07; Bitcoin, 0,17; la plata y Ethereum, 0,20; el EUR/USD, 0,32; el GBP/USD, 0,35; el USD/JPY, 0,40. Los índices de bolsa no tienen multiplicadores;
-  - un VPS de Contabo con 4 vCPU y 8 GB cuesta desde unos 5 EUR al mes, y uno de 12 vCPU y 48 GB, unos 20 EUR, según Contabo, que avisa de que su CPU rinde menos con mucha carga.
+  - fuera de Deriv, según Contabo: un VPS con 4 vCPU y 8 GB cuesta desde unos 5 EUR al mes, y uno de 12 vCPU y 48 GB, unos 20 EUR, y su CPU rinde menos con mucha carga.
 
 ## 4. Restricciones de la fase
 
@@ -52,9 +52,9 @@ Decisiones de la dirección técnica que cumplen todas las ADR y todos los incre
 2. **Cada decisión en su instante.** Una decisión usa solo lo que era durable antes de ella, en el orden del log. Lo que se sabe después, como la marca de un hueco que se añade a un tick anterior, no cambia una decisión ya tomada, tampoco al reproducirla.
 3. **Datos fijados.** Un backtest solo lee datasets publicados, por su `dataset_id`. El motor `shadow` lee la captura viva, y cada decisión guarda lo necesario para reproducirla después desde datasets publicados.
 4. **Memoria acotada.** Todo proceso que lee datos los lee por partes, con un techo de memoria que no depende de cuántos datos haya.
-5. **Planos separados.** Los datos (`ingest` y `buoh-operaciones`), la investigación (el motor de investigación y el backtest oficial, en un VPS que solo lee datos) y las señales (el motor `shadow`) corren en procesos y servicios distintos, cada uno con sus credenciales mínimas. Solo la aprobación del propietario, en la API, pasa una estrategia de la investigación a las señales. No hay ejecución: el modo más alto es `shadow`, nada se autentica en Deriv y no existe `execution-gateway` ([ADR-0002](../arquitectura/adr/0002-senales-y-ejecucion-controlada.md)).
+5. **Planos separados.** Los datos (`ingest` y `buoh-operaciones`), la investigación (el motor de investigación y sus backtests, en un VPS que lee datos de producción sin poder escribirlos y solo escribe en su bucket) y las señales (el motor `shadow`) corren en procesos y servicios distintos, cada uno con sus credenciales mínimas. Solo la aprobación del propietario, en la API, pasa una estrategia de la investigación a las señales. No hay ejecución: el modo más alto es `shadow`, nada se autentica en Deriv y no existe `execution-gateway` ([ADR-0002](../arquitectura/adr/0002-senales-y-ejecucion-controlada.md)).
 6. **Uso propio.** En producción solo existe la cuenta del propietario, y no hay registro público. Abrir cuentas a otras personas es de la beta externa ([modelo de lanzamiento](../producto/modelo-de-lanzamiento.md), etapa 3) y necesita antes revisar la redistribución de los datos de Deriv, que ADR-0004 §13 deshabilita.
-7. **TypeScript para la evidencia, Python para buscar.** El evaluador oficial, el backtest oficial y la estadística de la evidencia son TypeScript, para que la réplica use el mismo código que el bot. El motor de investigación es Python acelerado, en `research/python`, como permiten ADR-0001 (decisión 3) y ADR-0003 y decidió el propietario el 2026-11-16 (§12): busca y propone, y nada de lo que calcula cuenta como evidencia hasta que el backtest oficial lo repite.
+7. **TypeScript para la evidencia, Python para buscar.** El evaluador oficial, el backtest oficial y la estadística de la evidencia son TypeScript, para que la réplica use el mismo código que el bot. El motor de investigación es Python, en `research/python`, como permiten ADR-0001 (decisión 3) y ADR-0003 y decidió el propietario el 2026-11-16 (§12), acelerado con bibliotecas compiladas, como propone la dirección técnica. Busca y propone, y nada de lo que calcula cuenta como evidencia hasta que el backtest oficial lo repite.
 8. **Presupuesto.** Todo cabe en el presupuesto aprobado (§11). Lo que lo suba necesita antes el visto bueno del propietario.
 9. **Un solo entorno desplegado.** No hay `staging` en la Fase 2, porque no cabe en el presupuesto: todo corre en `production`, y el motor, con `execution_mode = shadow`. La preproducción de la arquitectura objetivo describe el destino.
 10. **Evidencia de producción.** Hasta el despliegue, el agente no tiene acceso a Render ni a Cloudflare (ADR-0016 §3). Las cifras de producción que pide la evidencia las calcula buoh en producción, sin secretos ni precios, y llegan al repositorio por el canal que fije la ADR de despliegue, por ejemplo una página de evidencia de la web que abre el propietario o los paneles que copia con los pasos del runbook. El 2026-10-31 el propietario decidió darle acceso a producción, también total (§12): el agente usa el mínimo que cada tarea necesita, por defecto solo lectura, y la ADR de despliegue fija cómo le llega, sin pasar credenciales por el chat ni por Git.
@@ -85,11 +85,11 @@ Cada directorio aparece con su incremento, no antes:
 apps/api/                # F2.3: API Fastify, cuentas, sesiones y laboratorio; sirve la web
 packages/strategy-sdk/   # F2.6: modelo de estrategia, indicadores y evaluador puros
 research/python/         # F2.6b: motor de investigación, en Python acelerado; corre en el VPS
-apps/backtest/           # F2.7: backtest oficial con strategy-sdk; corre en el VPS
+apps/backtest/           # F2.7: backtests de la búsqueda con strategy-sdk; corre en el VPS
 apps/signal-engine/      # F2.9: motor de señales shadow
 ```
 
-`packages/strategy-sdk` toma el nombre de la [arquitectura objetivo](../arquitectura/arquitectura-objetivo.md): la interfaz restringida de estrategia, sin red ni secretos. `research/python` es el de la arquitectura objetivo y ADR-0003. `apps/backtest` es nuevo: desde el 2026-11-16, el backtest oficial corre en el VPS y no en la API (§11), y la ADR del motor (§8, punto 7) lo precisa en ADR-0019.
+`packages/strategy-sdk` toma el nombre de la [arquitectura objetivo](../arquitectura/arquitectura-objetivo.md): la interfaz restringida de estrategia, sin red ni secretos. `research/python` es el de la arquitectura objetivo y ADR-0003. `apps/backtest` es nuevo: desde el 2026-11-16, los backtests de la búsqueda corren en el VPS, y en la API solo corre la réplica de cada versión antes de `shadow` (`F2-API-001`). La ADR del motor de investigación (§8, punto 10) lo precisa en ADR-0019 §12.
 
 ### Ampliar
 
@@ -99,7 +99,7 @@ apps/signal-engine/      # F2.9: motor de señales shadow
 - `apps/web`: pantallas con datos reales, que sustituyen sección a sección los datos ficticios.
 - `render-datos.yaml`, un Blueprint de Render aparte de `render.yaml`, que sigue siendo solo el sitio, y su prueba: los servicios del sistema de datos, de la API y del motor ([ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §2).
 - `test-vectors/`: vectores sintéticos de estrategia, backtest, búsqueda y réplica, compartidos por TypeScript y Python.
-- `infra/`: la preparación del VPS del motor, con su script y sus pasos en el runbook, que fija la ADR del motor (§8, punto 7).
+- `infra/`: la preparación del VPS del motor de investigación, con su script y sus pasos en el runbook, que fija su ADR (§8, punto 10).
 
 La API y el motor necesitan leer el log y los datasets con el código del worker. La ADR de la API y las cuentas (§8) decide si lo importan de `@buoh/market-data-worker` o si ese código pasa a un paquete propio. Si es un paquete, su PR lo añade a este corte. ([ADR-0019](../arquitectura/adr/0019-api-cuentas-y-auditoria.md) §8 decidió que lo importan del worker, por la ruta de exportación `@buoh/market-data-worker/lectura`, así que este corte no cambia.)
 
@@ -112,7 +112,7 @@ La API y el motor necesitan leer el log y los datasets con el código del worker
 - Suscriptores, pagos y registro público (Fase 3B).
 - Python fuera de `research/python`, TimescaleDB, Redis y un writer Parquet, salvo que una ADR de la fase demuestre que hacen falta.
 - Datos de MetaTrader 5 (Fase 1B). Las exportaciones de velas de MT5 del propietario, que todavía no existen, llegan con su propio plan.
-- La inteligencia artificial (modelos de aprendizaje automático): después de la puerta de salida, con su incremento y su ADR (§12).
+- La inteligencia artificial (modelos de aprendizaje automático): después de las reglas, como decidió el propietario, y la dirección técnica la deja para después de la puerta de salida, con su incremento y su ADR (§12).
 - Clientes: buoh opera primero solo para el propietario (§12).
 
 No se crean directorios vacíos para estos componentes.
@@ -192,9 +192,11 @@ La captura suma el oro (`frxXAUUSD`) en vivo, junto a R_100, y buoh guarda las v
 
 **Aceptación:**
 
-- la ADR de mercados y fuentes (§8, punto 5) fija cómo se captura más de un símbolo, los umbrales live del oro, medidos como en `F2-THRESHOLD-001`, y cómo distingue la captura un mercado cerrado de un fallo con los horarios de Deriv (`trading_times`): el oro cierra los fines de semana y un rato cada día;
-- el año de velas de 1 minuto de Deriv del oro, la plata, el EUR/USD, el GBP/USD, el USD/JPY, Bitcoin y Ethereum se descarga por tramos, se actualiza cada día y se publica como datasets que `data:replay` reproduce. Las velas las calcula Deriv, no buoh, y su contrato lo dice;
-- cada pocos minutos, buoh guarda los pagos de sube/baja y las comisiones de los multiplicadores de cada mercado (`proposal`, sin cuenta), para que el backtest sepa lo que Deriv habría cobrado en cada instante;
+- la ADR de mercados y fuentes (§8, punto 9) fija cómo se captura más de un símbolo y cómo distingue la captura un mercado cerrado de un fallo con los horarios de Deriv (`trading_times`): el oro cierra los fines de semana y un rato cada día;
+- el oro se captura primero con el perfil de medición, sin publicar datasets live, y sus umbrales se fijan después con al menos 7 días de esa captura, como los de R_100 (`F2-THRESHOLD-001`, ADR-0018 y ADR-0020);
+- antes de capturar el oro, el disco de PostgreSQL pasa de 1 a 5 GB, con el visto bueno del propietario (§12): con R_100, el log de 38 días puede ocupar ya más de la mitad del disco de 1 GB (ADR-0018 §7), y el oro manda un 30 % más de eventos. La ADR de mercados lo mide;
+- el año de velas de 1 minuto de Deriv del oro, la plata, el EUR/USD, el GBP/USD, el USD/JPY, Bitcoin y Ethereum se descarga por tramos, se actualiza cada día y se publica como datasets que `data:replay` reproduce. Las velas las calcula Deriv, no buoh, y su contrato lo dice. Del oro y de R_100 se descarga también el año de ticks, para que el backtest y el motor `shadow` usen los mismos datos, ticks y velas armadas por buoh (§4.1). La ADR mide el tamaño de todo eso, que entra en la revisión de la retención cuando R2 pasa de 8 GB (ADR-0020 §6);
+- cada pocos minutos, buoh guarda los pagos de sube/baja y las comisiones de los multiplicadores de cada mercado (`proposal`, sin cuenta), para que el backtest sepa lo que Deriv habría cobrado en cada instante. Para el tiempo anterior a esa captura, el backtest declara un supuesto de costos, el medido al empezar, con su sensibilidad (protocolo §1);
 - nada de esto se autentica en Deriv ni redistribuye sus datos (ADR-0004 §13). Se guarda todo el tiempo, para uso propio, como decidió el propietario (§12);
 - las escrituras de R2 y su costo se miden en producción y caben en el presupuesto de §11.
 
@@ -208,7 +210,7 @@ La captura suma el oro (`frxXAUUSD`) en vivo, junto a R_100, y buoh guarda las v
 - lee el sistema de datos con un rol de PostgreSQL y un token de R2 de solo lectura, y solo escribe en sus propias tablas;
 - ninguna respuesta, registro o error contiene secretos, tokens ni credenciales, y las pruebas lo comprueban;
 - todas las respuestas llevan cabeceras de seguridad y una política de contenido, sin recursos de terceros;
-- los backtests no corren en la API, sino en el VPS (`F2-BACKTEST-001`), y la API lee sus resultados de `buoh-investigacion` con un token de solo lectura. Hasta el cambio de alcance del 2026-11-16 (§12), este punto pedía que un backtest corriera aislado dentro de la API, con 435 MB como máximo; la ADR del motor (§8, punto 7) lo precisa en ADR-0019;
+- un backtest corre aislado del proceso que atiende las peticiones, con límites de memoria y de tiempo, y su fallo no tumba la API. Corre como mucho uno a la vez, y la memoria máxima del servicio con un backtest en curso, medida en Render, no pasa de 435 MB, el 85 % del Starter. Desde el cambio de alcance del 2026-11-16 (§12), en la API solo corre la réplica de cada versión antes de `shadow` (`F2-EVAL-001`): así un VPS comprometido no puede fabricar la evidencia que ve el propietario. Los backtests de la búsqueda corren en el VPS (`F2-BACKTEST-001`), y la API lee sus resultados de `buoh-investigacion` con un token de solo lectura. La ADR del motor de investigación (§8, punto 10) lo precisa en ADR-0019 §12;
 - su conexión a PostgreSQL va cifrada como fije la ADR de despliegue, y una prueba lo comprueba;
 - sus lecturas de R2 y su tráfico de salida se miden en producción y caben en el presupuesto de §11.
 
@@ -269,7 +271,8 @@ Una estrategia es un documento declarativo (`StrategyDefinition`), no código: r
 - una definición inválida se rechaza con errores estructurados;
 - el evaluador es puro y determinista: los vectores fijan sus decisiones, y sus pruebas prohíben red, reloj real y azar, como `F1-VECTOR-001`. Sin azar no hace falta semilla; si una ADR introduce azar, lo inyecta con una semilla registrada;
 - el ciclo de vida (`draft`, `reviewed`, `active`, `paused`, `retired`) avanza solo con las puertas del [protocolo de validación](../gobierno/protocolo-de-validacion-de-estrategias.md) §4, y cada cambio queda en la auditoría. La puerta `reviewed` → `shadow` del protocolo pone la estrategia en `active` con `execution_mode = shadow`, y la estrategia declara ese modo ([operación y control de riesgo](../gobierno/operacion-y-control-de-riesgo.md) §2). Como la promoción crea una versión nueva (seguridad y rigor §2), la ADR del modelo de estrategia fija cómo la versión en `shadow` queda ligada a la evidencia de la versión congelada;
-- las estrategias las propone el motor de investigación (`F2-RESEARCH-001`). La sección Laboratorio de la web muestra cada versión con su informe, y el propietario la aprueba o la rechaza; no la edita.
+- las estrategias las propone el motor de investigación (`F2-RESEARCH-001`). La sección Laboratorio de la web muestra cada versión con su informe, y el propietario la aprueba o la rechaza (§1); no la edita;
+- las ADR del modelo de estrategia y de la semántica del backtest fijan qué datos consume una estrategia, para que sean los mismos en el backtest y en `shadow` (§4.1).
 
 ### `F2-RESEARCH-001` — Motor de investigación
 
@@ -277,10 +280,12 @@ Una estrategia es un documento declarativo (`StrategyDefinition`), no código: r
 
 **Aceptación:**
 
-- la ADR del motor (§8, punto 7) fija la versión de Python, sus bibliotecas con su versión y su motivo, la gramática que recorre la búsqueda, los métodos de búsqueda, el registro de cada búsqueda y la seguridad del VPS;
-- lee solo datasets publicados, por su `dataset_id`, por partes, con un techo de memoria y con un token de R2 de solo lectura. Solo escribe en su bucket, `buoh-investigacion`. No tiene acceso a la base de producción, a la captura ni a ningún bróker, y una prueba lo comprueba;
+- la ADR del motor de investigación (§8, punto 10) fija la versión de Python, sus bibliotecas con su versión y su motivo, la gramática que recorre la búsqueda, los métodos de búsqueda, el registro de cada búsqueda y la seguridad del VPS;
+- lee solo datasets publicados, por su `dataset_id`, por partes, con un techo de memoria y con credenciales de solo lectura. Los datasets viven en `buoh-captura`, junto a la captura, R2 limita los tokens por bucket y no por prefijo (ADR-0020 §5), y qué publicación está activa lo dice PostgreSQL (`buoh_datasets`; ADR-0004 §8). Su ADR elige cómo lee: por ejemplo, un token de solo lectura de `buoh-captura` y un rol de PostgreSQL que solo lee `buoh_datasets`, o una copia de los datasets publicados y de su índice en un bucket que escribe el plano de datos. Cada opción dice lo que filtraría un VPS comprometido;
+- solo escribe en su bucket, `buoh-investigacion`, y en la API, por lo que permite su credencial (`F2-SEARCH-001`). No tiene ninguna credencial que escriba en producción ni ninguna de un bróker, y una prueba lo comprueba;
 - cada candidata sale como un `StrategyDefinition` válido (`F2-STRATEGY-001`), y su evaluador acelerado da las mismas decisiones que el de `packages/strategy-sdk` en los vectores compartidos;
 - evalúa cada candidata con los costos de su tipo de contrato (`F2-MARKET-001`), sin pasar de la caída máxima de §12;
+- solo propone para `shadow` estrategias de mercados que buoh captura en vivo, R_100 y el oro. De los demás informa lo que encuentra; capturarlos en vivo es otra decisión del propietario;
 - mide cuántas estrategias prueba por hora en el VPS, y esa medición decide si su plan alcanza;
 - su código tiene versiones fijadas con archivo de bloqueo, pruebas sin red, reloj real ni azar no inyectado, y linter y tipos estrictos, todo en CI;
 - cada semana deja en `buoh-investigacion` un informe de lo que probó, cuántas, lo que propone y lo que no encontró, y la sección Laboratorio lo muestra.
@@ -292,14 +297,17 @@ Con millones de pruebas, la mejor del pasado casi siempre es suerte. La búsqued
 **Aceptación:**
 
 - antes de mirar resultados, cada búsqueda registra lo que puede probar: la gramática, los rangos de parámetros, los datasets, las ventanas y la métrica principal (protocolo §1). Cambiarlo crea otra búsqueda;
+- el registro de cada búsqueda y la congelación de cada candidata pasan por la API antes de que el motor de investigación siga: la API los valida con sus contratos y los guarda append-only en PostgreSQL, con su hash y su hora, y en la auditoría, con un autor de sistema. El VPS llega a la API con una credencial propia, que solo registra búsquedas, congelaciones y resultados, y que fija la ADR del motor de investigación;
+- `buoh-investigacion` tiene una regla de bloqueo, como `buoh-captura`: lo escrito no se reescribe ni se borra. La API valida con sus contratos y sus hashes todo lo que lee de ahí;
 - cada candidata probada queda en el registro de su búsqueda, también las descartadas, y el informe de una propuesta dice cuántas se probaron;
-- la ADR del protocolo estadístico (§8, punto 9) fija las correcciones por búsqueda, como el Sharpe deflactado, la probabilidad de sobreajuste del backtest o la comparación con la línea base de White o de Hansen, y una propuesta tiene que superarlas;
+- la ADR del protocolo estadístico (§8, punto 7) fija las correcciones por búsqueda, como el Sharpe deflactado, la probabilidad de sobreajuste del backtest o la comparación con la línea base de White o de Hansen, y una propuesta tiene que superarlas;
 - la misma búsqueda corre sobre R_100 y sobre series al azar sintéticas. Si aprueba más candidatas de las que da el azar, no propone nada en mercados reales hasta corregirse;
-- un vector sintético sin patrón no produce ninguna propuesta, y uno con un patrón sembrado sí.
+- un vector sintético sin patrón no produce ninguna propuesta, y uno con un patrón sembrado sí;
+- si ninguna candidata supera estas pruebas, el motor puede presentar para la puerta de salida su mejor candidata de un mercado capturado en vivo, marcada «no validada» (protocolo §3) en todo su informe. Sirve solo para demostrar el motor `shadow` (§13), y el propietario lo sabe al aprobarla.
 
 ### `F2-BACKTEST-001` — Backtest reproducible por partes
 
-Un backtest evalúa una versión de estrategia sobre datasets publicados, con el evaluador del motor `shadow` (§4). Es el backtest oficial: corre en el VPS, en `apps/backtest`, y repite con `packages/strategy-sdk` lo que calculó el motor de investigación.
+Un backtest evalúa una versión de estrategia sobre datasets publicados, con el evaluador del motor `shadow` (§4). Los de la búsqueda corren en el VPS, en `apps/backtest`, y repiten con `packages/strategy-sdk` lo que calculó el motor de investigación. La réplica de cada versión antes de `shadow` corre en la API (`F2-API-001` y `F2-EVAL-001`).
 
 **Aceptación:**
 
@@ -323,7 +331,8 @@ La evaluación sigue el protocolo de validación, con las reglas medibles que fi
 - una estrategia sin muestra, costes, línea base o prueba fuera de muestra sale como «no validada» (protocolo §3);
 - antes de pasar a `shadow`, el backtest de la versión congelada se repite y da el mismo resultado: es la réplica del ciclo de seguridad y rigor §2;
 - un vector sintético en el que la estrategia gana en entrenamiento y pierde fuera de muestra produce exactamente ese informe;
-- el motor de investigación guarda el registro previo y pide la evaluación y la prueba fuera de muestra. Desde la sección Laboratorio de la web, el propietario ve el informe de evidencia, cada cifra con su contexto, y aprueba o rechaza la puerta `reviewed` → `shadow`. Solo su aprobación pasa una estrategia al motor `shadow`.
+- la ventana fuera de muestra de una versión empieza después de su congelación, que registró la API (`F2-SEARCH-001`): son datos que no existían cuando el motor buscó, y la API comprueba que no se solapa con ninguna ventana del registro de su búsqueda. Su duración la fija la ADR del protocolo estadístico;
+- el motor de investigación registra el registro previo en la API y pide la evaluación y la prueba fuera de muestra. Desde la sección Laboratorio de la web, el propietario ve el informe de evidencia, cada cifra con su contexto, y aprueba o rechaza la puerta `reviewed` → `shadow`. Solo su aprobación pasa una estrategia al motor `shadow` (§1).
 
 ### `F2-SHADOW-001` — Motor de señales shadow
 
@@ -358,7 +367,7 @@ El motor lleva un libro de posiciones hipotéticas por estrategia, con el modelo
 
 - cada posición enlaza su señal y su decisión, y nunca existe una orden;
 - una posición sigue la semántica de su contrato de Deriv: un multiplicador, con su comisión, su stop loss, su take profit y su cierre al perder lo apostado; un sube/baja, con el pago que Deriv ofrecía en su instante (`F2-MARKET-001`);
-- la comparación usa la prueba de deriva que fije la ADR del protocolo estadístico, con la cadencia que fije la ADR del motor. Una deriva material es causa de pausa (protocolo §5);
+- la comparación usa la prueba de deriva que fije la ADR del protocolo estadístico, con la cadencia que fije la ADR del motor `shadow`. Una deriva material es causa de pausa (protocolo §5);
 - el informe de la estrategia, en la sección Laboratorio de la web, muestra juntos el backtest, la validación, la prueba fuera de muestra y el `shadow`, cada cifra con su modo y su contexto.
 
 ### `F2-STOP-001` — Detención ante datos degradados
@@ -368,9 +377,10 @@ El motor deja de decidir por una estrategia en cuanto sus datos dejan de cumplir
 **Aceptación:**
 
 - se detiene, al menos, con la salud de los datos distinta de `healthy`, con una condición `connection_lost` o `event_gap_unresolved` abierta, con la continuidad pendiente, con datos más viejos que el máximo de la estrategia y con un perfil o un esquema distinto del registrado;
+- fuera del horario de su mercado (`F2-MARKET-001`), una estrategia no decide y no se detiene: un cierre programado no es una degradación. Un mercado que deja de mandar datos dentro de su horario sí la detiene. La ADR del motor `shadow` lo fija;
 - cada detención queda registrada con su causa y su instante, y se reproduce como cualquier otra decisión (`F2-REPLAY-001`);
 - la reanudación sigue el protocolo §5 tal como está: análisis documentado, nueva evidencia y una decisión auditada del propietario, desde la sección Laboratorio de la web. Reanudar en la Fase 2 adelanta, para el modo `shadow`, lo que el catálogo de funciones llama «Volver a encender» y pone en la Fase 4, y el propietario decide cómo (§12);
-- si la ADR del motor propone que alguna detención se levante sola cuando los datos se recuperan, eso cambia el protocolo §5: necesita antes la decisión del propietario (§12), y el mismo PR cambia el protocolo. Una estrategia pausada por un incidente nunca se reactiva sola;
+- si la ADR del motor `shadow` propone que alguna detención se levante sola cuando los datos se recuperan, eso cambia el protocolo §5: necesita antes la decisión del propietario (§12), y el mismo PR cambia el protocolo. Una estrategia pausada por un incidente nunca se reactiva sola;
 - cada causa tiene su vector, y la puerta de salida demuestra la detención en producción.
 
 ### `F2-REPLAY-001` — Cada decisión se reproduce
@@ -396,14 +406,14 @@ Cada ADR es un PR propio, con su revisión semántica, y se fusiona antes del pr
 2. **Despliegue del sistema de datos** (F2.2): las condiciones de ADR-0016 §4 que quedan después del punto de control. Son los roles, la retención, las reglas de `ingest` en producción, las comprobaciones de R2, dónde y cada cuánto corre `data:health`, las credenciales y la región. Decide también el cifrado de la conexión a PostgreSQL, el Blueprint de Render (`render-datos.yaml`, [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md)), la historia tras una parada programada, qué pasa si dos instancias se solapan durante un despliegue, cómo se mide el tráfico de salida y cómo llega al repositorio la evidencia de producción (§4, punto 10).
 3. **API y cuentas** (F2.3): el método de inicio de sesión, las sesiones, las cuentas sin registro público, los espacios personales, la auditoría, los contratos y su OpenAPI, cómo se sirve la web y sus roles y tokens de lectura. Decide también cómo se aíslan los backtests y cómo comparten la API y el motor el código de lectura de datos (§6).
 4. **Datasets vivos** (F2.5): los umbrales, el perfil de publicación, la cadencia y el tamaño, las partes y los límites al publicar, los ticks de la historia y la lectura por partes. Se escribe con 7 días de captura en producción.
-5. **Mercados y fuentes de investigación** (F2.5b): los símbolos, la captura de más de uno, los umbrales del oro, los mercados cerrados, las velas como datos de buoh, lo que cobra Deriv como fuente propia y su costo (`F2-MARKET-001`).
-6. **Modelo de estrategia** (F2.6).
-7. **Motor de investigación y su VPS** (F2.6b), con la precisión de ADR-0019 sobre dónde corren los backtests.
-8. **Semántica del backtest** (F2.7).
-9. **Protocolo estadístico** (F2.8), con las correcciones por búsqueda (`F2-SEARCH-001`).
-10. **Motor de señales shadow** (F2.9 y F2.10), con los ensayos de la puerta de salida.
+5. **Modelo de estrategia** (F2.6).
+6. **Semántica del backtest** (F2.7).
+7. **Protocolo estadístico** (F2.8), con las correcciones por búsqueda (`F2-SEARCH-001`) y cómo cumplen las candidatas del motor de investigación el registro previo (la hipótesis y su mecanismo) y la revisión técnica del [protocolo de validación](../gobierno/protocolo-de-validacion-de-estrategias.md) §1 y §4, que cambia en el mismo PR.
+8. **Motor de señales shadow** (F2.9 y F2.10), con los ensayos de la puerta de salida y los cierres programados del mercado (`F2-STOP-001`).
+9. **Mercados y fuentes de investigación** (F2.5b): los símbolos, la captura de más de uno, los mercados cerrados, las velas y los ticks de la historia como datos de buoh, lo que cobra Deriv como fuente propia, el disco y el costo (`F2-MARKET-001`).
+10. **Motor de investigación y su VPS** (F2.6b): sus credenciales, su seguridad y su administración, y la precisión de ADR-0019 §12 sobre dónde corren los backtests (`F2-RESEARCH-001` y `F2-SEARCH-001`).
 
-La 5 va sola, para que la captura del oro empiece pronto. Las cinco últimas comparten el evaluador, el instante de decisión y lo que guarda cada decisión. Por eso se escriben seguidas, y las cinco se fusionan antes del primer PR de código de F2.6. Todas empiezan después del PR 6 de ADR-0020 (`PROJECT_STATUS.md`, «Orden del trabajo»). Hasta el cambio de alcance del 2026-11-16 (§12), esta lista tenía ocho puntos, y los puntos 5 a 8 eran el modelo de estrategia, la semántica del backtest, el protocolo estadístico y el motor `shadow`.
+Los puntos 9 y 10 llegaron con el cambio de alcance del 2026-11-16 (§12), al final de la lista para no cambiar los números que citan otros documentos. El orden es otro: la 9 va primero y sola, para que la captura del oro empiece pronto, y después van seguidas la 5, la 10, la 6, la 7 y la 8. Esas cinco comparten el evaluador, el instante de decisión y lo que guarda cada decisión, así que se fusionan todas antes del primer PR de código de F2.6. La dirección técnica las pone después del PR 6 de ADR-0020, como pidió el propietario el 2026-11-14 para la del modelo de estrategia (`PROJECT_STATUS.md`, «Orden del trabajo»).
 
 F2.4 no tiene ADR: cambia el concepto de interfaz, que es su fuente canónica (P-V1-04).
 
@@ -416,8 +426,8 @@ F2.4 no tiene ADR: cambia el concepto de interfaz, que es su fuente canónica (P
 | **F2.3** API, cuentas y auditoría | `F2-API-001`, `F2-AUTH-001`, `F2-AUDIT-001` (sesiones) y `F2-GOV-001` (`apps/api`) | la captura de F2.2 corriendo en producción |
 | **F2.4** Datos reales en pantalla | `F2-UI-001`, `F2-CHART-001` y `F2-AUDIT-001` (eventos de datos, ADR-0019 §5) | F2.3 |
 | **F2.5** Datasets vivos | `F2-THRESHOLD-001` y `F2-DATASET-001` | F2.2 con sus 7 días de captura |
-| **F2.5b** Mercados reales | `F2-MARKET-001` | su ADR (§8, punto 5) y el PR 6 de ADR-0020 |
-| **F2.6** Estrategias | `F2-STRATEGY-001`, `F2-AUDIT-001` (estrategias) y `F2-GOV-001` (`packages/strategy-sdk`) | F2.3 y las cinco ADR del laboratorio (§8, puntos 6 a 10) |
+| **F2.5b** Mercados reales | `F2-MARKET-001` | su ADR (§8, punto 9) y el PR 6 de ADR-0020 |
+| **F2.6** Estrategias | `F2-STRATEGY-001`, `F2-AUDIT-001` (estrategias) y `F2-GOV-001` (`packages/strategy-sdk`) | F2.3 y las cinco ADR del laboratorio (§8, puntos 5 a 8 y 10) |
 | **F2.6b** Motor de investigación | `F2-RESEARCH-001`, `F2-SEARCH-001` (registro y controles negativos), `F2-AUDIT-001` (propuestas) y `F2-GOV-001` (`research/python`) | F2.5b y F2.6 |
 | **F2.7** Backtest | `F2-BACKTEST-001`, `F2-AUDIT-001` (backtests) y `F2-GOV-001` (`apps/backtest`) | F2.5, F2.6 y F2.6b |
 | **F2.8** Evaluación | `F2-EVAL-001`, `F2-SEARCH-001` (correcciones por búsqueda) y `F2-AUDIT-001` (registros previos, evaluaciones y aprobaciones) | F2.7 |
@@ -425,7 +435,7 @@ F2.4 no tiene ADR: cambia el concepto de interfaz, que es su fuente canónica (P
 | **F2.10** Posiciones, comparación y réplica | `F2-POSITION-001` y `F2-REPLAY-001` | F2.9 |
 | **F2.11** Puerta de salida | la evidencia de §13 | F2.10 |
 
-- La captura empieza en F2.2, lo antes posible, para que los datos se acumulen mientras avanza lo demás. Por lo mismo, F2.5b va antes que los demás incrementos nuevos: los ticks del oro solo existen desde que buoh los captura.
+- La captura empieza en F2.2, lo antes posible, para que los datos se acumulen mientras avanza lo demás. Por lo mismo, F2.5b va antes que los demás incrementos nuevos: el motor `shadow` solo puede seguir el oro desde que buoh lo captura, y sus umbrales necesitan 7 días de esa captura.
 - F2.2 se cierra con su evidencia de 7 días. F2.3 no la espera: empieza en cuanto la captura corre en producción. F2.5 sí espera esos 7 días.
 - F2.4 no espera el último PR de F2.3, el 7c, que solo reúne la memoria y el tráfico de salida de `buoh-api` de varios días (ADR-0019 §14). Para no mezclar su tráfico con esa medición, ninguna lectura de R2 de F2.4 llega a producción antes del 2026-11-08. Lo decidió el propietario el 2026-11-04. Los días que copia el 7c terminan antes del primer despliegue de F2.4 que lee R2.
 - La sección Datos de F2.4 (el 6b de `PROJECT_STATUS.md`) va después de la ADR de datasets vivos de F2.5, que decide dónde viven los datasets de producción y cómo se guarda su verificación (ADR-0018 §7). Hasta entonces, su lector solo podría leer las tablas de publicación de cada log, donde producción no publica. Así, F2.4 termina después de esa ADR. Esa ADR es [ADR-0020](../arquitectura/adr/0020-datasets-vivos.md), y la sección Datos llega después de su PR 4, cuando el esquema de los datasets existe en producción (§13).
@@ -472,13 +482,13 @@ Un ensayo en vivo o en producción nunca sustituye una prueba sin red, porque la
 | VPS de Contabo para el motor de investigación y el backtest oficial | F2.6b | unos 7 EUR, unos 8 USD |
 | Background worker Starter para el motor `shadow` | F2.9 | 7 USD |
 
-En total, unos 50 USD al mes, que aprobó el propietario el 2026-11-16 («2 si», a la pregunta de si aprobaba subir el gasto de unos 26 a unos 50 USD al mes); antes del cambio de alcance eran unos 33 (§12). La base, el worker de `ingest`, R2 y la API son los unos 22 USD que aprobó el propietario (ADR-0016 §2), más los unos 3 USD de R2 que aprobó el 2026-10-31 al conocer el redondeo de Cloudflare («ok aprueba apcion a, sigue trabajando», y «A» al confirmarlo; ADR-0018 §14). El cron job lo aprobó el 2026-10-31 («la respuesta nro 2, apruebo 1 usd mas»), y el servidor del motor el 2026-10-29 («1. Si, un servidor pequeño para el bot»), que se compra con F2.9. Desde el cambio de alcance, los backtests corren en el VPS, sin costo aparte. Los precios son los que comprobó ADR-0016 y se confirman al comprar.
+En total, unos 50 USD al mes, que aprobó el propietario el 2026-11-16 («2 si», a la pregunta de si aprobaba subir el gasto de unos 26 a unos 50 USD al mes); antes del cambio de alcance eran unos 33 (§12). La base, el worker de `ingest`, R2 y la API son los unos 22 USD que aprobó el propietario (ADR-0016 §2), más los unos 3 USD de R2 que aprobó el 2026-10-31 al conocer el redondeo de Cloudflare («ok aprueba apcion a, sigue trabajando», y «A» al confirmarlo; ADR-0018 §14). El cron job lo aprobó el 2026-10-31 («la respuesta nro 2, apruebo 1 usd mas»), y el servidor del motor el 2026-10-29 («1. Si, un servidor pequeño para el bot»), que se compra con F2.9. Desde el cambio de alcance, los backtests corren en el VPS, sin costo aparte. Los precios son los que comprobó ADR-0016, y los del VPS y del oro, los del 2026-11-16 (§3); se confirman al comprar.
 
-La línea de R2 es la de ADR-0018 §14 para la captura y `data:health`: R2 redondea el uso al millón siguiente, así que, con unos 1,35 millones de operaciones de clase A al mes, lo que pasa del millón gratuito se cobra como un millón entero. Pasar de 2 millones, por ejemplo con un segundo símbolo, costaría 9 USD. No incluye las lecturas de la API y del motor. El tráfico de salida de Render tampoco está medido: ADR-0018 §13 lo estima en unos 0,30 USD al mes por encima de lo incluido, y F2.2, F2.3 y F2.9 lo miden. Si lo medido no cabe en este presupuesto, se presenta al propietario antes de seguir (§4, punto 8).
+La línea de R2 es la de ADR-0018 §14 para la captura y `data:health`: R2 redondea el uso al millón siguiente, así que, con unos 1,35 millones de operaciones de clase A al mes, lo que pasa del millón gratuito se cobra como un millón entero. Con el oro en vivo, que manda un tick por segundo mientras cotiza, son unos 3,15 millones al mes y se cobran 3: unos 13,50 USD (estimación, §3). No incluye las lecturas de la API, del motor `shadow` ni del motor de investigación. El tráfico de salida de Render tampoco está medido: ADR-0018 §13 lo estima en unos 0,30 USD al mes por encima de lo incluido, y F2.2, F2.3 y F2.9 lo miden. Si lo medido no cabe en este presupuesto, se presenta al propietario antes de seguir (§4, punto 8).
 
 Pueden sumarse, si sus ADR los eligen y el propietario los aprueba:
 
-- el disco de PostgreSQL de 5 GB, 1,50 USD en lugar de 0,30, cuando la retención lo pida;
+- el disco de PostgreSQL de 5 GB, 1,50 USD en lugar de 0,30, cuando la retención lo pida, y antes de capturar el oro (`F2-MARKET-001`);
 - el worker Standard, unos 18 USD más, si el punto de control no basta (ADR-0016, «Consecuencias»).
 
 ## 12. Decisiones del propietario durante la fase
@@ -495,13 +505,15 @@ Pueden sumarse, si sus ADR los eligen y el propietario los aprueba:
 | Qué idiomas tiene el producto, para la preferencia de idioma del catálogo | producto | decidida el 2026-11-04: en español («sera en espanhol»), que el agente toma como la opción que recomendó, solo español. F2.4 guarda por cuenta solo el tema, y el selector de idioma llega con un segundo idioma (`F2-UI-001`) |
 | Cuánto se guardan los datasets vivos, que no cita ninguna evidencia | riesgo y producto | decidida el 2026-11-13: «B», todos, sin vencer, y se revisa cuando R2 pasa de 8 GB; la dirección técnica añade la misma revisión cuando la base pasa de 600 MB ([ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) §6) |
 | Qué tipo de operación representan las posiciones hipotéticas, dentro de lo que ofrece Deriv | producto | decidida el 2026-11-16: multiplicadores y sube/baja, sin dígitos («prefiero multiplicadores y sube y baja, dejar fuera los digitos»); los demás tipos quedan fuera hasta otra decisión |
-| Quién busca las estrategias | producto | decidida el 2026-11-16: un motor de investigación que prueba millones de estrategias y busca patrones, siempre buscando rentabilidad, en Python y en un VPS de Contabo de unos 7 EUR al mes (§1, §4.7 y §11; sus palabras, en `PROJECT_STATUS.md`) |
+| Quién busca las estrategias | producto | decidida el 2026-11-16: un motor de investigación que prueba millones de estrategias y busca patrones, siempre buscando rentabilidad, en Python y en un VPS de Contabo de unos 7 EUR al mes (§1, §4.7 y §11; sus palabras, en `PROJECT_STATUS.md`). Que él autorice cada estrategia que pasa al bot es una propuesta de la dirección técnica, que aprueba al fusionar este plan (§1) |
 | Dónde se opera primero y cuánto dura cada operación | producto y riesgo | decidida el 2026-11-16: en Deriv, y MT5 después; la duración la decide cada estrategia, de segundos a horas |
 | La caída máxima de una estrategia | riesgo | decidida el 2026-11-16: el 50 % de su capital, en el backtest, en `shadow` y en demo, y demo antes que dinero real. El agente recomendaba el 20 % y le explicó el riesgo. El límite para dinero real se decide antes de la Fase 5 |
 | Qué mercados y cuánto se guardan | producto, riesgo y dinero | decidida el 2026-11-16: R_100 y el oro en vivo, y siete mercados en velas (`F2-MARKET-001`), guardados todo el tiempo para uso propio, aunque los términos de Deriv solo permiten 24 horas |
-| Inteligencia artificial y clientes | producto | decidida el 2026-11-16: primero reglas, y los modelos de aprendizaje automático después de la puerta de salida; sin clientes por ahora |
+| Inteligencia artificial y clientes | producto | decidida el 2026-11-16: primero reglas y la inteligencia artificial después, que la dirección técnica sitúa después de la puerta de salida; sin clientes por ahora |
+| El disco de PostgreSQL de 5 GB, unos 1,20 USD más al mes | dinero | antes de capturar el oro (`F2-MARKET-001`) |
+| Quién administra el VPS, quién tiene su acceso, si lo recibe el agente, qué plan de Contabo y en qué región | seguridad y dinero | antes de abrir la ADR del motor de investigación (§8, punto 10) |
 | El presupuesto con el motor | dinero | decidida el 2026-11-16: unos 50 USD al mes (§11) |
-| Cómo se reanuda una estrategia `shadow` detenida: a mano, como pide hoy el protocolo §5, o sola tras las degradaciones breves que la historia cubre, lo que cambia el protocolo. Las dos adelantan para `shadow` el «Volver a encender» del catálogo (`F2-STOP-001`) | riesgo y producto | antes de abrir la ADR del motor (§8, punto 10) |
+| Cómo se reanuda una estrategia `shadow` detenida: a mano, como pide hoy el protocolo §5, o sola tras las degradaciones breves que la historia cubre, lo que cambia el protocolo. Las dos adelantan para `shadow` el «Volver a encender» del catálogo (`F2-STOP-001`) | riesgo y producto | antes de abrir la ADR del motor `shadow` (§8, punto 8) |
 | El worker Standard, si el punto de control no cumple `F2-CHECKPOINT-001` | dinero | solo si pasa |
 
 Cada decisión se pide con sus opciones y una recomendación, y el PR que la usa registra cuándo y con qué palabras la dio (AGENTS.md, «Fusión»).
@@ -512,7 +524,7 @@ La Fase 2 está `done` únicamente cuando:
 
 - todos los requisitos `F2-*` tienen evidencia fusionada;
 - el sistema de datos cumple `F2-DEPLOY-001` durante toda la ventana de la puerta de salida;
-- una estrategia propuesta por el motor de investigación y aprobada por el propietario sumó en `shadow`, en producción, al menos 7 días en `active`, sin contar sus pausas, y cada una de sus decisiones de esa ventana se reprodujo con el mismo registro desde datasets publicados y versiones fijados (`F2-REPLAY-001`);
+- una estrategia propuesta por el motor de investigación, o su mejor candidata «no validada» si ninguna pasa la búsqueda honesta (`F2-SEARCH-001`), aprobada por el propietario, sumó en `shadow`, en producción, al menos 7 días en `active`, sin contar sus pausas, y cada una de sus decisiones de esa ventana se reprodujo con el mismo registro desde datasets publicados y versiones fijados (`F2-REPLAY-001`);
 - en esa ventana el motor se detuvo sin intervención ante cada degradación de los datos, natural o provocada en un ensayo de la puerta, y cada reanudación siguió su regla (`F2-STOP-001`);
 - esa estrategia tiene su informe completo de backtest, validación, prueba fuera de muestra y `shadow`, también si es negativo. La puerta no exige ganancias. Exige que la estrategia haya pasado la puerta `reviewed` → `shadow` del protocolo §4, con su criterio de promoción registrado antes de ver resultados (protocolo §1), sea cual sea ese criterio;
 - el costo mensual medido está dentro del presupuesto aprobado;
@@ -521,9 +533,10 @@ La Fase 2 está `done` únicamente cuando:
 ## 14. Riesgos y preguntas no bloqueantes
 
 - **Memoria.** Si el punto de control no baja la memoria lo bastante, el worker Standard cabe sin cambiar el código, pero sube el total en unos 18 USD al mes (§12).
-- **Datos suficientes.** Un año de velas de 1 minuto sirve para estrategias de minutos a horas. Las de segundos necesitan ticks, que solo existen desde que buoh los captura: si al llegar F2.8 no bastan, esas estrategias esperan a que la captura los acumule.
+- **Datos suficientes.** Deriv da un año de velas y de ticks (§3), y la prueba fuera de muestra usa datos posteriores a cada congelación (`F2-EVAL-001`). Si al llegar F2.8 no bastan, la evaluación espera a que se acumulen.
 - **El motor puede no encontrar nada.** R_100 es azar por diseño, y en los mercados reales nadie sabe antes si hay algo viable después de los costos. La puerta de salida no exige ganancias (§13), y un informe negativo es un resultado válido.
 - **La CPU del VPS.** Contabo avisa de que su CPU rinde menos con mucha carga: el motor prueba menos por día, sin cambiar sus resultados. La medición de `F2-RESEARCH-001` decide si hace falta un plan mayor.
+- **Un servidor propio.** ADR-0016 descartó uno para el sistema de datos, porque el propietario, que no es programador, tendría que mantenerlo. El VPS vuelve solo para la investigación, sin poder escribir en producción ni tocar un bróker, y su ADR fija quién lo administra (§12). Un VPS comprometido podría leer lo que leen sus credenciales y dejar propuestas falsas, que la réplica en la API descubre antes de `shadow` (`F2-API-001`).
 - **La API está en internet.** Su seguridad se revisa en cada PR, y la seguridad conserva la revisión humana del propietario (CONTRIBUTING.md).
 - **Render Postgres Basic-256mb** (0,1 CPU y 256 MB) atiende la captura, la API y el motor a la vez. Si no alcanza, subir de plan necesita al propietario.
 - **Región.** La de Render no se puede cambiar después de crear un servicio (ADR-0016 §4).
