@@ -109,7 +109,7 @@ Estimaciones, que los PR miden:
 - **Tráfico de salida de Render.** Render cuenta lo que sus servicios envían a R2, también las peticiones (ADR-0016). Con la cuenta de ADR-0018 §13, el oro suma unos 11 GB al mes y los lotes unos 1,5 GB, unos 1,95 USD al mes a 0,15 USD por GB por encima de los 5 GB incluidos. La historia suma una vez unos 5 GB, unos 0,75 USD.
 - **R2, espacio.** Los datasets de la historia de ticks ocupan unos 4 GB, casi todo en los ticks normalizados en gzip (unos 100 bytes por tick, ADR-0020, «Medición»), y los de velas unos 100 MB. Con los logs de 30 días de las secuencias en vivo, unos 3 GB, y los de la descarga mientras no vencen, unos 1,5 GB, R2 pasa de 8 GB el mes de la descarga: la revisión de ADR-0020 §6 con el propietario llega en semanas y no en dos años. R2 cobra el espacio por encima de 10 GB, a 0,015 USD por GB al mes (ADR-0016).
 - **Retención.** Los logs de las secuencias por lotes vencen a los 30 días, como los demás. Los datasets que salen de ellos no vencen, como decidió el propietario para la historia de Deriv («Motor de investigación»), con la misma revisión de ADR-0020 §6.
-- **Total.** Unos 54 USD al mes (estimación), unos 3 más que los 51 aprobados antes (plan §11). El plan pide el visto bueno del propietario antes de subir el presupuesto (§4, punto 8), y lo dio el 2026-11-16, al fusionar esta ADR («ya hice merge apruebo 54 usd al mes»).
+- **Total.** Unos 54 USD al mes (estimación), unos 3 más que los 51 aprobados antes (plan §11). El plan pide el visto bueno del propietario antes de subir el presupuesto (§4, punto 8), y lo dio el 2026-11-16, después de fusionarla, en el mensaje en que lo avisó («ya hice merge apruebo 54 usd al mes»).
 
 ### 7. Términos de Deriv
 
