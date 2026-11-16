@@ -48,6 +48,7 @@ buoh/
 ├── apps/
 │   ├── api/                     # Fastify: identidad, consulta y API de producto
 │   ├── market-data-worker/      # ingesta, validación, normalización y trabajos de datos
+│   ├── backtest/                # backtest oficial de las candidatas del motor de investigación (plan de Fase 2, F2.7)
 │   ├── signal-engine/           # evaluación en vivo y producción de SignalEvent
 │   ├── execution-gateway/       # futuro: único proceso con permiso de ejecutar
 │   ├── web/                     # Next.js: investigación, auditoría y control (hoy, prototipo visual de ADR-0008)
@@ -63,7 +64,7 @@ buoh/
 │   ├── design-system/           # tokens y componentes visuales de buoh (guía: docs/diseno/marca-buoh.md)
 │   └── config/                  # configuración común de calidad y compilación
 ├── research/
-│   └── python/                  # análisis estadístico reproducible por lotes
+│   └── python/                  # motor de investigación: análisis y búsqueda de estrategias por lotes (plan de Fase 2, F2.6b)
 ├── infra/                       # Docker local, IaC, secretos y despliegue
 ├── docs/
 └── .kiro/steering/
@@ -154,7 +155,7 @@ La terminal MT5 con el puente corre en un PC dedicado del propietario o en un se
 ## Despliegue y fiabilidad
 
 - **Desarrollo de Fase 1:** Docker Compose para PostgreSQL estándar y almacenamiento S3-compatible local; datos sintéticos y públicos.
-- **Alojamiento productivo:** Render para PostgreSQL, API, web y `market-data-worker` (un background worker), y Cloudflare R2 como almacenamiento S3-compatible ([ADR-0006](adr/0006-alojamiento-en-render.md) y [ADR-0016](adr/0016-alojamiento-del-sistema-de-datos.md)). Siguen pendientes las regiones y la distribución de la app móvil. El [plan de Fase 2](../plan/fase-2-laboratorio-y-bot-shadow.md) autoriza el despliegue por incrementos: el sistema de datos en F2.2, la API con la web en F2.3 y el motor de señales `shadow` en F2.9, cada uno después de su ADR. Hasta entonces solo está desplegado el sitio oficial, como sitio estático gratuito ([ADR-0013](adr/0013-publicacion-del-sitio-en-render.md)).
+- **Alojamiento productivo:** Render para PostgreSQL, API, web y `market-data-worker` (un background worker), y Cloudflare R2 como almacenamiento S3-compatible ([ADR-0006](adr/0006-alojamiento-en-render.md) y [ADR-0016](adr/0016-alojamiento-del-sistema-de-datos.md)). Siguen pendientes las regiones y la distribución de la app móvil. El [plan de Fase 2](../plan/fase-2-laboratorio-y-bot-shadow.md) autoriza el despliegue por incrementos: el sistema de datos en F2.2, la API con la web en F2.3, el motor de investigación y el backtest oficial en un VPS propio de Contabo en F2.6b y F2.7, que solo lee datos, y el motor de señales `shadow` en F2.9, cada uno después de su ADR. Hasta F2.2 solo estuvo desplegado el sitio oficial, como sitio estático gratuito ([ADR-0013](adr/0013-publicacion-del-sitio-en-render.md)).
 - **Fases posteriores:** TimescaleDB o Redis se incorporan solo si una ADR documenta la necesidad medida.
 - **Preproducción:** estrategia *shadow*, pruebas de resiliencia, telemetría, migraciones y prueba demo sin secretos productivos.
 - **Producción de señales:** observabilidad de datos, eventos y latencia; interrupción automática si la calidad se degrada.
