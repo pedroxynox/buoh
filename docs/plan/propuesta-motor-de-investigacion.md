@@ -2,11 +2,11 @@
 
 - **Estado:** propuesta para que el propietario la corrija. No está vigente y no autoriza código, servicios ni gastos. Lo vigente sigue en [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md) y en el [plan de Fase 2](fase-2-laboratorio-y-bot-shadow.md).
 - **Fecha:** 2026-11-16.
-- **Qué pasa después:** el propietario la corrige en este PR. Con sus correcciones, el mismo PR cambia el plan de Fase 2, el roadmap y `PROJECT_STATUS.md` (§11), y este archivo se borra. Fusionar ese PR es aprobar el cambio.
+- **Qué pasa después:** el propietario la corrige en este PR. Con sus correcciones, el mismo PR cambia el plan de Fase 2, el roadmap y `PROJECT_STATUS.md` (§12), y este archivo se borra. Fusionar ese PR es aprobar el cambio.
 
 ## Resumen en palabras simples
 
-buoh tendrá un motor de investigación que estudia sin parar los datos que guarda buoh y los que se le añadan de mercados reales. Busca patrones y prueba millones de estrategias, siempre buscando rentabilidad después de pagar los costos. Se queda con las pocas que siguen funcionando con datos que no vio, y las propone. Nunca opera. Una estrategia que propone sigue el camino que ya existe: bot *shadow* sin dinero, después demo y, solo si pasa todas las puertas, dinero real, en la cuenta del propietario. Los clientes quedan fuera de esta propuesta (§9).
+buoh tendrá un motor de investigación que estudia sin parar los datos que guarda buoh y los que se le añadan de mercados reales. Busca patrones y prueba millones de estrategias, siempre buscando rentabilidad después de pagar los costos. Se queda con las pocas que siguen funcionando con datos que no vio, y las propone. Nunca opera. Una estrategia que propone sigue el camino que ya existe: bot *shadow* sin dinero, después demo y, solo si pasa todas las puertas, dinero real, en la cuenta de Deriv del propietario, con multiplicadores y sube/baja. Los clientes quedan fuera de esta propuesta (§9). Lo que se construye, cómo se conecta con buoh y cómo queda la Fase 2 está en §11.
 
 El motor está escrito en Python acelerado (§7) y corre en un servidor propio (VPS) de Contabo, con más memoria y CPU (§8). La captura, la base de datos, la API y la web siguen en Render, donde ya funcionan.
 
@@ -87,7 +87,7 @@ Una estrategia es viable solo después de los costos de Deriv, donde operará pr
 - **Multiplicadores:** la comisión al abrir, que en el oro el precio cubre moviéndose a favor un 0,018 %. Son el tipo más barato medido, y el único del oro que se puede cerrar a los pocos segundos.
 - **CFD en MT5** (Deriv MT5 o Vantage), más adelante: el spread, la comisión y el swap, con margen y apalancamiento ([ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md) §6).
 
-El tipo de contrato y la duración forman parte de cada candidata: los elige el motor, dentro de los tipos que permita el propietario (§10, decisión 13). Para evaluar opciones, el motor necesita el pago que Deriv habría ofrecido en cada momento, así que buoh empieza a guardarlo (§6).
+El tipo de contrato y la duración forman parte de cada candidata: los elige el motor, dentro de los tipos que permitió el propietario (§10, decisión 10). Para evaluar opciones, el motor necesita el pago que Deriv habría ofrecido en cada momento, así que buoh empieza a guardarlo (§6).
 
 ### Qué no hace nunca
 
@@ -140,7 +140,7 @@ Estimación sin medir: con los indicadores ya calculados, una regla simple recor
 
 - **Solo cuenta lo de TypeScript.** El resultado de Python sirve para elegir candidatas; la evidencia es el backtest oficial. Los vectores compartidos fijan que los dos dan las mismas decisiones (ADR-0003, «Contrato entre lenguajes»).
 - **Herramientas candidatas,** que la ADR del motor fija con su versión y su motivo: Polars y DuckDB para leer los datos por partes, NumPy y Numba para evaluar rápido, Optuna o búsqueda evolutiva para recorrer la gramática y, más adelante, modelos de árboles como LightGBM.
-- **Modelos de aprendizaje automático:** ver «La inteligencia artificial», abajo (§10, decisión 11). Primero, reglas.
+- **Modelos de aprendizaje automático:** ver «La inteligencia artificial», abajo (§10, decisión 9). Primero, reglas.
 - **Resultados:** el registro de cada búsqueda y sus candidatas, en un bucket propio de R2 (`buoh-investigacion`), con un resumen que la API muestra en la sección Laboratorio.
 
 ### La inteligencia artificial
@@ -155,7 +155,7 @@ En buoh funcionaría así:
 4. **Usarlo en el bot:** el bot *shadow*, en TypeScript, evalúa ese archivo y los vectores compartidos comprueban que responde igual que en Python.
 5. **Renovarlo:** cada cierto tiempo, el motor entrena una versión nueva con los datos nuevos, y esa versión vuelve a pasar todas las pruebas.
 
-El tipo de modelo propuesto son los árboles de decisión potenciados, como LightGBM, y no las redes neuronales grandes: con datos de mercado en tablas suelen funcionar igual o mejor, entrenan rápido en un servidor pequeño y su evaluación es simple de reproducir. Sus riesgos: aprende el ruido con más facilidad que una regla, explica peor por qué decidió y necesita más datos. Por eso entra cuando el motor de reglas funcione y haya meses de datos (§10, decisión 11).
+El tipo de modelo propuesto son los árboles de decisión potenciados, como LightGBM, y no las redes neuronales grandes: con datos de mercado en tablas suelen funcionar igual o mejor, entrenan rápido en un servidor pequeño y su evaluación es simple de reproducir. Sus riesgos: aprende el ruido con más facilidad que una regla, explica peor por qué decidió y necesita más datos. Por eso entra cuando el motor de reglas funcione y haya meses de datos (§10, decisión 9).
 
 ## 8. Alojamiento
 
@@ -204,26 +204,128 @@ Y en su respuesta siguiente, el mismo día: «quiero operar primero en deriv por
 7. **La duración la decide cada estrategia,** de segundos a horas. Las de segundos esperan a tener ticks capturados (§6).
 8. **Las exportaciones de MT5, más adelante y siempre en velas.** Hoy no tiene ninguna. El agente lo toma así: las exportaciones serán de velas, no de ticks.
 
+Y en la siguiente: «me parece bien empezar con las reglas y sumar la ia despues, si eso es lo mas viable, prefiero multiplicadores y sube y baja, dejar fuera los digitos»:
+
+9. **Primero reglas, y la inteligencia artificial después** (§7, «La inteligencia artificial»), con su propio incremento y su ADR, después de la puerta de salida de la Fase 2 (§11).
+10. **Multiplicadores y sube/baja,** sin dígitos. Sustituye a la decisión pendiente de qué tipo de operación representan las posiciones hipotéticas (`PROJECT_STATUS.md`). Los acumuladores, toca/no toca y los demás tipos quedan fuera hasta otra decisión.
+
 ### Pendientes, cada una con la recomendación del agente
 
-9. **La caída máxima que acepta:** el motor busca la mayor rentabilidad neta sin pasar de ese tope. Recomendación: 20 % del capital de cada estrategia, en el backtest y en *shadow*, que se puede bajar.
-10. **Qué mercados se añaden.** Recomendación: el oro, el EUR/USD y el Nasdaq de Deriv (§6), y más después de medir. Cada símbolo capturado en vivo suma escrituras en R2: con el guardado de hoy, entre unos 5 y 15 USD al mes por símbolo (estimación, a medir con su ritmo de ticks), que se pueden bajar cambiando cómo se guarda cada evento.
-11. **Inteligencia artificial** (aprendizaje automático, §7). Recomendación: empezar con reglas y sumar los modelos cuando el motor funcione y haya meses de datos.
-12. **Guardar más historia de Deriv.** Los términos de Deriv solo permiten guardar sus datos 24 horas, y el propietario ya aceptó guardar más («Decisiones vigentes relevantes» de `PROJECT_STATUS.md`). Descargar un año de historia de varios mercados agranda ese riesgo. Recomendación: aceptarlo para uso propio y no redistribuir nada, como hoy (ADR-0004 §13).
-13. **Qué tipos de contrato puede usar el motor.** Sustituye a la decisión pendiente de qué tipo de operación representan las posiciones hipotéticas (`PROJECT_STATUS.md`). Recomendación: multiplicadores y sube/baja, y dejar fuera los dígitos, que dependen de la última cifra del precio y no del mercado. Los multiplicadores son lo más barato medido (§3), y con ellos se pierde como mucho lo apostado.
+11. **La caída máxima que acepta:** el motor busca la mayor rentabilidad neta sin pasar de ese tope. Recomendación: 20 % del capital de cada estrategia, en el backtest y en *shadow*, que se puede bajar.
+12. **Qué mercados se añaden.** Recomendación: el oro, el EUR/USD y el Nasdaq de Deriv (§6), los tres con su año de velas, y solo el oro capturado también en vivo, para las estrategias de segundos. Cada símbolo capturado en vivo suma escrituras en R2: con el guardado de hoy, entre unos 5 y 15 USD al mes por símbolo (estimación, a medir con su ritmo de ticks), que se pueden bajar cambiando cómo se guarda cada evento. Las velas casi no cuestan: unas pocas peticiones al día. Se suman más mercados después de medir.
+13. **Guardar más historia de Deriv.** Los términos de Deriv solo permiten guardar sus datos 24 horas, y el propietario ya aceptó guardar más («Decisiones vigentes relevantes» de `PROJECT_STATUS.md`). Descargar un año de historia de varios mercados agranda ese riesgo. Recomendación: aceptarlo para uso propio y no redistribuir nada, como hoy (ADR-0004 §13).
+14. **El presupuesto mensual** (§11, «Costo»): de unos 26 USD hoy a unos 45 a 55 USD. Recomendación: aprobarlo, con el oro como único mercado nuevo capturado en vivo, y revisar cuando haya mediciones.
 
 La dirección técnica decide, y lo deja escrito en las ADR: las herramientas, la gramática, las pruebas estadísticas, el formato de los datos y la forma del registro.
 
-## 11. Qué cambia en los documentos si se aprueba
+## 11. Qué se construye y cómo
 
-- **Plan de Fase 2:** el §1 (quién crea las estrategias), el §4.7 (Python entra para la búsqueda), el §6 (`research/python`, más símbolos y la importación de MT5), requisitos nuevos para el motor, la búsqueda honesta y los mercados, el §8 (el orden de las ADR), el §9, el §11 (el presupuesto), el §12 (las decisiones) y el §13 (la estrategia de la puerta de salida sale del motor).
+### Las piezas
+
+| Pieza | Qué hace | Lenguaje | Dónde corre | Estado |
+|---|---|---|---|---|
+| Captura (`apps/market-data-worker`, `ingest`) | escucha Deriv y guarda cada tick | TypeScript | Render, `buoh-ingesta` | existe; suma el oro (F2.6) |
+| Operaciones (`buoh-operaciones`) | salud, retención, datasets; suma las velas y lo que cobra Deriv | TypeScript | Render, cada 5 minutos | existe; se amplía (F2.6) |
+| `packages/strategy-sdk` | el formato de una estrategia, los indicadores, los costos de los multiplicadores y de sube/baja, y el evaluador oficial, puro | TypeScript | lo usan el backtest oficial y el bot | nueva (F2.7) |
+| Motor de investigación (`research/python`) | busca patrones, prueba millones de estrategias y propone candidatas | Python acelerado | VPS de Contabo | nueva (F2.8) |
+| Backtest oficial (`apps/backtest`) | vuelve a evaluar cada candidata con `strategy-sdk`, hace la prueba fuera de muestra una sola vez y escribe el informe | TypeScript | VPS de Contabo | nueva (F2.9) |
+| API y web (`apps/api`, `apps/web`) | la sección Laboratorio: candidatas, informes y la aprobación del propietario | TypeScript | Render, `buoh-api` | existen; se amplían (F2.9) |
+| Bot *shadow* (`apps/signal-engine`) | sigue en vivo las estrategias aprobadas, con señales y posiciones imaginarias, y se para solo si los datos fallan | TypeScript | Render, su propio servidor, de 7 USD al mes, ya aprobado | nueva (F2.10) |
+
+El backtest oficial pasa de la API (plan §11, «Los backtests corren dentro del servicio de la API») al VPS: allí hay CPU y memoria, y la API, con 512 MB, no tiene que repartirlos. Eso cambia lo que ADR-0019 decidió sobre el aislamiento de los backtests, y la ADR del motor lo precisa.
+
+### Cómo se conecta con buoh
+
+```text
+Deriv (canal público)
+  ├── ticks en vivo ─────────► captura (Render) ──► log en R2 y PostgreSQL
+  └── velas y precios ───────► operaciones (Render) ─┐
+                                                     ▼
+                   datasets publicados en R2 (el motor solo los lee)
+                                                     │
+                                                     ▼
+          VPS de Contabo: motor de investigación (Python)
+                    └── candidatas ──► backtest oficial (TypeScript)
+                                                     │
+                                                     ▼
+                         bucket buoh-investigacion (R2)
+                                                     │
+                                                     ▼
+          API y web (Render): Laboratorio ──► el propietario aprueba
+                                                     │
+                                                     ▼
+          registro de estrategias en PostgreSQL (solo se añade, auditado)
+                                                     │
+                                                     ▼
+          bot shadow (Render) ──► señales y posiciones imaginarias
+                                                     │
+                                                     ▼
+          Fase 4: execution-gateway ──► cuenta demo de Deriv
+```
+
+Las reglas de la conexión:
+
+- **El VPS solo lee datos** de R2, con un token de solo lectura, y solo escribe en `buoh-investigacion`. No toca la base de producción, ni la captura, ni ningún bróker.
+- **Solo el propietario activa.** El motor propone; una estrategia pasa al bot solo cuando el propietario la aprueba en la web, con su sesión de contraseña y código, y la aprobación queda en la auditoría.
+- **El bot no depende del VPS.** Lee las estrategias aprobadas de PostgreSQL: si el VPS se apaga, el bot sigue.
+
+### Los incrementos de la Fase 2
+
+F2.1 a F2.5 no cambian, con lo que les falta («Próximos pasos, en orden» de `PROJECT_STATUS.md`). Desde F2.6:
+
+| Incremento | Qué entrega | Depende de |
+|---|---|---|
+| **F2.6** Mercados reales y lo que cobra Deriv | captura viva del oro, con sus umbrales medidos; el año de velas de 1 minuto del oro, el EUR/USD y el Nasdaq, y su actualización diaria; los pagos de sube/baja y las comisiones de los multiplicadores cada pocos minutos | su ADR y el PR 6 de ADR-0020 |
+| **F2.7** Estrategias | `StrategyDefinition`, los indicadores con sus vectores, los costos de los multiplicadores y de sube/baja, y el evaluador puro (`F2-STRATEGY-001`) | las cuatro ADR del laboratorio |
+| **F2.8** Motor de investigación | `research/python` y el VPS: lectura de datos por partes, el evaluador acelerado con los vectores de F2.7, la búsqueda de reglas, el registro de cada búsqueda, los controles negativos y la medición de cuántas estrategias prueba por hora | F2.6 y F2.7 |
+| **F2.9** Backtest oficial y evaluación | `apps/backtest` en el VPS, la prueba fuera de muestra una sola vez, el informe con las correcciones por búsqueda, y la sección Laboratorio con la aprobación (`F2-BACKTEST-001` y `F2-EVAL-001`) | F2.8 |
+| **F2.10** Bot *shadow* y señales | como el F2.9 de hoy (`F2-SHADOW-001`, `F2-SIGNAL-001` y `F2-STOP-001`), con la semántica de los multiplicadores y de sube/baja | F2.9 |
+| **F2.11** Posiciones, comparación y réplica | como el F2.10 de hoy (`F2-POSITION-001` y `F2-REPLAY-001`) | F2.10 |
+| **F2.12** Puerta de salida | la evidencia del plan §13 | F2.11 |
+
+F2.6 va primero porque los ticks del oro solo existen desde que buoh los captura: así se acumulan mientras se construye lo demás, como hizo F2.2 con R_100. La inteligencia artificial llega después de F2.12, con su propio incremento y su ADR.
+
+La puerta de salida no cambia: una estrategia del motor en *shadow* al menos 7 días, cada decisión reproducida y detenciones solas ante datos degradados (plan §13). No exige ganancias: si el motor no encuentra nada rentable, la estrategia que pase la puerta lo dirá en su informe.
+
+### ADR antes del código
+
+1. **Mercados y fuentes de investigación** (F2.6): los símbolos, las velas como datos de buoh, lo que cobra Deriv como fuente propia, los umbrales del oro y el costo.
+2. **Modelo de estrategia** (F2.7): la gramática, los indicadores, los multiplicadores y sube/baja, sus costos y sus duraciones.
+3. **Motor de investigación y su VPS** (F2.8): la versión de Python y sus bibliotecas, la búsqueda, el registro, la seguridad del VPS y sus tokens.
+4. **Backtest y protocolo estadístico** (F2.9): cómo se reconstruye cada decisión, la prueba fuera de muestra y las correcciones por búsqueda.
+5. **Motor *shadow*** (F2.10), con los ensayos de la puerta de salida y cómo se reanuda una estrategia detenida, que el propietario decide antes (`PROJECT_STATUS.md`, «Decisiones pendientes»).
+
+La 1 va sola, para que la captura del oro empiece pronto. Las 2 a 5 comparten el evaluador y el instante de decisión, así que se escriben seguidas y se fusionan antes del primer PR de código de F2.7, como pedía el plan para las cuatro del laboratorio (§8). Todas empiezan después del PR 6 de ADR-0020 («Orden del trabajo»).
+
+### Lenguajes
+
+- **TypeScript:** todo lo que toca producción o decide: la captura, las operaciones, la API, la web, `strategy-sdk`, el backtest oficial y el bot.
+- **Python acelerado:** solo el motor de investigación, en `research/python`, en el VPS (ADR-0003).
+- **SQL:** las migraciones de PostgreSQL.
+- Ninguno más en la Fase 2.
+
+### Cómo trabajamos
+
+- **Cada incremento:** su ADR, después PR pequeños con sus pruebas, una revisión semántica por PR, CI en verde, la fusión del propietario, el despliegue y su evidencia. Como hasta ahora (`AGENTS.md`).
+- **El agente** escribe el código, las pruebas, los documentos y los pasos del runbook.
+- **El propietario** decide lo de producto, dinero y riesgo, fusiona, crea y paga los servicios, como el VPS de Contabo y los tokens de R2, con los pasos del runbook, y guarda los secretos.
+- **Python con las mismas exigencias que TypeScript:** versiones fijadas con archivo de bloqueo, pruebas sin red con los vectores compartidos, linter y tipos estrictos, todo en CI.
+- **Con el motor en marcha:** cada semana, un informe en Laboratorio con lo que probó, cuántas, lo que propone y por qué, y también lo que no encontró.
+
+### Costo
+
+Hoy, unos 26 USD al mes («Siguiente tarea autorizada» de `PROJECT_STATUS.md`). Se suman el bot *shadow*, 7 USD, ya aprobado; el VPS, unos 7 EUR; y el oro en vivo, entre unos 5 y 15 USD (estimación, §10, decisión 12). Las velas y lo que cobra Deriv caben en la ejecución de `buoh-operaciones` que ya existe. En total, unos 45 a 55 USD al mes (estimación), que necesitan el visto bueno del propietario (§10, decisión 14).
+
+## 12. Qué cambia en los documentos si se aprueba
+
+- **Plan de Fase 2:** el §1 (quién crea las estrategias), el §4.7 (Python entra para la búsqueda), el §6 (`research/python`, `apps/backtest`, más símbolos y la importación de MT5), requisitos nuevos para los mercados, el motor y la búsqueda honesta, el §8 (las ADR de §11), el §9 (los incrementos de §11), el §11 (el presupuesto y dónde corren los backtests), el §12 (las decisiones) y el §13 (la estrategia de la puerta de salida sale del motor).
 - **Roadmap:** el incremento 2 de la Fase 2 pasa a ser el motor, y la importación de MT5 se adelanta de la Fase 1B.
-- **`PROJECT_STATUS.md`:** el paso 6 de «Próximos pasos, en orden» y las decisiones pendientes.
-- **ADR nuevas, en este orden:** mercados y fuentes de investigación; alojamiento del motor; el motor y su registro; protocolo estadístico para la búsqueda; modelo de estrategia; backtest; y motor *shadow*. Las cuatro últimas son las del laboratorio que ya preveía el plan (§8, puntos 5 a 8), adaptadas.
+- **`PROJECT_STATUS.md`:** el paso 6 de «Próximos pasos, en orden», las decisiones vigentes y las pendientes.
+- **ADR-0019:** una precisión, cuando llegue la ADR del motor, porque los backtests ya no corren en la API.
 
-Los pasos 1 a 5 de «Próximos pasos, en orden» no cambian. Las ADR empiezan después del PR 6 de ADR-0020, como decidió el propietario el 2026-11-14 («Orden del trabajo»).
+Los pasos 1 a 5 de «Próximos pasos, en orden» no cambian.
 
-## 12. Riesgos y límites
+## 13. Riesgos y límites
 
 - **Puede no encontrar nada viable.** En R_100 es lo esperado. En mercados reales, nadie lo sabe antes de probar.
 - **Pocos datos al principio.** Un año de velas sirve para operaciones de minutos a horas. Para estrategias de ticks hacen falta meses de captura.
