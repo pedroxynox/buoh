@@ -52,6 +52,7 @@ Consultas de solo lectura al canal público de Deriv (`wss://api.derivws.com/tra
   - sube/baja de R_100 a 5 ticks y a 5 minutos: paga 19,54 y 19,55. Para no perder hay que acertar el 51,2 % de las veces;
   - sube/baja del oro a 15 minutos y a 1 hora: paga 17,66 y 17,41. Para no perder hay que acertar el 56,6 % y el 57,4 %;
   - multiplicador ×100: comisión de 0,36 USD en R_100 y de 0,18 USD en el oro. Con una exposición de 1000 USD, el precio tiene que moverse a favor un 0,036 % y un 0,018 % para cubrirla.
+- **Ritmo de los ticks** (suscripción de 120 s desde las 05:08 UTC): el oro, 120 ticks, uno por segundo; R_100, 61, uno cada 2 segundos. Hoy buoh guarda cada tick como una escritura de clase A en R2, que cobra 4,50 USD por millón por encima del millón gratuito de cada mes, redondeando al millón siguiente (ADR-0018 §14). El oro cotiza unas 23 horas al día, 5 días a la semana: con un tick por segundo son unos 1,8 millones de escrituras al mes, y con los unos 1,35 millones de R_100 el total pasa de 2 a 3 millones cobrados. Son unos 9 USD más al mes (estimación).
 - **Precios de VPS,** que se confirman al comprar:
   - Contabo, según [su blog](https://contabo.com/blog/best-budget-vps-developers/), comprobado por Contabo el 2026-08-17: Cloud VPS 4, 4 vCPU, 8 GB y 100 GB, desde 5,24 EUR al mes con IVA a 24 meses. Según sus páginas de ubicaciones, el Cloud VPS 12, 12 vCPU y 48 GB, 20 EUR al mes, y el Cloud VPS 16, 16 vCPU y 64 GB, 29,60 EUR. El mismo blog avisa de que su CPU puede rendir menos con mucha carga;
   - Hetzner, como comparación, después de su subida del 2026-06-15, según [CostGoat](https://costgoat.com/pricing/hetzner), actualizado el 2026-10-20, sin IVA: CX43, 8 vCPU compartidas y 16 GB, 15,99 EUR al mes; CX53, 16 vCPU compartidas y 32 GB, 29,49 EUR.
@@ -209,11 +210,14 @@ Y en la siguiente: «me parece bien empezar con las reglas y sumar la ia despues
 9. **Primero reglas, y la inteligencia artificial después** (§7, «La inteligencia artificial»), con su propio incremento y su ADR, después de la puerta de salida de la Fase 2 (§11).
 10. **Multiplicadores y sube/baja,** sin dígitos. Sustituye a la decisión pendiente de qué tipo de operación representan las posiciones hipotéticas (`PROJECT_STATUS.md`). Los acumuladores, toca/no toca y los demás tipos quedan fuera hasta otra decisión.
 
+Y en la siguiente: «Acepto la caida maxima de 50% del capital pero las estrategias o buoh operará en demo primero, deriv permite guardar los datos 24h pero asumo el mismo riesgo se guardara durante todo el tiempo, lo acepto para mi uso propio»:
+
+11. **Caída máxima del 50 % del capital de cada estrategia.** El motor busca la mayor rentabilidad neta sin pasar de ese tope, en el backtest, en *shadow* y en demo. El agente había recomendado el 20 % y le explicó el riesgo: con un 50 %, una estrategia puede perder la mitad de su capital antes de pararse, y recuperarse de esa caída exige ganar un 100 %. Antes de operar, buoh pasa por demo, como ya piden las puertas (protocolo §4). El límite para dinero real es otra decisión, «Límites monetarios y política de riesgo para fases `demo` y `real`» (`PROJECT_STATUS.md`), y se toma antes de la Fase 5.
+12. **Guardar la historia de Deriv todo el tiempo,** solo para uso propio y sin redistribuirla (ADR-0004 §13), aceptando que los términos de Deriv solo permiten guardar sus datos 24 horas. Es el mismo riesgo que ya aceptó para la captura y los datasets («Decisiones vigentes relevantes» de `PROJECT_STATUS.md`), ahora para un año de velas de varios mercados.
+
 ### Pendientes, cada una con la recomendación del agente
 
-11. **La caída máxima que acepta:** el motor busca la mayor rentabilidad neta sin pasar de ese tope. Recomendación: 20 % del capital de cada estrategia, en el backtest y en *shadow*, que se puede bajar.
-12. **Qué mercados se añaden.** Recomendación: el oro, el EUR/USD y el Nasdaq de Deriv (§6), los tres con su año de velas, y solo el oro capturado también en vivo, para las estrategias de segundos. Cada símbolo capturado en vivo suma escrituras en R2: con el guardado de hoy, entre unos 5 y 15 USD al mes por símbolo (estimación, a medir con su ritmo de ticks), que se pueden bajar cambiando cómo se guarda cada evento. Las velas casi no cuestan: unas pocas peticiones al día. Se suman más mercados después de medir.
-13. **Guardar más historia de Deriv.** Los términos de Deriv solo permiten guardar sus datos 24 horas, y el propietario ya aceptó guardar más («Decisiones vigentes relevantes» de `PROJECT_STATUS.md`). Descargar un año de historia de varios mercados agranda ese riesgo. Recomendación: aceptarlo para uso propio y no redistribuir nada, como hoy (ADR-0004 §13).
+13. **Qué mercados se añaden.** Recomendación: el oro, el EUR/USD y el Nasdaq de Deriv (§6), los tres con su año de velas, y solo el oro capturado también en vivo, para las estrategias de segundos. Cada símbolo capturado en vivo suma escrituras en R2: el oro, unos 9 USD al mes con el guardado de hoy (§3). Agrupar varios ticks en cada escritura lo bajaría casi a cero, pero toca la parte más delicada de la captura, que hoy guarda cada tick antes de usarlo, y retrasaría lo que ve el bot unos segundos, que es justo lo que no quieren las estrategias de segundos; la ADR de F2.6 lo estudia antes de sumar más mercados en vivo. Las velas casi no cuestan: unas pocas peticiones al día. Se suman más mercados después de medir.
 14. **El presupuesto mensual** (§11, «Costo»): de unos 26 USD hoy a unos 45 a 55 USD. Recomendación: aprobarlo, con el oro como único mercado nuevo capturado en vivo, y revisar cuando haya mediciones.
 
 La dirección técnica decide, y lo deja escrito en las ADR: las herramientas, la gramática, las pruebas estadísticas, el formato de los datos y la forma del registro.
@@ -314,7 +318,7 @@ La 1 va sola, para que la captura del oro empiece pronto. Las 2 a 5 comparten el
 
 ### Costo
 
-Hoy, unos 26 USD al mes («Siguiente tarea autorizada» de `PROJECT_STATUS.md`). Se suman el bot *shadow*, 7 USD, ya aprobado; el VPS, unos 7 EUR; y el oro en vivo, entre unos 5 y 15 USD (estimación, §10, decisión 12). Las velas y lo que cobra Deriv caben en la ejecución de `buoh-operaciones` que ya existe. En total, unos 45 a 55 USD al mes (estimación), que necesitan el visto bueno del propietario (§10, decisión 14).
+Hoy, unos 26 USD al mes («Siguiente tarea autorizada» de `PROJECT_STATUS.md`). Se suman el bot *shadow*, 7 USD, ya aprobado; el VPS, unos 7 EUR; y el oro en vivo, unos 9 USD (estimación, §3 y §10, decisión 13). Las velas y lo que cobra Deriv caben en la ejecución de `buoh-operaciones` que ya existe. En total, unos 45 a 55 USD al mes (estimación), que necesitan el visto bueno del propietario (§10, decisión 14).
 
 ## 12. Qué cambia en los documentos si se aprueba
 
