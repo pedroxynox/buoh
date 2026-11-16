@@ -41,6 +41,7 @@ Si una sesión empieza sin seguir estos pasos, el propietario puede pedirlo en s
 - Cuando el protocolo pida una decisión humana (producto, dinero, riesgo o seguridad), explicar al propietario las opciones y la recomendación en palabras simples. Las preguntas y los avisos de seguridad van en frases completas.
 - Actualizar el estado de la sesión de Kiro cada vez que cambie la tarea: el propietario lo mira para saber qué pasa.
 - Antes de un paso que tarde más de un minuto (pruebas, CI, una revisión o una medición), decir en una línea qué se hace y para qué. El propietario no ve las herramientas, y un silencio largo le parece que el agente se paró.
+- De cada ADR, el propietario lee solo un resumen (decisión del 2026-11-16, «cada adr quiero leer apenas un resumen yo»). Cada ADR nueva empieza, después de su encabezado, con una sección «Resumen para el propietario», en palabras sencillas y de unas diez líneas: qué decide, qué cuesta, qué riesgo tiene y qué aprueba al fusionarla. Al darle el enlace, el agente le da ese resumen en el chat.
 - Al terminar, dejar el PR listo con las condiciones de `AGENTS.md` («Fusión») y dar al propietario el enlace y un resumen corto de lo que cambia y de si necesita algo más que su fusión. El agente no fusiona: fusiona el propietario.
 
 ## Comandos y GitHub
