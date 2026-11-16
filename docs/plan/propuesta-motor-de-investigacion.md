@@ -6,14 +6,14 @@
 
 ## Resumen en palabras simples
 
-buoh tendrá un motor de investigación que estudia solo los datos que guarda buoh y los que se le añadan de mercados reales. Prueba miles de estrategias, se queda con las pocas que siguen funcionando después de pagar los costos y con datos que no vio, y las propone. Nunca opera. Una estrategia que propone sigue el camino que ya existe: bot *shadow* sin dinero, después demo y, solo si pasa todas las puertas, dinero real, primero para el propietario y después para clientes.
+buoh tendrá un motor de investigación que estudia sin parar los datos que guarda buoh y los que se le añadan de mercados reales. Busca patrones y prueba millones de estrategias, siempre buscando rentabilidad después de pagar los costos. Se queda con las pocas que siguen funcionando con datos que no vio, y las propone. Nunca opera. Una estrategia que propone sigue el camino que ya existe: bot *shadow* sin dinero, después demo y, solo si pasa todas las puertas, dinero real, en la cuenta del propietario. Los clientes quedan fuera de esta propuesta (§9).
 
-El motor corre en un servidor propio (VPS) con más memoria y CPU. La captura, la base de datos, la API y la web siguen en Render, donde ya funcionan.
+El motor está escrito en Python acelerado (§7) y corre en un servidor propio (VPS) de Contabo, con más memoria y CPU (§8). La captura, la base de datos, la API y la web siguen en Render, donde ya funcionan.
 
 Lo más importante que hay que saber:
 
 - **R_100 es azar.** Deriv genera sus precios con un generador de números aleatorios ([Deriv](https://deriv.com/markets/derived-indices/synthetic-indices)). En R_100 no hay patrón que encontrar. El motor lo usa como prueba de honestidad: si «encuentra» estrategias ganadoras en R_100, su filtro está mal.
-- **Probar miles de estrategias fabrica ganadoras falsas.** Si se prueban muchas, algunas ganan en el pasado por suerte. El motor cuenta todo lo que prueba y le exige más a una ganadora cuanto más probó (§5).
+- **Probar millones de estrategias fabrica ganadoras falsas.** Si se prueban muchas, algunas ganan en el pasado por suerte. El motor cuenta todo lo que prueba y le exige más a una ganadora cuanto más probó (§5).
 - **Que no encuentre nada es un resultado válido.** Protege el dinero. No hay garantía de que existan estrategias viables.
 
 ## 1. Lo que pidió el propietario
@@ -24,6 +24,10 @@ El 2026-11-16, en la sesión de Kiro:
 - «quiero que un motor construido con la mejor tecnologia estudie esos datos buscando estrategias viables, si es necesario meter mercados reales que sean viables, se meten, analizando patrones y demas, sobre el servidor lo alojaremos en una vps con mas ram y mas cpu».
 - «Escribe la propuesta completa y yo la corrijo, dejo claro que, quiero que ese motor se mantenga estudiando patrones y miles de estrategias sobre los datos de los brokers para futuras operaciones donde el mismo buoh va a operar tanto por si solo como por el cliente mismo».
 
+Su corrección de la primera versión de esta propuesta, el mismo día: «A ver, lo que dijiste está bien, pero, el motor ok, va a estudiar los datos de buoh y mercados reales, va a probar millones de estrategias, va a buscar patrones, va a analizar mercado siempre buscando rentabilidad, en cuanto a tecnologia perfecto, será python, pero será python puro o como, el servidor será un servidor de calebo creo que se llama cuesta 7 euros al mes, primero operará para mi, olvidemos que habrá clientes por los momentos, sigamos desarrollando el plan, dime, preguntame lo que necesites y sigamos desarrollando este plan, quiero algo realmente potente no se si me has entendido».
+
+El agente toma de ella cinco decisiones (§10): el motor busca las estrategias; prueba millones; Python, con la opción A de §7; el VPS de Contabo, que el agente toma como el «calebo» del mensaje, de unos 7 EUR al mes; y operar solo para el propietario, sin clientes por ahora.
+
 Hoy el plan de Fase 2 dice otra cosa: el propietario crea las estrategias en la sección Laboratorio y buoh las prueba (§1 del plan). Por eso esta propuesta cambia el plan.
 
 ## 2. Lo que ya existe y lo que dice el repositorio
@@ -33,7 +37,7 @@ Hoy el plan de Fase 2 dice otra cosa: el propietario crea las estrategias en la 
 - **Python está permitido para esto.** [ADR-0003](../arquitectura/adr/0003-lenguajes-y-limites.md) limita Python a `research/python`, para investigación por lotes, con contratos versionados, y fuera de la ruta de órdenes.
 - **Lo que el plan de Fase 2 deja fuera hoy:** más símbolos que R_100, los datos de MetaTrader 5 y Python (§6 del plan), y su §4.7 pide que el evaluador, el backtest y la estadística sean TypeScript.
 - **El protocolo ya admite explorar.** El entrenamiento «explora hipótesis y parámetros» y la validación «selecciona entre alternativas» ([protocolo de validación](../gobierno/protocolo-de-validacion-de-estrategias.md) §2). El informe ya cuenta «cuántas variantes se probaron» (plan, `F2-EVAL-001`).
-- **El camino hacia operar ya existe:** `shadow` → `demo` → `real`, y solo `execution-gateway` ejecuta ([ADR-0002](../arquitectura/adr/0002-senales-y-ejecucion-controlada.md); roadmap, Fases 4 a 6). Operar para clientes es la etapa 5 del [modelo de lanzamiento](../producto/modelo-de-lanzamiento.md), «Ejecución autorizada».
+- **El camino hacia operar ya existe:** `shadow` → `demo` → `real`, y solo `execution-gateway` ejecuta ([ADR-0002](../arquitectura/adr/0002-senales-y-ejecucion-controlada.md); roadmap, Fases 4 a 6).
 
 ## 3. Lo medido el 2026-11-16
 
@@ -44,7 +48,9 @@ Consultas de solo lectura al canal público de Deriv (`wss://api.derivws.com/tra
   - velas de 1 minuto, 1 hora y 1 día de hasta un año atrás, pidiéndolas por tramos: las más antiguas que devolvió son del 2025-11-17 en el oro y el EUR/USD y del 2025-11-20 en R_100. Una petición más antigua devuelve el último tramo, no la fecha pedida;
   - ticks, solo los últimos: 1000 por petición, unos 16 minutos del oro, y una petición más antigua también devuelve los últimos.
 - **Tipos de contrato de R_100** (`contracts_for`): 35, en 14 familias, entre ellos sube/baja, multiplicadores, acumuladores, dígitos y toca/no toca.
-- **Precios de VPS** (Hetzner, después de su subida del 2026-06-15, según [CostGoat](https://costgoat.com/pricing/hetzner), actualizado el 2026-10-20, sin IVA): CX43, 8 vCPU compartidas y 16 GB, 15,99 EUR al mes; CX53, 16 vCPU compartidas y 32 GB, 29,49 EUR; CCX33, 8 vCPU dedicadas y 32 GB, 138,49 EUR. Los CX solo existen en Alemania y Finlandia. Se confirman al comprar.
+- **Precios de VPS,** que se confirman al comprar:
+  - Contabo, según [su blog](https://contabo.com/blog/best-budget-vps-developers/), comprobado por Contabo el 2026-08-17: Cloud VPS 4, 4 vCPU, 8 GB y 100 GB, desde 5,24 EUR al mes con IVA a 24 meses. Según sus páginas de ubicaciones, el Cloud VPS 12, 12 vCPU y 48 GB, 20 EUR al mes, y el Cloud VPS 16, 16 vCPU y 64 GB, 29,60 EUR. El mismo blog avisa de que su CPU puede rendir menos con mucha carga;
+  - Hetzner, como comparación, después de su subida del 2026-06-15, según [CostGoat](https://costgoat.com/pricing/hetzner), actualizado el 2026-10-20, sin IVA: CX43, 8 vCPU compartidas y 16 GB, 15,99 EUR al mes; CX53, 16 vCPU compartidas y 32 GB, 29,49 EUR.
 
 Consecuencia: con datos de Deriv, el motor puede estudiar desde el primer día un año de velas de 1 minuto de mercados reales. Los ticks de mercados reales solo existen desde que buoh empiece a capturarlos.
 
@@ -60,6 +66,15 @@ Consecuencia: con datos de Deriv, el motor puede estudiar desde el primer día u
 6. **Congelar y proponer.** La superviviente se congela como versión inmutable. El backtest oficial de buoh, en TypeScript, la vuelve a evaluar y la prueba fuera de muestra se ejecuta una sola vez (plan, `F2-EVAL-001`). Si pasa, se propone para el bot *shadow*.
 7. **Vigilar.** Lo que corre en *shadow* se compara con lo esperado. Una deriva la pausa, como ya pide el protocolo §5. Con cada semana de datos nuevos, el ciclo vuelve a empezar.
 
+### Qué lo hace potente
+
+- **Muchos datos y buenos:** varios mercados reales, un año de velas desde el primer día y ticks que se acumulan, con procedencia y calidad comprobadas.
+- **Velocidad:** Python acelerado, con los indicadores calculados una sola vez y compartidos por todas las candidatas (§7).
+- **Búsqueda inteligente:** en lugar de probar a ciegas, la búsqueda evolutiva y la bayesiana gastan el tiempo en las zonas que prometen.
+- **Un filtro duro:** con millones de pruebas, la potencia de verdad es no creerse la suerte (§5).
+- **No para:** cada semana estudia los datos nuevos, propone, y retira lo que deja de funcionar.
+- **Después, aprendizaje automático:** modelos que encuentran patrones que las reglas no expresan, cuando se puedan reproducir y explicar (§10).
+
 ### Qué cuenta como viable
 
 Una estrategia es viable solo después de los costos del lugar donde se operaría, y cada lugar cobra distinto:
@@ -68,7 +83,7 @@ Una estrategia es viable solo después de los costos del lugar donde se operarí
 - **Multiplicadores de Deriv:** la comisión al abrir.
 - **CFD en MT5** (Deriv MT5 o Vantage): el spread, la comisión y el swap, con margen y apalancamiento ([ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md) §6).
 
-El motor evalúa cada candidata con el modelo de costos de cada lugar que el propietario elija (§10, decisión 3). Una estrategia viable en uno puede no serlo en otro.
+El motor evalúa cada candidata con el modelo de costos de cada lugar que el propietario elija (§10, decisión 6). Una estrategia viable en uno puede no serlo en otro.
 
 ### Qué no hace nunca
 
@@ -77,9 +92,9 @@ El motor evalúa cada candidata con el modelo de costos de cada lugar que el pro
 - No usa los datos de la prueba fuera de muestra para elegir nada.
 - No promete ni presenta rentabilidad: cada cifra lleva su modo, período, muestra, costos y pérdidas ([seguridad y rigor](../gobierno/seguridad-y-rigor-cuantitativo.md) §1 y §3).
 
-## 5. Honestidad con miles de estrategias
+## 5. Honestidad con millones de estrategias
 
-Es la parte que decide si el motor sirve. Con miles de pruebas, la mejor del pasado casi siempre es suerte.
+Es la parte que decide si el motor sirve. Con millones de pruebas, la mejor del pasado casi siempre es suerte, así que el listón sube con cada prueba: una ganadora tiene que seguir funcionando en varios períodos y, cuando su patrón lo permita, en varios mercados.
 
 - **Registro previo de la búsqueda.** Antes de mirar resultados se registra qué puede probar el motor: la gramática, los rangos de parámetros, los datos y la métrica principal. Cambiarlo crea otra búsqueda (protocolo §1).
 - **Todo se cuenta.** Cada candidata probada queda en el registro de la búsqueda, también las descartadas.
@@ -104,15 +119,21 @@ Propuesta para empezar: el oro (`frxXAUUSD`), el EUR/USD (`frxEURUSD`) y el Nasd
 
 | Opción | Cómo | A favor | En contra |
 |---|---|---|---|
-| **A. Búsqueda en Python y evaluador oficial en TypeScript** (recomendada) | El motor busca en Python, en `research/python`; cada candidata sale como `StrategyDefinition`, y `packages/strategy-sdk`, en TypeScript, la vuelve a evaluar para el backtest oficial y el *shadow* | Lo más rápido para probar miles; el mejor ecosistema de estadística y aprendizaje automático; es lo que ya prevén ADR-0003 y la arquitectura objetivo | Dos evaluadores: hay que demostrar con vectores compartidos que dan lo mismo |
+| **A. Búsqueda en Python y evaluador oficial en TypeScript** (elegida por el propietario el 2026-11-16: «será python») | El motor busca en Python, en `research/python`; cada candidata sale como `StrategyDefinition`, y `packages/strategy-sdk`, en TypeScript, la vuelve a evaluar para el backtest oficial y el *shadow* | Lo más rápido para probar millones; el mejor ecosistema de estadística y aprendizaje automático; es lo que ya prevén ADR-0003 y la arquitectura objetivo | Dos evaluadores: hay que demostrar con vectores compartidos que dan lo mismo |
 | B. Todo en TypeScript | El mismo evaluador busca y opera | Un solo evaluador | Más lento para explorar y casi sin herramientas de estadística |
 | C. Todo en Python, también el bot | Un solo lenguaje | Simple al principio | Pone Python en la ruta de señales y, después, de órdenes, contra ADR-0003 |
+
+### Python acelerado, no Python puro
+
+Python puro, línea a línea, es demasiado lento para millones de pruebas. En el motor, Python dirige el trabajo, y el cálculo pesado lo hacen bibliotecas compiladas: NumPy, Polars y DuckDB, escritas en C, C++ y Rust, y Numba, que convierte en código de máquina las funciones de Python que recorren los datos. Es la forma habitual de hacer investigación cuantitativa en Python.
+
+Estimación sin medir: con los indicadores ya calculados, una regla simple recorre un año de velas de 1 minuto (unas 370 000) en unos pocos milisegundos en un núcleo, así que un servidor de 4 núcleos prueba millones al día. Con ticks, cada prueba cuesta decenas de veces más. El primer incremento del motor lo mide.
 
 ### Con la A
 
 - **Solo cuenta lo de TypeScript.** El resultado de Python sirve para elegir candidatas; la evidencia es el backtest oficial. Los vectores compartidos fijan que los dos dan las mismas decisiones (ADR-0003, «Contrato entre lenguajes»).
 - **Herramientas candidatas,** que la ADR del motor fija con su versión y su motivo: Polars y DuckDB para leer los datos por partes, NumPy y Numba para evaluar rápido, Optuna o búsqueda evolutiva para recorrer la gramática y, más adelante, modelos de árboles como LightGBM.
-- **Modelos de aprendizaje automático:** entran solo si su decisión se puede reproducir byte a byte en el bot y explicar (§10, decisión 6). Primero, reglas.
+- **Modelos de aprendizaje automático:** entran solo si su decisión se puede reproducir byte a byte en el bot y explicar (§10, decisión 11). Primero, reglas.
 - **Resultados:** el registro de cada búsqueda y sus candidatas, en un bucket propio de R2 (`buoh-investigacion`), con un resumen que la API muestra en la sección Laboratorio.
 
 ## 8. Alojamiento
@@ -121,38 +142,50 @@ Propuesta para empezar: el oro (`frxXAUUSD`), el EUR/USD (`frxEURUSD`) y el Nasd
 
 | Opción | Costo aproximado | A favor | En contra |
 |---|---|---|---|
-| **A. VPS solo para el motor** (recomendada) | 16 a 30 EUR al mes (CX43 o CX53, §3) | Mucha CPU y memoria por poco dinero; la captura y la web no cambian; el motor puede apagarse o crecer sin tocar producción | Un servidor más que mantener seguro |
+| **A. VPS solo para el motor** (recomendada) | unos 7 EUR al mes en Contabo (§3) | Mucha CPU y memoria por poco dinero; la captura y la web no cambian; el motor puede apagarse o crecer sin tocar producción | Un servidor más que mantener seguro |
 | B. Mover todo a un VPS | parecido, sin Render | Un solo proveedor | Rehacer el despliegue que funciona, perder la base gestionada y sus copias, y más trabajo de operación |
-| C. Un plan más grande de Render | 25 USD al mes, 2 GB y 1 CPU (Standard) | Nada nuevo que mantener | Poca CPU para miles de pruebas |
+| C. Un plan más grande de Render | 25 USD al mes, 2 GB y 1 CPU (Standard) | Nada nuevo que mantener | Poca CPU para millones de pruebas |
+
+### El VPS de Contabo
+
+El propietario eligió Contabo el 2026-11-16, por unos 7 EUR al mes (§1). Lo que dice Contabo de sus planes (§3):
+
+- su plan de entrada, el Cloud VPS 4, tiene 4 vCPU, 8 GB y 100 GB de disco, desde 5,24 EUR al mes con IVA si se contrata a 24 meses; el precio depende del plazo y de la ubicación;
+- si hace falta más, el Cloud VPS 12 tiene 12 vCPU y 48 GB por unos 20 EUR al mes, y el Cloud VPS 16, 16 vCPU y 64 GB por unos 29,60;
+- la misma Contabo avisa de que su CPU puede rendir menos en las horas de más carga. Para un trabajo por lotes eso solo lo hace más lento, no cambia los resultados. El primer incremento mide cuántas estrategias prueba por hora, y se sube de plan, o se cambia a Hetzner, solo si esa medición lo pide.
 
 ### Con la A
 
 - **Datos:** el motor lee los datasets y la historia de R2 con un token de solo lectura propio. R2 no cobra el tráfico de salida. No lee los datos pesados de la base de Render, cuyo tráfico de salida sí se cobra.
 - **Seguridad:** acceso solo con llave SSH, cortafuegos cerrado salvo SSH, actualizaciones de seguridad automáticas, ningún secreto en Git y ninguna credencial de bróker en el VPS, nunca. Escribe solo en su bucket. La ADR de alojamiento fija quién lo administra y cómo le llegan sus secretos.
-- **Región:** los CX solo existen en Europa, y los datos están en el este de EE. UU. Para un trabajo por lotes no importa; la ADR lo confirma midiendo.
+- **Región:** Contabo tiene centros de datos en Europa, EE. UU. y Asia, y fuera de la región por defecto cobra un recargo. Los datos están en el este de EE. UU., pero para un trabajo por lotes la distancia apenas importa; la ADR elige la región midiendo.
 - **Lo crea y lo paga el propietario,** con los pasos del PR de despliegue, como en Render (ADR-0016 §3).
 
-## 9. Operar por sí solo y para clientes
+## 9. Operar para el propietario
 
-Interpretación del agente, para que el propietario la corrija: «operar por sí solo» es que buoh opere la cuenta del propietario de forma automática, y «por el cliente» es que un cliente vincule su cuenta y autorice a buoh a operar en ella estrategias aprobadas, además de recibir señales.
+El propietario decidió el 2026-11-16 que buoh opere primero para él y dejar fuera a los clientes por ahora («primero operará para mi, olvidemos que habrá clientes por los momentos»). El producto sigue previendo clientes ([visión](../producto/vision-y-alcance.md) y [modelo de lanzamiento](../producto/modelo-de-lanzamiento.md)), pero esta propuesta no diseña nada para ellos.
 
-Las dos cosas ya están en el producto y no cambian sus puertas:
-
-- **Para el propietario:** demo en la Fase 4 y dinero real en las Fases 5 y 6, con `execution-gateway`, `risk-policy`, idempotencia, reconciliación y *kill switch*.
-- **Para clientes:** señales pagas en la Fase 3B y ejecución autorizada en la etapa 5 del modelo de lanzamiento, con OAuth de Deriv y sin recibir nunca contraseñas ni fondos. En MT5 no hay hoy una forma permitida de operar cuentas de clientes: MT5 no tiene OAuth, y buoh solo acepta la excepción de las cuentas MT5 del propietario (ADR-0007 §5). Hacerlo necesitaría otra decisión y su ADR.
-- **Aviso:** operar o recomendar operaciones para otras personas suele ser una actividad regulada. Antes hace falta la evaluación legal de la jurisdicción, que ya es una decisión pendiente, y que una conclusión técnica no sustituye ([seguridad y rigor](../gobierno/seguridad-y-rigor-cuantitativo.md) §6).
+Para el propietario, el camino ya existe y no cambian sus puertas: demo en la Fase 4 y dinero real en las Fases 5 y 6, con `execution-gateway`, `risk-policy`, idempotencia, reconciliación y *kill switch*. En MT5, sus cuentas propias siguen la excepción de ADR-0007 §5.
 
 ## 10. Decisiones del propietario
 
-Cada una con la recomendación del agente:
+### Tomadas el 2026-11-16 (§1)
 
-1. **Aprobar que el motor busque las estrategias,** en lugar de crearlas el propietario. Recomendación: sí, con los filtros de §5.
-2. **Qué mercados se añaden.** Recomendación: el oro, el EUR/USD y el Nasdaq de Deriv (§6), y más después de medir. Cada símbolo capturado en vivo suma escrituras en R2: con el guardado de hoy, entre unos 5 y 15 USD al mes por símbolo (estimación, a medir con su ritmo de ticks), que se pueden bajar cambiando cómo se guarda cada evento.
-3. **Dónde se operaría al final y cuánto dura cada operación,** para el modelo de costos (§4). Recomendación: hasta decidirlo, evaluar con multiplicadores de Deriv y con CFD de MT5, y operaciones de minutos a horas, que es lo que permiten las velas de 1 minuto.
-4. **El VPS.** Recomendación: Hetzner CX43 (8 vCPU y 16 GB, unos 16 EUR al mes), y subir al CX53 cuando una medición lo pida.
-5. **Importar sus exportaciones de MT5.** Recomendación: sí, del bróker donde piensa operar.
-6. **Modelos que no se leen como reglas** (aprendizaje automático). Recomendación: empezar solo con reglas y decidir los modelos cuando haya resultados.
-7. **Guardar más historia de Deriv.** Los términos de Deriv solo permiten guardar sus datos 24 horas, y el propietario ya aceptó guardar más («Decisiones vigentes relevantes» de `PROJECT_STATUS.md`). Descargar un año de historia de varios mercados agranda ese riesgo. Recomendación: aceptarlo para uso propio y no redistribuir nada, como hoy (ADR-0004 §13).
+1. **El motor busca las estrategias,** en lugar de crearlas el propietario («el motor ok»), con los filtros de §5.
+2. **Prueba millones de estrategias y busca patrones,** siempre buscando rentabilidad («va a probar millones de estrategias, va a buscar patrones, va a analizar mercado siempre buscando rentabilidad»).
+3. **Python,** con la opción A de §7 («será python»).
+4. **Un VPS de Contabo,** de unos 7 EUR al mes («el servidor será un servidor de calebo creo que se llama cuesta 7 euros al mes»).
+5. **Solo para el propietario,** sin clientes por ahora (§9).
+
+### Pendientes, cada una con la recomendación del agente
+
+6. **Dónde operaría primero con su dinero:** en Deriv, con opciones o multiplicadores, o en MT5, con CFD en Deriv MT5 o en Vantage. Decide el modelo de costos (§4), qué datos van primero y qué ejecución se construye antes. Recomendación: hasta decidirlo, el motor evalúa cada candidata con los costos de los multiplicadores de Deriv y de los CFD de MT5, y los números dicen dónde hay algo.
+7. **Cuánto dura cada operación:** segundos, minutos, horas o días. Decide qué datos se estudian y cuánta CPU hace falta. Recomendación: de minutos a días, con las velas de 1 minuto, y los ticks cuando se hayan acumulado.
+8. **La caída máxima que acepta:** el motor busca la mayor rentabilidad neta sin pasar de ese tope. Recomendación: 20 % del capital de cada estrategia, en el backtest y en *shadow*, que se puede bajar.
+9. **Qué exportaciones de MT5 tiene:** de qué bróker, qué mercados, cuántos meses, y si son ticks o velas. Recomendación: importarlas, empezando por las del bróker donde piensa operar (§6).
+10. **Qué mercados se añaden.** Recomendación: el oro, el EUR/USD y el Nasdaq de Deriv (§6), y más después de medir. Cada símbolo capturado en vivo suma escrituras en R2: con el guardado de hoy, entre unos 5 y 15 USD al mes por símbolo (estimación, a medir con su ritmo de ticks), que se pueden bajar cambiando cómo se guarda cada evento.
+11. **Modelos que no se leen como reglas** (aprendizaje automático). Recomendación: empezar con reglas y sumar los modelos cuando el motor funcione y se puedan reproducir en el bot.
+12. **Guardar más historia de Deriv.** Los términos de Deriv solo permiten guardar sus datos 24 horas, y el propietario ya aceptó guardar más («Decisiones vigentes relevantes» de `PROJECT_STATUS.md`). Descargar un año de historia de varios mercados agranda ese riesgo. Recomendación: aceptarlo para uso propio y no redistribuir nada, como hoy (ADR-0004 §13).
 
 La dirección técnica decide, y lo deja escrito en las ADR: las herramientas, la gramática, las pruebas estadísticas, el formato de los datos y la forma del registro.
 
@@ -173,6 +206,7 @@ Los pasos 1 a 5 de «Próximos pasos, en orden» no cambian. Las ADR empiezan de
 - **Costos.** El VPS y cada símbolo capturado suben el gasto mensual; nada se compra sin el visto bueno del propietario.
 - **Términos de Deriv, MT5 y Vantage.** Guardar datos y usar programas automáticos tiene condiciones; las de MT5 y Vantage todavía no se revisaron (ADR-0007 §8).
 - **Un servidor más.** El VPS hay que mantenerlo seguro; un fallo suyo no toca la captura ni la web, porque no tiene permisos sobre ellas.
+- **La CPU de Contabo varía.** Con poca CPU, el motor prueba menos por día; la medición del primer incremento dice si el plan de 7 EUR alcanza.
 
 ## Referencias
 
@@ -181,4 +215,5 @@ Los pasos 1 a 5 de «Próximos pasos, en orden» no cambian. Las ADR empiezan de
 - White, H. (2000). «A Reality Check for Data Snooping». *Econometrica*, 68(5).
 - Hansen, P. R. (2005). «A Test for Superior Predictive Ability». *Journal of Business & Economic Statistics*, 23(4).
 - [Deriv: índices sintéticos](https://deriv.com/markets/derived-indices/synthetic-indices) y [documentación de la API](https://developers.deriv.com/docs/).
+- [Contabo: comparación de VPS económicos de 2026](https://contabo.com/blog/best-budget-vps-developers/) y [sus planes en Europa](https://contabo.com/en-us/locations/europe/).
 - [CostGoat: precios de Hetzner Cloud](https://costgoat.com/pricing/hetzner).
