@@ -67,8 +67,8 @@ Es la fase actual desde el 2026-10-29. El estado vigente se consulta únicamente
 **Incrementos:**
 
 1. autenticación de usuarios de buoh y espacios personales;
-2. creación, versión y revisión de hipótesis/estrategias;
-3. gráficos de datos y exploración de calidad;
+2. motor de investigación que busca patrones y prueba millones de estrategias de reglas sobre R_100 y mercados reales de Deriv, con una búsqueda honesta (decisión del propietario del 2026-11-16), y la autorización del propietario de cada estrategia que pasa al bot ([plan](../plan/fase-2-laboratorio-y-bot-shadow.md) §1 y §12);
+3. gráficos de datos y exploración de calidad, y los mercados reales: el oro en vivo y siete mercados en velas;
 4. motor de *backtest* con reglas declarativas limitadas;
 5. evaluación entrenamiento/validación/fuera de muestra;
 6. motor de señales `shadow`, libro de posiciones hipotéticas y comparación contra expectativa;

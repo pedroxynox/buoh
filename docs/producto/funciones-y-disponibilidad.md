@@ -37,7 +37,7 @@ Leyenda: ● disponible · ◐ solo lectura o resumen · — no disponible.
 | Función | Qué hace | Fase | Web | Móvil | Escritorio |
 |---|---|---|:-:|:-:|:-:|
 | Cuenta de buoh | Acceso y espacio personal | 2 | ● | ● | ● |
-| Hipótesis y estrategias | Ideas y reglas versionadas; un cambio crea otra versión | 2 | ● | ◐ | ● |
+| Hipótesis y estrategias | Reglas versionadas que propone el motor de investigación y autoriza el propietario; un cambio crea otra versión | 2 | ● | ◐ | ● |
 | Backtest | Prueba sobre datos pasados con costes, latencia y supuestos declarados | 2 | ● | ◐ | ● |
 | Validación fuera de muestra | Separación entrenamiento, validación y prueba | 2 | ● | ◐ | ● |
 | Informe de evidencia | Muestra, costes, pérdidas, *drawdown*, versión y limitaciones | 2 | ● | ◐ | ● |
