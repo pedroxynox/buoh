@@ -1,6 +1,6 @@
 # ADR-0019: API, cuentas y auditoría (F2.3)
 
-- **Estado:** Aceptada
+- **Estado:** Aceptada; complementada por [ADR-0023](0023-motor-de-investigacion.md) (la credencial del motor de investigación, sus objetos y su autor en la auditoría, en §2 a §5, y lo que corre en el proceso hijo de §12)
 - **Fecha:** 2026-11-02
 - **Ámbito:** Fase 2, incremento F2.3 (`F2-API-001`, `F2-AUTH-001`, `F2-AUDIT-001` en lo de las sesiones y `F2-GOV-001` para `apps/api`, del [plan de Fase 2](../../plan/fase-2-laboratorio-y-bot-shadow.md)). Fija también lo que otros incrementos toman de ella: las lecturas del sistema de datos (F2.4), el aislamiento de los backtests (F2.7) y el código de lectura que comparte el motor (F2.9).
 - **Decisores:** Propietario de buoh (el método de inicio de sesión), a propuesta de la dirección técnica (lo demás, incluidas la duración de la sesión y la recuperación desde Render, que le propuso junto con la opción A).
@@ -89,6 +89,7 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
   - **La validez** se mira en cada petición: la sesión vale si no está cerrada (`session_closures`), no venció (`expires_at_utc`, 24 h) y su última actividad —la más reciente entre la creación y `session_activity`— no pasa de 1 hora. La actividad es una fila nueva, como mucho una por minuto. Renueva la inactividad una petición con el token CSRF válido, y `GET /api/v1/sesion` (abrir una página); una actualización automática de una pantalla, sin el token, no.
   - **El tope de 10** cierra la sesión abierta más antigua (por `write_order`) cuando una nueva pasa de 10, con `session_closed` (`session_limit`). Cada cierre es una fila de `session_closures`, idempotente (`ON CONFLICT DO NOTHING`), para que el restablecimiento (bajo el bloqueo de las cuentas) y el tope (bajo el de las sesiones) no choquen.
   - **El bloqueo de las sesiones** es `pg_advisory_xact_lock(4100020, hashtext(account_id))`, una clave distinta de la de las cuentas (4 100 019), para que los inicios de sesión no esperen a la orden `cuenta` ni entre cuentas distintas.
+- (Precisión de [ADR-0023](0023-motor-de-investigacion.md) §5.) El motor de investigación entra en la API con una credencial propia, que no es una sesión: un token que solo vale en las rutas `/api/v1/investigacion/` y desde las direcciones del VPS, del que el servidor guarda su HMAC-SHA-256 con `BUOH_API_TOKEN_KEY` y la etiqueta `buoh/motor/v1`. Esas rutas no aceptan la cookie de la sesión, y las demás no aceptan el token. No piden las condiciones de CSRF, que protegen la cookie que el navegador envía por su cuenta, y rechazan una petición con `Origin`. Cambiar `BUOH_API_TOKEN_KEY` también anula esa credencial.
 
 ### 3. Cuentas, alta y recuperación
 
@@ -112,6 +113,7 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
   - **Las entradas:** `link_created`, de `operator`, sin petición, con la cuenta y el enlace; `link_used`, con la cuenta y el enlace; y `account_enrolled`, con la cuenta y la credencial nueva, o `credential_reset`, con la cuenta, la credencial nueva y la anterior.
   - Terminar el alta no abre una sesión: la web lleva después al inicio de sesión (PR 4b y PR 5).
   - Hasta el PR 4b, las rutas de los enlaces no tienen el límite por dirección de §1. No es un riesgo en producción, porque no se despliegan hasta el PR 6.
+- (Precisión de ADR-0023 §5.) La orden suma `motor crear <usuario>`, que crea la credencial del motor de investigación, anula la anterior y escribe el token una sola vez en stdout, y `motor revocar <usuario>`, que la anula. Sus entradas son `research_credential_created` y `research_credential_revoked`, del operador (§5).
 
 ### 4. Espacios personales
 
@@ -121,6 +123,7 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 - Las pruebas, con dos cuentas de prueba, demuestran que una cuenta no puede leer ni cambiar lo de la otra (`F2-AUTH-001`). En F2.3 son las sesiones y la auditoría, y cada incremento siguiente suma sus objetos.
 - No se usa la seguridad por filas de PostgreSQL: con una sola cuenta en producción y la API como única escritora, aporta poco. Se revisa antes de abrir cuentas a otras personas («Condiciones de revisión»).
 - (Precisión del PR de la salud de los datos de F2.4.) Lo que se lee del sistema de datos (§8), como la salud, el catálogo o los gráficos, no es un objeto de una cuenta: es lo mismo para todas. Sus rutas exigen una sesión válida, aunque su lectura no reciba la cuenta: «no hay consulta sin cuenta» vale para los objetos de una cuenta, los de arriba, y estas lecturas usan otro rol, que no lee nada de `buoh_api` (§7).
+- (Precisión de ADR-0023 §5.) Las búsquedas, los conjuntos de datasets, los resúmenes y las congelaciones del motor de investigación son objetos de la cuenta de su credencial, y las rutas del motor leen y escriben solo con esa cuenta, como las de una sesión con la suya.
 
 ### 5. Auditoría
 
@@ -144,6 +147,7 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
   - el identificador de la petición falta solo con la orden `cuenta` y en los fallos agrupados, que no son de una petición;
   - la tabla es `buoh_api.audit_events` (migración `0001_auditoria.sql`): el documento en JCS y las columnas que se consultan, que la base comprueba iguales a las del documento, con un índice por cuenta.
 - (Precisión del PR 4b de §14.) El alta y el restablecimiento escriben sus entradas en `src/accounts/links.ts`; el inicio de sesión, los cierres y la credencial deshabilitada, en `src/accounts/sessions.ts`. Los fallos que se agrupan (`login_failures`: un nombre que no existe, una credencial deshabilitada y los que rechaza un límite) se cuentan en memoria por ventana de 5 minutos y clase, y por cuenta cuando la hay (`src/accounts/login-failures.ts`), y se escriben al cerrarse la ventana, al empezar el inicio de sesión siguiente o al parar la API; si PostgreSQL no responde en ese momento, no cortan la respuesta del intento, que ya se rechaza por otro motivo. `GET /api/v1/auditoria` devuelve las últimas 100 entradas de la cuenta de la sesión, de la más nueva a la más vieja; nunca una entrada sin cuenta ni de otra cuenta.
+- (Precisión de ADR-0023 §5.) `AuditEvent` suma el autor `research_engine`, el motor de investigación, con las acciones `research_search_registered`, `research_search_summarized` y `research_candidate_frozen`; el operador suma `research_credential_created` y `research_credential_revoked`; y los rechazos de la credencial del motor se agrupan cada 5 minutos en `research_requests_rejected`, como `login_failures`: con la cuenta si el token era válido y lo rechazó la dirección o un límite, y sin cuenta si no existía. Llegan con el PR 3 de ADR-0023 §14.
 
 ### 6. Contratos, rutas y OpenAPI
 
@@ -329,6 +333,7 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 - **Límites:** tamaños de V8 al arrancar; un vigilante del padre que termina al hijo si su memoria residente pasa de su techo; un plazo; y una preferencia del núcleo por terminar al hijo si falta memoria (`oom_score_adj`), para que muera el hijo y no la API. La ADR de la semántica del backtest (plan §8, punto 6) fija los valores con mediciones. Con un backtest en curso, el servicio no pasa de 435 MB medidos en Render.
 - **Uno a la vez:** pedir otro con uno en curso responde `backtest_in_progress`.
 - El padre valida con su contrato lo que devuelve el hijo, antes de guardarlo con `buoh_api`. Un hijo que falla o que se termina deja su backtest como fallido, con su causa, y la API sigue respondiendo.
+- (Precisión de ADR-0023 §1.) Desde el cambio de alcance del 2026-11-16 (plan de Fase 2, `F2-API-001`), los backtests de la búsqueda corren en el VPS del motor de investigación, en `apps/backtest`, y en este proceso hijo solo corren la réplica de cada versión congelada y su prueba fuera de muestra (`F2-EVAL-001`), una a la vez y con estos límites.
 
 ### 13. Pruebas
 

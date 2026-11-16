@@ -1,6 +1,6 @@
 # ADR-0003: Lenguajes y límites de responsabilidad técnica
 
-- **Estado:** Aceptada; complementada por [ADR-0007](0007-varias-fuentes-y-metatrader-5.md) (MQL5 limitado al puente de MetaTrader 5), [ADR-0010](0010-prototipo-de-escritorio.md) (Rust en el contenedor Tauri del prototipo de escritorio) y [ADR-0012](0012-catalogo-y-adaptador-publico-de-deriv.md) (bibliotecas de la fuente Deriv)
+- **Estado:** Aceptada; complementada por [ADR-0007](0007-varias-fuentes-y-metatrader-5.md) (MQL5 limitado al puente de MetaTrader 5), [ADR-0010](0010-prototipo-de-escritorio.md) (Rust en el contenedor Tauri del prototipo de escritorio), [ADR-0012](0012-catalogo-y-adaptador-publico-de-deriv.md) (bibliotecas de la fuente Deriv) y [ADR-0023](0023-motor-de-investigacion.md) (Python y bibliotecas del motor de investigación)
 - **Fecha:** 2026-10-17
 - **Decisores:** Dirección técnica de buoh
 
@@ -60,6 +60,15 @@ Motivos completos en [ADR-0019](0019-api-cuentas-y-auditoria.md). Cada bibliotec
 Python se limita a `research/python`: exploración estadística, transformación tabular, validación de hipótesis, simulaciones y generación de artefactos reproducibles. Se preferirán entornos bloqueados y bibliotecas explícitas de cálculo/estadística; sus resultados atraviesan la frontera hacia TypeScript mediante contratos y datos versionados.
 
 **Por qué es la mejor elección para investigación:** su ecosistema cuantitativo acelera la validación de hipótesis y la experimentación de series temporales. No será la ruta directa de órdenes: así se evita mezclar notebooks, dependencias dinámicas y experimentación con la infraestructura crítica de ejecución.
+
+### Bibliotecas del motor de investigación (F2.6b)
+
+Motivos completos en [ADR-0023](0023-motor-de-investigacion.md) §2. Cada biblioteca entra en el PR que la usa, y `research/python/uv.lock`, con el hash de cada paquete, fija su versión exacta:
+
+- Python 3.14, con la misma versión de parche en CI y en el VPS (`research/python/.python-version`), que instala `uv`.
+- `numpy`, para las series y la caché de los datos; `numba`, con `llvmlite`, que compila los indicadores, el evaluador y las posiciones sin `fastmath`, para la paridad bit a bit con TypeScript ([ADR-0022](0022-modelo-de-estrategia.md) §8); `optuna`, para los muestreadores TPE y NSGA-II, con semilla; `boto3`, para R2; `urllib3`, que ya llega con `boto3`, para la API; `jsonschema`, que valida con el JSON Schema 2020-12 de `packages/contracts`; y `rfc8785`, el JCS de la identidad de cada candidata.
+- Para desarrollar y en CI: `uv`, `ruff`, `mypy` en modo estricto y `pytest`.
+- El VPS instala solo paquetes ya construidos (`uv sync --locked --no-build --no-dev`), y una versión nueva entra publicada hace al menos 7 días, salvo un arreglo de seguridad.
 
 ### SQL — lenguaje de datos y auditoría
 
