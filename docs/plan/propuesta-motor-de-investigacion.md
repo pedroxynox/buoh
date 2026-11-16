@@ -26,7 +26,7 @@ El 2026-11-16, en la sesión de Kiro:
 
 Su corrección de la primera versión de esta propuesta, el mismo día: «A ver, lo que dijiste está bien, pero, el motor ok, va a estudiar los datos de buoh y mercados reales, va a probar millones de estrategias, va a buscar patrones, va a analizar mercado siempre buscando rentabilidad, en cuanto a tecnologia perfecto, será python, pero será python puro o como, el servidor será un servidor de calebo creo que se llama cuesta 7 euros al mes, primero operará para mi, olvidemos que habrá clientes por los momentos, sigamos desarrollando el plan, dime, preguntame lo que necesites y sigamos desarrollando este plan, quiero algo realmente potente no se si me has entendido».
 
-El agente toma de ella cinco decisiones (§10): el motor busca las estrategias; prueba millones; Python, con la opción A de §7; el VPS de Contabo, que el agente toma como el «calebo» del mensaje, de unos 7 EUR al mes; y operar solo para el propietario, sin clientes por ahora.
+Sus respuestas siguientes están en §10. El agente toma de esta corrección cinco decisiones (§10): el motor busca las estrategias; prueba millones; Python, con la opción A de §7; el VPS de Contabo, que el agente toma como el «calebo» del mensaje, de unos 7 EUR al mes; y operar solo para el propietario, sin clientes por ahora.
 
 Hoy el plan de Fase 2 dice otra cosa: el propietario crea las estrategias en la sección Laboratorio y buoh las prueba (§1 del plan). Por eso esta propuesta cambia el plan.
 
@@ -47,7 +47,11 @@ Consultas de solo lectura al canal público de Deriv (`wss://api.derivws.com/tra
 - **Historia que da Deriv** (`ticks_history`):
   - velas de 1 minuto, 1 hora y 1 día de hasta un año atrás, pidiéndolas por tramos: las más antiguas que devolvió son del 2025-11-17 en el oro y el EUR/USD y del 2025-11-20 en R_100. Una petición más antigua devuelve el último tramo, no la fecha pedida;
   - ticks, solo los últimos: 1000 por petición, unos 16 minutos del oro, y una petición más antigua también devuelve los últimos.
-- **Tipos de contrato de R_100** (`contracts_for`): 35, en 14 familias, entre ellos sube/baja, multiplicadores, acumuladores, dígitos y toca/no toca.
+- **Tipos de contrato** (`contracts_for`): R_100 tiene 35, en 14 familias, entre ellos sube/baja, multiplicadores, acumuladores, dígitos y toca/no toca, algunos de 1 a 10 ticks. El oro tiene muchos menos: sube/baja desde 5 minutos, multiplicadores sin vencimiento, y los demás desde 1 o 7 días.
+- **Lo que cobra Deriv** (`proposal`, sin cuenta, hacia las 04:20 UTC, con una apuesta de 10 USD):
+  - sube/baja de R_100 a 5 ticks y a 5 minutos: paga 19,54 y 19,55. Para no perder hay que acertar el 51,2 % de las veces;
+  - sube/baja del oro a 15 minutos y a 1 hora: paga 17,66 y 17,41. Para no perder hay que acertar el 56,6 % y el 57,4 %;
+  - multiplicador ×100: comisión de 0,36 USD en R_100 y de 0,18 USD en el oro. Con una exposición de 1000 USD, el precio tiene que moverse a favor un 0,036 % y un 0,018 % para cubrirla.
 - **Precios de VPS,** que se confirman al comprar:
   - Contabo, según [su blog](https://contabo.com/blog/best-budget-vps-developers/), comprobado por Contabo el 2026-08-17: Cloud VPS 4, 4 vCPU, 8 GB y 100 GB, desde 5,24 EUR al mes con IVA a 24 meses. Según sus páginas de ubicaciones, el Cloud VPS 12, 12 vCPU y 48 GB, 20 EUR al mes, y el Cloud VPS 16, 16 vCPU y 64 GB, 29,60 EUR. El mismo blog avisa de que su CPU puede rendir menos con mucha carga;
   - Hetzner, como comparación, después de su subida del 2026-06-15, según [CostGoat](https://costgoat.com/pricing/hetzner), actualizado el 2026-10-20, sin IVA: CX43, 8 vCPU compartidas y 16 GB, 15,99 EUR al mes; CX53, 16 vCPU compartidas y 32 GB, 29,49 EUR.
@@ -77,13 +81,13 @@ Consecuencia: con datos de Deriv, el motor puede estudiar desde el primer día u
 
 ### Qué cuenta como viable
 
-Una estrategia es viable solo después de los costos del lugar donde se operaría, y cada lugar cobra distinto:
+Una estrategia es viable solo después de los costos de Deriv, donde operará primero el propietario (§10, decisión 6). Cada tipo de contrato cobra distinto (§3):
 
-- **Opciones de Deriv** (por ejemplo sube/baja): el pago que fija Deriv para cada contrato.
-- **Multiplicadores de Deriv:** la comisión al abrir.
-- **CFD en MT5** (Deriv MT5 o Vantage): el spread, la comisión y el swap, con margen y apalancamiento ([ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md) §6).
+- **Opciones** (por ejemplo sube/baja): el pago que fija Deriv para cada contrato. En el oro, a 15 minutos, hay que acertar el 56,6 % de las veces solo para no perder.
+- **Multiplicadores:** la comisión al abrir, que en el oro el precio cubre moviéndose a favor un 0,018 %. Son el tipo más barato medido, y el único del oro que se puede cerrar a los pocos segundos.
+- **CFD en MT5** (Deriv MT5 o Vantage), más adelante: el spread, la comisión y el swap, con margen y apalancamiento ([ADR-0007](../arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md) §6).
 
-El motor evalúa cada candidata con el modelo de costos de cada lugar que el propietario elija (§10, decisión 6). Una estrategia viable en uno puede no serlo en otro.
+El tipo de contrato y la duración forman parte de cada candidata: los elige el motor, dentro de los tipos que permita el propietario (§10, decisión 13). Para evaluar opciones, el motor necesita el pago que Deriv habría ofrecido en cada momento, así que buoh empieza a guardarlo (§6).
 
 ### Qué no hace nunca
 
@@ -108,8 +112,11 @@ Es la parte que decide si el motor sirve. Con millones de pruebas, la mejor del 
 1. **R_100 sigue** como hoy, y sirve de control negativo (§5).
 2. **Historia de Deriv:** el año de velas de 1 minuto de los mercados que elija el propietario (§3), descargado por tramos y guardado como dataset propio, con su procedencia, su hora en UTC y su calidad, como cualquier fuente de buoh.
 3. **Captura viva de mercados reales:** los mismos mercados, por el canal público de Deriv y con el adaptador de hoy, para acumular ticks desde ahora. Cada símbolo necesita sus umbrales medidos antes de publicar datasets ([ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) §1).
-4. **Exportaciones de MT5 del propietario:** su historia de MT5 entra como fuente importada, con la hora de su servidor convertida a UTC y comprobada, su procedencia y su calidad. Adelanta una parte de la Fase 1B sin el puente MQL5.
+4. **Exportaciones de MT5 del propietario,** más adelante y en velas (§10, decisión 8): su historia de MT5 entra como fuente importada, con la hora de su servidor convertida a UTC y comprobada, su procedencia y su calidad. Adelanta una parte de la Fase 1B sin el puente MQL5.
 5. **Puente de MT5 (Fase 1B):** después, para los datos vivos del lugar donde se opere en MT5.
+6. **Lo que cobra Deriv:** cada pocos minutos, los pagos de las opciones y las comisiones de los multiplicadores de cada mercado, con `proposal` y sin cuenta, como fuente propia de buoh. Sin ellos, el motor no puede saber cuánto habría pagado una opción en el pasado.
+
+Las estrategias de segundos necesitan ticks, y Deriv solo da los últimos (§3). Por eso la captura viva de los mercados reales empieza pronto: el motor estudia primero estrategias de minutos a horas con las velas, y las de segundos a medida que se acumulan los ticks.
 
 Propuesta para empezar: el oro (`frxXAUUSD`), el EUR/USD (`frxEURUSD`) y el Nasdaq (`OTC_NDX`), y sumar más después de medir lo que cuestan y lo que aportan.
 
@@ -133,8 +140,22 @@ Estimación sin medir: con los indicadores ya calculados, una regla simple recor
 
 - **Solo cuenta lo de TypeScript.** El resultado de Python sirve para elegir candidatas; la evidencia es el backtest oficial. Los vectores compartidos fijan que los dos dan las mismas decisiones (ADR-0003, «Contrato entre lenguajes»).
 - **Herramientas candidatas,** que la ADR del motor fija con su versión y su motivo: Polars y DuckDB para leer los datos por partes, NumPy y Numba para evaluar rápido, Optuna o búsqueda evolutiva para recorrer la gramática y, más adelante, modelos de árboles como LightGBM.
-- **Modelos de aprendizaje automático:** entran solo si su decisión se puede reproducir byte a byte en el bot y explicar (§10, decisión 11). Primero, reglas.
+- **Modelos de aprendizaje automático:** ver «La inteligencia artificial», abajo (§10, decisión 11). Primero, reglas.
 - **Resultados:** el registro de cada búsqueda y sus candidatas, en un bucket propio de R2 (`buoh-investigacion`), con un resumen que la API muestra en la sección Laboratorio.
+
+### La inteligencia artificial
+
+Una regla dice «si pasa A y B, entra». La arma el motor combinando piezas, y se puede leer. Un modelo de aprendizaje automático no recibe reglas: recibe cientos de miles de ejemplos del pasado, cada uno con cómo estaba el mercado (los indicadores de ese momento) y qué pasó después, y aprende solo qué combinaciones suelen venir antes de una subida o de una bajada. Con datos nuevos da una probabilidad, por ejemplo «58 % de que suba en los próximos 15 minutos», y la estrategia entra solo cuando esa probabilidad paga los costos del contrato (§4).
+
+En buoh funcionaría así:
+
+1. **Entrenar** el modelo con los datos de entrenamiento.
+2. **Probarlo** con datos que no vio, con el mismo filtro duro que las reglas (§5): un modelo es una candidata más, y cuenta como muchas pruebas.
+3. **Congelarlo:** se guarda como un archivo fijo, con su huella, dentro de la versión de la estrategia. No sigue aprendiendo en vivo, así que da siempre la misma respuesta ante los mismos datos, y cada decisión del bot se puede reproducir (plan, `F2-REPLAY-001`).
+4. **Usarlo en el bot:** el bot *shadow*, en TypeScript, evalúa ese archivo y los vectores compartidos comprueban que responde igual que en Python.
+5. **Renovarlo:** cada cierto tiempo, el motor entrena una versión nueva con los datos nuevos, y esa versión vuelve a pasar todas las pruebas.
+
+El tipo de modelo propuesto son los árboles de decisión potenciados, como LightGBM, y no las redes neuronales grandes: con datos de mercado en tablas suelen funcionar igual o mejor, entrenan rápido en un servidor pequeño y su evaluación es simple de reproducir. Sus riesgos: aprende el ruido con más facilidad que una regla, explica peor por qué decidió y necesita más datos. Por eso entra cuando el motor de reglas funcione y haya meses de datos (§10, decisión 11).
 
 ## 8. Alojamiento
 
@@ -177,15 +198,19 @@ Para el propietario, el camino ya existe y no cambian sus puertas: demo en la Fa
 4. **Un VPS de Contabo,** de unos 7 EUR al mes («el servidor será un servidor de calebo creo que se llama cuesta 7 euros al mes»).
 5. **Solo para el propietario,** sin clientes por ahora (§9).
 
+Y en su respuesta siguiente, el mismo día: «quiero operar primero en deriv porque creo que mt5 requiere otra serie de cosas para poder tenerlo trabajando 24\7 creo, aun no tengo exportaciones de nada pero lo haremos luego sera siempre en velas, el tiempo que dure la operacion lo determinará la estrategia puede ser segundos minutos o horas»:
+
+6. **Operar primero en Deriv.** MT5 queda para después, porque necesita una terminal encendida todo el día (ADR-0007 §4).
+7. **La duración la decide cada estrategia,** de segundos a horas. Las de segundos esperan a tener ticks capturados (§6).
+8. **Las exportaciones de MT5, más adelante y siempre en velas.** Hoy no tiene ninguna. El agente lo toma así: las exportaciones serán de velas, no de ticks.
+
 ### Pendientes, cada una con la recomendación del agente
 
-6. **Dónde operaría primero con su dinero:** en Deriv, con opciones o multiplicadores, o en MT5, con CFD en Deriv MT5 o en Vantage. Decide el modelo de costos (§4), qué datos van primero y qué ejecución se construye antes. Recomendación: hasta decidirlo, el motor evalúa cada candidata con los costos de los multiplicadores de Deriv y de los CFD de MT5, y los números dicen dónde hay algo.
-7. **Cuánto dura cada operación:** segundos, minutos, horas o días. Decide qué datos se estudian y cuánta CPU hace falta. Recomendación: de minutos a días, con las velas de 1 minuto, y los ticks cuando se hayan acumulado.
-8. **La caída máxima que acepta:** el motor busca la mayor rentabilidad neta sin pasar de ese tope. Recomendación: 20 % del capital de cada estrategia, en el backtest y en *shadow*, que se puede bajar.
-9. **Qué exportaciones de MT5 tiene:** de qué bróker, qué mercados, cuántos meses, y si son ticks o velas. Recomendación: importarlas, empezando por las del bróker donde piensa operar (§6).
+9. **La caída máxima que acepta:** el motor busca la mayor rentabilidad neta sin pasar de ese tope. Recomendación: 20 % del capital de cada estrategia, en el backtest y en *shadow*, que se puede bajar.
 10. **Qué mercados se añaden.** Recomendación: el oro, el EUR/USD y el Nasdaq de Deriv (§6), y más después de medir. Cada símbolo capturado en vivo suma escrituras en R2: con el guardado de hoy, entre unos 5 y 15 USD al mes por símbolo (estimación, a medir con su ritmo de ticks), que se pueden bajar cambiando cómo se guarda cada evento.
-11. **Modelos que no se leen como reglas** (aprendizaje automático). Recomendación: empezar con reglas y sumar los modelos cuando el motor funcione y se puedan reproducir en el bot.
+11. **Inteligencia artificial** (aprendizaje automático, §7). Recomendación: empezar con reglas y sumar los modelos cuando el motor funcione y haya meses de datos.
 12. **Guardar más historia de Deriv.** Los términos de Deriv solo permiten guardar sus datos 24 horas, y el propietario ya aceptó guardar más («Decisiones vigentes relevantes» de `PROJECT_STATUS.md`). Descargar un año de historia de varios mercados agranda ese riesgo. Recomendación: aceptarlo para uso propio y no redistribuir nada, como hoy (ADR-0004 §13).
+13. **Qué tipos de contrato puede usar el motor.** Sustituye a la decisión pendiente de qué tipo de operación representan las posiciones hipotéticas (`PROJECT_STATUS.md`). Recomendación: multiplicadores y sube/baja, y dejar fuera los dígitos, que dependen de la última cifra del precio y no del mercado. Los multiplicadores son lo más barato medido (§3), y con ellos se pierde como mucho lo apostado.
 
 La dirección técnica decide, y lo deja escrito en las ADR: las herramientas, la gramática, las pruebas estadísticas, el formato de los datos y la forma del registro.
 
@@ -202,6 +227,7 @@ Los pasos 1 a 5 de «Próximos pasos, en orden» no cambian. Las ADR empiezan de
 
 - **Puede no encontrar nada viable.** En R_100 es lo esperado. En mercados reales, nadie lo sabe antes de probar.
 - **Pocos datos al principio.** Un año de velas sirve para operaciones de minutos a horas. Para estrategias de ticks hacen falta meses de captura.
+- **Las opciones de Deriv cobran mucho en mercados reales.** En el oro a 15 minutos hay que acertar el 56,6 % solo para no perder (§3). Si hay algo viable, es más probable encontrarlo con multiplicadores, que cobran mucho menos.
 - **Dos evaluadores.** Si Python y TypeScript divergen, la evidencia sería falsa. Lo evitan los vectores compartidos y que solo cuente el de TypeScript.
 - **Costos.** El VPS y cada símbolo capturado suben el gasto mensual; nada se compra sin el visto bueno del propietario.
 - **Términos de Deriv, MT5 y Vantage.** Guardar datos y usar programas automáticos tiene condiciones; las de MT5 y Vantage todavía no se revisaron (ADR-0007 §8).
