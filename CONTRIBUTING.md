@@ -43,7 +43,7 @@ No crees componentes futuros o directorios vacíos fuera del [corte de Fase 1](d
 
 El [plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md) (§6) autoriza estas piezas, cada una solo desde su incremento y después de su ADR:
 
-- `apps/api/` (F2.3): API Fastify con cuentas, sesiones y laboratorio, que sirve también la web.
+- `apps/api/` (F2.3): API Fastify con cuentas, sesiones y laboratorio, que sirve también la web y corre la réplica de los backtests antes de `shadow`.
 - `packages/strategy-sdk/` (F2.6): modelo de estrategia, indicadores y evaluador puros.
 - `research/python/` (F2.6b): motor de investigación en Python acelerado, que corre en un VPS propio ([ADR-0003](docs/arquitectura/adr/0003-lenguajes-y-limites.md)).
 - `apps/backtest/` (F2.7): backtests de la búsqueda con `packages/strategy-sdk`, que corren en el mismo VPS.
