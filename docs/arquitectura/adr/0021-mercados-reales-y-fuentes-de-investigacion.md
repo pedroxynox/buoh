@@ -12,7 +12,7 @@
 - **El oro en vivo.** Se captura como R_100, en su propia serie de cuadernos semanales (logs), en el mismo servidor. Cuando el oro cierra, buoh espera y vuelve a intentarlo, sin darlo por fallo. Si el servidor no aguanta los dos, el oro necesita uno propio, de 7 USD al mes, y te lo pregunto antes.
 - **La historia.** buoh descarga, poco a poco, un año de ticks de R_100 y del oro, un año de velas de 1 minuto de los siete mercados y los horarios de cada día. Se guardan para siempre, solo para tu uso.
 - **Lo que cobra Deriv.** Cada 30 minutos, buoh pregunta cuánto paga un sube/baja y cuánto cobra un multiplicador en cada mercado, y lo guarda. Sin eso, el motor no puede saber si una estrategia gana después de los costos.
-- **Costo.** Unos 54 USD al mes (estimación): 3 más que los 51 aprobados, por el tráfico de salida de Render y las lecturas de R2 que suma el oro. Necesita tu visto bueno.
+- **Costo.** Unos 54 USD al mes (estimación): 3 más que los 51 de antes, por el tráfico de salida de Render y las lecturas de R2 que suma el oro. Lo aprobaste el 2026-11-16.
 - **Riesgo.** Nada de esto opera ni usa una cuenta de Deriv. R2 llegará a 8 GB en semanas, cuando se descargue la historia, y ahí revisamos juntos cuánto se guarda.
 - **Qué apruebas al fusionarla.** Todo lo de arriba, y el orden de ocho PR de §9.
 
@@ -109,7 +109,7 @@ Estimaciones, que los PR miden:
 - **Tráfico de salida de Render.** Render cuenta lo que sus servicios envían a R2, también las peticiones (ADR-0016). Con la cuenta de ADR-0018 §13, el oro suma unos 11 GB al mes y los lotes unos 1,5 GB, unos 1,95 USD al mes a 0,15 USD por GB por encima de los 5 GB incluidos. La historia suma una vez unos 5 GB, unos 0,75 USD.
 - **R2, espacio.** Los datasets de la historia de ticks ocupan unos 4 GB, casi todo en los ticks normalizados en gzip (unos 100 bytes por tick, ADR-0020, «Medición»), y los de velas unos 100 MB. Con los logs de 30 días de las secuencias en vivo, unos 3 GB, y los de la descarga mientras no vencen, unos 1,5 GB, R2 pasa de 8 GB el mes de la descarga: la revisión de ADR-0020 §6 con el propietario llega en semanas y no en dos años. R2 cobra el espacio por encima de 10 GB, a 0,015 USD por GB al mes (ADR-0016).
 - **Retención.** Los logs de las secuencias por lotes vencen a los 30 días, como los demás. Los datasets que salen de ellos no vencen, como decidió el propietario para la historia de Deriv («Motor de investigación»), con la misma revisión de ADR-0020 §6.
-- **Total.** Unos 54 USD al mes (estimación), unos 3 más que los 51 aprobados (plan §11). El plan pide el visto bueno del propietario antes de subir el presupuesto (§4, punto 8), y esta ADR no se fusiona sin él.
+- **Total.** Unos 54 USD al mes (estimación), unos 3 más que los 51 aprobados antes (plan §11). El plan pide el visto bueno del propietario antes de subir el presupuesto (§4, punto 8), y lo dio el 2026-11-16, después de fusionarla, en el mensaje en que lo avisó («ya hice merge apruebo 54 usd al mes»).
 
 ### 7. Términos de Deriv
 
