@@ -53,6 +53,20 @@ Consultas de solo lectura al canal público de Deriv (`wss://api.derivws.com/tra
   - sube/baja del oro a 15 minutos y a 1 hora: paga 17,66 y 17,41. Para no perder hay que acertar el 56,6 % y el 57,4 %;
   - multiplicador ×100: comisión de 0,36 USD en R_100 y de 0,18 USD en el oro. Con una exposición de 1000 USD, el precio tiene que moverse a favor un 0,036 % y un 0,018 % para cubrirla.
 - **Ritmo de los ticks** (suscripción de 120 s desde las 05:08 UTC): el oro, 120 ticks, uno por segundo; R_100, 61, uno cada 2 segundos. Hoy buoh guarda cada tick como una escritura de clase A en R2, que cobra 4,50 USD por millón por encima del millón gratuito de cada mes, redondeando al millón siguiente (ADR-0018 §14). El oro cotiza unas 23 horas al día, 5 días a la semana: con un tick por segundo son unos 1,8 millones de escrituras al mes, y con los unos 1,35 millones de R_100 el total pasa de 2 a 3 millones cobrados. Son unos 9 USD más al mes (estimación).
+- **Costo frente a movimiento** (hacia las 05:20 UTC): la comisión del multiplicador ×100 como porcentaje de la exposición, y la desviación de los retornos de las velas de 1 hora (las últimas 1000) y de 1 día (las últimas 365). Cuanto menor es la última columna, menos se come el costo del movimiento de una hora típica. Es una señal de dónde es más fácil cubrir los costos, no de dónde se gana.
+
+  | Mercado | Comisión | Movimiento típico en 1 hora | En 1 día | Comisión / movimiento en 1 hora |
+  |---|---|---|---|---|
+  | R_100 | 0,036 % | 1,07 % | 5,12 % | 0,03 |
+  | Oro (`frxXAUUSD`) | 0,018 % | 0,27 % | 1,85 % | 0,07 |
+  | Bitcoin (`cryBTCUSD`) | 0,070 % | 0,42 % | 2,32 % | 0,17 |
+  | Plata (`frxXAGUSD`) | 0,097 % | 0,49 % | 4,47 % | 0,20 |
+  | Ethereum (`cryETHUSD`) | 0,117 % | 0,58 % | 3,17 % | 0,20 |
+  | EUR/USD | 0,024 % | 0,08 % | 0,34 % | 0,32 |
+  | GBP/USD | 0,024 % | 0,07 % | 0,39 % | 0,35 |
+  | USD/JPY | 0,030 % | 0,08 % | 0,47 % | 0,40 |
+
+  Los índices de bolsa (`OTC_NDX`, `OTC_SPC`, `OTC_GDAXI`) no tienen multiplicadores: el Nasdaq solo ofrece sube/baja de 15 minutos a 1 hora y contratos de 1 día o más (`contracts_for`). R_100 es el más barato frente a su movimiento, pero es azar: un costo bajo no sirve sin un patrón.
 - **Precios de VPS,** que se confirman al comprar:
   - Contabo, según [su blog](https://contabo.com/blog/best-budget-vps-developers/), comprobado por Contabo el 2026-08-17: Cloud VPS 4, 4 vCPU, 8 GB y 100 GB, desde 5,24 EUR al mes con IVA a 24 meses. Según sus páginas de ubicaciones, el Cloud VPS 12, 12 vCPU y 48 GB, 20 EUR al mes, y el Cloud VPS 16, 16 vCPU y 64 GB, 29,60 EUR. El mismo blog avisa de que su CPU puede rendir menos con mucha carga;
   - Hetzner, como comparación, después de su subida del 2026-06-15, según [CostGoat](https://costgoat.com/pricing/hetzner), actualizado el 2026-10-20, sin IVA: CX43, 8 vCPU compartidas y 16 GB, 15,99 EUR al mes; CX53, 16 vCPU compartidas y 32 GB, 29,49 EUR.
@@ -112,14 +126,14 @@ Es la parte que decide si el motor sirve. Con millones de pruebas, la mejor del 
 
 1. **R_100 sigue** como hoy, y sirve de control negativo (§5).
 2. **Historia de Deriv:** el año de velas de 1 minuto de los mercados que elija el propietario (§3), descargado por tramos y guardado como dataset propio, con su procedencia, su hora en UTC y su calidad, como cualquier fuente de buoh.
-3. **Captura viva de mercados reales:** los mismos mercados, por el canal público de Deriv y con el adaptador de hoy, para acumular ticks desde ahora. Cada símbolo necesita sus umbrales medidos antes de publicar datasets ([ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) §1).
+3. **Captura viva del oro,** junto a la de R_100, por el canal público de Deriv y con el adaptador de hoy, para acumular ticks desde ahora (§10, decisión 13). El oro cierra los fines de semana y cada día un rato: la captura tiene que distinguir un mercado cerrado de un fallo, y la ADR de F2.6 lo resuelve con los horarios de Deriv (`trading_times`). Cada símbolo necesita sus umbrales medidos antes de publicar datasets ([ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) §1).
 4. **Exportaciones de MT5 del propietario,** más adelante y en velas (§10, decisión 8): su historia de MT5 entra como fuente importada, con la hora de su servidor convertida a UTC y comprobada, su procedencia y su calidad. Adelanta una parte de la Fase 1B sin el puente MQL5.
 5. **Puente de MT5 (Fase 1B):** después, para los datos vivos del lugar donde se opere en MT5.
 6. **Lo que cobra Deriv:** cada pocos minutos, los pagos de las opciones y las comisiones de los multiplicadores de cada mercado, con `proposal` y sin cuenta, como fuente propia de buoh. Sin ellos, el motor no puede saber cuánto habría pagado una opción en el pasado.
 
 Las estrategias de segundos necesitan ticks, y Deriv solo da los últimos (§3). Por eso la captura viva de los mercados reales empieza pronto: el motor estudia primero estrategias de minutos a horas con las velas, y las de segundos a medida que se acumulan los ticks.
 
-Propuesta para empezar: el oro (`frxXAUUSD`), el EUR/USD (`frxEURUSD`) y el Nasdaq (`OTC_NDX`), y sumar más después de medir lo que cuestan y lo que aportan.
+En vivo: R_100, como hoy, y el oro (§10, decisión 13). Con velas, que casi no cuestan, el motor puede estudiar todos los mercados reales que tienen multiplicadores. Propuesta para empezar: el oro, la plata, el EUR/USD, el GBP/USD, el USD/JPY, Bitcoin y Ethereum (§3). Los índices de bolsa no tienen multiplicadores en Deriv, así que quedan fuera hasta que el motor estudie sube/baja.
 
 ## 7. Tecnología
 
@@ -215,10 +229,14 @@ Y en la siguiente: «Acepto la caida maxima de 50% del capital pero las estrateg
 11. **Caída máxima del 50 % del capital de cada estrategia.** El motor busca la mayor rentabilidad neta sin pasar de ese tope, en el backtest, en *shadow* y en demo. El agente había recomendado el 20 % y le explicó el riesgo: con un 50 %, una estrategia puede perder la mitad de su capital antes de pararse, y recuperarse de esa caída exige ganar un 100 %. Antes de operar, buoh pasa por demo, como ya piden las puertas (protocolo §4). El límite para dinero real es otra decisión, «Límites monetarios y política de riesgo para fases `demo` y `real`» (`PROJECT_STATUS.md`), y se toma antes de la Fase 5.
 12. **Guardar la historia de Deriv todo el tiempo,** solo para uso propio y sin redistribuirla (ADR-0004 §13), aceptando que los términos de Deriv solo permiten guardar sus datos 24 horas. Es el mismo riesgo que ya aceptó para la captura y los datasets («Decisiones vigentes relevantes» de `PROJECT_STATUS.md`), ahora para un año de velas de varios mercados.
 
+Y en la siguiente: «ok mejor vamos a capturar los dos a ver si le saco algo a r100, si no luego quito r100 y dejo solo el oro». El agente le había dado tres opciones: cambiar R_100 por el oro (su recomendación, con el mismo costo que hoy), capturar los dos, por unos 9 USD más al mes, o no capturar nada nuevo:
+
+13. **Capturar en vivo R_100 y el oro.** Si R_100 no da nada, el propietario lo quita más adelante y deja solo el oro.
+
 ### Pendientes, cada una con la recomendación del agente
 
-13. **Qué mercados se añaden.** Recomendación: el oro, el EUR/USD y el Nasdaq de Deriv (§6), los tres con su año de velas, y solo el oro capturado también en vivo, para las estrategias de segundos. Cada símbolo capturado en vivo suma escrituras en R2: el oro, unos 9 USD al mes con el guardado de hoy (§3). Agrupar varios ticks en cada escritura lo bajaría casi a cero, pero toca la parte más delicada de la captura, que hoy guarda cada tick antes de usarlo, y retrasaría lo que ve el bot unos segundos, que es justo lo que no quieren las estrategias de segundos; la ADR de F2.6 lo estudia antes de sumar más mercados en vivo. Las velas casi no cuestan: unas pocas peticiones al día. Se suman más mercados después de medir.
-14. **El presupuesto mensual** (§11, «Costo»): de unos 26 USD hoy a unos 45 a 55 USD. Recomendación: aprobarlo, con el oro como único mercado nuevo capturado en vivo, y revisar cuando haya mediciones.
+14. **Qué mercados estudia el motor con velas.** Recomendación: el oro, la plata, el EUR/USD, el GBP/USD, el USD/JPY, Bitcoin y Ethereum, cada uno con su año de velas de 1 minuto y su actualización diaria (§6). Las velas casi no cuestan: unas pocas peticiones al día por mercado.
+15. **El presupuesto mensual** (§11, «Costo»): de unos 26 USD hoy a unos 45 a 55 USD. Recomendación: aprobarlo, con el oro como único mercado nuevo capturado en vivo, y revisar cuando haya mediciones.
 
 La dirección técnica decide, y lo deja escrito en las ADR: las herramientas, la gramática, las pruebas estadísticas, el formato de los datos y la forma del registro.
 
@@ -279,7 +297,7 @@ F2.1 a F2.5 no cambian, con lo que les falta («Próximos pasos, en orden» de `
 
 | Incremento | Qué entrega | Depende de |
 |---|---|---|
-| **F2.6** Mercados reales y lo que cobra Deriv | captura viva del oro, con sus umbrales medidos; el año de velas de 1 minuto del oro, el EUR/USD y el Nasdaq, y su actualización diaria; los pagos de sube/baja y las comisiones de los multiplicadores cada pocos minutos | su ADR y el PR 6 de ADR-0020 |
+| **F2.6** Mercados reales y lo que cobra Deriv | captura viva del oro, con sus umbrales medidos, junto a la de R_100; el año de velas de 1 minuto de los mercados de §6, y su actualización diaria; los pagos de sube/baja y las comisiones de los multiplicadores cada pocos minutos | su ADR y el PR 6 de ADR-0020 |
 | **F2.7** Estrategias | `StrategyDefinition`, los indicadores con sus vectores, los costos de los multiplicadores y de sube/baja, y el evaluador puro (`F2-STRATEGY-001`) | las cuatro ADR del laboratorio |
 | **F2.8** Motor de investigación | `research/python` y el VPS: lectura de datos por partes, el evaluador acelerado con los vectores de F2.7, la búsqueda de reglas, el registro de cada búsqueda, los controles negativos y la medición de cuántas estrategias prueba por hora | F2.6 y F2.7 |
 | **F2.9** Backtest oficial y evaluación | `apps/backtest` en el VPS, la prueba fuera de muestra una sola vez, el informe con las correcciones por búsqueda, y la sección Laboratorio con la aprobación (`F2-BACKTEST-001` y `F2-EVAL-001`) | F2.8 |
@@ -318,7 +336,7 @@ La 1 va sola, para que la captura del oro empiece pronto. Las 2 a 5 comparten el
 
 ### Costo
 
-Hoy, unos 26 USD al mes («Siguiente tarea autorizada» de `PROJECT_STATUS.md`). Se suman el bot *shadow*, 7 USD, ya aprobado; el VPS, unos 7 EUR; y el oro en vivo, unos 9 USD (estimación, §3 y §10, decisión 13). Las velas y lo que cobra Deriv caben en la ejecución de `buoh-operaciones` que ya existe. En total, unos 45 a 55 USD al mes (estimación), que necesitan el visto bueno del propietario (§10, decisión 14).
+Hoy, unos 26 USD al mes («Siguiente tarea autorizada» de `PROJECT_STATUS.md`). Se suman el bot *shadow*, 7 USD, ya aprobado; el VPS, unos 7 EUR; y el oro en vivo, unos 9 USD (estimación, §3 y §10, decisión 13). Las velas y lo que cobra Deriv caben en la ejecución de `buoh-operaciones` que ya existe. En total, unos 45 a 55 USD al mes (estimación), que necesitan el visto bueno del propietario (§10, decisión 15).
 
 ## 12. Qué cambia en los documentos si se aprueba
 
