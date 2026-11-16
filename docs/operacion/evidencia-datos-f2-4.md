@@ -112,6 +112,24 @@ De las 21:00 del 2026-11-12 a las 00:00 del 2026-11-13, las 37 ejecuciones de `b
 
 **La medición de F2.4.** Desde el despliegue del #98, `buoh-api` lee R2 cada vez que alguien abre Mercados; entre el #97 y el #98, solo con las rutas abiertas a mano. El punto 7 de F2.4 mide esas lecturas y su tráfico de salida en producción, con los paneles de Render y de Cloudflare, copiados dentro de los 7 días que guarda Render (ADR-0018 §13).
 
+## Las publicaciones en la Auditoría y la sección Datos (PR #109 y #110)
+
+El #109 trajo a la Auditoría las publicaciones de `buoh_datasets`, y el #110, la sección Datos con los datasets publicados (ADR-0019 §8; ADR-0020 §10; [concepto de interfaz](../diseno/concepto-de-interfaz.md) §12 y §14). Los dos solo leen PostgreSQL. Las horas son UTC del 2026-11-14, salvo donde se dice. Salen de GitHub, de las comprobaciones del agente desde fuera, sin sesión ni credenciales, de sus lecturas de producción con `buoh_agente`, con `verify-full` y en transacciones de solo lectura, y de una foto del propietario, que usa la hora UTC−3.
+
+| Hora | Qué pasó |
+|---|---|
+| 15:02:09 | El propietario fusiona el PR #109 (`1e460b2`, GitHub). |
+| 17:29:02 | El propietario fusiona el PR #110 (`9d71ea9`). El árbol es el de su último commit, `49e8e3c`, el que probó CI en el PR (`git diff --quiet 49e8e3c 9d71ea9` sale con 0). |
+| 17:31:22, 17:33:43 y 17:36:40 | CI sobre `9d71ea9`: `test:integration`, `verify:pr` y `desktop:windows` terminan bien. |
+| 17:33:44 | El lector de Datos de la API, con el código fusionado y las opciones de su pool, sobre producción: 54 datasets, 4 del log 1, 28 del 2 y 22 del 3, todos limpios, con el perfil de publicación y las dos verificaciones `passed`, y 140 incidencias, en 38 ms. `DataDatasets` y el validador de la web aceptan la respuesta. Ningún dataset activo está sin su rango, en los 54 las incidencias suman su `incident_count`, ninguna lista va sin orden, y los 54 núcleos están en JCS y dan su identificador. |
+| 17:38:52 | Desde fuera: `GET /api/v1/datos/datasets` sin sesión responde `401 unauthenticated`, y hacia las 17:31 respondía `404`. `/datos/` sirve la página nueva en su estado de carga, con «Los datasets no vencen.» y la tarjeta que dice que la lista de cada incidencia todavía no está en la web, sin la marca «Datos ficticios» ni la tabla ficticia del escritorio. |
+| 17:39:28.586 a 17:39:31.747 | `buoh-ingesta` se despliega, porque el #110 cambia el worker y `packages/contracts`: la conexión se cierra a las 17:39:28.586; el último latido del proceso viejo, `disconnected`, es de las 17:39:28.949; el primero del nuevo, de las 17:39:30.736; y la conexión se abre a las 17:39:31.747. Son 3,2 s sin eventos de Deriv. |
+| 17:41:13 | La salud de `buoh-operaciones`: `healthy`, `connected`, sin condiciones abiertas, como en las ejecuciones de las 17:30 y las 17:36. |
+| hacia las 17:52 | El propietario abre Datos con su sesión (su foto, a las 14:52 de su hora). La tabla empieza por el dataset publicado a las 16:45:56, del log 3, segmentos 1509–1580, con el período de las 06:02:26 a las 12:00:02 y 10 727 ticks, y sigue con los anteriores del mismo log, sin huecos entre sus segmentos. Todos dicen «Limpio», y «Pasó» en la comprobación y en el recálculo, con su hora. Sus incidencias son «Ninguna» o conexiones perdidas, como «3: 3 conexiones perdidas». La barra superior dice «Desactivado» y «Saludable», sin la marca «Datos ficticios». La foto no entra en el repositorio, porque muestra datos personales. |
+| 2026-11-16, 02:26 | El lector de la Auditoría de la API, con el código fusionado, sobre producción: 200 eventos, con la lista cortada, de los logs 1 a 5. Son 60 publicaciones de `buoh_datasets`, 4 del log 1, 28 del 2 y 28 del 3, y 56 versiones del catálogo, 56 condiciones y 28 incidencias de los logs. En esa lectura, la única sesión de `buoh_agente` era la del agente. |
+
+Con las publicaciones, la lista de la Auditoría pasa de 200, como avisó el PR #109, así que los eventos más viejos de los logs dejan de verse antes de que venzan sus logs. La vista dice que se muestran los 200 más recientes.
+
 ## La compresión de las respuestas de `buoh-api`
 
 El 2026-11-05 a las 20:49:22 UTC, con `curl` desde fuera, sin sesión ni credenciales y con `Accept-Encoding: br, gzip`, cuatro respuestas de `buoh-api` llegaron comprimidas con Brotli: `/`, `/mercados/`, `GET /api/salud` y `GET /api/v1/datos/salud`, el `401` sin sesión. Las cuatro traían `content-encoding: br`, `server: cloudflare` y `x-render-origin-server: Render`. Pedida sin `Accept-Encoding`, `/` llegó sin comprimir. Una comprobación anterior del mismo día dio lo mismo con un script de `/_next/static/`. La API no comprime: no tiene `@fastify/compress`. Comprime Cloudflare, delante de Render, cuando el navegador lo admite, como hacen todos.
