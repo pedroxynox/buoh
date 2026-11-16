@@ -105,6 +105,7 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 - [ADR-0019: API, cuentas y auditoría (F2.3)](docs/arquitectura/adr/0019-api-cuentas-y-auditoria.md)
 - [ADR-0020: datasets vivos (F2.5)](docs/arquitectura/adr/0020-datasets-vivos.md)
 - [ADR-0021: mercados reales y fuentes de investigación (F2.5b)](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md)
+- [ADR-0022: modelo de estrategia (F2.6)](docs/arquitectura/adr/0022-modelo-de-estrategia.md)
 - [Plan de la línea visual V1](docs/plan/linea-visual-v1.md)
 - [Guía de marca](docs/diseno/marca-buoh.md)
 - [Concepto de interfaz](docs/diseno/concepto-de-interfaz.md)
