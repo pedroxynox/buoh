@@ -65,9 +65,9 @@ Python se limita a `research/python`: exploración estadística, transformación
 
 Motivos completos en [ADR-0023](0023-motor-de-investigacion.md) §2. Cada biblioteca entra en el PR que la usa, y `research/python/uv.lock`, con el hash de cada paquete, fija su versión exacta:
 
-- Python 3.14, con la misma versión de parche en CI y en el VPS (`research/python/.python-version`), que instala `uv`.
-- `numpy`, para las series y la caché de los datos; `numba`, con `llvmlite`, que compila los indicadores, el evaluador y las posiciones sin `fastmath`, para la paridad bit a bit con TypeScript ([ADR-0022](0022-modelo-de-estrategia.md) §8); `optuna`, para los muestreadores TPE y NSGA-II, con semilla; `boto3`, para R2; `urllib3`, que ya llega con `boto3`, para la API; `jsonschema`, que valida con el JSON Schema 2020-12 de `packages/contracts`; y `rfc8785`, el JCS de la identidad de cada candidata.
-- Para desarrollar y en CI: `uv`, `ruff`, `mypy` en modo estricto y `pytest`.
+- Python 3.14, con la misma versión de parche en CI y en el VPS (`research/python/.python-version`), que instala `uv`. `research/python` es un proyecto virtual, sin `[build-system]`: uv no lo construye.
+- `numpy`, para las series y la caché de los datos; `numba`, con `llvmlite`, que compila los indicadores, el evaluador y las posiciones sin `fastmath`, para que los indicadores den los mismos bits que TypeScript y las posiciones, los mismos resultados ([ADR-0022](0022-modelo-de-estrategia.md) §8, con la precisión de ADR-0023 §3); `optuna`, para los muestreadores TPE y NSGA-II, con semilla; `boto3`, para R2; `urllib3`, que ya llega con `boto3`, para la API; `jsonschema`, que valida con el JSON Schema 2020-12 de `packages/contracts`; y `rfc8785`, el JCS de la identidad de cada candidata.
+- `uv` instala Python y el entorno, en CI y en el VPS; `pytest` corre las pruebas en CI y en el VPS, en un grupo de dependencias aparte; y, solo para desarrollar y en CI, `ruff` y `mypy` en modo estricto.
 - El VPS instala solo paquetes ya construidos (`uv sync --locked --no-build --no-dev`), y una versión nueva entra publicada hace al menos 7 días, salvo un arreglo de seguridad.
 
 ### SQL — lenguaje de datos y auditoría
