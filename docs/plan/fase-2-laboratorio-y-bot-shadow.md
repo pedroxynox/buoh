@@ -322,7 +322,7 @@ Un backtest evalúa una versión de estrategia sobre datasets publicados, con el
 
 ### `F2-EVAL-001` — Entrenamiento, validación y prueba fuera de muestra
 
-La evaluación sigue el protocolo de validación, con las reglas medibles que fije la ADR del protocolo estadístico. Es [ADR-0025](../arquitectura/adr/0025-protocolo-estadistico.md): lo que se fija antes de validar está en el registro de la búsqueda y en esa ADR, y el registro previo de cada candidata lo compone la API con su congelación, que es la petición de la evaluación del motor, antes de la prueba fuera de muestra (§5); la revisión técnica la hace la API con su réplica (§6); y la ventana fuera de muestra dura los días de 60 operaciones al ritmo de la validación, de 14 a 56, con una prueba de significación que corrige por las versiones abiertas a la vez (§7).
+La evaluación sigue el protocolo de validación, con las reglas medibles que fije la ADR del protocolo estadístico. Es [ADR-0025](../arquitectura/adr/0025-protocolo-estadistico.md): lo que se fija antes de validar está en el registro de la búsqueda y en esa ADR, y el registro previo de cada candidata lo compone la API con su congelación, que es la petición de la evaluación del motor, antes de la prueba fuera de muestra (§5); la revisión técnica la hace la API con su réplica (§6); y la ventana fuera de muestra dura los días de 60 operaciones al ritmo de la validación, de 14 a 56, con una prueba por apuestas, que vale con pocas operaciones y con cualquier distribución de sus resultados, y que corrige por las versiones de su símbolo abiertas a la vez (§7).
 
 **Aceptación:**
 
