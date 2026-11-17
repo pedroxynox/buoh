@@ -19,7 +19,7 @@ Antes de ejecutar la prueba final, registrar:
 
 Modificar cualquiera de estos elementos después de ver resultados crea una nueva versión de estrategia.
 
-Para una candidata del motor de investigación, la API compone el registro previo al congelarla, con lo que ya tiene registrado de su búsqueda ([ADR-0025](../arquitectura/adr/0025-protocolo-estadistico.md) §5). Su hipótesis falsable es la predicción fuera de muestra registrada: que su resultado neto es positivo y no empeora de forma clara frente a la validación. Su mecanismo es el patrón del estudio que usa su regla, o «no identificado», y el informe lo muestra tal cual.
+Para una candidata del motor de investigación, la API compone el registro previo al congelarla, con lo que ya tiene registrado de su búsqueda ([ADR-0025](../arquitectura/adr/0025-protocolo-estadistico.md) §5). Su hipótesis falsable es la predicción fuera de muestra registrada: que su resultado por operación es positivo, con la significación de ADR-0025 §7. Su mecanismo es el patrón del estudio que usa su regla, o «no identificado», y el informe lo muestra tal cual.
 
 ## 2. Separación temporal de datos
 
