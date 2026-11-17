@@ -1,4 +1,5 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { closeSync, mkdtempSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,6 +52,7 @@ import {
   type SpaceMeasure,
 } from '../src/index.js';
 import type { Scheduler } from '../src/deriv/ports.js';
+import { MEMORY_REPORT_MODULE, memoryReportOf, ownMaxRssBytes } from '../src/operations/child.js';
 import { uuid } from './support/connection-harness.js';
 import { flush, ManualClock } from './support/deriv-fixtures.js';
 
@@ -2967,6 +2969,45 @@ describe('runNodeScript: un proceso aparte con su entorno y su plazo', () => {
     expect(result.maxRssBytes).toBeLessThan(512 * 1024 * 1024);
   });
 
+  it('con reportMemory, la memoria es la del propio proceso, no la del que lo lanza', async () => {
+    // Con 192 MiB residentes en este proceso, un hijo que no reserva nada no llega a 128 MiB: el
+    // `maxRSS` de un hijo de Linux arrastra, tras el fork, la memoria del padre, y su `VmHWM` no.
+    const parent = Buffer.alloc(192 * 1024 * 1024, 1);
+    const path = script('vacio.mjs', 'process.stdout.write("ok");');
+    const result = await runNodeScript({
+      args: [],
+      env: {},
+      nodeFlags: [],
+      reportMemory: true,
+      script: path,
+      timeoutMs: 30_000,
+    });
+    expect(parent.length).toBe(192 * 1024 * 1024);
+    expect(result.stdout).toBe('ok');
+    expect(result.maxRssBytes).toBeGreaterThan(0);
+    expect(result.maxRssBytes).toBeLessThan(128 * 1024 * 1024);
+  });
+
+  it('el módulo de la memoria no escribe en un descriptor 3 que no es una tubería', async () => {
+    const target = join(directory, 'descriptor-3.txt');
+    const fd = openSync(target, 'w');
+    try {
+      const code = await new Promise<number | null>((resolve, reject) => {
+        const child = spawn(
+          process.execPath,
+          ['--import', MEMORY_REPORT_MODULE, script('nada.mjs', '')],
+          { env: {}, stdio: ['ignore', 'ignore', 'ignore', fd] },
+        );
+        child.on('error', reject);
+        child.on('close', resolve);
+      });
+      expect(code).toBe(0);
+    } finally {
+      closeSync(fd);
+    }
+    expect(readFileSync(target, 'utf8')).toBe('');
+  });
+
   it('con reportMemory, la memoria llega también si el proceso sale con process.exit y un código de error', async () => {
     const path = script('sale.mjs', 'process.exit(4);');
     const result = await runNodeScript({
@@ -3028,6 +3069,26 @@ describe('runNodeScript: un proceso aparte con su entorno y su plazo', () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toHaveLength(CHILD_OUTPUT_LIMIT_BYTES);
     expect(result.stderr).toHaveLength(CHILD_OUTPUT_LIMIT_BYTES);
+  });
+});
+
+describe('la memoria de los procesos (precisión del PR 9 de ADR-0018 §13)', () => {
+  it('de lo que llega por el descriptor 3 vale la última línea, con un entero positivo de bytes', () => {
+    expect(memoryReportOf('{"max_rss_bytes":1}\n{"max_rss_bytes":52428800}\n')).toBe(52_428_800);
+    expect(memoryReportOf('{"max_rss_bytes":52428800}\nbasura\n')).toBeNull();
+    expect(memoryReportOf('')).toBeNull();
+    expect(memoryReportOf('{"max_rss_bytes":0}')).toBeNull();
+    expect(memoryReportOf('{"max_rss_bytes":-1}')).toBeNull();
+    expect(memoryReportOf('{"max_rss_bytes":1.5}')).toBeNull();
+    expect(memoryReportOf('{"max_rss_bytes":9007199254740993}')).toBeNull();
+    expect(memoryReportOf('{"max_rss_bytes":"52428800"}')).toBeNull();
+    expect(memoryReportOf('[52428800]')).toBeNull();
+  });
+
+  it('la memoria del proceso principal va en bytes', () => {
+    // Un proceso de Node tiene decenas de MiB residentes: en KiB, sin pasar a bytes, no llegaría a 1 MiB.
+    expect(ownMaxRssBytes()).toBeGreaterThan(16 * 1024 * 1024);
+    expect(ownMaxRssBytes()).toBeLessThan(8 * 1024 * 1024 * 1024);
   });
 });
 

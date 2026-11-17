@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { DERIV_SOURCE } from '../deriv/profile.js';
 import { createUuidV7Generator } from '../ids.js';
 import { stderrAlert } from '../operational/registry.js';
-import { runWorkerChild } from '../operations/child.js';
+import { ownMaxRssBytes, runWorkerChild } from '../operations/child.js';
 import { openOwnerDatabase } from '../operations/owner-database.js';
 import { openLogDeletion } from '../operations/retention.js';
 import { operationsCommand } from '../operations/run.js';
@@ -24,8 +24,7 @@ const { exitCode, lines } = await operationsCommand(process.env, {
   forwardChildStderr: (text) => {
     process.stderr.write(text.endsWith('\n') ? text : `${text}\n`);
   },
-  // `maxRSS` va en KiB.
-  maxRssBytes: () => process.resourceUsage().maxRSS * 1024,
+  maxRssBytes: ownMaxRssBytes,
   nextId: createUuidV7Generator({ now: () => Date.now(), randomBytes }),
   now: () => new Date().toISOString(),
   openDatabase: (config) => openOwnerDatabase(config, { source: DERIV_SOURCE }),

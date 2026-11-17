@@ -76,29 +76,35 @@ const MEMORY_OUTPUT_LIMIT_BYTES = 4096;
 
 /**
  * El módulo que `runNodeScript` carga con `--import` en un proceso con `reportMemory`. Al salir,
- * también con `process.exit` o un error, escribe por el descriptor 3 una línea JSON con su memoria
- * residente máxima en bytes (`process.resourceUsage().maxRSS`, que va en KiB), como la que ya
- * informan `datasets:publish` y `data:replay`. Solo escribe si ese descriptor es la tubería que
- * abre quien lo lanza, y nunca toca stdout ni stderr, que interpreta `buoh-operaciones`. Un proceso
- * cortado con `SIGKILL` no llega a escribirla. Es una URL `data:` para que el módulo no dependa de
- * dónde está compilado.
+ * también con `process.exit` o con un error que llega a salir, escribe por el descriptor 3 una línea
+ * JSON con su memoria residente máxima en bytes: el `VmHWM` de `/proc/self/status`, que va en kB.
+ * No usa `process.resourceUsage().maxRSS`, porque en Linux el de un proceso lanzado arrastra la
+ * memoria residente que tenía su padre al lanzarlo, y el `VmHWM` es solo la suya desde que arrancó.
+ * Solo escribe si ese descriptor es una tubería o un socket, como el que abre `runNodeScript`: en un
+ * proceso de Node sin él, el descriptor 3 puede ser uno interno. Nunca toca stdout ni stderr, que
+ * interpreta `buoh-operaciones`. No llega a escribirla un proceso cortado con `SIGKILL` o con
+ * `SIGTERM`, ni uno que aborta al agotar su heap de V8, ni uno sin `/proc`. Es una URL `data:` para
+ * que el módulo no dependa de dónde está compilado.
  */
-export const MEMORY_REPORT_MODULE = `data:text/javascript,${encodeURIComponent(
-  [
-    'import { fstatSync, writeSync } from "node:fs";',
-    'process.on("exit", () => {',
-    '  try {',
-    `    const target = fstatSync(${String(MEMORY_FD)});`,
-    '    if (target.isSocket() || target.isFIFO()) {',
-    `      writeSync(${String(MEMORY_FD)}, JSON.stringify({ max_rss_bytes: process.resourceUsage().maxRSS * 1024 }) + "\\n");`,
-    '    }',
-    '  } catch {}',
-    '});',
-  ].join('\n'),
-)}`;
+export const MEMORY_REPORT_MODULE = `data:text/javascript,${encodeURIComponent(String.raw`import { fstatSync, readFileSync, writeSync } from "node:fs";
+process.on("exit", () => {
+  try {
+    const target = fstatSync(${String(MEMORY_FD)});
+    if (!target.isSocket() && !target.isFIFO()) {
+      return;
+    }
+    const peak = /^VmHWM:\s+(\d+) kB$/m.exec(readFileSync("/proc/self/status", "utf8"));
+    if (peak !== null) {
+      writeSync(${String(MEMORY_FD)}, JSON.stringify({ max_rss_bytes: Number(peak[1]) * 1024 }) + "\n");
+    }
+  } catch {}
+});`)}`;
 
-/** La memoria de la última línea que llegó por `MEMORY_FD`, o `null` si no es una línea válida. */
-function memoryOf(text: string): number | null {
+/**
+ * La memoria de lo que llegó por `MEMORY_FD`: el `max_rss_bytes` de su última línea, si es un entero
+ * positivo, o `null` si esa línea no es una de las que escribe `MEMORY_REPORT_MODULE`.
+ */
+export function memoryReportOf(text: string): number | null {
   const line = text.trim().split('\n').at(-1) ?? '';
   try {
     const value: unknown = JSON.parse(line);
@@ -110,6 +116,14 @@ function memoryOf(text: string): number | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * La memoria residente máxima de este proceso hasta ahora, en bytes: la del proceso principal de
+ * `buoh-operaciones` en su paso `memory`. `process.resourceUsage().maxRSS` va en KiB.
+ */
+export function ownMaxRssBytes(): number {
+  return process.resourceUsage().maxRSS * 1024;
 }
 
 /**
@@ -169,7 +183,7 @@ export function runNodeScript(input: {
     child.on('close', (code) => {
       clearTimeout(timer);
       const result = { exitCode: code, stderr: stderr.text(), stdout: stdout.text(), timedOut };
-      resolve(reportMemory ? { ...result, maxRssBytes: memoryOf(memory.text()) } : result);
+      resolve(reportMemory ? { ...result, maxRssBytes: memoryReportOf(memory.text()) } : result);
     });
   });
 }

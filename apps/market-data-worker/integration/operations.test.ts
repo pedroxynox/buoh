@@ -48,6 +48,7 @@ import {
   type WorkerConfig,
 } from '../src/index.js';
 import { derivLogProfileRow } from '../src/deriv/log-profile.js';
+import { ownMaxRssBytes } from '../src/operations/child.js';
 import { readLogQualityProfile } from '../src/postgres/log-profile.js';
 import { START, uuid } from '../test/support/connection-harness.js';
 import { contentKey } from '../src/object-keys.js';
@@ -228,8 +229,7 @@ async function operations(env = operationsEnvironment()) {
   const result = await operationsCommand(env, {
     alert: (payload) => alerts.push(payload),
     forwardChildStderr: (text) => forwarded.push(text),
-    // `maxRSS` va en KiB, como en el servicio.
-    maxRssBytes: () => process.resourceUsage().maxRSS * 1024,
+    maxRssBytes: ownMaxRssBytes,
     nextId: () => uuid((sequence += 1)),
     now: clock.now,
     openDatabase: (config) =>
@@ -311,7 +311,7 @@ afterAll(async () => {
 });
 
 describe('buoh-operaciones (ADR-0018 §11)', () => {
-  it('la primera ejecución crea los roles y el log 1, con sus siete migraciones como buoh_dueno, sus privilegios y las contraseñas, y guarda en él la salud, la verificación y el espacio', async () => {
+  it('la primera ejecución crea los roles y el log 1, con sus siete migraciones como buoh_dueno, sus privilegios y las contraseñas, y guarda en él la salud, la verificación, el espacio y la memoria', async () => {
     const run = await operations();
     expect(run.alerts).toEqual([]);
     // data:health leyó el log sin ninguna alerta: ni un almacén sin responder ni un rechazo.
@@ -326,6 +326,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       ['retention', 'completed'],
       ['verification', 'completed'],
       ['space', 'completed'],
+      ['memory', 'completed'],
     ]);
     // A las 10:00 UTC toca la ejecución 120; el log 1 todavía no tiene segmentos.
     expect(run.step('verification')?.['report']).toEqual({
@@ -371,22 +372,17 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       ['space', 'completed'],
       ['memory', 'completed'],
     ]);
-    // La memoria del proceso de la prueba, que hace de principal, y la de cada proceso que lanzó:
-    // el `db:migrate` de la API corre aparte, con el módulo de la memoria; los demás, en este
-    // proceso, que no la da (`inProcess`).
-    const memory = reports.at(-1)?.report as {
-      children: { child: string; max_rss_bytes: number | null }[];
-      max_rss_bytes: number;
-    };
-    expect(memory.max_rss_bytes).toBeGreaterThan(0);
-    expect(memory.children.length).toBeGreaterThan(0);
-    for (const launch of memory.children) {
-      if (launch.child === 'api_migrate') {
-        expect(launch.max_rss_bytes).toBeGreaterThan(0);
-      } else {
-        expect(launch.max_rss_bytes).toBeNull();
-      }
-    }
+    // La memoria del proceso de la prueba, que hace de principal, y un `null` por cada proceso que
+    // lanzó: aquí corren dentro de este proceso (`inProcess`), que no da la suya. La memoria de un
+    // proceso aparte la comprueban, con procesos reales, las pruebas de `runNodeScript`.
+    expect(reports.at(-1)?.report).toEqual({
+      children: [
+        { child: 'migrate', max_rss_bytes: null },
+        { child: 'health', max_rss_bytes: null },
+      ],
+      max_rss_bytes: expect.any(Number) as number,
+    });
+    expect(reports.at(-1)?.report['max_rss_bytes']).toBeGreaterThan(16 * 1024 * 1024);
     expect(reports[1]?.report).toMatchObject({
       alerts: [],
       exit_code: 1,
@@ -463,7 +459,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     expect(await reportsOf(LOG_1)).toEqual(before);
   });
 
-  it('sin nada que cambiar, no crea otro log ni pone contraseñas, y solo guarda los informes de la salud y de la verificación', async () => {
+  it('sin nada que cambiar, no crea otro log ni pone contraseñas, y solo guarda los informes de la salud, de la verificación y de la memoria', async () => {
     const run = await operations();
     expect(run.exitCode).toBe(0);
     expect(run.steps[0]?.['report']).toEqual({
