@@ -1,6 +1,6 @@
 # ADR-0022: Modelo de estrategia (F2.6)
 
-- **Estado:** Aceptada
+- **Estado:** Aceptada; complementada por [ADR-0024](0024-semantica-del-backtest.md) (el orden de los ticks de la historia y las velas incompletas en §2, la latencia y las velas de Deriv en §5, el instante de una entrada en §6, el perfil equivalente, las incidencias de los lotes y el resultado estimado en §7, y el próximo plazo, la ventana y los supuestos de ejecución en §8)
 - **Fecha:** 2026-11-16
 - **Ámbito:** Fase 2, incremento F2.6 (`F2-STRATEGY-001`, `F2-AUDIT-001` en lo de las estrategias y `F2-GOV-001` para `packages/strategy-sdk`, del [plan de Fase 2](../../plan/fase-2-laboratorio-y-bot-shadow.md), §8, punto 5). Fija también lo que toman de ella F2.6b (la gramática que recorre el motor de investigación y su paridad), F2.7 (el evaluador y la posición hipotética), F2.8 (el ciclo de vida y la puerta a `shadow`) y F2.9 y F2.10 (la política de datos y lo que el motor `shadow` recibe del evaluador).
 - **Decisores:** Propietario de buoh (los tipos de contrato, la caída máxima, que la duración la decida cada estrategia y la reanudación sola tras datos degradados, decididos el 2026-11-16; plan §12), a propuesta de la dirección técnica (lo demás, también que el propietario autorice cada estrategia que pasa al bot, que aprobó al fusionar el plan).
@@ -52,6 +52,7 @@ Una estrategia opera un solo símbolo, en una sola dirección, con un solo tipo 
   - con `deriv_candles`, decide al cerrar cada vela, con el instante de su fin;
   - un tick que trae la historia de un hueco entra en los indicadores cuando llega, en ese orden, y nunca dispara una decisión con un instante anterior;
   - entre dos datos, el anfitrión le pasa el paso del tiempo (§8), para que la estrategia note datos viejos, el vencimiento de una señal o un cambio de día aunque no llegue nada.
+- (Precisión de [ADR-0024](0024-semantica-del-backtest.md) §2 y §3.) Mientras la continuidad está pendiente, la vista de cada instante retiene los ticks del flujo, y con el resultado de la historia da juntos los que trae y los retenidos, en el orden de su hora de la fuente y con el instante del resultado. Así los indicadores y las velas reciben los precios en el orden en que ocurrieron, y ningún tick dispara una decisión con un instante anterior. Una vela que se solapa con un intervalo sin datos registrados dentro del horario entra en los indicadores, pero su cierre no decide.
 
 ### 3. Biblioteca de indicadores 1.0.0
 
@@ -94,11 +95,12 @@ Los tipos son los que decidió el propietario: `MULTUP` y `MULTDOWN` (multiplica
 - **Sin cotización.** Para el tiempo anterior a la primera cotización guardada, la posición usa el costo medido al empezar, declarado como supuesto, y el informe da su sensibilidad (`F2-MARKET-001`).
 - **Importes.** En decimal canónico, con aritmética de punto fijo entera: los cocientes con 18 decimales y el resultado de cada posición redondeado al centavo al liquidarla, con redondeo al par.
 - **Caída máxima.** La curva de resultados mide el resultado acumulado en % del capital inicial, y su peor caída, la mayor bajada desde un máximo anterior (concepto de interfaz §9), con las posiciones cerradas y el resultado del tick de un multiplicador abierto. Si la caída llega al 50 %, o al tope menor que declare la estrategia, la estrategia se detiene, y esa detención solo se levanta a mano (`F2-STOP-001`).
+- (Precisión de [ADR-0024](0024-semantica-del-backtest.md) §6.) Con la latencia declarada, la compra es la decisión más la latencia: la posición empieza en el primer tick usado con un instante igual o posterior, y un sube/baja vence a su duración desde la compra. Con velas de Deriv, un stop loss o un take profit tocado dentro de una vela da el resultado del umbral exacto, o el de la apertura si la vela ya abre más allá de él.
 
 ### 6. Señales
 
 - **Vencimiento.** Una decisión de entrar es una señal. Vence si en `signal_expiry_ms` (de 1000 a 60 000 ms; 5000 por defecto) desde su instante no llega el tick que abre la posición, y entonces queda como omitida, con su motivo. En un sube/baja, `signal_expiry_ms` tiene que ser menor que la duración del contrato (con 5 ticks, como mucho 5000 ms), para que nunca abra un contrato ya vencido; si no, la definición se rechaza con `signal_expiry_too_long`.
-- **Frecuencia.** Un mínimo de segundos entre dos entradas (de 0 a 86 400) y un máximo de entradas por día UTC (de 1 a 500), contados con el instante de cada evento. Una señal que los pasaría queda omitida, con su motivo.
+- **Frecuencia.** Un mínimo de segundos entre dos entradas (de 0 a 86 400) y un máximo de entradas por día UTC (de 1 a 500), contados con el instante de cada evento. Una señal que los pasaría queda omitida, con su motivo. (Precisión de [ADR-0024](0024-semantica-del-backtest.md) §6.) Una entrada cuenta con el instante de la decisión que abrió su posición, y su día UTC es el de ese instante; una señal que venció o quedó omitida no cuenta. Con la latencia declarada, el vencimiento de la señal cuenta desde la compra, que es la decisión más la latencia.
 - El motor `shadow` convierte cada señal en un `SignalEvent` (`F2-SIGNAL-001`), con lo que fija su ADR.
 
 ### 7. Política de datos
@@ -121,12 +123,15 @@ El anfitrión le pasa la salud junto con lo que la impone: las condiciones abier
 
 La ADR del motor `shadow` lo implementa en vivo, y la de la semántica del backtest, sobre las marcas de calidad del dataset. Quién registra cada detención en la auditoría lo fija la ADR del motor `shadow`.
 
+(Precisión de [ADR-0024](0024-semantica-del-backtest.md) §4 y §5.) El backtest no usa las marcas finales de los datasets, sino la vista de cada instante, con la salud que se deriva del log. El único perfil equivalente al declarado es el de la historia descargada del mismo símbolo, y solo antes de su primer tick en vivo. Con `deriv_candles` y en la historia descargada, el intervalo de una incidencia de sus datasets cuenta como datos degradados. Un resultado es estimado también tras un cierre pedido, como un despliegue, si el intervalo sin datos se solapa con el horario de su mercado.
+
 ### 8. El evaluador
 
 - **Interfaz.** Una función pura: `evaluar(definición, estado, evento) → (estado, decisiones)`. Cada evento lleva su instante (§2) y es uno de estos: un tick con sus marcas, el resultado de la recuperación de un hueco, el cierre de una vela, un cambio de la salud con lo que la impone, un cambio de horario, una cotización, el paso del tiempo o la reanudación a mano del propietario, auditada. Las decisiones son `entrar` (una señal, con su contrato), `salir` (con su causa), `liquidar` (con su resultado), `omitir` (con su causa), `detener` y `reanudar`. El estado se serializa en JSON canónico, para que el motor `shadow` lo guarde y la réplica lo compare.
 - **Sin efectos.** No lee el reloj, la red, el azar ni ningún archivo: lo que necesita le llega en cada evento. El backtest y el motor `shadow` lo llaman igual, y una estrategia no puede saber si corre en vivo o en una réplica (plan §4.1).
 - **Números.** Los precios y las constantes son decimales canónicos. Los indicadores se calculan en binario64 de IEEE 754, desde esos decimales, solo con suma, resta, multiplicación, división, raíz cuadrada, máximo, mínimo y valor absoluto, cada operación por separado, en el orden que da su definición, y las sumas de izquierda a derecha, del valor más antiguo al más reciente. Así dan el mismo resultado, bit a bit, en TypeScript y en Python. No valen funciones como la exponencial o el logaritmo, ni la potencia, ni la multiplicación y suma fusionadas, ni sumas que reordenan o compensan, como `sum()` de Python 3.12, `math.fsum` o las reducciones de NumPy; en Numba, sin `fastmath` ni reducciones en paralelo. Los importes van en punto fijo entero (§5).
 - **Versión.** `strategy-evaluator-1.0.0`. Quien llama guarda esa versión con cada decisión y cada backtest; un cambio de lo que decide es otra versión. Cada versión del evaluador, de la gramática y de la biblioteca que use una estrategia registrada sigue disponible mientras exista una decisión o un backtest que la cite, para su réplica (`F2-REPLAY-001`).
+- (Precisión de [ADR-0024](0024-semantica-del-backtest.md) §3 y §6.) El evaluador suma una función pura, el próximo plazo de su estado, con la que el anfitrión le pasa el paso del tiempo en el instante exacto de cada plazo; y dos eventos, la apertura y el cierre de la ventana. Antes de la apertura actualiza sus indicadores y su política de datos sin decidir, y al cierre liquida su multiplicador abierto. El estado inicial lleva los supuestos de ejecución, la latencia y los costos, y el motor `shadow` usa los de la réplica de su versión congelada, como fije su ADR.
 
 ### 9. Identidad, versiones y errores
 

@@ -4,7 +4,7 @@ schema_version: "1.0.0"
 status: "active"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-11-16T06:00:00.000Z"
+last_reviewed_utc: "2026-11-17T06:00:00.000Z"
 ---
 
 # Plan ejecutable: Fase 2 — Laboratorio y bot shadow para uso propio
@@ -312,7 +312,7 @@ Un backtest evalúa una versión de estrategia sobre datasets publicados, con el
 
 **Aceptación:**
 
-- la ADR de la semántica del backtest fija cómo se reconstruye cada instante de decisión desde los source events del dataset (§4, punto 2), qué entradas forman la identidad del backtest y cómo trata los datos degradados según la política de datos de la estrategia;
+- la ADR de la semántica del backtest fija cómo se reconstruye cada instante de decisión desde los source events del dataset (§4, punto 2), qué entradas forman la identidad del backtest y cómo trata los datos degradados según la política de datos de la estrategia. Es [ADR-0024](../arquitectura/adr/0024-semantica-del-backtest.md): la vista de cada instante, que deriva cada log desde su segmento 0, en su orden, con las marcas de cada tick al llegar y la salud del log (§2); el anfitrión, con el instante de cada evento y el paso del tiempo en cada plazo (§3); el `BacktestSpec`, cuyo hash es la identidad (§1 y §7); y la política de datos sobre la salud del log y las incidencias de los lotes (§5);
 - su identidad es el hash de sus entradas: versión de estrategia, parámetros, `dataset_id`, rango, versión del motor, costes y supuestos. El entorno de ejecución (versiones de Node y de los contratos) se guarda junto al resultado, fuera de la comparación: repetirlo con las mismas entradas da las mismas decisiones, posiciones y métricas, byte a byte;
 - lee los datos por partes, cada una verificada por su hash antes de usarla, y un backtest de 30 días sintéticos de R_100 no pasa de 256 MB;
 - declara costes, latencia y supuestos, y cuenta las decisiones que la política de datos dejó sin tomar;
@@ -409,7 +409,7 @@ Cada ADR es un PR propio, con su revisión semántica, y se fusiona antes del pr
 3. **API y cuentas** (F2.3): el método de inicio de sesión, las sesiones, las cuentas sin registro público, los espacios personales, la auditoría, los contratos y su OpenAPI, cómo se sirve la web y sus roles y tokens de lectura. Decide también cómo se aíslan los backtests y cómo comparten la API y el motor el código de lectura de datos (§6).
 4. **Datasets vivos** (F2.5): los umbrales, el perfil de publicación, la cadencia y el tamaño, las partes y los límites al publicar, los ticks de la historia y la lectura por partes. Se escribe con 7 días de captura en producción.
 5. **Modelo de estrategia** (F2.6), [ADR-0022](../arquitectura/adr/0022-modelo-de-estrategia.md).
-6. **Semántica del backtest** (F2.7).
+6. **Semántica del backtest** (F2.7), [ADR-0024](../arquitectura/adr/0024-semantica-del-backtest.md).
 7. **Protocolo estadístico** (F2.8), con las correcciones por búsqueda (`F2-SEARCH-001`) y cómo cumplen las candidatas del motor de investigación el registro previo (la hipótesis y su mecanismo) y la revisión técnica del [protocolo de validación](../gobierno/protocolo-de-validacion-de-estrategias.md) §1 y §4, que cambia en el mismo PR.
 8. **Motor de señales shadow** (F2.9 y F2.10), con los ensayos de la puerta de salida y los cierres programados del mercado (`F2-STOP-001`).
 9. **Mercados y fuentes de investigación** (F2.5b), [ADR-0021](../arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md): los símbolos, la captura de más de uno, los mercados cerrados, las velas y los ticks de la historia como datos de buoh, lo que cobra Deriv como datos propios de buoh, el disco y el costo (`F2-MARKET-001`).
@@ -442,6 +442,7 @@ F2.4 no tiene ADR: cambia el concepto de interfaz, que es su fuente canónica (P
 - F2.4 no espera el último PR de F2.3, el 7c, que solo reúne la memoria y el tráfico de salida de `buoh-api` de varios días (ADR-0019 §14). Para no mezclar su tráfico con esa medición, ninguna lectura de R2 de F2.4 llega a producción antes del 2026-11-08. Lo decidió el propietario el 2026-11-04. Los días que copia el 7c terminan antes del primer despliegue de F2.4 que lee R2.
 - La sección Datos de F2.4 (el 6b de `PROJECT_STATUS.md`) va después de la ADR de datasets vivos de F2.5, que decide dónde viven los datasets de producción y cómo se guarda su verificación (ADR-0018 §7). Hasta entonces, su lector solo podría leer las tablas de publicación de cada log, donde producción no publica. Así, F2.4 termina después de esa ADR. Esa ADR es [ADR-0020](../arquitectura/adr/0020-datasets-vivos.md), y la sección Datos llega después de su PR 4, cuando el esquema de los datasets existe en producción (§13).
 - Cada incremento se entrega en PR pequeños, con una revisión semántica cada uno, y desde F2.3 el propietario lo usa en la web.
+- Los PR 2 a 4 de F2.7 (la vista de cada instante, los contratos del backtest y `apps/backtest`) van antes del PR 4 de ADR-0023, que lee de la vista las series del motor de investigación. Necesitan F2.5 y los PR de ADR-0022 que citan, no F2.6b; el resto de F2.7 sigue esperando F2.6b ([ADR-0024](../arquitectura/adr/0024-semantica-del-backtest.md) §12).
 - Ningún incremento deja componentes futuros vacíos.
 
 ### Comandos

@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 87
-updated_at_utc: "2026-11-16T23:45:00.000Z"
+status_version: 88
+updated_at_utc: "2026-11-17T06:00:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -54,7 +54,7 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 3. **El PR 6 de ADR-0020**, la evidencia de F2.5, después de ese corte. Con él, F2.5 está hecho. Los informes del paso 6 de las primeras publicaciones de producción, con su duración y su memoria, están en el log 3, que vence hacia el 2026-12-16. Para ahorrar revisiones, el 7b y el PR 6 pueden ir en un mismo PR, con una precisión de ADR-0020 §13 que lo diga.
 4. **2026-12-02 a las 00:00:03 UTC:** vence el log 1, y el agente comprueba su borrado (runbook de ingesta, «Operaciones (`buoh-operaciones`)», «El primer borrado»).
 5. **Después del 2026-11-19, la rotación de la credencial dueña** de `buoh-postgres` (F2.2, PR 7c), el día que elija el propietario, y el PR que registra lo que vio el agente. Con ella, el propietario decide si rota también la contraseña de `buoh_agente` («Decisiones pendientes»). Después, el PR 9 cierra F2.2.
-6. **Las cinco ADR del laboratorio** (plan de Fase 2, §8, puntos 5 a 8 y 10), sin esperar el PR 6, salvo la del motor *shadow*, que va después del corte del 2026-11-23 («Decisiones vigentes relevantes», «Orden del trabajo»). La de mercados y fuentes (F2.5b, punto 9), [ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md), está fusionada desde el 2026-11-16, y su código empieza después del PR 6 (plan §9). La del modelo de estrategia es [ADR-0022](docs/arquitectura/adr/0022-modelo-de-estrategia.md), y la del motor de investigación y su VPS, [ADR-0023](docs/arquitectura/adr/0023-motor-de-investigacion.md). Las cinco van seguidas: el modelo de estrategia, el motor de investigación y su VPS, la semántica del backtest, el protocolo estadístico y el motor *shadow*. La mayoría de las decisiones del propietario que necesitan se tomaron el 2026-11-16 («Motor de investigación»). El mismo día decidió también el disco de 5 GB, quién administra el VPS y cómo se reanuda una estrategia detenida («Disco, VPS y reanudación»), y el VPS, que lo demás siga en Render y el sistema del VPS («VPS del motor de investigación»).
+6. **Las cinco ADR del laboratorio** (plan de Fase 2, §8, puntos 5 a 8 y 10), sin esperar el PR 6, salvo la del motor *shadow*, que va después del corte del 2026-11-23 («Decisiones vigentes relevantes», «Orden del trabajo»). La de mercados y fuentes (F2.5b, punto 9), [ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md), está fusionada desde el 2026-11-16, y su código empieza después del PR 6 (plan §9). La del modelo de estrategia es [ADR-0022](docs/arquitectura/adr/0022-modelo-de-estrategia.md); la del motor de investigación y su VPS, [ADR-0023](docs/arquitectura/adr/0023-motor-de-investigacion.md); y la de la semántica del backtest, [ADR-0024](docs/arquitectura/adr/0024-semantica-del-backtest.md). Quedan la del protocolo estadístico y, después del corte del 2026-11-23, la del motor *shadow*. Las cinco van seguidas: el modelo de estrategia, el motor de investigación y su VPS, la semántica del backtest, el protocolo estadístico y el motor *shadow*. La mayoría de las decisiones del propietario que necesitan se tomaron el 2026-11-16 («Motor de investigación»). El mismo día decidió también el disco de 5 GB, quién administra el VPS y cómo se reanuda una estrategia detenida («Disco, VPS y reanudación»), y el VPS, que lo demás siga en Render y el sistema del VPS («VPS del motor de investigación»).
 
 **`F2.2` — Sistema de datos en producción.**
 

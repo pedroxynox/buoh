@@ -1,6 +1,6 @@
 # ADR-0017: Punto de control de la derivación en vivo
 
-- **Estado:** Aceptada; la verificación periódica de §4 y el corte entre logs de §7 los decide [ADR-0018](0018-sistema-de-datos-en-produccion.md), que cambia §7: una `event_gap_unresolved` abierta no bloquea el corte, a las 24 horas no lo bloquea nada, tampoco la falta de un cierre pedido, y el informe final del log es el traspaso explícito
+- **Estado:** Aceptada; la verificación periódica de §4 y el corte entre logs de §7 los decide [ADR-0018](0018-sistema-de-datos-en-produccion.md), que cambia §7: una `event_gap_unresolved` abierta no bloquea el corte, a las 24 horas no lo bloquea nada, tampoco la falta de un cierre pedido, y el informe final del log es el traspaso explícito; [ADR-0024](0024-semantica-del-backtest.md) extiende el pliegue con la vista de cada instante de §10
 - **Fecha:** 2026-10-30
 - **Ámbito:** Fase 2, incremento F2.1 (`F2-CHECKPOINT-001` y `F2-GOV-001` del [plan de Fase 2](../../plan/fase-2-laboratorio-y-bot-shadow.md))
 - **Decisores:** Dirección técnica de buoh. El plan de la Fase 2 no pide al propietario ninguna decisión para F2.1 (§12).
@@ -169,6 +169,8 @@ La publicación y el replay siguen derivando cada dataset desde sus propios segm
 El plan de la Fase 2 pide que el backtest y el motor `shadow` decidan con lo que era durable en cada instante (§4, punto 2). Este pliegue es su base: aplica los eventos de uno en uno y en el orden del log, y su estado después de cada evento es lo que se sabía en ese instante.
 
 Un tick que llega en orden, con un tiempo posterior al high-watermark de su símbolo, no puede ser un duplicado ni un conflicto de tiempo, porque ningún tick anterior tiene ese tiempo. Por eso esa vista también puede quedar acotada. La ADR de la semántica del backtest decide cómo la extiende. Este incremento no implementa nada para estrategias.
+
+(Precisión de [ADR-0024](0024-semantica-del-backtest.md) §2.) La vista de cada instante, en `packages/domain`, da cada tick que se puede usar con las marcas que tiene al llegar, retiene los del flujo mientras la continuidad está pendiente y da la salud del log cada vez que cambia. No da los ticks `out_of_order`, ni calcula sus demás marcas, así que su memoria no crece con el log.
 
 ### 11. Secuencia de entrega
 
