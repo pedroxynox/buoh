@@ -170,7 +170,7 @@ El plan de la Fase 2 pide que el backtest y el motor `shadow` decidan con lo que
 
 Un tick que llega en orden, con un tiempo posterior al high-watermark de su símbolo, no puede ser un duplicado ni un conflicto de tiempo, porque ningún tick anterior tiene ese tiempo. Por eso esa vista también puede quedar acotada. La ADR de la semántica del backtest decide cómo la extiende. Este incremento no implementa nada para estrategias.
 
-(Precisión de [ADR-0024](0024-semantica-del-backtest.md) §2.) La vista de cada instante, en `packages/domain`, da cada tick que se puede usar con las marcas que tiene al llegar, retiene los del flujo mientras la continuidad está pendiente y da la salud del log cada vez que cambia. No da los ticks `out_of_order`, ni calcula sus demás marcas, así que su memoria no crece con el log.
+(Precisión de [ADR-0024](0024-semantica-del-backtest.md) §2.) La vista de cada instante, en `packages/domain`, da cada tick que se puede usar con las marcas que tiene al llegar, retiene los del flujo mientras la continuidad está pendiente y da la salud del log cada vez que cambia. No da los ticks `out_of_order`, ni calcula sus demás marcas. Para reconocer los duplicados y los conflictos de los demás le bastan las huellas de los ticks con la hora del high-watermark y, mientras la continuidad está pendiente, las de los ticks del flujo que llegan, con un techo de 16 000. Así su memoria no crece con el log.
 
 ### 11. Secuencia de entrega
 
