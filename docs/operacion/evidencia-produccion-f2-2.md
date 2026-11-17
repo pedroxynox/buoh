@@ -57,10 +57,11 @@ Entre dos informes hubo además 5 escrituras en R2 que fallaron y no cayeron en 
 **La memoria de `buoh-operaciones`.** En su página **Metrics** de Render solo salen las métricas de red: lo vio el propietario el 2026-11-12 y lo confirmó su captura del 2026-11-17, aunque la [documentación de Render](https://render.com/docs/service-metrics) dice que muestra la memoria de todos los servicios salvo los sitios estáticos. Lo que sí se sabe:
 
 - **Ninguna ejecución se cortó.** Las 2016 de la ventana guardaron sus informes `health` y `verification`, todos `completed`. Render corta la instancia que pasa de los 512 MB del Starter, y un corte antes de su último paso habría dejado alguna ejecución sin el informe de ese paso: no falta ninguno.
-- **Su proceso hijo, medido aparte.** En la ventana, el único hijo de cada ejecución era `data:health`, porque la publicación de los datasets empezó el 2026-11-14. Con un log de 7 días, `data:health` llegó a 118 MiB con los tamaños de V8 con los que arranca («Evidencia de F2.1» en `PROJECT_STATUS.md`; [evidencia de memoria de F2.1](evidencia-memoria-f2-1.md)). Desde el 2026-11-14 también corren la publicación y la verificación de ADR-0020, que llegaron a 195,8 y 191,9 MiB en el techo, medidas en local ([evidencia de los datasets vivos](evidencia-datasets-f2-5.md)).
-- **Lo que falta.** El proceso principal de `buoh-operaciones` no se ha medido, y la instancia corre a la vez el principal y su hijo. Así que no está demostrado que el total quede por debajo de los 256 MB de `F2-DEPLOY-001`.
+- **Sus procesos hijos.** Cada ejecución corre en procesos aparte `data:health` y, en su paso 1, el `db:migrate` del worker de cada log y el de la API (ADR-0018 §11; `apps/market-data-worker/src/operations/child.ts`). De ellos solo está medido `data:health`: con un log de 7 días, llegó a 118 MiB con los tamaños de V8 con los que arranca («Evidencia de F2.1» en `PROJECT_STATUS.md`; [evidencia de memoria de F2.1](evidencia-memoria-f2-1.md)). Los `db:migrate` no se han medido.
+- **Los hijos de después de la ventana.** Desde el 2026-11-14 corren también la publicación y la verificación de ADR-0020, que informan su memoria en producción. En sus 67 ejecuciones, del 2026-11-14 a las 12:21 al 2026-11-17 a las 18:11 UTC, llegaron como mucho a 160,5 MiB al publicar, 142,7 MiB al verificar con `--verify-only` y 173,3 MiB al recalcular (lectura del agente del 2026-11-17).
+- **Lo que falta.** El proceso principal de `buoh-operaciones` no se ha medido, ni sus hijos `db:migrate`, y la instancia corre a la vez el principal y uno de sus hijos. Así que no está demostrado que el total quede por debajo de los 256 MB de `F2-DEPLOY-001`.
 
-El propietario decidió el 2026-11-17 cerrar F2.2 con lo que sí se sabe («A»; precisión del PR 9 de ADR-0018 §13 y de `F2-DEPLOY-001`). Un PR de código suma a los informes de `buoh-operaciones` la memoria máxima de su proceso principal y de cada hijo, y la evidencia de F2.5 la registra con lo medido en producción.
+El propietario decidió el 2026-11-17 cerrar F2.2 con lo que sí se sabe («A»; precisión del PR 9 de ADR-0018 §13 y de `F2-DEPLOY-001`). Un PR de código suma a los informes de `buoh-operaciones` la memoria máxima de su proceso principal y de cada hijo, y la evidencia de F2.5 la compara con los 256 MB: si el principal y un hijo juntos no caben, el agente lo presenta al propietario antes de seguir.
 
 ## El espacio
 
@@ -86,7 +87,7 @@ No consta si las tarjetas eran del bucket o de la cuenta. Si eran de la cuenta, 
 
 ## Límites
 
-- **La memoria de `buoh-operaciones`** no la mide Render, y su proceso principal no se ha medido. Lo que se sabe, arriba, acota su instancia por debajo de los 512 MB del Starter, no de los 256 MB; la medida completa llega con un PR de código.
+- **La memoria de `buoh-operaciones`** no la mide Render, y su proceso principal y sus hijos `db:migrate` no se han medido. Lo que se sabe, arriba, acota su instancia por debajo de los 512 MB del Starter, no de los 256 MB; la medida completa llega con un PR de código.
 - **Las cifras de los paneles** son lecturas de los gráficos, sin una hora de copia exacta, salvo que fue antes de las 21:34 UTC del 2026-11-12. Los dos despliegues de esa noche quedan fuera de esos paneles.
 - **Los episodios entre dos informes.** La salud se guarda cada 5 minutos, así que lo que dura menos puede no caer en ningún informe. Los cortes de la conexión y las escrituras fallidas salen del log y del registro operativo, con todas sus horas.
 - **La parada de la fuente** del 2026-11-12 no la ve `data:health`, que dio `healthy`. Lo que hace una estrategia con ella lo fija la ADR del motor `shadow`.
