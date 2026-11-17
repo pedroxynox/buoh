@@ -108,6 +108,7 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 - [ADR-0022: modelo de estrategia (F2.6)](docs/arquitectura/adr/0022-modelo-de-estrategia.md)
 - [ADR-0023: motor de investigación y su VPS (F2.6b)](docs/arquitectura/adr/0023-motor-de-investigacion.md)
 - [ADR-0024: semántica del backtest (F2.7)](docs/arquitectura/adr/0024-semantica-del-backtest.md)
+- [ADR-0025: protocolo estadístico (F2.8)](docs/arquitectura/adr/0025-protocolo-estadistico.md)
 - [Plan de la línea visual V1](docs/plan/linea-visual-v1.md)
 - [Guía de marca](docs/diseno/marca-buoh.md)
 - [Concepto de interfaz](docs/diseno/concepto-de-interfaz.md)
