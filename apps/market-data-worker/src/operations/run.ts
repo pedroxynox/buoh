@@ -55,7 +55,8 @@ import {
  * Los pasos de una ejecución, en orden. `final_health` es la segunda parte del paso 2 de §11: el
  * informe final de un log que terminó (§6, «Traspaso»). `retention` es el paso 3. `publication` y
  * `dataset_verification` son los pasos 6 y 7 de ADR-0020 §8, que solo corren con la contraseña de
- * `buoh_publicacion`.
+ * `buoh_publicacion`. `memory` es el último, en todas las ejecuciones: la memoria residente máxima
+ * del proceso principal y la de cada proceso que lanzó (precisión del PR 9 de ADR-0018 §13).
  */
 export const OPERATIONS_STEPS = [
   'roles_and_logs',
@@ -66,6 +67,7 @@ export const OPERATIONS_STEPS = [
   'space',
   'publication',
   'dataset_verification',
+  'memory',
 ] as const;
 export type OperationsStep = (typeof OPERATIONS_STEPS)[number];
 
@@ -93,6 +95,11 @@ export interface OperationsInput {
   readonly deletion: (log: LogLocation) => LogDeletion;
   /** Recibe el stderr de cada proceso de `data:health` y de `db:migrate`, sus alertas saneadas. */
   readonly forwardChildStderr: (text: string) => void;
+  /**
+   * La memoria residente máxima del proceso principal hasta ese momento, en bytes:
+   * `process.resourceUsage().maxRSS * 1024` en el servicio.
+   */
+  readonly maxRssBytes: () => number;
   /** UUIDv7 de la ejecución y de cada informe. */
   readonly nextId: () => string;
   /** La hora UTC con milisegundos (`toISOString()`). */
@@ -858,15 +865,27 @@ export async function runOperations(input: OperationsInput): Promise<OperationsR
   const startedAt = input.now();
   const lines: string[] = [];
   let failed = false;
+  const launches: Report[] = [];
+  const measured: OperationsInput = {
+    ...input,
+    runChild: recordedRunChild(input.runChild, launches),
+  };
   const steps: Record<OperationsStep, () => Promise<StepOutcome>> = {
-    final_health: () => finalHealth(input),
-    health: () => health(input),
-    retention: () => retention(input),
-    dataset_verification: () => datasetVerificationStep(input, startedAt, runId),
-    publication: () => publicationStep(input, startedAt),
-    roles_and_logs: () => rolesAndLogs(input, runId),
-    space: () => space(input),
-    verification: () => verification(input, startedAt),
+    final_health: () => finalHealth(measured),
+    health: () => health(measured),
+    retention: () => retention(measured),
+    dataset_verification: () => datasetVerificationStep(measured, startedAt, runId),
+    memory: () =>
+      Promise.resolve({
+        log: null,
+        report: { children: launches, max_rss_bytes: input.maxRssBytes() },
+        status: 'completed',
+        store: true,
+      }),
+    publication: () => publicationStep(measured, startedAt),
+    roles_and_logs: () => rolesAndLogs(measured, runId),
+    space: () => space(measured),
+    verification: () => verification(measured, startedAt),
   };
   // Los pasos 6 y 7 solo existen con la contraseña de buoh_publicacion (ADR-0020 §13, PR 4).
   const enabled = OPERATIONS_STEPS.filter(
@@ -916,6 +935,23 @@ export async function runOperations(input: OperationsInput): Promise<OperationsR
     }),
   );
   return { lines, run_id: runId, status };
+}
+
+/**
+ * `runChild`, que anota en `launches`, en orden, cada proceso que lanza con la memoria residente
+ * máxima que dio (`maxRssBytes`), o `null` si no la dio o no arrancó, para el paso `memory`.
+ */
+function recordedRunChild(runChild: RunChild, launches: Report[]): RunChild {
+  return async (child, args, env, options) => {
+    let maxRssBytes: number | null = null;
+    try {
+      const result = await runChild(child, args, env, options);
+      maxRssBytes = result.maxRssBytes ?? null;
+      return result;
+    } finally {
+      launches.push({ child, max_rss_bytes: maxRssBytes });
+    }
+  };
 }
 
 /** El primer motivo saneado de un informe: el suyo o el de su primer fallo. */

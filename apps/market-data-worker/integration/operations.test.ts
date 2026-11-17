@@ -48,6 +48,7 @@ import {
   type WorkerConfig,
 } from '../src/index.js';
 import { derivLogProfileRow } from '../src/deriv/log-profile.js';
+import { ownMaxRssBytes } from '../src/operations/child.js';
 import { readLogQualityProfile } from '../src/postgres/log-profile.js';
 import { START, uuid } from '../test/support/connection-harness.js';
 import { contentKey } from '../src/object-keys.js';
@@ -228,6 +229,7 @@ async function operations(env = operationsEnvironment()) {
   const result = await operationsCommand(env, {
     alert: (payload) => alerts.push(payload),
     forwardChildStderr: (text) => forwarded.push(text),
+    maxRssBytes: ownMaxRssBytes,
     nextId: () => uuid((sequence += 1)),
     now: clock.now,
     openDatabase: (config) =>
@@ -309,7 +311,7 @@ afterAll(async () => {
 });
 
 describe('buoh-operaciones (ADR-0018 §11)', () => {
-  it('la primera ejecución crea los roles y el log 1, con sus siete migraciones como buoh_dueno, sus privilegios y las contraseñas, y guarda en él la salud, la verificación y el espacio', async () => {
+  it('la primera ejecución crea los roles y el log 1, con sus siete migraciones como buoh_dueno, sus privilegios y las contraseñas, y guarda en él la salud, la verificación, el espacio y la memoria', async () => {
     const run = await operations();
     expect(run.alerts).toEqual([]);
     // data:health leyó el log sin ninguna alerta: ni un almacén sin responder ni un rechazo.
@@ -324,6 +326,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       ['retention', 'completed'],
       ['verification', 'completed'],
       ['space', 'completed'],
+      ['memory', 'completed'],
     ]);
     // A las 10:00 UTC toca la ejecución 120; el log 1 todavía no tiene segmentos.
     expect(run.step('verification')?.['report']).toEqual({
@@ -367,7 +370,19 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       ['health', 'completed'],
       ['verification', 'completed'],
       ['space', 'completed'],
+      ['memory', 'completed'],
     ]);
+    // La memoria del proceso de la prueba, que hace de principal, y un `null` por cada proceso que
+    // lanzó: aquí corren dentro de este proceso (`inProcess`), que no da la suya. La memoria de un
+    // proceso aparte la comprueban, con procesos reales, las pruebas de `runNodeScript`.
+    expect(reports.at(-1)?.report).toEqual({
+      children: [
+        { child: 'migrate', max_rss_bytes: null },
+        { child: 'health', max_rss_bytes: null },
+      ],
+      max_rss_bytes: expect.any(Number) as number,
+    });
+    expect(reports.at(-1)?.report['max_rss_bytes']).toBeGreaterThan(16 * 1024 * 1024);
     expect(reports[1]?.report).toMatchObject({
       alerts: [],
       exit_code: 1,
@@ -444,7 +459,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     expect(await reportsOf(LOG_1)).toEqual(before);
   });
 
-  it('sin nada que cambiar, no crea otro log ni pone contraseñas, y solo guarda los informes de la salud y de la verificación', async () => {
+  it('sin nada que cambiar, no crea otro log ni pone contraseñas, y solo guarda los informes de la salud, de la verificación y de la memoria', async () => {
     const run = await operations();
     expect(run.exitCode).toBe(0);
     expect(run.steps[0]?.['report']).toEqual({
@@ -462,8 +477,10 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       'health',
       'verification',
       'space',
+      'memory',
       'health',
       'verification',
+      'memory',
     ]);
     const logs = await ready(admin).query(
       "SELECT 1 FROM pg_namespace WHERE nspname ~ '^buoh_log_'",
@@ -495,10 +512,11 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       ),
     ).toBeNull();
     // El informe del paso 1 queda en el log activo, el 1, como el de la salud.
-    expect((await reportsOf(LOG_1)).map((item) => item.step).slice(-3)).toEqual([
+    expect((await reportsOf(LOG_1)).map((item) => item.step).slice(-4)).toEqual([
       'roles_and_logs',
       'health',
       'verification',
+      'memory',
     ]);
   });
 
@@ -758,7 +776,9 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
         },
       ]);
       expect(second.step('space')?.['report']).toMatchObject({ measured: false });
-      const stored = (await reportsOf(LOG_1)).filter((item) => item.step !== 'health');
+      const stored = (await reportsOf(LOG_1)).filter(
+        (item) => item.step !== 'health' && item.step !== 'memory',
+      );
       expect(stored.slice(-3).map((item) => item.step)).toEqual([
         'verification',
         'space',

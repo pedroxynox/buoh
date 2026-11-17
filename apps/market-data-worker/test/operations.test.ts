@@ -1,4 +1,5 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { closeSync, mkdtempSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,6 +52,7 @@ import {
   type SpaceMeasure,
 } from '../src/index.js';
 import type { Scheduler } from '../src/deriv/ports.js';
+import { MEMORY_REPORT_MODULE, memoryReportOf, ownMaxRssBytes } from '../src/operations/child.js';
 import { uuid } from './support/connection-harness.js';
 import { flush, ManualClock } from './support/deriv-fixtures.js';
 
@@ -774,6 +776,9 @@ function fakeDeletion(
   return { calls, open, release, stored };
 }
 
+/** La memoria residente máxima del proceso principal en las ejecuciones falsas: 100 MiB. */
+const PARENT_RSS = 100 * 1024 * 1024;
+
 /** Una ejecución con la base, los procesos y los objetos falsos, con IDs y hora fijos. */
 async function run(
   db: ReturnType<typeof fakeDatabase>,
@@ -781,6 +786,8 @@ async function run(
   options: {
     readonly config?: OperationsConfig;
     readonly deletion?: ReturnType<typeof fakeDeletion>;
+    /** La memoria residente máxima del proceso principal; por defecto, `PARENT_RSS`. */
+    readonly maxRssBytes?: () => number;
     /** Los IDs; por defecto, `uuid(1)`, `uuid(2)`… desde el principio en cada ejecución. */
     readonly nextId?: () => string;
     readonly now?: () => string;
@@ -797,6 +804,7 @@ async function run(
     database: db.database,
     deletion: (options.deletion ?? fakeDeletion()).open,
     forwardChildStderr: (text) => forwarded.push(text),
+    maxRssBytes: options.maxRssBytes ?? (() => PARENT_RSS),
     nextId: options.nextId ?? (() => uuid((sequence += 1))),
     now: options.now ?? (() => NOW),
     objects: (options.objects ?? fakeObjects()).objects,
@@ -822,6 +830,7 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       'space',
       'publication',
       'dataset_verification',
+      'memory',
     ]);
     const db = fakeDatabase({ loggedIn: new Set(), logs: [] });
     const children = fakeChildren((child) =>
@@ -866,6 +875,8 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       'last:1:space',
       'space',
       'report:1:space',
+      'list',
+      'report:1:memory',
     ]);
     expect(children.runs.map((item) => [item.child, item.args, item.env])).toEqual([
       ['migrate', [], migrateEnvironment(CONFIG, 'buoh_log_000001')],
@@ -930,6 +941,20 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
         step: 'space',
       },
       {
+        event: 'operations_step',
+        log: null,
+        report: {
+          children: [
+            { child: 'migrate', max_rss_bytes: null },
+            { child: 'health', max_rss_bytes: null },
+          ],
+          max_rss_bytes: PARENT_RSS,
+        },
+        run_id: uuid(1),
+        status: 'completed',
+        step: 'memory',
+      },
+      {
         event: 'operations_run',
         finished_at_utc: NOW,
         run_id: uuid(1),
@@ -944,6 +969,7 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       [1, 'health', 'completed', uuid(1)],
       [1, 'verification', 'completed', uuid(1)],
       [1, 'space', 'completed', uuid(1)],
+      [1, 'memory', 'completed', uuid(1)],
     ]);
     expect(db.reports[1]?.row.report).toEqual({ alerts: [], exit_code: 1, log: 1, report: REPORT });
   });
@@ -1387,6 +1413,7 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
       ['health', 'completed'],
       ['verification', 'completed'],
       ['space', 'completed'],
+      ['memory', 'completed'],
     ]);
   });
 
@@ -1413,6 +1440,8 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
       'list',
       'list',
       'list',
+      'list',
+      // La memoria: el intento de guardar su informe.
       'list',
     ]);
     expect(children.runs).toEqual([]);
@@ -1449,6 +1478,8 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
       { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'verification' },
       { event: 'operations_step_failed', reason: 'ECONNREFUSED', step: 'space' },
       { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'space' },
+      // La memoria se mide igual: lo que falla es guardarla.
+      { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'memory' },
     ]);
     expect(lines.slice(2, 6)).toEqual([
       expect.objectContaining({
@@ -1517,7 +1548,63 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
     expect(alerts).toEqual([]);
     expect(result.status).toBe('completed');
     // No cambió nada: el informe del paso 1 no se guarda.
-    expect(db.reports.map((item) => item.row.step)).toEqual(['health', 'verification', 'space']);
+    expect(db.reports.map((item) => item.row.step)).toEqual([
+      'health',
+      'verification',
+      'space',
+      'memory',
+    ]);
+  });
+});
+
+describe('runOperations: la memoria de la ejecución (ADR-0018 §11 y §13)', () => {
+  it('el último paso guarda en el log activo la memoria máxima del proceso principal y la de cada proceso que lanzó, en orden, y null si no la dio', async () => {
+    const db = fakeDatabase({ loggedIn: new Set(), logs: [log(1)] });
+    const memory: Record<string, number> = {
+      health: 118 * 1024 * 1024,
+      migrate: 70 * 1024 * 1024,
+    };
+    const children = fakeChildren((child) =>
+      child in memory ? { maxRssBytes: memory[child] ?? null } : {},
+    );
+    const { lines } = await run(db, children, { maxRssBytes: () => 90 * 1024 * 1024 });
+    expect(children.runs.map((item) => item.child)).toContain('health');
+    const report = {
+      children: children.runs.map((item) => ({
+        child: item.child,
+        max_rss_bytes: memory[item.child] ?? null,
+      })),
+      max_rss_bytes: 90 * 1024 * 1024,
+    };
+    expect(lines.at(-2)).toMatchObject({ report, status: 'completed', step: 'memory' });
+    const stored = db.reports.filter(({ row }) => row.step === 'memory');
+    expect(stored.map(({ log: number, row }) => [number, row.status, row.report])).toEqual([
+      [1, 'completed', report],
+    ]);
+    expect(db.reports.at(-1)?.row.step).toBe('memory');
+  });
+
+  it('un proceso que no arranca cuenta en la memoria con null, y su paso falla como siempre', async () => {
+    const db = fakeDatabase({ loggedIn: new Set(), logs: [log(1)] });
+    const children = fakeChildren((child) =>
+      child === 'migrate' ? { maxRssBytes: 70 * 1024 * 1024 } : {},
+    );
+    const runChild: RunChild = (child, args, env, options) =>
+      child === 'health'
+        ? Promise.reject(Object.assign(new Error('spawn sintético'), { code: 'EAGAIN' }))
+        : children.runChild(child, args, env, options);
+    const { lines } = await run(db, { ...children, runChild });
+    expect(lines.find((line) => line['step'] === 'health')).toMatchObject({ status: 'failed' });
+    expect(lines.find((line) => line['step'] === 'memory')).toMatchObject({
+      report: {
+        children: [
+          ...children.runs.map(() => ({ child: 'migrate', max_rss_bytes: 70 * 1024 * 1024 })),
+          { child: 'health', max_rss_bytes: null },
+        ],
+        max_rss_bytes: PARENT_RSS,
+      },
+      status: 'completed',
+    });
   });
 });
 
@@ -1696,6 +1783,7 @@ describe('runOperations: la salud (ADR-0018 §11, paso 2)', () => {
       { event: 'operations_report_unavailable', reason: '42P01', step: 'health' },
       { event: 'operations_report_unavailable', reason: '42P01', step: 'verification' },
       { event: 'operations_report_unavailable', reason: '42P01', step: 'space' },
+      { event: 'operations_report_unavailable', reason: '42P01', step: 'memory' },
     ]);
   });
 });
@@ -2728,6 +2816,7 @@ describe('operationsCommand', () => {
       {
         alert: () => undefined,
         forwardChildStderr: () => undefined,
+        maxRssBytes: () => PARENT_RSS,
         nextId: () => uuid(1),
         now: () => NOW,
         openDatabase: () => {
@@ -2773,6 +2862,7 @@ describe('operationsCommand', () => {
       const result = await operationsCommand(ENV, {
         alert: () => undefined,
         forwardChildStderr: () => undefined,
+        maxRssBytes: () => PARENT_RSS,
         nextId: () => uuid((sequence += 1)),
         now: () => NOW,
         openDatabase: () => db.database,
@@ -2797,6 +2887,7 @@ describe('operationsCommand', () => {
     await operationsCommand(ENV, {
       alert: () => undefined,
       forwardChildStderr: () => undefined,
+      maxRssBytes: () => PARENT_RSS,
       nextId: () => uuid((sequence += 1)),
       now: () => NOW,
       openDatabase: () => db.database,
@@ -2851,6 +2942,104 @@ describe('runNodeScript: un proceso aparte con su entorno y su plazo', () => {
     expect(seen.argv).toEqual(['--json', '--log', '2']);
     expect(seen.flags).toEqual(['--max-semi-space-size=1', '--max-old-space-size=256']);
     expect(seen.env).toEqual({ BUOH_POSTGRES_USER: 'buoh_salud' });
+    // Sin `reportMemory`, el proceso no carga el módulo de la memoria y no da ninguna.
+    expect(result).not.toHaveProperty('maxRssBytes');
+  });
+
+  it('con reportMemory, da la memoria residente máxima del proceso, sin tocar su stdout, su stderr ni su entorno', async () => {
+    const path = script(
+      'memoria.mjs',
+      'let block = Buffer.alloc(64 * 1024 * 1024, 1); process.stdout.write(JSON.stringify({ env: process.env, size: block.length })); process.stderr.write("aviso"); block = null; globalThis.gc();',
+    );
+    const result = await runNodeScript({
+      args: [],
+      env: { BUOH_POSTGRES_USER: 'buoh_salud' },
+      nodeFlags: ['--max-semi-space-size=1', '--max-old-space-size=256', '--expose-gc'],
+      reportMemory: true,
+      script: path,
+      timeoutMs: 30_000,
+    });
+    expect(result).toMatchObject({ exitCode: 0, stderr: 'aviso', timedOut: false });
+    expect(JSON.parse(result.stdout)).toEqual({
+      env: { BUOH_POSTGRES_USER: 'buoh_salud' },
+      size: 64 * 1024 * 1024,
+    });
+    // Es el pico: el proceso suelta el bloque de 64 MiB antes de salir, y aun así cuenta. Un proceso
+    // de Node no llega a 512 MiB.
+    expect(result.maxRssBytes).toBeGreaterThan(64 * 1024 * 1024);
+    expect(result.maxRssBytes).toBeLessThan(512 * 1024 * 1024);
+  });
+
+  it('con reportMemory, la memoria es la del propio proceso, no la del que lo lanza', async () => {
+    // Con 192 MiB residentes en este proceso, un hijo que no reserva nada no llega a 128 MiB: el
+    // `maxRSS` de un hijo de Linux arrastra, tras el fork, la memoria del padre, y su `VmHWM` no.
+    const parent = Buffer.alloc(192 * 1024 * 1024, 1);
+    const path = script('vacio.mjs', 'process.stdout.write("ok");');
+    const result = await runNodeScript({
+      args: [],
+      env: {},
+      nodeFlags: [],
+      reportMemory: true,
+      script: path,
+      timeoutMs: 30_000,
+    });
+    expect(parent.length).toBe(192 * 1024 * 1024);
+    expect(result.stdout).toBe('ok');
+    expect(result.maxRssBytes).toBeGreaterThan(0);
+    expect(result.maxRssBytes).toBeLessThan(128 * 1024 * 1024);
+  });
+
+  it('el módulo de la memoria no escribe en un descriptor 3 que no es una tubería', async () => {
+    const target = join(directory, 'descriptor-3.txt');
+    const fd = openSync(target, 'w');
+    try {
+      const code = await new Promise<number | null>((resolve, reject) => {
+        const child = spawn(
+          process.execPath,
+          ['--import', MEMORY_REPORT_MODULE, script('nada.mjs', '')],
+          { env: {}, stdio: ['ignore', 'ignore', 'ignore', fd] },
+        );
+        child.on('error', reject);
+        child.on('close', resolve);
+      });
+      expect(code).toBe(0);
+    } finally {
+      closeSync(fd);
+    }
+    expect(readFileSync(target, 'utf8')).toBe('');
+  });
+
+  it('con reportMemory, la memoria llega también si el proceso sale con process.exit y un código de error', async () => {
+    const path = script('sale.mjs', 'process.exit(4);');
+    const result = await runNodeScript({
+      args: [],
+      env: {},
+      nodeFlags: [],
+      reportMemory: true,
+      script: path,
+      timeoutMs: 30_000,
+    });
+    expect(result.exitCode).toBe(4);
+    expect(result.maxRssBytes).toBeGreaterThan(0);
+  });
+
+  it('con reportMemory, un proceso cortado con SIGKILL no da su memoria', async () => {
+    const path = script('lento-memoria.mjs', 'setTimeout(() => undefined, 60_000);');
+    const result = await runNodeScript({
+      args: [],
+      env: {},
+      nodeFlags: [],
+      reportMemory: true,
+      script: path,
+      timeoutMs: 200,
+    });
+    expect(result).toEqual({
+      exitCode: null,
+      maxRssBytes: null,
+      stderr: '',
+      stdout: '',
+      timedOut: true,
+    });
   });
 
   it('un proceso que no termina en su plazo se corta con SIGKILL', async () => {
@@ -2884,34 +3073,57 @@ describe('runNodeScript: un proceso aparte con su entorno y su plazo', () => {
   });
 });
 
+describe('la memoria de los procesos (precisión del PR 9 de ADR-0018 §13)', () => {
+  it('de lo que llega por el descriptor 3 vale la última línea, con un entero positivo de bytes', () => {
+    expect(memoryReportOf('{"max_rss_bytes":1}\n{"max_rss_bytes":52428800}\n')).toBe(52_428_800);
+    expect(memoryReportOf('{"max_rss_bytes":52428800}\nbasura\n')).toBeNull();
+    expect(memoryReportOf('')).toBeNull();
+    expect(memoryReportOf('{"max_rss_bytes":0}')).toBeNull();
+    expect(memoryReportOf('{"max_rss_bytes":-1}')).toBeNull();
+    expect(memoryReportOf('{"max_rss_bytes":1.5}')).toBeNull();
+    expect(memoryReportOf('{"max_rss_bytes":9007199254740993}')).toBeNull();
+    expect(memoryReportOf('{"max_rss_bytes":"52428800"}')).toBeNull();
+    expect(memoryReportOf('[52428800]')).toBeNull();
+  });
+
+  it('la memoria del proceso principal va en bytes', () => {
+    // Un proceso de Node tiene decenas de MiB residentes: en KiB, sin pasar a bytes, no llegaría a 1 MiB.
+    expect(ownMaxRssBytes()).toBeGreaterThan(16 * 1024 * 1024);
+    expect(ownMaxRssBytes()).toBeLessThan(8 * 1024 * 1024 * 1024);
+  });
+});
+
 describe('workerChildScript: el proceso de cada comando del worker (ADR-0018 §11)', () => {
   const env = { BUOH_POSTGRES_USER: 'buoh_salud' };
 
-  it('data:health corre su CLI con WORKER_NODE_FLAGS, 60 s de plazo, sus argumentos y el entorno dado', () => {
+  it('data:health corre su CLI con WORKER_NODE_FLAGS, 60 s de plazo, sus argumentos, el entorno dado y su memoria', () => {
     expect(workerChildScript('health', ['--json', '--log', '1'], env)).toEqual({
       args: ['--json', '--log', '1'],
       env,
       nodeFlags: WORKER_NODE_FLAGS,
+      reportMemory: true,
       script: fileURLToPath(new URL('../src/cli/health.js', import.meta.url)),
       timeoutMs: 60_000,
     });
   });
 
-  it('db:migrate corre su CLI con WORKER_NODE_FLAGS y 120 s de plazo', () => {
+  it('db:migrate corre su CLI con WORKER_NODE_FLAGS, 120 s de plazo y su memoria', () => {
     expect(workerChildScript('migrate', [], env)).toEqual({
       args: [],
       env,
       nodeFlags: WORKER_NODE_FLAGS,
+      reportMemory: true,
       script: fileURLToPath(new URL('../src/cli/migrate.js', import.meta.url)),
       timeoutMs: 120_000,
     });
   });
 
-  it('el db:migrate de la API corre el CLI compilado de apps/api con WORKER_NODE_FLAGS y 120 s de plazo', () => {
+  it('el db:migrate de la API corre el CLI compilado de apps/api con WORKER_NODE_FLAGS, 120 s de plazo y su memoria', () => {
     expect(workerChildScript('api_migrate', [], env)).toEqual({
       args: [],
       env,
       nodeFlags: WORKER_NODE_FLAGS,
+      reportMemory: true,
       script: fileURLToPath(new URL('../../api/dist/cli/migrate.js', import.meta.url)),
       timeoutMs: 120_000,
     });
@@ -3082,7 +3294,7 @@ describe('la configuración de los datasets vivos (ADR-0020 §5 y §8)', () => {
     expect(replayEnvironment(DATASETS_CONFIG)).not.toHaveProperty('BUOH_POSTGRES_SCHEMA');
   });
 
-  it('los procesos de los datasets son los del worker, con sus tamaños de V8 y sus plazos', () => {
+  it('los procesos de los datasets son los del worker, con sus tamaños de V8, sus plazos y su memoria', () => {
     for (const [child, script] of [
       ['datasets_migrate', 'migrate-datasets.js'],
       ['publish', 'publish-dataset.js'],
@@ -3093,6 +3305,7 @@ describe('la configuración de los datasets vivos (ADR-0020 §5 y §8)', () => {
         spec.script.endsWith(`/dist/cli/${script}`) || spec.script.endsWith(`/src/cli/${script}`),
       ).toBe(true);
       expect(spec.nodeFlags).toEqual(WORKER_NODE_FLAGS);
+      expect(spec.reportMemory).toBe(true);
     }
     expect(workerChildScript('publish', [], {}).timeoutMs).toBe(60_000);
     expect(workerChildScript('replay', [], {}, { timeoutMs: 12_000 }).timeoutMs).toBe(12_000);
