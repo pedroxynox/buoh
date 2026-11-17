@@ -228,6 +228,8 @@ async function operations(env = operationsEnvironment()) {
   const result = await operationsCommand(env, {
     alert: (payload) => alerts.push(payload),
     forwardChildStderr: (text) => forwarded.push(text),
+    // `maxRSS` va en KiB, como en el servicio.
+    maxRssBytes: () => process.resourceUsage().maxRSS * 1024,
     nextId: () => uuid((sequence += 1)),
     now: clock.now,
     openDatabase: (config) =>
@@ -367,7 +369,24 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       ['health', 'completed'],
       ['verification', 'completed'],
       ['space', 'completed'],
+      ['memory', 'completed'],
     ]);
+    // La memoria del proceso de la prueba, que hace de principal, y la de cada proceso que lanzó:
+    // el `db:migrate` de la API corre aparte, con el módulo de la memoria; los demás, en este
+    // proceso, que no la da (`inProcess`).
+    const memory = reports.at(-1)?.report as {
+      children: { child: string; max_rss_bytes: number | null }[];
+      max_rss_bytes: number;
+    };
+    expect(memory.max_rss_bytes).toBeGreaterThan(0);
+    expect(memory.children.length).toBeGreaterThan(0);
+    for (const launch of memory.children) {
+      if (launch.child === 'api_migrate') {
+        expect(launch.max_rss_bytes).toBeGreaterThan(0);
+      } else {
+        expect(launch.max_rss_bytes).toBeNull();
+      }
+    }
     expect(reports[1]?.report).toMatchObject({
       alerts: [],
       exit_code: 1,
@@ -462,8 +481,10 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       'health',
       'verification',
       'space',
+      'memory',
       'health',
       'verification',
+      'memory',
     ]);
     const logs = await ready(admin).query(
       "SELECT 1 FROM pg_namespace WHERE nspname ~ '^buoh_log_'",
@@ -495,10 +516,11 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       ),
     ).toBeNull();
     // El informe del paso 1 queda en el log activo, el 1, como el de la salud.
-    expect((await reportsOf(LOG_1)).map((item) => item.step).slice(-3)).toEqual([
+    expect((await reportsOf(LOG_1)).map((item) => item.step).slice(-4)).toEqual([
       'roles_and_logs',
       'health',
       'verification',
+      'memory',
     ]);
   });
 
@@ -758,7 +780,9 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
         },
       ]);
       expect(second.step('space')?.['report']).toMatchObject({ measured: false });
-      const stored = (await reportsOf(LOG_1)).filter((item) => item.step !== 'health');
+      const stored = (await reportsOf(LOG_1)).filter(
+        (item) => item.step !== 'health' && item.step !== 'memory',
+      );
       expect(stored.slice(-3).map((item) => item.step)).toEqual([
         'verification',
         'space',
