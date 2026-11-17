@@ -1,6 +1,6 @@
 # ADR-0020: Datasets vivos (F2.5)
 
-- **Estado:** Aceptada
+- **Estado:** Aceptada; complementada por [ADR-0024](0024-semantica-del-backtest.md) (cómo trata un backtest una parada programada en §4 y cómo recorre las partes en §10)
 - **Fecha:** 2026-11-13
 - **Ámbito:** Fase 2, incremento F2.5 (`F2-THRESHOLD-001` y `F2-DATASET-001` del [plan de Fase 2](../../plan/fase-2-laboratorio-y-bot-shadow.md)). Fija también lo que toman de ella F2.4 (la sección Datos y las publicaciones de la Auditoría), F2.7 (la lectura de los datasets por partes) y F2.9 (el perfil del estado vivo).
 - **Decisores:** Propietario de buoh (cuánto se guardan los datasets, §6), a propuesta de la dirección técnica (lo demás).
@@ -106,7 +106,7 @@ Lo pide decidir ADR-0015 §4 al publicar datasets vivos. Sí pasan: sin ellos, u
 - **Quién.** El arranque de `ingest`, la sesión nueva de cada corte (ADR-0018 §6), la reparación de cierres, la vigilancia de huecos, `data:health` y el gráfico de la API (ADR-0019 §8) arman el perfil de cada log desde esa fila y el esquema de fuente guardado. Un perfil que el código no conoce falla cerrado, con `log_not_derivable`, como cualquier versión que no tiene lector.
 - **Qué cambia.** Tras una reconexión con 2000 ms de separación, la continuidad queda demostrada sin pedir historia, y la salud vuelve antes a `healthy`. El pliegue sigue sin producir `delivery_delayed` ni las marcas de los ticks (ADR-0017 §3): la ADR del motor (F2.9) decide cómo ve esas marcas en el instante de cada decisión, con este mismo perfil.
 - **El gráfico** sigue dibujando los ticks del flujo y marcando los huecos con el perfil del log. No dibuja los recuperados.
-- **Paradas programadas.** Revisada con lo medido, la regla de ADR-0018 §5 sigue: una parada programada no recupera su historia. En 11 días fueron 14 paradas y 23 ticks, y recuperarlos exigiría que un cierre pedido dejara la continuidad pendiente, otra versión de las reglas y del pliegue. La parada queda en los source events del dataset como un cierre `requested` seguido de una apertura, y la ADR de la semántica del backtest (F2.7) decide cómo la trata una estrategia.
+- **Paradas programadas.** Revisada con lo medido, la regla de ADR-0018 §5 sigue: una parada programada no recupera su historia. En 11 días fueron 14 paradas y 23 ticks, y recuperarlos exigiría que un cierre pedido dejara la continuidad pendiente, otra versión de las reglas y del pliegue. La parada queda en los source events del dataset como un cierre `requested` seguido de una apertura, y la ADR de la semántica del backtest (F2.7) decide cómo la trata una estrategia. (Precisión de [ADR-0024](0024-semantica-del-backtest.md) §5.) La salud queda en `paused` hasta la conexión siguiente, así que la estrategia se detiene por datos degradados, su posición sigue con los ticks que llegan y vuelve sola con `healthy`. El primer tick después lleva la marca `after_unrecorded`. Si el intervalo sin datos se solapa con el horario del mercado, tienen un resultado estimado un multiplicador o un sube/baja de ticks que lo cruzan y un sube/baja de tiempo que vence dentro.
 
 ### 5. Dónde viven los datasets
 
@@ -187,7 +187,7 @@ En una ejecución normal, la publicación dura unos 15 a 30 s y la verificación
 
 - **Datos** (F2.4, 6b de [`PROJECT_STATUS.md`](../../../PROJECT_STATUS.md)) lee de `buoh_datasets`, con `buoh_api_lectura`, cada dataset de `production` con su identificador, su período (`event_time_from_utc` y `event_time_to_utc`), su log, sus conteos, sus incidencias, cómo terminó y la última verificación de cada modo. No lee R2.
 - **La Auditoría** (ADR-0019 §5 y §8) lee las publicaciones de `buoh_datasets` en lugar de las tablas de cada log, y así las publicaciones de producción llegan a la sección (`F2-AUDIT-001`). Como los datasets no vencen, sus publicaciones quedan en la sección, al contrario que los demás eventos de datos, que se borran con su log a los 30 días (ADR-0019 §5).
-- **Lectura por partes** (F2.7). Cada parte de §7 se puede leer y verificar por su hash antes de usarla, como pide `F2-BACKTEST-001`. La ADR de la semántica del backtest decide cómo las recorre.
+- **Lectura por partes** (F2.7). Cada parte de §7 se puede leer y verificar por su hash antes de usarla, como pide `F2-BACKTEST-001`. La ADR de la semántica del backtest decide cómo las recorre. (Precisión de [ADR-0024](0024-semantica-del-backtest.md) §8.) El backtest recorre en orden las partes `source_events` de cada log, desde su segmento 0, y no lee `normalized_ticks`. Verifica cada objeto por su hash físico antes de descomprimirlo, y su hash lógico al terminarlo, y un fallo lo hace fallar sin resultado.
 
 ### 11. Costo
 
