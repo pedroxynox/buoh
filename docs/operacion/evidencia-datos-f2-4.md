@@ -1,6 +1,6 @@
 # Evidencia de F2.4 en producción
 
-Lo que F2.4 lleva a producción, con lo que vio el agente con su acceso de solo lectura («Acceso del agente», en el [runbook de ingesta](runbook-ingesta-de-datos.md)) y desde fuera, y lo que el propietario copió de Render y de su navegador. F2.4 pide medir en producción las lecturas de R2 y el tráfico de salida (`F2-API-001`; [ADR-0019](../arquitectura/adr/0019-api-cuentas-y-auditoria.md) §8 y §15); esa medición llega después, con el punto 7 de F2.4 en `PROJECT_STATUS.md`. Este documento empieza antes, con el primer despliegue de F2.4 que lee el sistema de datos.
+Lo que F2.4 lleva a producción, con lo que vio el agente con su acceso de solo lectura («Acceso del agente», en el [runbook de ingesta](runbook-ingesta-de-datos.md)) y desde fuera, y lo que el propietario copió de Render y de su navegador. F2.4 pide medir en producción las lecturas de R2 y el tráfico de salida (`F2-API-001`; [ADR-0019](../arquitectura/adr/0019-api-cuentas-y-auditoria.md) §8 y §15); esa medición es la del 7b, el punto 7 de F2.4 en `PROJECT_STATUS.md` (abajo, «Las lecturas de R2 y el tráfico de salida (PR 7b)»). Este documento empieza antes, con el primer despliegue de F2.4 que lee el sistema de datos. Con el 7b, F2.4 está hecho.
 
 Este documento no trae secretos, ni el nombre de usuario del propietario, que no se publica (ADR-0019 §1).
 
@@ -110,7 +110,42 @@ De las 21:00 del 2026-11-12 a las 00:00 del 2026-11-13, las 37 ejecuciones de `b
 
 **Cuándo desplegó `buoh-api` con el #97.** El propietario abrió las dos rutas nuevas hacia las 21:41, antes de que terminara `desktop:windows`, a las 21:47:48, y `buoh-ingesta` esperó a CI. El #97 cambiaba la sección de `buoh-api` en `render-datos.yaml`, como el PR #91, y la sincronización del Blueprint la desplegó sin esperar a los checks, como describe la [guía de despliegue](despliegue-en-render.md) («Cuándo despliegan»). Lo que se desplegó era el árbol que CI ya había probado en el PR. Con el #99, que no cambia `render-datos.yaml`, `buoh-api` y `buoh-ingesta` esperaron a CI. El propietario no mencionó ningún cambio pendiente en la página del Blueprint, y las variables `BUOH_API_S3_BUCKET` y `BUOH_API_S3_REGION`, que pone el Blueprint, existen: sin ellas, con el token, la API nueva no arrancaría (ADR-0019 §8).
 
-**La medición de F2.4.** Desde el despliegue del #98, `buoh-api` lee R2 cada vez que alguien abre Mercados; entre el #97 y el #98, solo con las rutas abiertas a mano. El punto 7 de F2.4 mide esas lecturas y su tráfico de salida en producción, con los paneles de Render y de Cloudflare, copiados dentro de los 7 días que guarda Render (ADR-0018 §13).
+**La medición de F2.4.** Desde el despliegue del #98, `buoh-api` lee R2 cada vez que alguien abre Mercados; entre el #97 y el #98, solo con las rutas abiertas a mano. El punto 7 de F2.4 mide esas lecturas y su tráfico de salida en producción, con los paneles de Render y de Cloudflare, copiados dentro de los 7 días que guarda Render (ADR-0018 §13). Lo registra abajo, en «Las lecturas de R2 y el tráfico de salida (PR 7b)».
+
+## Las lecturas de R2 y el tráfico de salida (PR 7b)
+
+El propietario copió los paneles el 2026-11-17 con capturas de pantalla, adelantadas del 2026-11-19 («los paneles tambien los haremos hoy para cerrar lo pendiente»). Usó su navegador en su hora, UTC−3: los días de los gráficos son los de esa hora. Durante la semana usó la web con normalidad, sin nada provocado para la medición.
+
+En Render, la página **Metrics** de `buoh-api`, con **Last 7 days**, del 2026-11-11 al 2026-11-17:
+
+| Panel de `buoh-api` | Lo que mostró |
+|---|---|
+| **Memory**, con el límite de 512 MB | por debajo de 150 MB toda la semana, con una línea por instancia, una después de cada despliegue; un pico de unos 140 MB el 2026-11-15 por la tarde, y de unos 90 a 100 MB en los últimos días |
+| **Total Requests** | 831 en los 7 días, en tres barras, del 2026-11-13 al 2026-11-15, de unas 445, 165 y 215; ninguna el 2026-11-11, el 2026-11-12, el 2026-11-16 ni el 2026-11-17 |
+| **Outbound Bandwidth** | un punto por hora, de casi 0 a unos 0,7 MB, y uno de unos 1,35 MB el 2026-11-15 por la tarde |
+| **Usage this month**, del 2026-11-01 al momento de la captura | 21 MB: **HTTP Responses**, 16 MB; **Websocket Responses**, 0 MB; **Service-Initiated**, 5 MB; **Service-Initiated (Private Link)**, 0 MB |
+
+En Cloudflare, la pestaña **Métricas** del bucket `buoh-captura`, el único de la cuenta, con 30 días en la hora de Brasilia (BRT, UTC−3):
+
+| Tarjeta o gráfico de `buoh-captura` | Lo que mostró |
+|---|---|
+| **Operaciones de Clase A** | 766,19 mil en las tarjetas (730,72 mil en la leyenda del gráfico); unas 45 000 al día desde el 2026-11-02, con un punto de unas 50 000 el 2026-11-13 |
+| **Operaciones de Clase B** | 2,51 millones en las tarjetas (2,39 en la leyenda); de unas 130 000 a 150 000 al día desde el 2026-11-02, con un pico de unas 218 000 el 2026-11-13, unas 180 000 el día siguiente y unas 150 000 después |
+| **Distribución de solicitudes** | 3,28 millones, la suma de las dos clases |
+| **Almacenamiento medio** | 342,26 MB de media en el período; el gráfico crece sin saltos hasta unos 480 MB hacia el 2026-11-13, salta a unos 630 MB hacia el 2026-11-14 y llega a unos 720 MB al final |
+| **Datos recuperados** | 0 B |
+
+**Lo que se lee.**
+
+- **El tráfico de salida de `buoh-api`.** En **Service-Initiated** cuenta Render lo que el servicio envía a internet en las conexiones que abre él ([métricas de Render](https://render.com/docs/service-metrics)). PostgreSQL no entra, porque la API lo lee por la red interna de Render (`fromDatabase` con `property: host` en `render-datos.yaml`). Antes del #97, la API no se conectaba a nada fuera de Render, y el 2026-11-12 llevaba 12 MB en el mes ([evidencia de F2.3](evidencia-api-f2-3.md), «La memoria y el tráfico de salida (PR 7c)»). Así que esos 5 MB son las peticiones a R2 desde el #97. Con alrededor de 1 KB por petición (ADR-0018 §13), son del orden de 5000. Son pocas porque la API guarda en memoria lo de cada segmento cerrado y los eventos del segmento abierto (ADR-0019 §8, «La caché»): cada vez que Mercados vuelve a pedir el gráfico, solo lee lo nuevo.
+- **Frente a la estimación.** ADR-0019 §8 estima unos 0,7 millones de lecturas y unos 2,2 GB de tráfico de salida al mes con cien vistas al día de 6 horas, sin la caché. Con el uso real del propietario, 831 peticiones en una semana, `buoh-api` lleva 21 MB en el mes. Su parte de los 5 GB incluidos de Render es casi nada, y cabe en el presupuesto del plan §11.
+- **Las lecturas de R2 en el bucket.** Cloudflare cuenta todo el bucket, así que unas 5000 lecturas de la API no se distinguen de las unas 150 000 al día de la captura y de `buoh-operaciones`. Al mes son unos 4,5 millones de clase B, cerca de los unos 4,7 millones que estima ADR-0018 §14 y menos de la mitad de los 10 millones gratuitos. La clase A sigue en unos 1,35 millones al mes, como estima ADR-0018 §14. El pico de clase B del 2026-11-13 no es de la API, que habría tenido que pedir unas 70 000 lecturas más y enviar decenas de MB. Cloudflare no dice de quién es. Ese día, el agente midió los umbrales de [ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) («Medición») leyendo los 3161 segmentos cerrados de los logs 2 y 3 en cada pasada: unas diez pasadas lo explicarían, pero no consta cuántas hizo. El del 2026-11-14 coincide con el primer día de la publicación de los datasets vivos, que se puso al día con los logs 1 a 3 (PR #107).
+- **El espacio.** Unos 720 MB al final, muy por debajo de los 8 GB que obligan a revisar la retención (ADR-0018 §7). El salto hacia el 2026-11-14 coincide con esa primera publicación, que escribe bajo `datasets/`.
+- **La memoria de `buoh-api`.** Como mucho unos 140 MB en producción, con el gráfico real, por debajo de los 220,1 MiB que midió en el sandbox el peor caso ([evidencia de memoria de F2.4](evidencia-memoria-f2-4.md)).
+
+**Lo que no resuelve.** Si Render cuenta las respuestas antes o después de que Cloudflare las comprima («La compresión de las respuestas de `buoh-api`», abajo) sigue sin saberse. Desde el 2026-11-12, las respuestas HTTP suman unos 4 MB en unas 830 peticiones, unos 5 KB de media, pero sin saber qué rutas fueron esas peticiones la media no lo decide. Con el uso de hoy no cambia nada: aunque Render contara el gráfico sin comprimir, son pocos MB al mes.
+
+**Límites.** Las cifras son lecturas de los gráficos, salvo las de las tarjetas y las de **Usage this month**. Las capturas son imágenes de la conversación, no archivos del repositorio. Lo que se atribuye a cada pico sale de las fechas, no de un desglose por token, que Cloudflare no da en este panel.
 
 ## Las publicaciones en la Auditoría y la sección Datos (PR #109 y #110)
 
