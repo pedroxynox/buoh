@@ -25,7 +25,7 @@ export const TAGLINE = 'Observa con calma. Decide con evidencia.';
  * Entrega siguiente de PROJECT_STATUS.md para la que se escribió el texto sobre lo que existe hoy.
  * Una prueba falla cuando cambia, para obligar a revisar el sitio.
  */
-export const WRITTEN_FOR_NEXT_DELIVERY = 'F2.2';
+export const WRITTEN_FOR_NEXT_DELIVERY = 'F2.5';
 
 /** Aviso corto que va en el pie de todas las páginas. */
 export const RISK_SHORT =
@@ -182,7 +182,7 @@ export const PLATFORMS: readonly PlatformInfo[] = [
     name: 'Web',
     icon: 'eye',
     role: 'La estación principal: investigación, señales, auditoría y configuración.',
-    phase: 'Fase 2 (hoy, prototipo con datos ficticios)',
+    phase: 'Fase 2 (hoy, solo de uso propio; investigación y señales, todavía con datos ficticios)',
   },
   {
     name: 'Android e iOS',
@@ -262,7 +262,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
     id: '2',
     title: 'Laboratorio y bot shadow para uso propio',
     state: 'en curso',
-    text: 'Su plan ya está aprobado. Primero lleva la captura de datos a un servidor que funciona todo el día; después traerá estrategias versionadas, backtests honestos y un bot que emite señales hipotéticas, sin operar.',
+    text: 'Su plan ya está aprobado. La captura de datos ya funciona todo el día en un servidor, y la web de uso propio ya los muestra. Después traerá estrategias versionadas, backtests honestos y un bot que emite señales hipotéticas, sin operar.',
   },
   {
     id: '3',
