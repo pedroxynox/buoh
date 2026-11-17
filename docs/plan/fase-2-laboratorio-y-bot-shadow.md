@@ -4,7 +4,7 @@ schema_version: "1.0.0"
 status: "active"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-11-17T08:00:00.000Z"
+last_reviewed_utc: "2026-11-17T20:00:00.000Z"
 ---
 
 # Plan ejecutable: Fase 2 — Laboratorio y bot shadow para uso propio
@@ -142,7 +142,7 @@ El arranque de `ingest`, la reparación de cierres antes de cada reconexión, la
 - el Blueprint del sistema de datos (`render-datos.yaml`, ADR-0018 §2) describe los servicios, y su prueba los fija. La región elegida queda registrada, y las credenciales solo existen como variables `BUOH_*` de cada servicio;
 - cada proceso tiene su token de R2, limitado al bucket de su entorno y a lo que hace: `ingest` y, si es otro, el proceso que publica datasets (`F2-DATASET-001`) leen y escriben, y `data:health`, la API y el motor solo leen. La ADR fija el cifrado de la conexión a PostgreSQL, y una prueba comprueba que el worker lo aplica; la API y el motor lo comprueban en su incremento;
 - la ADR fija dónde y cada cuánto corre `data:health`, con su costo en R2 calculado, y si una parada programada, como un despliegue, recupera su historia, algo que ADR-0015 §10 dejó para el plan de alojamiento;
-- evidencia de 7 días seguidos de captura en producción, por el canal de §4, punto 10. `data:health` da `healthy` salvo en episodios registrados con su causa. La memoria máxima medida en Render no pasa de 256 MB, la mitad del Starter. Las operaciones de R2 y el tráfico de salida medidos caben en el presupuesto de §11;
+- evidencia de 7 días seguidos de captura en producción, por el canal de §4, punto 10. `data:health` da `healthy` salvo en episodios registrados con su causa. La memoria máxima medida en Render no pasa de 256 MB, la mitad del Starter. (Precisión del PR 9 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16, decisión del propietario del 2026-11-17.) Render no muestra la memoria de `buoh-operaciones`, un cron job, así que para él vale que ninguna ejecución de la ventana se corte, que acota su instancia por debajo de los 512 MB del Starter, y la memoria de cada proceso hijo medida por separado. La de su proceso principal y la de cada hijo, medidas en producción, llegan después a sus informes, con un PR de código, y la evidencia de F2.5 las registra. Las operaciones de R2 y el tráfico de salida medidos caben en el presupuesto de §11;
 - el runbook tiene una sección de producción: preparar, desplegar, parar, recuperar, rotar credenciales y borrar.
 
 ### `F2-ROLE-001` — Roles de PostgreSQL con el privilegio mínimo

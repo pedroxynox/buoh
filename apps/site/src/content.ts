@@ -182,7 +182,7 @@ export const PLATFORMS: readonly PlatformInfo[] = [
     name: 'Web',
     icon: 'eye',
     role: 'La estación principal: investigación, señales, auditoría y configuración.',
-    phase: 'Fase 2 (hoy, solo de uso propio)',
+    phase: 'Fase 2 (hoy, solo de uso propio; investigación y señales, todavía con datos ficticios)',
   },
   {
     name: 'Android e iOS',
