@@ -4,7 +4,7 @@ schema_version: "1.0.0"
 status: "active"
 effective_when_merged: true
 owner: "propietario de buoh"
-last_reviewed_utc: "2026-11-17T06:00:00.000Z"
+last_reviewed_utc: "2026-11-17T08:00:00.000Z"
 ---
 
 # Plan ejecutable: Fase 2 — Laboratorio y bot shadow para uso propio
@@ -301,7 +301,7 @@ Con millones de pruebas, la mejor del pasado casi siempre es suerte. La búsqued
 - el registro de cada búsqueda y la congelación de cada candidata pasan por la API antes de que el motor de investigación siga: la API los valida con sus contratos y los guarda append-only en PostgreSQL, con su hash y su hora, y en la auditoría, con el motor de investigación como autor propio. El VPS llega a la API con una credencial propia, que solo registra búsquedas, congelaciones y resultados, y lee los datasets que puede usar y sus propias búsquedas (ADR-0023 §5). Es una entrada nueva a la API desde internet, que ADR-0019 no tiene (§1, §2, §4 y §5, y su alternativa descartada de otra puerta en internet): la ADR del motor de investigación la justifica, la fija y añade ese autor a ADR-0019 §5;
 - `buoh-investigacion` tiene una regla de bloqueo, como `buoh-captura`: lo escrito no se reescribe ni se borra mientras dura su bloqueo, que en las listas temporales y el estado vence (ADR-0023 §7). La API valida con sus contratos y sus hashes todo lo que lee de ahí;
 - cada candidata probada queda en el registro de su búsqueda, también las descartadas, y el informe de una propuesta dice cuántas se probaron. Esa lista, de millones de filas, va a `buoh-investigacion`, y a PostgreSQL van la especificación de la búsqueda, cada congelación y el hash de esa lista. La lista de una búsqueda sin finalistas que se pueden congelar se guarda 30 días, y su resumen, con sus recuentos, para siempre (ADR-0023 §6);
-- la ADR del protocolo estadístico (§8, punto 7) fija las correcciones por búsqueda, como el Sharpe deflactado, la probabilidad de sobreajuste del backtest o la comparación con la línea base de White o de Hansen, y una propuesta tiene que superarlas;
+- la ADR del protocolo estadístico (§8, punto 7) fija las correcciones por búsqueda, como el Sharpe deflactado, la probabilidad de sobreajuste del backtest o la comparación con la línea base de White o de Hansen, y una propuesta tiene que superarlas. Es [ADR-0025](../arquitectura/adr/0025-protocolo-estadistico.md) §4: el Sharpe deflactado de la validación, con las mediciones de su familia, de al menos 0,95; la muestra mínima; `cost_scale` de 1,5 y la latencia de 2000 ms; las vecinas y las subventanas; y la PBO de la búsqueda, que calcula el VPS y solo puede impedir una congelación. White y Hansen no se suman, porque también los calcularía el VPS y solo podrían impedir; lo que decide es la prueba fuera de muestra de su §7;
 - la misma búsqueda corre sobre R_100 y sobre series al azar sintéticas. Si aprueba más candidatas de las que da el azar, no propone nada en mercados reales hasta corregirse. ADR-0023 §6 lo precisa: todas corren también sobre una serie barajada, las de ticks del oro también sobre R_100, y con un control que falla el motor no propone nada de ningún mercado, tampoco de R_100;
 - un vector sintético sin patrón no produce ninguna propuesta, y uno con un patrón sembrado sí;
 - si ninguna candidata supera estas pruebas, el motor puede presentar para la puerta de salida su mejor candidata de un mercado capturado en vivo, marcada «candidata de demostración, sin ventaja demostrada» en todo su informe. Pasa por la misma congelación, la misma prueba fuera de muestra y la misma réplica que las demás. Sirve solo para demostrar el motor `shadow` (§13), y el propietario lo sabe al aprobarla.
@@ -322,7 +322,7 @@ Un backtest evalúa una versión de estrategia sobre datasets publicados, con el
 
 ### `F2-EVAL-001` — Entrenamiento, validación y prueba fuera de muestra
 
-La evaluación sigue el protocolo de validación, con las reglas medibles que fije la ADR del protocolo estadístico.
+La evaluación sigue el protocolo de validación, con las reglas medibles que fije la ADR del protocolo estadístico. Es [ADR-0025](../arquitectura/adr/0025-protocolo-estadistico.md): lo que se fija antes de validar está en el registro de la búsqueda y en esa ADR, y el registro previo de cada candidata lo compone la API con su congelación, que es la petición de la evaluación del motor, antes de la prueba fuera de muestra (§5); la revisión técnica la hace la API con su réplica (§6); y la ventana fuera de muestra dura los días de 60 operaciones al ritmo de la validación, de 14 a 56, con una prueba por apuestas, que vale con pocas operaciones y con cualquier distribución de sus resultados, y que corrige por las versiones de su símbolo abiertas a la vez (§7).
 
 **Aceptación:**
 
@@ -369,7 +369,7 @@ El motor lleva un libro de posiciones hipotéticas por estrategia, con el modelo
 
 - cada posición enlaza su señal y su decisión, y nunca existe una orden;
 - una posición sigue la semántica de su contrato de Deriv: un multiplicador, con su comisión, su stop loss, su take profit y su cierre al perder lo apostado; un sube/baja, con el pago que Deriv ofrecía en su instante (`F2-MARKET-001`);
-- la comparación usa la prueba de deriva que fije la ADR del protocolo estadístico, con la cadencia que fije la ADR del motor `shadow`. Una deriva material es causa de pausa (protocolo §5);
+- la comparación usa la prueba de deriva que fije la ADR del protocolo estadístico, con la cadencia que fije la ADR del motor `shadow`. Una deriva material es causa de pausa (protocolo §5). Es [ADR-0025](../arquitectura/adr/0025-protocolo-estadistico.md) §9: una prueba de Poisson de la frecuencia y un remuestreo del resultado, las dos al 1 %;
 - el informe de la estrategia, en la sección Laboratorio de la web, muestra juntos el backtest, la validación, la prueba fuera de muestra y el `shadow`, cada cifra con su modo y su contexto.
 
 ### `F2-STOP-001` — Detención ante datos degradados
@@ -410,7 +410,7 @@ Cada ADR es un PR propio, con su revisión semántica, y se fusiona antes del pr
 4. **Datasets vivos** (F2.5): los umbrales, el perfil de publicación, la cadencia y el tamaño, las partes y los límites al publicar, los ticks de la historia y la lectura por partes. Se escribe con 7 días de captura en producción.
 5. **Modelo de estrategia** (F2.6), [ADR-0022](../arquitectura/adr/0022-modelo-de-estrategia.md).
 6. **Semántica del backtest** (F2.7), [ADR-0024](../arquitectura/adr/0024-semantica-del-backtest.md).
-7. **Protocolo estadístico** (F2.8), con las correcciones por búsqueda (`F2-SEARCH-001`) y cómo cumplen las candidatas del motor de investigación el registro previo (la hipótesis y su mecanismo) y la revisión técnica del [protocolo de validación](../gobierno/protocolo-de-validacion-de-estrategias.md) §1 y §4, que cambia en el mismo PR.
+7. **Protocolo estadístico** (F2.8), con las correcciones por búsqueda (`F2-SEARCH-001`) y cómo cumplen las candidatas del motor de investigación el registro previo (la hipótesis y su mecanismo) y la revisión técnica del [protocolo de validación](../gobierno/protocolo-de-validacion-de-estrategias.md) §1 y §4, que cambia en el mismo PR. Es [ADR-0025](../arquitectura/adr/0025-protocolo-estadistico.md).
 8. **Motor de señales shadow** (F2.9 y F2.10), con los ensayos de la puerta de salida y los cierres programados del mercado (`F2-STOP-001`).
 9. **Mercados y fuentes de investigación** (F2.5b), [ADR-0021](../arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md): los símbolos, la captura de más de uno, los mercados cerrados, las velas y los ticks de la historia como datos de buoh, lo que cobra Deriv como datos propios de buoh, el disco y el costo (`F2-MARKET-001`).
 10. **Motor de investigación y su VPS** (F2.6b), [ADR-0023](../arquitectura/adr/0023-motor-de-investigacion.md): sus credenciales, su seguridad y su administración, y la precisión de ADR-0019 §12 sobre dónde corren los backtests (`F2-RESEARCH-001` y `F2-SEARCH-001`).

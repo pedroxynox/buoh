@@ -19,6 +19,8 @@ Antes de ejecutar la prueba final, registrar:
 
 Modificar cualquiera de estos elementos después de ver resultados crea una nueva versión de estrategia.
 
+Para una candidata del motor de investigación, la API compone el registro previo al congelarla, con lo que ya tiene registrado de su búsqueda ([ADR-0025](../arquitectura/adr/0025-protocolo-estadistico.md) §5). Su hipótesis falsable es la predicción fuera de muestra registrada: que su resultado por operación es positivo, con la significación de ADR-0025 §7. Su mecanismo es el patrón del estudio que usa su regla, o «no identificado», y el informe lo muestra tal cual.
+
 ## 2. Separación temporal de datos
 
 1. **Entrenamiento:** explora hipótesis y parámetros.
@@ -46,6 +48,8 @@ Todo informe debe incluir, como mínimo:
 
 Una estrategia con rendimiento positivo sin tamaño de muestra, control de costes, línea base o prueba fuera de muestra se clasifica como **no validada**.
 
+Las reglas medibles, con sus umbrales (la métrica principal, la muestra mínima, las correcciones por búsqueda, la ventana fuera de muestra, el criterio de promoción y la prueba de deriva), están en [ADR-0025](../arquitectura/adr/0025-protocolo-estadistico.md).
+
 ## 4. Puertas de promoción
 
 | De | A | Evidencia requerida |
@@ -57,6 +61,8 @@ Una estrategia con rendimiento positivo sin tamaño de muestra, control de coste
 | `real` | ampliación | resultados contextualizados, control eficaz y aprobación renovada |
 
 Una puerta puede rechazar una estrategia sin que ello sea un fallo del proyecto. El rechazo y su evidencia se conservan.
+
+Para una candidata del motor de investigación, la revisión técnica de `draft` a `reviewed` la hace la API sola: comprueba la definición, el registro previo y que su réplica da lo mismo que la repetición del VPS ([ADR-0025](../arquitectura/adr/0025-protocolo-estadistico.md) §6). La puerta `reviewed` a `shadow` la decide siempre el propietario, con el informe de evidencia.
 
 ## 5. Revisión y retiro
 
