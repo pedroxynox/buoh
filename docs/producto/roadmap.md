@@ -104,6 +104,8 @@ Es la fase actual desde el 2026-10-29. El estado vigente se consulta únicamente
 5. flujos de soporte, términos y revisión de cumplimiento aplicables;
 6. integración de cobro solo después de definir entidad, jurisdicción y proveedor adecuado.
 
+**Precondición:** la primera rotación de la credencial dueña de la base de producción, con los pasos del [runbook de ingesta](../operacion/runbook-ingesta-de-datos.md) («Rotar credenciales»). El propietario la aplazó el 2026-11-17 hasta antes de abrir buoh a otras personas ([ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §8).
+
 **Criterio de salida:** buoh puede ofrecer señales pagas dentro del alcance aprobado. Las señales en modo `real` son un objetivo explícito cuando la estrategia correspondiente alcance elegibilidad; no quedan bloqueadas por la arquitectura.
 
 ## Fase 4 — Integración de ejecución demo
