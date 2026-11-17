@@ -1,6 +1,6 @@
 # ADR-0021: Mercados reales y fuentes de investigación (F2.5b)
 
-- **Estado:** Aceptada; complementada por [ADR-0024](0024-semantica-del-backtest.md) (el horario del día siguiente en §3)
+- **Estado:** Aceptada; complementada por [ADR-0024](0024-semantica-del-backtest.md) (el horario del día siguiente en §3, y `ContractOffer` y la recepción de los registros de los lotes en §4)
 - **Fecha:** 2026-11-16
 - **Ámbito:** Fase 2, incremento F2.5b (`F2-MARKET-001` del [plan de Fase 2](../../plan/fase-2-laboratorio-y-bot-shadow.md), §8, punto 9). Fija también lo que toman de ella F2.6 y F2.7 (las velas, los ticks de la historia y lo que cobra Deriv como datos del backtest) y F2.9 (los horarios de cada mercado, `F2-STOP-001`).
 - **Decisores:** Propietario de buoh (los mercados, guardar la historia, el disco de 5 GB y el presupuesto, decididos el 2026-11-16; plan §12), a propuesta de la dirección técnica (lo demás).
@@ -76,7 +76,7 @@ Lo que no llega por la suscripción en vivo entra por peticiones sueltas al mism
 
 ### 4. Contratos y la historia de un año
 
-**Contratos nuevos**, en `packages/contracts`, con su JSON Schema y su semántica en los [contratos de dominio](../contratos-de-dominio.md):
+**Contratos nuevos**, en `packages/contracts`, con su JSON Schema y su semántica en los [contratos de dominio](../contratos-de-dominio.md). (Precisión de [ADR-0024](0024-semantica-del-backtest.md) §4.) Se suma `ContractOffer`, los multiplicadores y las duraciones que acepta un mercado, de `contracts_for`, y `ContractQuote`, `TradingSession` y `ContractOffer` llevan la recepción y la observación de su frame, como `MarketTick`, porque un backtest y el motor `shadow` los usan desde que se reciben:
 
 - **`MarketCandle`:** una vela de Deriv (apertura, máximo, mínimo y cierre en decimal canónico, su hora UTC y su intervalo), con la procedencia de `MarketTick`. Son velas que calcula Deriv: nunca se mezclan con las que buoh arma con sus ticks, y una estrategia declara cuáles usa (ADR del modelo de estrategia).
 - **`ContractQuote`:** lo que Deriv ofrecía por un contrato en un instante: tipo, símbolo, apuesta, duración o multiplicador, precio, pago o comisión, y la hora UTC de la cotización.
