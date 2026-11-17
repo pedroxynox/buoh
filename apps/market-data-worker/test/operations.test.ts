@@ -2949,12 +2949,12 @@ describe('runNodeScript: un proceso aparte con su entorno y su plazo', () => {
   it('con reportMemory, da la memoria residente máxima del proceso, sin tocar su stdout, su stderr ni su entorno', async () => {
     const path = script(
       'memoria.mjs',
-      'const block = Buffer.alloc(64 * 1024 * 1024, 1); process.stdout.write(JSON.stringify({ env: process.env, size: block.length })); process.stderr.write("aviso");',
+      'let block = Buffer.alloc(64 * 1024 * 1024, 1); process.stdout.write(JSON.stringify({ env: process.env, size: block.length })); process.stderr.write("aviso"); block = null; globalThis.gc();',
     );
     const result = await runNodeScript({
       args: [],
       env: { BUOH_POSTGRES_USER: 'buoh_salud' },
-      nodeFlags: ['--max-semi-space-size=1', '--max-old-space-size=256'],
+      nodeFlags: ['--max-semi-space-size=1', '--max-old-space-size=256', '--expose-gc'],
       reportMemory: true,
       script: path,
       timeoutMs: 30_000,
@@ -2964,7 +2964,8 @@ describe('runNodeScript: un proceso aparte con su entorno y su plazo', () => {
       env: { BUOH_POSTGRES_USER: 'buoh_salud' },
       size: 64 * 1024 * 1024,
     });
-    // Los 64 MiB del bloque están en su memoria residente, y un proceso de Node no llega a 512 MiB.
+    // Es el pico: el proceso suelta el bloque de 64 MiB antes de salir, y aun así cuenta. Un proceso
+    // de Node no llega a 512 MiB.
     expect(result.maxRssBytes).toBeGreaterThan(64 * 1024 * 1024);
     expect(result.maxRssBytes).toBeLessThan(512 * 1024 * 1024);
   });
