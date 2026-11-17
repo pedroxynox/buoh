@@ -43,7 +43,7 @@ Las puertas de calidad y cumplimiento determinan cuándo pasa cada etapa, no si 
 
 ### Usuarios
 
-- **Investigador/operador propio:** crea hipótesis, revisa evidencia y autoriza una estrategia apta.
+- **Investigador/operador propio:** revisa la evidencia de las estrategias que propone el motor de investigación y autoriza las aptas. Desde el 2026-11-16 no crea las hipótesis: las busca el motor ([plan de Fase 2](../plan/fase-2-laboratorio-y-bot-shadow.md), §1).
 - **Suscriptor de señales:** recibe señales con contexto, versión, vencimiento y métricas, sin falsas promesas.
 - **Usuario de ejecución autorizada:** vincula una cuenta permitida y decide qué estrategia/política puede automatizarse.
 - **Operador de plataforma:** administra salud del sistema, permisos, interrupciones de emergencia y auditoría; no puede alterar resultados históricos.

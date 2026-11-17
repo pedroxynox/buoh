@@ -855,7 +855,7 @@ AuditObject = { kind: "account" | "credential" | "link" | "session", id: UuidV7 
 
 ## Contratos futuros
 
-`StrategyDefinition`, `SignalEvent`, `RiskPolicy`, `ExecutionIntent` y `ExecutionEvent` se definirán en sus fases. [ADR-0022](adr/0022-modelo-de-estrategia.md) fija `StrategyDefinition` 1.0.0, que llega a `packages/contracts` con el PR 2 de su §13. Sus conceptos no autorizan crear tablas, APIs o servicios en Fase 1.
+`StrategyDefinition`, `SignalEvent`, `RiskPolicy`, `ExecutionIntent` y `ExecutionEvent` se definirán en sus fases. [ADR-0022](adr/0022-modelo-de-estrategia.md) fija `StrategyDefinition` 1.0.0, que llega a `packages/contracts` con el PR 2 de su §13, y [ADR-0023](adr/0023-motor-de-investigacion.md), los de la investigación (`ResearchSearchSpec`, `ResearchSearchSummary`, `ResearchCandidateList`, `ResearchCandidateFreeze`, `ResearchEngineStatus` y `ResearchWeeklyReport`), que llegan con el PR 3 de su §14, salvo `ResearchCandidateFreeze`, que llega con F2.8. Sus conceptos no autorizan crear tablas, APIs o servicios en Fase 1.
 
 ## Versionado y compatibilidad
 
