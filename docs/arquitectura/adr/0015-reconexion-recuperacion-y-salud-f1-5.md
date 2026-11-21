@@ -14,7 +14,7 @@ F1.5 cierra la Fase 1. El plan §6 pide:
 - **`F1-HEALTH-001`:** `pnpm run data:health -- --json` emite un `HealthReport` validado con salud, conexión, backlog por conteo y bytes, últimos datos y dataset, y condiciones abiertas. Almacenamiento no disponible da `paused`; contrato o configuración incompatibles, `failed`; nunca `healthy` sin datos persistidos.
 - **Puerta de salida (§9):** que reinicio, desconexión y fallo de persistencia no oculten pérdida ni emitan datos no durables, entre otras.
 
-`PROJECT_STATUS.md` añade tres pendientes: el primer proceso que escriba el log de forma continua usa el log protegido por el bloqueo y vuelve a tomarlo o termina (pendiente 6 de F1.3); tras un fallo de persistencia el `ConnectionClosed` no queda en el log, y un evento que el índice confirmó aunque informó error se adopta al reabrir sin reconciliar (pendiente 7 de F1.3); y el `HistoryRecoveryResult` tiene que llegar después del primer tick posterior al cierre (pendiente 6 de F1.2).
+`PROJECT_STATUS.md` añade tres pendientes (hoy en la [especificación de pendientes](../../plan/especificacion-de-pendientes.md), P-F1-07): el primer proceso que escriba el log de forma continua usa el log protegido por el bloqueo y vuelve a tomarlo o termina (pendiente 6 de F1.3); tras un fallo de persistencia el `ConnectionClosed` no queda en el log, y un evento que el índice confirmó aunque informó error se adopta al reabrir sin reconciliar (pendiente 7 de F1.3); y el `HistoryRecoveryResult` tiene que llegar después del primer tick posterior al cierre (pendiente 6 de F1.2).
 
 Hechos comprobados el 2026-10-27:
 

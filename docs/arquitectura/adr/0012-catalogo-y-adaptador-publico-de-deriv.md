@@ -225,7 +225,7 @@ Cada PR es pequeño, con su revisión semántica:
 4. En el worker: carga de `schemas.zip` (dependencia `fflate`).
 5. En el worker: transporte `ws`, cola, correlación, keepalive y pausa del ingestor desde el transporte (dependencia `ws`).
 6. En el worker: catálogo e incidencias de respuestas pedidas en PostgreSQL y almacenamiento de objetos (migración `0003`) y bloqueo por fuente.
-7. `pnpm run data:smoke`, con almacenamiento en memoria en `src/` (log, registro operativo, objetos, catálogo e incidencias de respuestas pedidas), porque los almacenes en memoria de `test/support` no se compilan. También el runbook y la evidencia de F1.4b en `PROJECT_STATUS.md`.
+7. `pnpm run data:smoke`, con almacenamiento en memoria en `src/` (log, registro operativo, objetos, catálogo e incidencias de respuestas pedidas), porque los almacenes en memoria de `test/support` no se compilan. También el runbook y la evidencia de F1.4b en `PROJECT_STATUS.md` (hoy en el [historial de entregas](../../plan/historial-de-entregas.md)).
 
 ## Consecuencias
 
