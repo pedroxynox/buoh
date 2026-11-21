@@ -19,6 +19,7 @@ No uses conversaciones anteriores como fuente de verdad si contradicen el reposi
 | Materia | Fuente canónica |
 |---|---|
 | Estado y siguiente trabajo | `PROJECT_STATUS.md` |
+| Decisiones del propietario, con sus palabras y su fecha | `docs/gobierno/decisiones-vigentes.md` |
 | Alcance y aceptación de una fase | `docs/plan/` |
 | Decisiones técnicas duraderas | ADR aceptadas en `docs/arquitectura/adr/`; una ADR posterior puede sustituir otra explícitamente |
 | Forma exacta de datos y eventos | Esquemas ejecutables en `packages/contracts` cuando existan; antes, `docs/arquitectura/contratos-de-dominio.md` |

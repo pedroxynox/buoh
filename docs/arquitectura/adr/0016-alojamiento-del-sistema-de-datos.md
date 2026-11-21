@@ -48,7 +48,7 @@ El 2026-10-29, en el sandbox de Kiro, con el PostgreSQL 18.4 y el SeaweedFS 4.48
 | Objetos | Cloudflare R2 | de 1 a 2 USD |
 | Workspace | Hobby | 0 USD |
 
-En total, unos 15 USD al mes, para un solo símbolo, R_100 (`PROJECT_STATUS.md`, «Decisiones vigentes relevantes»): cada símbolo más suma operaciones de R2 y espacio. No cuenta dónde corra `data:health` (§4). La API (`apps/api`), cuando exista, añade otro servicio Starter: unos 22 USD al mes. Cambiar a un plan que suba ese presupuesto necesita el visto bueno del propietario.
+En total, unos 15 USD al mes, para un solo símbolo, R_100 ([decisiones vigentes](../../gobierno/decisiones-vigentes.md)): cada símbolo más suma operaciones de R2 y espacio. No cuenta dónde corra `data:health` (§4). La API (`apps/api`), cuando exista, añade otro servicio Starter: unos 22 USD al mes. Cambiar a un plan que suba ese presupuesto necesita el visto bueno del propietario.
 
 ### 3. Cuándo se compra
 

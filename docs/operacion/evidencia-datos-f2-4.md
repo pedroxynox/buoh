@@ -1,6 +1,6 @@
 # Evidencia de F2.4 en producción
 
-Lo que F2.4 lleva a producción, con lo que vio el agente con su acceso de solo lectura («Acceso del agente», en el [runbook de ingesta](runbook-ingesta-de-datos.md)) y desde fuera, y lo que el propietario copió de Render y de su navegador. F2.4 pide medir en producción las lecturas de R2 y el tráfico de salida (`F2-API-001`; [ADR-0019](../arquitectura/adr/0019-api-cuentas-y-auditoria.md) §8 y §15); esa medición es la del 7b, el punto 7 de F2.4 en `PROJECT_STATUS.md` (abajo, «Las lecturas de R2 y el tráfico de salida (PR 7b)»). Este documento empieza antes, con el primer despliegue de F2.4 que lee el sistema de datos. Con el 7b, F2.4 está hecho.
+Lo que F2.4 lleva a producción, con lo que vio el agente con su acceso de solo lectura («Acceso del agente», en el [runbook de ingesta](runbook-ingesta-de-datos.md)) y desde fuera, y lo que el propietario copió de Render y de su navegador. F2.4 pide medir en producción las lecturas de R2 y el tráfico de salida (`F2-API-001`; [ADR-0019](../arquitectura/adr/0019-api-cuentas-y-auditoria.md) §8 y §15); esa medición es la del 7b, el punto 7 de F2.4 en el [historial de entregas](../plan/historial-de-entregas.md) (abajo, «Las lecturas de R2 y el tráfico de salida (PR 7b)»). Este documento empieza antes, con el primer despliegue de F2.4 que lee el sistema de datos. Con el 7b, F2.4 está hecho.
 
 Este documento no trae secretos, ni el nombre de usuario del propietario, que no se publica (ADR-0019 §1).
 
@@ -85,7 +85,7 @@ Las horas de `buoh-ingesta` son las de recepción de los eventos del log 2 y las
 
 ## Las lecturas de R2, Mercados y los eventos de datos (PR #97, #98 y #99)
 
-Los tres PR llegaron a producción el 2026-11-12, después de los días del 7c de F2.3, como decidió el propietario (`PROJECT_STATUS.md`, F2.4). El #97 trajo a la API las lecturas de R2, con el token `api`; el #98, la sección Mercados con el gráfico y el catálogo reales; y el #99, los eventos de datos en la sección Auditoría (ADR-0019 §8; [concepto de interfaz](../diseno/concepto-de-interfaz.md) §11 y §12). Las horas son UTC del 2026-11-12, salvo donde se dice, y salen de GitHub, de las comprobaciones del agente desde fuera, sin sesión ni credenciales, de sus lecturas de producción y de las capturas del propietario, que usa la hora UTC−3.
+Los tres PR llegaron a producción el 2026-11-12, después de los días del 7c de F2.3, como decidió el propietario ([historial de entregas](../plan/historial-de-entregas.md), F2.4). El #97 trajo a la API las lecturas de R2, con el token `api`; el #98, la sección Mercados con el gráfico y el catálogo reales; y el #99, los eventos de datos en la sección Auditoría (ADR-0019 §8; [concepto de interfaz](../diseno/concepto-de-interfaz.md) §11 y §12). Las horas son UTC del 2026-11-12, salvo donde se dice, y salen de GitHub, de las comprobaciones del agente desde fuera, sin sesión ni credenciales, de sus lecturas de producción y de las capturas del propietario, que usa la hora UTC−3.
 
 | Hora | Qué pasó |
 |---|---|

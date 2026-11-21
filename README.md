@@ -118,6 +118,8 @@ Una capa flotante seguirá siendo una capacidad Android opcional, pasiva y de co
 - [Estado del código](docs/arquitectura/estado-del-codigo.md)
 - [Flujo de gráficos](docs/diseno/flujo-de-graficas.md)
 - [Especificación de pendientes](docs/plan/especificacion-de-pendientes.md)
+- [Decisiones vigentes](docs/gobierno/decisiones-vigentes.md)
+- [Historial de entregas](docs/plan/historial-de-entregas.md)
 - [Seguridad y rigor cuantitativo](docs/gobierno/seguridad-y-rigor-cuantitativo.md)
 - [Protocolo de validación de estrategias](docs/gobierno/protocolo-de-validacion-de-estrategias.md)
 - [Operación y control de riesgo](docs/gobierno/operacion-y-control-de-riesgo.md)
