@@ -31,7 +31,7 @@ Tipos de pendiente:
 - **parcial:** hay piezas, pero no el comportamiento completo;
 - **sin documentar:** existe, pero ningún documento lo describe;
 - **contradicho:** el documento dice algo que el código no hace;
-- **menor registrado:** anotado en un PR, una ADR o `PROJECT_STATUS.md`;
+- **menor registrado:** anotado en un PR, una ADR, `PROJECT_STATUS.md` o este documento (P-F1-07);
 - **resuelto:** decidido o terminado. La entrada se conserva con su decisión, y su identificador no se reutiliza.
 
 ## 1. Fase 1 — Fundación de datos
@@ -46,7 +46,7 @@ Tipos de pendiente:
   - `packages/contracts` define `SourceCatalogSnapshot`, y `packages/domain` convierte la respuesta de `active_symbols` en snapshot (`deriveCatalogSnapshot`), con los seis motivos de un catálogo inválido;
   - el adaptador del worker pide `active_symbols`, crea el snapshot desde el frame durable y lo guarda con la regla de versiones. Un catálogo inválido deja su incidencia y no reemplaza la última versión válida;
   - `PostgresCatalogStore` guarda las versiones en `source_catalog_versions` y el JCS de cada snapshot en el almacenamiento de objetos (migración `0003`). Las pruebas de integración cubren las dos condiciones de aceptación;
-  - `pnpm run data:smoke` lo consulta en vivo (`PROJECT_STATUS.md`, «Evidencia de F1.4b»).
+  - `pnpm run data:smoke` lo consulta en vivo ([historial de entregas](historial-de-entregas.md), «Evidencia de F1.4b»).
 - **Límite:** el smoke guarda el catálogo en memoria (ADR-0012 §10). Desde el PR 5 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13, `ingest`, el primer proceso que ingiere de forma continua (P-F1-04), guarda el catálogo vivo en PostgreSQL con `PostgresCatalogStore`, en el esquema y el bucket de su captura, que se borran antes de 24 horas (ADR-0015 §7). El 2026-10-29 lo hizo en los ensayos de la puerta de salida (P-F1-06), en esquemas y buckets desechables. El catálogo tampoco decide el universo comercial, que sigue pendiente en `PROJECT_STATUS.md`.
 
 ### P-F1-02. Adaptador público de Deriv (`F1-SOURCE-001`) — resuelto
@@ -59,8 +59,8 @@ Tipos de pendiente:
   - el worker descarga `schemas.zip` con su SHA-256, sus límites y las huellas de sus 14 entradas (`fflate`);
   - el adaptador (`apps/market-data-worker/src/deriv/`) usa `ws` con el tamaño declarado de un frame cortado, una cola en memoria con sus límites, correlación por `req_id` y `msg_type` después de que el frame sea durable, keepalive, tiempos de espera y pausa del ingestor desde el transporte. Las respuestas pedidas inválidas van a `requested_response_incidents`;
   - quien escribe el log de una fuente en PostgreSQL toma antes su bloqueo (`SourceLock`);
-  - la aceptación del plan se cumple con las pruebas del adaptador, con socket, reloj y temporizador falsos, y con `pnpm run data:smoke` (`PROJECT_STATUS.md`, «Evidencia de F1.4b»).
-- **Límite:** el adaptador no reconecta (P-F1-04). El pendiente 6 de F1.3 lo cerró el primer escritor continuo, `ingest`, en el PR 5 de ADR-0015 §13 (`PROJECT_STATUS.md`).
+  - la aceptación del plan se cumple con las pruebas del adaptador, con socket, reloj y temporizador falsos, y con `pnpm run data:smoke` ([historial de entregas](historial-de-entregas.md), «Evidencia de F1.4b»).
+- **Límite:** el adaptador no reconecta (P-F1-04). El pendiente 6 de F1.3 lo cerró el primer escritor continuo, `ingest`, en el PR 5 de ADR-0015 §13 (P-F1-07).
 
 ### P-F1-03. `pnpm run data:smoke` — resuelto
 
@@ -68,8 +68,8 @@ Tipos de pendiente:
 - **Fuente:** plan de Fase 1 §5 y §7, ADR-0004 §13 y ADR-0012 §10.
 - **Antes:** el comando no existía en `package.json`.
 - **Decisión del propietario:** los umbrales live de retraso y hueco se fijan con lo que mida el smoke, y mientras tanto los datos live no se publican como dataset.
-- **Resolución (F1.4b):** `pnpm run data:smoke -- --live` corre `scripts/data-smoke.mjs`, que deja en stdout una sola línea JSON saneada. Sin `--live` responde con un error de uso y no abre conexiones. Guarda todo en memoria y lo borra al terminar, así que el borrado en 24 horas se cumple sin tablas ni objetos que limpiar. Su uso y su resultado están en el runbook («Smoke público de Deriv»), y el primer smoke vivo, en `PROJECT_STATUS.md` («Evidencia de F1.4b»).
-- **Límite:** nunca es el único criterio de fusión, y los umbrales live siguen sin fijar (`PROJECT_STATUS.md`).
+- **Resolución (F1.4b):** `pnpm run data:smoke -- --live` corre `scripts/data-smoke.mjs`, que deja en stdout una sola línea JSON saneada. Sin `--live` responde con un error de uso y no abre conexiones. Guarda todo en memoria y lo borra al terminar, así que el borrado en 24 horas se cumple sin tablas ni objetos que limpiar. Su uso y su resultado están en el runbook («Smoke público de Deriv»), y el primer smoke vivo, en el [historial de entregas](historial-de-entregas.md) («Evidencia de F1.4b»).
+- **Límite:** nunca es el único criterio de fusión, y los umbrales live siguen sin fijar ([decisiones vigentes](../gobierno/decisiones-vigentes.md)).
 
 ### P-F1-04. Reconexión y recuperación de historia (`F1-RECONNECT-001`) — resuelto
 
@@ -83,7 +83,7 @@ Tipos de pendiente:
   - el cursor y el latido en PostgreSQL (migración `0004`) y la captura continua `ingest`, con la retención de 23 horas (PR #38);
   - `data:health` muestra `recovering` hasta que la historia cubre el hueco (P-F1-05, PR #39);
   - la aceptación del plan §6 se cumple con las pruebas de reloj y transporte falsos y con el smoke vivo aparte. Los ensayos de la puerta de salida lo demostraron en vivo el 2026-10-29 (P-F1-06, [evidencia de la puerta de salida](../operacion/evidencia-puerta-fase-1.md)), y encontraron el fallo del `pip_size` de la historia, que corrigió el PR #40;
-  - cierra los pendientes 6 de F1.2 y 7 de F1.3 (`PROJECT_STATUS.md`).
+  - cierra los pendientes 6 de F1.2 y 7 de F1.3 (P-F1-07).
 - **Límite:** con la continuidad pendiente, la salud `recovering` no muestra la causa en `open_condition_types`. Desde F2.4, la web la lee de la conexión del informe ([concepto de interfaz](../diseno/concepto-de-interfaz.md) §10), y así quedó resuelto el pendiente 2 de F1.2. Los ticks recuperados solo existen como raw hasta que se publiquen datasets vivos (ADR-0015 §4).
 
 ### P-F1-05. Reporte de salud y `pnpm run data:health -- --json` (`F1-HEALTH-001`) — resuelto
@@ -115,7 +115,7 @@ Tipos de pendiente:
 
 ### P-F1-07. Pendientes menores ya registrados — menor registrado
 
-`PROJECT_STATUS.md` los mantiene en «Pendientes registrados de F1.2», «de F1.3» y «de F1.4a», y este documento no los repite. Entre ellos, dos tienen fecha límite explícita:
+Hasta el 2026-11-21 estaban en `PROJECT_STATUS.md`; desde entonces están aquí abajo, con el mismo texto y en el mismo orden, en «Pendientes registrados de F1.4a», «de F1.3» y «de F1.2». Solo cambian las rutas de los enlaces y la referencia a «Siguiente tarea autorizada», que ahora nombra el [historial de entregas](historial-de-entregas.md). Entre ellos, dos tienen fecha límite explícita:
 
 - antes de publicar datasets vivos largos: límites de lectura y artefactos que crecen sin segmentar (F1.3, pendiente 2). El [plan de Fase 2](fase-2-laboratorio-y-bot-shadow.md) lo resuelve en F2.5 (`F2-DATASET-001`);
 - antes de desplegar: un rol de PostgreSQL de solo inserción y lectura (F1.3, pendiente 4; ADR-0006). El plan de Fase 2 lo resuelve en F2.2 (`F2-ROLE-001`).
@@ -124,6 +124,48 @@ Comprobado en el repositorio:
 
 - la guardia documental no tenía regla para `packages/domain/**` (F1.2, pendiente 3): la añadió F2.1 (`F2-GOV-001`, PR #49);
 - `qualityProfileSchema` está repetido (F1.2, pendiente 4; aquí D-14).
+
+#### Pendientes registrados de F1.4a
+
+Detectados en la revisión semántica del PR #8; ninguno bloqueó F1.5:
+
+1. El JSON Schema generado `data-quality-incident.schema.json` todavía acepta `symbol = null` en `invalid_source_frame` con el esquema de incidencias 1.0.0. El runtime sí lo rechaza. Falta la condición `if`/`then` en esa rama, añadida desde `packages/contracts/scripts/generate-json-schemas.ts` o la fuente Zod, nunca a mano en el archivo generado.
+2. Las pruebas que ligan versiones al manifiesto no fijan qué campo del manifiesto lee cada comprobación, porque en el vector v1 todas las versiones son 1.0.0. Falta un caso que mueva un campo y sus registros juntos a una versión sin usar.
+
+El antiguo pendiente 3 (el sink `nonTickFrame` no deja ver un `error`) quedó resuelto en F1.4b: el adaptador interpreta cada respuesta sobre el texto que conserva, después de que su frame sea durable (ADR-0012 §5).
+
+#### Pendientes registrados de F1.3
+
+Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la lista completa está en cada PR. Los más relevantes para el despliegue están abajo. [ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) decide cómo se resuelven los tres primeros (§7 y §9), y se cierran con sus PR 3 y 4:
+
+1. Si la conexión cae durante el `COMMIT` de una publicación, se informa "no se confirmó" aunque pudo confirmarse.
+2. Publicar no aplica los límites de lectura del replay. `normalized_ticks` y `quality_incidents` son un único artefacto que crece con el dataset. Resolver antes de publicar datasets live largos.
+3. Los nombres de `PublicationStep` no coinciden con `PersistenceStage`; los fallos de publicación todavía no entran en el registro operativo.
+
+<!-- El pendiente 4 quedó resuelto: ver el párrafo debajo de la lista. -->
+
+5. SeaweedFS `mini` arranca componentes internos que no se usan (Iceberg, Lance, servidor de administración).
+
+El antiguo pendiente 4 (un único rol PostgreSQL dueño de las tablas, cuando antes de desplegar hacía falta un rol de ejecución que solo pudiera insertar y leer, ADR-0006) quedó resuelto el 2026-11-01. Desde el PR 2 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16, el worker trae los roles de producción y sus privilegios: `buoh_ingesta` solo lee e inserta (`F2-ROLE-001`). Desde el PR 5a, `buoh-operaciones` los crea y les da sus privilegios en cada ejecución. En producción, su primera ejecución creó los roles y les puso sus contraseñas, e `ingest` captura con `buoh_ingesta` (runbook, «Desplegar», «Comprobar el arranque»).
+
+El antiguo pendiente 6 (un solo escritor por fuente) quedó resuelto en F1.5 con `ingest` (PR #38), el primer proceso que escribe el log de forma continua: escribe con el log protegido por el bloqueo (`openLockedSourceLog`), vuelve a tomar el bloqueo antes de reconectar si lo perdió y termina con `source_lock_taken` si lo tiene otro proceso ([ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §3, «Bloqueo»). F1.4b lo había resuelto en parte: el transporte entrega una llamada a la vez, y `fixture:publish` toma antes el bloqueo de su fuente, que nota una sesión perdida en unos 10 s (ADR-0012 §9).
+
+El antiguo pendiente 7 quedó resuelto en F1.5 ([ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §3). Tras un fallo de persistencia, la sesión repara antes del socket siguiente el `ConnectionClosed` que no quedó durable (`close_not_recorded`), así que la caída queda en el log con `connection_lost` y su recuperación. Un evento que el índice confirmó aunque informó error se adopta al reabrir, sin cerrar dos veces la misma conexión, y la sesión vuelve a leer del log la conexión anterior y el high-watermark; ese evento no se entrega a quien escucha, como acepta §12 (punto 7). Lo demostraron en vivo los puntos 3, 5 y 6 de la puerta de salida.
+
+#### Pendientes registrados de F1.2
+
+Detectados en la revisión semántica del PR #5:
+
+El antiguo pendiente 1 (atribución de símbolo y mensajes que no son ticks) quedó resuelto en F1.4a.
+
+El antiguo pendiente 2 (en `recovering` por continuidad pendiente, el `HealthReport` no muestra la causa, porque `open_condition_types` queda vacío) quedó resuelto en F2.4, con el punto 4 de «Siguiente tarea autorizada» del [historial de entregas](historial-de-entregas.md). El informe sigue sin nombrarla: la web la lee de su conexión, como fijan los [contratos de dominio](../arquitectura/contratos-de-dominio.md) («HealthReport») y el [concepto de interfaz](../diseno/concepto-de-interfaz.md) §10, y su prueba compara esa lectura con la derivación del dominio.
+
+4. `qualityProfileSchema` está duplicado entre `packages/domain` y `packages/contracts/src/vector-integrity.ts`.
+5. `typecheck` y `lint` resuelven `@buoh/contracts` con `paths` al código fuente; vitest usa `dist`. Ejecutar `pnpm run test`, no vitest directo. `apps/market-data-worker` sigue el mismo patrón.
+
+El antiguo pendiente 3 (el mapa de impacto sin regla para `packages/domain/**`) quedó resuelto en F2.1 (`F2-GOV-001`, PR #49).
+
+El antiguo pendiente 6 quedó resuelto en F1.5 ([ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §4, «Orden»): el `HistoryRecoveryResult` pasa por la misma cola que los frames, y la sesión lo pide 2000 ms después del primer tick durable posterior al cierre, así que siempre queda después de él. Los puntos 3, 5 y 6 de la puerta de salida volvieron así a `healthy`.
 
 ## 2. Línea visual V1
 

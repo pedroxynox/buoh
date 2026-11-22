@@ -19,7 +19,7 @@
 
 ## Contexto
 
-El 2026-11-16 el propietario decidió que las estrategias las busque un motor de investigación en Python, en un VPS propio, que pruebe millones de estrategias de reglas; que el VPS lo administre él, con la ayuda del agente, y que solo él tenga acceso (`PROJECT_STATUS.md`, «Motor de investigación» y «Disco, VPS y reanudación»). Ese mismo día eligió el VPS y el sistema:
+El 2026-11-16 el propietario decidió que las estrategias las busque un motor de investigación en Python, en un VPS propio, que pruebe millones de estrategias de reglas; que el VPS lo administre él, con la ayuda del agente, y que solo él tenga acceso ([decisiones vigentes](../../gobierno/decisiones-vigentes.md), «Motor de investigación» y «Disco, VPS y reanudación»). Ese mismo día eligió el VPS y el sistema:
 
 - «Ok me parece bien ese vps de contabo solo dime cuando es el costo real mensual o si existen mejores propuestas de vps en esa faixa de valor». El agente le comparó los precios reales, con el IOF de la tarjeta: el VPS-2 de OVHcloud, unos 10 USD al mes (unos R$ 59 a 63), su recomendación; el Cloud VPS 4 de Contabo, unos R$ 36 a 38, cuya CPU rinde menos con mucha carga; el CX33 de Hetzner, sin existencias; y Netcup, fuera de ese precio.
 - «Elijo el de ovh, hay posibilidad de colocar todo el proyecto en la vps y no pagar render?». El agente le explicó que se puede, y que ahorraría unos 20 a 25 USD al mes, pero le recomendó seguir en Render hasta terminar la Fase 2: la base de datos, sus copias, la seguridad y las actualizaciones pasarían a ser trabajo suyo, y mudarse costaría semanas y volver a medir todo.

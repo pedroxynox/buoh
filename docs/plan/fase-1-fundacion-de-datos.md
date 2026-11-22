@@ -159,7 +159,7 @@ Una prueba viva nunca sustituye una prueba offline, porque la red y el mercado n
 1. **F1.1:** Node/pnpm fijados, contratos runtime, validador de integridad del fixture, `verify`, `test:vectors` y guardia documental (`F1-FOUND-001`, `F1-CONTRACT-001`, `F1-GOV-001`).
 2. **F1.2:** normalización y reglas de calidad puras; completar oráculo del pipeline (`F1-VECTOR-001`, `F1-QUALITY-001`).
 3. **F1.3:** PostgreSQL, object storage, source event log, publicación y replay (`F1-STREAM-001`, `F1-DATASET-001`).
-4. **F1.4:** catálogo y streaming público de Deriv (`F1-CATALOG-001`, `F1-SOURCE-001`). Se entrega en dos partes: F1.4a (reglas de calidad 2.0.0) y F1.4b (catálogo, adaptador y `data:smoke`), según `PROJECT_STATUS.md`.
+4. **F1.4:** catálogo y streaming público de Deriv (`F1-CATALOG-001`, `F1-SOURCE-001`). Se entrega en dos partes: F1.4a (reglas de calidad 2.0.0) y F1.4b (catálogo, adaptador y `data:smoke`), según `PROJECT_STATUS.md` (hoy en el [historial de entregas](historial-de-entregas.md), «Situación»).
 5. **F1.5:** reconexión, recuperación, salud y demostración de puerta (`F1-RECONNECT-001`, `F1-HEALTH-001`).
 
 Cada incremento debe ser utilizable, revisable y sin componentes futuros vacíos.

@@ -18,7 +18,7 @@
 
 ## Contexto
 
-El 2026-11-16 el propietario decidió que un motor de investigación busque las estrategias, que buoh opere primero en Deriv con multiplicadores y sube/baja, que se capturen en vivo R_100 y el oro, que el motor estudie con un año de velas el oro, la plata, el EUR/USD, el GBP/USD, el USD/JPY, Bitcoin y Ethereum, y que la historia de Deriv se guarde todo el tiempo, para uso propio (`PROJECT_STATUS.md`, «Motor de investigación»). Aprobó también el disco de 5 GB («Disco, VPS y reanudación»). El plan de Fase 2 lo recoge en `F2-MARKET-001` y pone esta ADR antes del código de F2.5b (§8, punto 9).
+El 2026-11-16 el propietario decidió que un motor de investigación busque las estrategias, que buoh opere primero en Deriv con multiplicadores y sube/baja, que se capturen en vivo R_100 y el oro, que el motor estudie con un año de velas el oro, la plata, el EUR/USD, el GBP/USD, el USD/JPY, Bitcoin y Ethereum, y que la historia de Deriv se guarde todo el tiempo, para uso propio ([decisiones vigentes](../../gobierno/decisiones-vigentes.md), «Motor de investigación»). Aprobó también el disco de 5 GB («Disco, VPS y reanudación»). El plan de Fase 2 lo recoge en `F2-MARKET-001` y pone esta ADR antes del código de F2.5b (§8, punto 9).
 
 Lo que el código supone hoy (análisis del repositorio en `main`, `b2f5797`):
 

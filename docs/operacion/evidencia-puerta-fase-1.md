@@ -1,6 +1,6 @@
 # Evidencia de la puerta de salida de Fase 1
 
-Evidencia de los nueve ensayos de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §12 y de cada punto de la Definition of Done del [plan de Fase 1](../plan/fase-1-fundacion-de-datos.md) §9, reunida el 2026-10-29. Con ella y con la decisión del propietario del mismo día sobre el orden de las fases (primero la Fase 2; la Fase 1B, sin fecha; `PROJECT_STATUS.md`, «Decisiones vigentes relevantes»), la Fase 1 quedó `done` (ADR-0015 §12).
+Evidencia de los nueve ensayos de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §12 y de cada punto de la Definition of Done del [plan de Fase 1](../plan/fase-1-fundacion-de-datos.md) §9, reunida el 2026-10-29. Con ella y con la decisión del propietario del mismo día sobre el orden de las fases (primero la Fase 2; la Fase 1B, sin fecha; [decisiones vigentes](../gobierno/decisiones-vigentes.md)), la Fase 1 quedó `done` (ADR-0015 §12).
 
 Los ensayos capturaron datos reales de Deriv en un PostgreSQL y un almacenamiento de objetos desechables, que se borraron al terminar cada secuencia (ADR-0015 §7, ADR-0004 §13). Este documento solo trae lo que no es dato de mercado: horas UTC, estados, motivos, conteos, esperas e identificadores. Ningún precio, payload, credencial, host ni puerto. Las salidas crudas de cada orden quedaron fuera de Git.
 
@@ -88,7 +88,7 @@ En un esquema y un bucket desechables (08:48:26–08:48:30 UTC): `db:migrate`, `
 
 | Punto | Evidencia |
 |---|---|
-| Todos los requisitos `F1-*` tienen evidencia fusionada | `F1-FOUND-001`, `F1-CONTRACT-001` y `F1-GOV-001`: «Evidencia de F1.1» de `PROJECT_STATUS.md`. `F1-VECTOR-001` y `F1-QUALITY-001`: «Evidencia de F1.2» y «de F1.4a». `F1-DATASET-001`: «de F1.3a». `F1-STREAM-001`: «de F1.3b». `F1-CATALOG-001` y `F1-SOURCE-001`: «de F1.4b». `F1-RECONNECT-001`: PR #35 a #38 y #40, con las pruebas de reloj y transporte falsos y los puntos 2, 3, 5 y 6. `F1-HEALTH-001`: PR #35 y #39, con `data:health` en cada paso de estos ensayos |
+| Todos los requisitos `F1-*` tienen evidencia fusionada | `F1-FOUND-001`, `F1-CONTRACT-001` y `F1-GOV-001`: «Evidencia de F1.1» del [historial de entregas](../plan/historial-de-entregas.md). `F1-VECTOR-001` y `F1-QUALITY-001`: «Evidencia de F1.2» y «de F1.4a». `F1-DATASET-001`: «de F1.3a». `F1-STREAM-001`: «de F1.3b». `F1-CATALOG-001` y `F1-SOURCE-001`: «de F1.4b». `F1-RECONNECT-001`: PR #35 a #38 y #40, con las pruebas de reloj y transporte falsos y los puntos 2, 3, 5 y 6. `F1-HEALTH-001`: PR #35 y #39, con `data:health` en cada paso de estos ensayos |
 | Un clon limpio ejecuta las verificaciones offline con el toolchain fijado | CI ejecuta `DOCS_BASE_REF=origin/main pnpm run verify:pr` y `pnpm run test:integration` sobre un clon limpio, con el Node y el pnpm fijados, en cada PR y en cada push a `main` (`CONTRIBUTING.md`); los dos pasaron sobre `main` en `2dffd23` |
 | Los vectores se reproducen exactamente | `pnpm run test:vectors`, dentro de `verify:pr`, y el punto 9 |
 | Un flujo público de Deriv se captura sin credenciales | Punto 1 (persistido) y punto 2 (en memoria) |
@@ -105,4 +105,4 @@ En un esquema y un bucket desechables (08:48:26–08:48:30 UTC): `db:migrate`, `
 - Las capturas duraron minutos, no las 23 horas de la retención. La parada a las 23 horas y `retention_expired` solo están probadas con reloj falso.
 - En el punto 2 la historia no trajo ningún tick que faltara (`recovered_event_count` 0). Los puntos 3, 5 y 6 sí recuperaron ticks (1, 11 y 10), así que el recuento intermedio está probado en vivo.
 - Las incidencias derivadas solo incluyen las que este tráfico produjo. Los demás tipos están cubiertos por los vectores y las pruebas offline.
-- Nada se publicó desde una captura viva: los datos live siguen sin publicarse hasta fijar sus umbrales (`PROJECT_STATUS.md`, «Decisiones vigentes relevantes»).
+- Nada se publicó desde una captura viva: los datos live siguen sin publicarse hasta fijar sus umbrales ([decisiones vigentes](../gobierno/decisiones-vigentes.md)).

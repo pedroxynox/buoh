@@ -3,7 +3,7 @@
 - **Estado:** Aceptada; §3, §4, §5 y §8 complementadas por [ADR-0017](0017-punto-de-control-de-la-derivacion-en-vivo.md) (los lectores en vivo parten de un punto de control), que también sustituye, para el estado vivo, la frase de «Relación con ADR-0005» según la cual se vuelve a derivar entero, sin calidad incremental y sin guardar lo derivado; §7 sustituida en `production` por [ADR-0018](0018-sistema-de-datos-en-produccion.md) (sistema de datos en producción), que también cambia allí el fallo de §3 al arrancar con el bloqueo tomado por una espera y decide lo que §10 dejaba para el plan de alojamiento
 - **Fecha:** 2026-10-27
 - **Ámbito:** Fase 1, entrega F1.5 (`F1-RECONNECT-001`, `F1-HEALTH-001` y la puerta de salida de Fase 1)
-- **Decisores:** Dirección técnica de buoh, dentro de las decisiones del propietario registradas en `PROJECT_STATUS.md` (umbrales live sin inventar y datos live sin publicar)
+- **Decisores:** Dirección técnica de buoh, dentro de las decisiones del propietario registradas en las [decisiones vigentes](../../gobierno/decisiones-vigentes.md) (umbrales live sin inventar y datos live sin publicar)
 - **Complementa:** [ADR-0004](0004-pipeline-y-reproduccion-de-datos-fase-1.md) §10, §12 y §13, [ADR-0005](0005-persistencia-local-y-formato-fisico-f1-3.md) §4 y [ADR-0012](0012-catalogo-y-adaptador-publico-de-deriv.md) §1, §5, §6, §8, §9 y §10. No cambia el alcance, el contrato de comandos ni la puerta de salida del [plan de Fase 1](../../plan/fase-1-fundacion-de-datos.md).
 
 ## Contexto
@@ -14,7 +14,7 @@ F1.5 cierra la Fase 1. El plan §6 pide:
 - **`F1-HEALTH-001`:** `pnpm run data:health -- --json` emite un `HealthReport` validado con salud, conexión, backlog por conteo y bytes, últimos datos y dataset, y condiciones abiertas. Almacenamiento no disponible da `paused`; contrato o configuración incompatibles, `failed`; nunca `healthy` sin datos persistidos.
 - **Puerta de salida (§9):** que reinicio, desconexión y fallo de persistencia no oculten pérdida ni emitan datos no durables, entre otras.
 
-`PROJECT_STATUS.md` añade tres pendientes: el primer proceso que escriba el log de forma continua usa el log protegido por el bloqueo y vuelve a tomarlo o termina (pendiente 6 de F1.3); tras un fallo de persistencia el `ConnectionClosed` no queda en el log, y un evento que el índice confirmó aunque informó error se adopta al reabrir sin reconciliar (pendiente 7 de F1.3); y el `HistoryRecoveryResult` tiene que llegar después del primer tick posterior al cierre (pendiente 6 de F1.2).
+`PROJECT_STATUS.md` añade tres pendientes (hoy en la [especificación de pendientes](../../plan/especificacion-de-pendientes.md), P-F1-07): el primer proceso que escriba el log de forma continua usa el log protegido por el bloqueo y vuelve a tomarlo o termina (pendiente 6 de F1.3); tras un fallo de persistencia el `ConnectionClosed` no queda en el log, y un evento que el índice confirmó aunque informó error se adopta al reabrir sin reconciliar (pendiente 7 de F1.3); y el `HistoryRecoveryResult` tiene que llegar después del primer tick posterior al cierre (pendiente 6 de F1.2).
 
 Hechos comprobados el 2026-10-27:
 

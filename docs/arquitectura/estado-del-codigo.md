@@ -154,7 +154,7 @@ Misma lógica o el mismo conocimiento en varios lugares, que debería cambiar a 
 
 **D-14. Esquema del perfil de calidad**
 - Dónde: `qualityProfileSchema` en `packages/domain/src/profile.ts` y su copia en `packages/contracts/src/vector-integrity.ts`.
-- Ya está registrado: es el pendiente 4 de F1.2 en `PROJECT_STATUS.md`.
+- Ya está registrado: es el pendiente 4 de F1.2 en la [especificación de pendientes](../plan/especificacion-de-pendientes.md) (P-F1-07).
 
 ### 2.2 Similitud intencional
 

@@ -88,9 +88,9 @@ El primer PR de código debe implementar la interfaz de comandos definida en el 
 
 ## Documentación y estado
 
-Cada ADR nueva empieza, después de su encabezado, con una sección «Resumen para el propietario», en palabras sencillas y de unas diez líneas: qué decide, qué cuesta, qué riesgo tiene y qué aprueba quien la fusiona. Es lo que lee el propietario, que decidió el 2026-11-16 leer de cada ADR solo un resumen (`PROJECT_STATUS.md`, «Orden del trabajo»); la forma la propone la dirección técnica.
+Cada ADR nueva empieza, después de su encabezado, con una sección «Resumen para el propietario», en palabras sencillas y de unas diez líneas: qué decide, qué cuesta, qué riesgo tiene y qué aprueba quien la fusiona. Es lo que lee el propietario, que decidió el 2026-11-16 leer de cada ADR solo un resumen ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Orden del trabajo»); la forma la propone la dirección técnica.
 
-Revisa impacto documental en todo PR. Actualiza `PROJECT_STATUS.md` cuando cambien fase, objetivo, siguiente tarea, bloqueos, decisiones pendientes, componentes autorizados o evidencia de salida. No lo conviertas en un changelog.
+Revisa impacto documental en todo PR. Actualiza `PROJECT_STATUS.md` cuando cambien fase, objetivo, siguiente tarea, bloqueos, decisiones pendientes, componentes autorizados o evidencia de salida. No lo conviertas en un changelog. Las decisiones del propietario, con sus palabras y su fecha, van a las [decisiones vigentes](docs/gobierno/decisiones-vigentes.md).
 
 La guardia documental de `F1-GOV-001` usa [`docs/impact-map.json`](docs/impact-map.json):
 

@@ -3,13 +3,13 @@
 - **Estado:** Aceptada
 - **Fecha:** 2026-10-25
 - **Ámbito:** Fase 1, entrega F1.4b (`F1-CATALOG-001`, `F1-SOURCE-001` y `pnpm run data:smoke`)
-- **Decisores:** Dirección técnica de buoh, dentro de las decisiones del propietario para F1.4b registradas en `PROJECT_STATUS.md`
+- **Decisores:** Dirección técnica de buoh, dentro de las decisiones del propietario para F1.4b registradas en las [decisiones vigentes](../../gobierno/decisiones-vigentes.md)
 - **Complementa:** [ADR-0003](0003-lenguajes-y-limites.md) (bibliotecas de la fuente Deriv), [ADR-0004](0004-pipeline-y-reproduccion-de-datos-fase-1.md) §2, §6, §7, §12 y §13, [ADR-0005](0005-persistencia-local-y-formato-fisico-f1-3.md) y [ADR-0007](0007-varias-fuentes-y-metatrader-5.md) §2. No cambia el alcance ni la puerta de salida de Fase 1.
 - **Complementada por:** [ADR-0015](0015-reconexion-recuperacion-y-salud-f1-5.md) (F1.5): conector `deriv-options-ws-1.1.0` con `ticks_history` (§1 y §5), la respuesta de historia como respuesta pedida (§6), reconexión con el bloqueo por fuente (§9), el smoke de reconexión (§10) y, en §8, la derivación del estado vivo con el perfil de medición, que sigue sin publicar; y por [ADR-0018](0018-sistema-de-datos-en-produccion.md), con la que en `production` una segunda instancia espera el bloqueo de §9 en lugar de terminar
 
 ## Contexto
 
-F1.4b conecta buoh con el canal público de Deriv, solo para escuchar: el catálogo de símbolos (`active_symbols`) y el flujo de ticks, sin credenciales, sin operar y sin publicar datos vivos. `PROJECT_STATUS.md` y la [especificación de pendientes](../../plan/especificacion-de-pendientes.md) (P-F1-01 a P-F1-03) dejan abiertos estos puntos:
+F1.4b conecta buoh con el canal público de Deriv, solo para escuchar: el catálogo de símbolos (`active_symbols`) y el flujo de ticks, sin credenciales, sin operar y sin publicar datos vivos. `PROJECT_STATUS.md` (sus pendientes están hoy en P-F1-07 de la especificación de pendientes) y la [especificación de pendientes](../../plan/especificacion-de-pendientes.md) (P-F1-01 a P-F1-03) dejan abiertos estos puntos:
 
 - la forma del registro de snapshot del catálogo y qué incidencia deja un catálogo inválido;
 - el validador draft-04 y el cliente WebSocket, dos dependencias nuevas;
@@ -225,7 +225,7 @@ Cada PR es pequeño, con su revisión semántica:
 4. En el worker: carga de `schemas.zip` (dependencia `fflate`).
 5. En el worker: transporte `ws`, cola, correlación, keepalive y pausa del ingestor desde el transporte (dependencia `ws`).
 6. En el worker: catálogo e incidencias de respuestas pedidas en PostgreSQL y almacenamiento de objetos (migración `0003`) y bloqueo por fuente.
-7. `pnpm run data:smoke`, con almacenamiento en memoria en `src/` (log, registro operativo, objetos, catálogo e incidencias de respuestas pedidas), porque los almacenes en memoria de `test/support` no se compilan. También el runbook y la evidencia de F1.4b en `PROJECT_STATUS.md`.
+7. `pnpm run data:smoke`, con almacenamiento en memoria en `src/` (log, registro operativo, objetos, catálogo e incidencias de respuestas pedidas), porque los almacenes en memoria de `test/support` no se compilan. También el runbook y la evidencia de F1.4b en `PROJECT_STATUS.md` (hoy en el [historial de entregas](../../plan/historial-de-entregas.md)).
 
 ## Consecuencias
 
