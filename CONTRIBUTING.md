@@ -80,6 +80,16 @@ La guardia documental pide revisar la guía de marca al tocar `packages/design-s
 
 El primer PR de código debe implementar la interfaz de comandos definida en el plan. Desde entonces, cada cambio ejecuta los comandos aplicables, incluyendo `pnpm run verify`.
 
+Un PR que solo cambia archivos `.md` ejecuta en su lugar las pruebas que leen documentos del repositorio y la guardia documental: antes de cada commit, las dos primeras líneas, y después, la tercera, porque `docs:check:pr` solo ve lo comprometido.
+
+```text
+pnpm exec turbo run test --filter=@buoh/site --filter=@buoh/mobile --filter=@buoh/desktop --filter=@buoh/design-system
+pnpm run docs:check
+DOCS_BASE_REF=origin/main pnpm run docs:check:pr
+```
+
+Son los paquetes cuyas pruebas leen hoy un `.md` del repositorio; el PR que añada una prueba así suma su paquete a esta lista. Prettier ignora los `.md`, ESLint solo revisa código, y ni el build ni las demás pruebas los leen. CI ejecuta siempre `verify:pr` entero y `test:integration`, y el PR solo está listo con CI en verde ([AGENTS.md](AGENTS.md), «Fusión»). Lo decidió el propietario el 2026-11-22 ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Tareas más rápidas»).
+
 - Las pruebas se derivan del requisito y de vectores independientes, no de la implementación terminada.
 - No afirmes que algo fue verificado si no ejecutaste la comprobación.
 - Un código de salida cero no demuestra por sí solo todos los criterios: registra evidencia por ID.
