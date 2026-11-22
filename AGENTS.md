@@ -83,7 +83,7 @@ El modelo revisor contrasta el diff con fuentes canónicas y vectores independie
 
 ### Revisión semántica
 
-- Antes de pedirla, el autor busca en el repositorio cada referencia a lo que su cambio mueve, renombra, quita o contradice: por el nombre del archivo, por sus enlaces (`](…)`) y por el nombre de la sección entre comillas angulares. Corrige las que quedan falsas y comprueba que existen los enlaces relativos de los Markdown que cambia. Así la revisión no gasta una ronda en lo que el autor podía encontrar ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Tareas más rápidas»).
+- Antes de pedirla, el autor busca en el repositorio cada referencia a lo que su cambio mueve, renombra, quita o contradice: por el nombre del archivo, por el nombre de la sección entre comillas angulares, por su ancla (`#…`) si cambia el título, y por los datos que cambia, como una cifra, una fecha o un nombre. Corrige las que quedan falsas y comprueba que existen los enlaces relativos de los Markdown que cambia. Así la revisión no gasta una ronda en lo que el autor podía encontrar ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Tareas más rápidas»).
 - Cada PR recibe una sola revisión semántica.
 - Solo se repite si encontró hallazgos bloqueantes, y únicamente tras corregirlos.
 - En lo que dice un documento, solo bloquean un dato falso, una contradicción con otra fuente, una regla o una información perdida, una cita o un enlace roto, una decisión del propietario que falta o está mal registrada, o algo que prohíben las «Invariantes no negociables», como un secreto. Un problema de redacción es menor.
@@ -119,7 +119,7 @@ El propietario decidió el 2026-10-30 que el agente mantenga todas las reglas de
 
 No cambian:
 
-- la revisión semántica de cada PR, las verificaciones del paso 6 de «Protocolo de ejecución de tareas» (en un PR que solo cambia archivos `.md`, las de abajo), CI en verde y el comentario de listo («Fusión»);
+- la revisión semántica de cada PR, las verificaciones del paso 6 de «Protocolo de ejecución de tareas» (en un PR que solo cambia archivos `.md`, las de «`verify:pr` entero en local», más abajo), CI en verde y el comentario de listo («Fusión»);
 - las pruebas que salen de los criterios del plan, de las ADR y de los vectores, con sus casos de fallo;
 - la documentación que pide la guardia documental.
 
@@ -130,7 +130,7 @@ Se hacen solo cuando el cambio las necesita:
 - **Mediciones** de tiempo o de memoria: cuando un criterio, un plazo de prueba o una decisión dependen de ellas.
 - **Las pruebas de integración en local**: cuando el cambio toca PostgreSQL, el almacenamiento de objetos o una migración. CI las corre siempre.
 - **Una investigación con un subagente**: en un área que el agente no conoce. Su resultado se reutiliza y no se repite.
-- **Repetir una verificación**: cuando algo cambió desde la última. Tras un rebase que deja el mismo árbol que el commit verificado (`git diff --quiet <commit verificado> HEAD` sale con 0), las pruebas de entonces valen; la guardia documental se vuelve a ejecutar, porque compara con la base nueva (`DOCS_BASE_REF=origin/main pnpm run docs:check:pr`), y el PR lo dice. Un rebase que cambia el árbol, como el que trae commits nuevos de `main`, se verifica entero, o con los comandos de un PR de solo documentos si lo es.
+- **Repetir una verificación**: cuando algo cambió desde la última. Tras un rebase que deja el mismo árbol que el commit verificado (`git diff --quiet <commit verificado> HEAD` sale con 0), las pruebas de entonces valen; la guardia documental se vuelve a ejecutar, porque compara con la base nueva (`DOCS_BASE_REF=origin/main pnpm run docs:check:pr`), y el PR lo dice. Un rebase que cambia el árbol, como el que trae commits nuevos de `main`, se verifica entero o, si el PR solo cambia archivos `.md`, con los comandos de `CONTRIBUTING.md` («Calidad y evidencia»).
 
 Se escriben cortos:
 
