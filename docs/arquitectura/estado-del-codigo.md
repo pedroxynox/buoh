@@ -41,7 +41,7 @@ Entre las dos mitades no circulan datos: `apps/api` todavía no lee la ruta de d
 ### Reglas que conviene conocer antes de cambiar código
 
 - [AGENTS.md](../../AGENTS.md): autoridad por materia, invariantes, una sola revisión semántica por PR y desarrollo por fases.
-- [CONTRIBUTING.md](../../CONTRIBUTING.md): ramas, commits `tipo(ámbito): resumen` y `pnpm run verify:pr` antes de abrir un PR.
+- [CONTRIBUTING.md](../../CONTRIBUTING.md): ramas, commits `tipo(ámbito): resumen` y `pnpm run verify:pr` antes de abrir un PR (en un PR que solo cambia archivos `.md`, la guardia documental y las pruebas que leen documentos).
 - **Guardia documental** ([`docs/impact-map.json`](../impact-map.json)): tocar código de un área exige cambiar alguna de sus fuentes canónicas en el mismo PR, también si solo se añaden comentarios. En CI no se puede justificar una excepción.
 - **Móvil:** ESLint prohíbe importar `@buoh/design-system/react` en `apps/mobile` (React 19.3.0 frente a 19.3.1; ADR-0009).
 - **pnpm** corre los scripts con su emulador de shell (`shellEmulator`). Un script que deba separar stdout usa un archivo de `scripts/` (ADR-0003).
