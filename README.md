@@ -12,7 +12,7 @@ Cualquier persona o motor de IA debe leer, en orden:
 
 1. [`AGENTS.md`](AGENTS.md): reglas de trabajo y jerarquía de autoridad.
 2. [`PROJECT_STATUS.md`](PROJECT_STATUS.md): estado vigente y siguiente tarea.
-3. [Plan ejecutable de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md), el de la fase actual.
+3. [Plan ejecutable de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md), el de la fase actual: al empezar, las partes que pide `AGENTS.md` («Lectura obligatoria»).
 4. Contratos, ADR y runbooks afectados por la tarea.
 
 ## Desarrollo actual

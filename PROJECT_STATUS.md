@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 93
-updated_at_utc: "2026-11-22T00:22:00.000Z"
+status_version: 94
+updated_at_utc: "2026-11-22T01:39:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -67,8 +67,6 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 
 **`F2.5` — Datasets vivos, en curso.** Su ADR es [ADR-0020](docs/arquitectura/adr/0020-datasets-vivos.md), con la secuencia de seis PR de su §13. Los PR 2 a 5 están fusionados, el último (PR #108) el 2026-11-14. Desde el PR 4 (PR #107, del 2026-11-14), `buoh-operaciones` publica en `buoh_datasets` un dataset cada 6 horas y lo verifica en los dos modos. El log 5, el primero con el perfil de publicación `deriv_options-publication-v1-R_100` y las reglas 3.0.0, lo preparó `buoh-operaciones` el 2026-11-16, y la captura entra en él con el corte del 2026-11-23 (paso 2). Falta el PR 6, la evidencia (paso 3). El detalle de cada PR está en el [historial de entregas](docs/plan/historial-de-entregas.md) («Siguiente tarea autorizada», F2.5).
 
-**En paralelo, la documentación más corta** (decisión del propietario del 2026-11-21; [decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Documentación más corta»). Con el primero de tres PR (PR #122), este archivo quedó en lo vigente, y las decisiones, la historia de las entregas y los pendientes de la Fase 1 pasaron, con el mismo texto, a sus documentos. Con el segundo, cada sesión lee al arrancar solo una parte del plan de Fase 2 (`AGENTS.md`, «Lectura obligatoria»), y lo ocasional del sandbox pasa a `.kiro/steering/sandbox-ocasional.md`. Falta el tercero, que fija reglas para que la documentación no vuelva a crecer, entre ellas la de la revisión semántica de esa decisión. No espera a ningún paso de la lista.
-
 ## Bloqueos
 
 Ninguno.
@@ -107,4 +105,5 @@ Este archivo solo describe lo vigente:
 
 - una entrega terminada queda en una línea de «Entregas de la Fase 2», con el enlace a su evidencia; su detalle queda en su ADR, en su evidencia y en sus PR;
 - cada decisión del propietario, con sus palabras y su fecha, va a las [decisiones vigentes](docs/gobierno/decisiones-vigentes.md), y aquí solo su efecto en el trabajo siguiente;
-- el [historial de entregas](docs/plan/historial-de-entregas.md) está congelado: no se le añade nada.
+- el [historial de entregas](docs/plan/historial-de-entregas.md) está congelado: no se le añade nada;
+- al cambiar `plan`, el mismo PR actualiza las partes del plan que se leen al arrancar (`.kiro/steering/entorno-sandbox-kiro.md`, «Arranque de sesión», paso 3).

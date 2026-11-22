@@ -115,10 +115,10 @@ Tipos de pendiente:
 
 ### P-F1-07. Pendientes menores ya registrados — menor registrado
 
-Hasta el 2026-11-21 estaban en `PROJECT_STATUS.md`; desde entonces están aquí abajo, con el mismo texto y en el mismo orden, en «Pendientes registrados de F1.4a», «de F1.3» y «de F1.2». Solo cambian las rutas de los enlaces y la referencia a «Siguiente tarea autorizada», que ahora nombra el [historial de entregas](historial-de-entregas.md). Entre ellos, dos tienen fecha límite explícita:
+Hasta el 2026-11-21 estaban en `PROJECT_STATUS.md`. El PR #122 los pasó aquí abajo, en el mismo orden, a «Pendientes registrados de F1.4a», «de F1.3» y «de F1.2», con el mismo texto salvo las rutas de los enlaces y la referencia a «Siguiente tarea autorizada», que ahora nombra el [historial de entregas](historial-de-entregas.md). Desde entonces cambian aquí, como el resto de este documento. Entre ellos, dos tenían fecha límite explícita, y los dos están resueltos:
 
-- antes de publicar datasets vivos largos: límites de lectura y artefactos que crecen sin segmentar (F1.3, pendiente 2). El [plan de Fase 2](fase-2-laboratorio-y-bot-shadow.md) lo resuelve en F2.5 (`F2-DATASET-001`);
-- antes de desplegar: un rol de PostgreSQL de solo inserción y lectura (F1.3, pendiente 4; ADR-0006). El plan de Fase 2 lo resuelve en F2.2 (`F2-ROLE-001`).
+- antes de publicar datasets vivos largos: límites de lectura y artefactos que crecen sin segmentar (F1.3, pendiente 2). Lo resolvió F2.5 (`F2-DATASET-001`), con los PR 2 y 3a de [ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) (abajo, «de F1.3»);
+- antes de desplegar: un rol de PostgreSQL de solo inserción y lectura (F1.3, pendiente 4; ADR-0006). Lo resolvió F2.2 (`F2-ROLE-001`; abajo, «de F1.3»).
 
 Comprobado en el repositorio:
 
@@ -136,15 +136,17 @@ El antiguo pendiente 3 (el sink `nonTickFrame` no deja ver un `error`) quedó re
 
 #### Pendientes registrados de F1.3
 
-Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la lista completa está en cada PR. Los más relevantes para el despliegue están abajo. [ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) decide cómo se resuelven los tres primeros (§7 y §9), y se cierran con sus PR 3 y 4:
+Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la lista completa está en cada PR. Los más relevantes para el despliegue están abajo. [ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) decidió cómo se resolvían los tres primeros (§7 y §9), que ya están resueltos:
 
-1. Si la conexión cae durante el `COMMIT` de una publicación, se informa "no se confirmó" aunque pudo confirmarse.
-2. Publicar no aplica los límites de lectura del replay. `normalized_ticks` y `quality_incidents` son un único artefacto que crece con el dataset. Resolver antes de publicar datasets live largos.
-3. Los nombres de `PublicationStep` no coinciden con `PersistenceStage`; los fallos de publicación todavía no entran en el registro operativo.
-
-<!-- El pendiente 4 quedó resuelto: ver el párrafo debajo de la lista. -->
+<!-- Los pendientes 1 a 4 quedaron resueltos: ver los párrafos debajo de la lista. -->
 
 5. SeaweedFS `mini` arranca componentes internos que no se usan (Iceberg, Lance, servidor de administración).
+
+Los antiguos pendientes 1 a 3 quedaron resueltos en F2.5, como decidió ADR-0020, y están en producción desde su PR 4 (#107), del 2026-11-14:
+
+- el 1 (si la conexión caía durante el `COMMIT` de una publicación, se informaba "no se confirmó" aunque pudo confirmarse): un `COMMIT` ambiguo falla con `commit_outcome_unknown`, y la ejecución siguiente comprueba si el dataset ya está publicado antes de repetirlo (§9; PR 3b, #105);
+- el 2 (publicar no aplicaba los límites de lectura del replay, y `normalized_ticks` y `quality_incidents` eran un único artefacto que crecía con el dataset): los artefactos derivados se dividen en partes de 5000 registros (PR 2, #103), y la publicación comprueba los límites del replay antes de escribir (§7; PR 3a, #104);
+- el 3 (los nombres de `PublicationStep` no coincidían con `PersistenceStage`, y los fallos de publicación no entraban en el registro operativo): `PublicationStep` toma los nombres de `PersistenceStage` (PR 3a), y una escritura de la publicación que falla abre `persistence_unavailable` en el registro de `buoh_datasets` (§9; PR 3b).
 
 El antiguo pendiente 4 (un único rol PostgreSQL dueño de las tablas, cuando antes de desplegar hacía falta un rol de ejecución que solo pudiera insertar y leer, ADR-0006) quedó resuelto el 2026-11-01. Desde el PR 2 de [ADR-0018](../arquitectura/adr/0018-sistema-de-datos-en-produccion.md) §16, el worker trae los roles de producción y sus privilegios: `buoh_ingesta` solo lee e inserta (`F2-ROLE-001`). Desde el PR 5a, `buoh-operaciones` los crea y les da sus privilegios en cada ejecución. En producción, su primera ejecución creó los roles y les puso sus contraseñas, e `ingest` captura con `buoh_ingesta` (runbook, «Desplegar», «Comprobar el arranque»).
 
