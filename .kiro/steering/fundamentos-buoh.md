@@ -10,7 +10,7 @@ buoh es un bot multiplataforma de investigación cuantitativa, señales trazable
 
 ## Protocolo obligatorio para agentes
 
-- Antes de trabajar, leer [`AGENTS.md`](../../AGENTS.md), [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md) y los planes activos enlazados allí (`plan` y `parallel_plans`).
+- Antes de trabajar, leer [`AGENTS.md`](../../AGENTS.md), [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md) y, de los planes activos enlazados allí (`plan` y `parallel_plans`), lo que pide `AGENTS.md` («Lectura obligatoria»).
 - Las conversaciones no sustituyen las fuentes canónicas del repositorio.
 - Ante conflicto o decisión ausente, seguir el protocolo de `AGENTS.md`; no improvisar silenciosamente.
 
@@ -59,7 +59,6 @@ buoh es un bot multiplataforma de investigación cuantitativa, señales trazable
 ## Forma de trabajar
 
 - Antes de agregar una capacidad, confirmar su etapa, su límite de seguridad y su puerta de calidad.
-- Actualizar `PROJECT_STATUS.md` cuando cambien fase, objetivo, siguiente tarea, bloqueos o evidencia; no usarlo como changelog.
 - Preferir cambios pequeños, auditables y documentados cuando afecten seguridad, datos, plataforma, riesgo o alcance.
 - No introducir dependencias, servicios cloud, credenciales ni integraciones de terceros sin justificación técnica y revisión explícita.
 - Usar español claro en documentación de producto y nombrar los conceptos de dominio de forma precisa y consistente.
@@ -68,8 +67,5 @@ buoh es un bot multiplataforma de investigación cuantitativa, señales trazable
 ## Flujo de GitHub y revisión
 
 - El repositorio de buoh comienza privado.
-- El agente prepara cambios en ramas de trabajo, crea y actualiza los pull requests mediante la automatización configurada; nunca sube cambios directamente a `main`.
-- El propietario fusiona todos los pull requests. El agente los deja listos con las condiciones de `AGENTS.md` («Fusión») y nunca fusiona. El propietario puede revisar cualquiera, pedir cambios, cerrarlo sin fusionar o revertirlo.
+- Las ramas, los pull requests, sus verificaciones y la fusión siguen `AGENTS.md` («Fusión») y `CONTRIBUTING.md`: el agente nunca sube cambios directamente a `main` ni fusiona.
 - El agente no altera configuración de Git, identidad, autoría ni atribución para ocultar quién realizó un cambio.
-- Antes de abrir un pull request, revisar `CONTRIBUTING.md`, ejecutar las verificaciones disponibles y resumir alcance, riesgos y documentación afectada.
-- No incluir secretos, datos reales de mercado, tokens de Deriv, credenciales ni resultados sensibles en commits o pull requests.

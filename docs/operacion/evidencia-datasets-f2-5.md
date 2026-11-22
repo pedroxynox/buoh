@@ -9,7 +9,7 @@ El PR 6 de §13 añade aquí la evidencia de producción: los datasets publicado
 ## Entorno
 
 - Sandbox de Kiro, sin Docker, con 31 GiB de memoria que Node ve. No es Render, así que las cifras absolutas son orientativas. Cada proceso corre con los tamaños de V8 de producción (`WORKER_NODE_FLAGS`: `--max-semi-space-size=1 --max-old-space-size=256`), los que eligen el máximo del montón con independencia de la memoria que ve Node (ADR-0017 §9).
-- PostgreSQL 18.4 y SeaweedFS 4.48 portátiles, solo en `127.0.0.1` y sin TLS, del arnés de integración local que describe el steering del sandbox (`.kiro/steering/entorno-sandbox-kiro.md`). Producción usa PostgreSQL 18 de Render y R2.
+- PostgreSQL 18.4 y SeaweedFS 4.48 portátiles, solo en `127.0.0.1` y sin TLS, del arnés de integración local que describe el steering del sandbox (`.kiro/steering/sandbox-ocasional.md`). Producción usa PostgreSQL 18 de Render y R2.
 - Node.js 24.22.0, y la release de esquemas fijada `production_v20260901_0`, descargada de su URL fijada y comprobada con su SHA-256.
 - `scripts/evidencia-f2-5/medir-datasets.mjs`, que no es un comando del producto, sobre el worker compilado.
 

@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 92
-updated_at_utc: "2026-11-21T23:24:00.000Z"
+status_version: 93
+updated_at_utc: "2026-11-22T00:22:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -22,7 +22,7 @@ Transformar una hipótesis en una estrategia viva, explicable y no ejecutora, pa
 ## Situación
 
 - La Fase 1 terminó el 2026-10-29 y cumplió su puerta de salida ([evidencia de la puerta de salida](docs/operacion/evidencia-puerta-fase-1.md)). Ese día el propietario decidió hacer antes la Fase 2 que la Fase 1B, la de los datos de MetaTrader 5 ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Orden de fases»).
-- El [plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md) fija sus requisitos `F2-*`, el corte de implementación, las ADR que van antes del código y su orden, y el presupuesto. El 2026-11-16 el propietario cambió su alcance: las estrategias las busca un motor de investigación, en Python y en un VPS propio, que prueba millones de estrategias de reglas sobre R_100 y mercados reales de Deriv, y el propietario autoriza las que pasan al bot. Entran el oro en vivo y siete mercados reales en velas (F2.5b) y el motor (F2.6b) (plan §1 y §12; decisiones vigentes, «Motor de investigación»).
+- El [plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md) fija sus requisitos `F2-*`, el corte de implementación, las ADR que van antes del código y su orden, y el presupuesto. El 2026-11-16 el propietario cambió su alcance: las estrategias las busca un motor de investigación, en Python y en un VPS propio, que prueba millones de estrategias de reglas sobre R_100 y mercados reales de Deriv, y el propietario autoriza las que pasan al bot, como propone la dirección técnica. Entran el oro en vivo y siete mercados reales en velas (F2.5b) y el motor (F2.6b) (plan §1 y §12; decisiones vigentes, «Motor de investigación»).
 - El sistema de datos corre en producción desde el 2026-11-01, en la región `virginia` de Render y con los objetos en Cloudflare R2: la captura (`buoh-ingesta`), el cron job `buoh-operaciones`, cada 5 minutos, y la base `buoh-postgres` ([ADR-0018](docs/arquitectura/adr/0018-sistema-de-datos-en-produccion.md)). Desde el 2026-11-03 corre también `buoh-api`, que sirve la API y la web en `https://buoh-api.onrender.com` ([ADR-0019](docs/arquitectura/adr/0019-api-cuentas-y-auditoria.md)). Producción cuesta unos 26 USD al mes (ADR-0018 §14 y ADR-0019 §10). El total aprobado para la Fase 2, con el servidor del motor *shadow*, el motor de investigación, su VPS y los mercados reales, es de unos 56,50 USD al mes (decisiones vigentes, «Servidor del motor de señales *shadow*»).
 - El sitio oficial está en internet desde el 2026-10-27, como sitio estático gratuito de Render, en `https://buoh-sitio.onrender.com` y sin indexar ni anunciar ([ADR-0013](docs/arquitectura/adr/0013-publicacion-del-sitio-en-render.md)).
 - No existe estrategia, señal, conexión de cuenta ni ejecución `demo` o `real`. MetaTrader 5 (Deriv MT5 y Vantage) queda decidido como segunda integración ([ADR-0007](docs/arquitectura/adr/0007-varias-fuentes-y-metatrader-5.md)), sin código.
@@ -57,7 +57,7 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 
 ## Siguiente tarea autorizada
 
-**Próximos pasos, en orden** (el 2026-11-16, cuando el propietario pasa a otra cuenta de Kiro: `.kiro/steering/entorno-sandbox-kiro.md`, «Cambio de sesión»). El detalle de cada incremento está en su ADR y en el [historial de entregas](docs/plan/historial-de-entregas.md).
+**Próximos pasos, en orden** (el 2026-11-16, cuando el propietario pasa a otra cuenta de Kiro: `.kiro/steering/sandbox-ocasional.md`, «Cambio de sesión»). El detalle de cada incremento está en su ADR y en el [historial de entregas](docs/plan/historial-de-entregas.md).
 
 1. **La memoria de `buoh-operaciones` en producción** (seguimiento del cierre de F2.2; [decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Memoria de `buoh-operaciones`»). El PR de la memoria trae a cada ejecución un último paso, `memory`, que guarda en el log activo la memoria residente máxima de su proceso principal y la de cada proceso que lanzó (runbook de ingesta, «Paso 8, `memory`»). El propietario lo fusionó (PR #121) el 2026-11-17 a las 21:48 UTC. Desde su despliegue, el agente lee esos informes con su acceso, y el PR 6 de ADR-0020 los compara con los 256 MB de `F2-DEPLOY-001`, con el mayor de lo medido en producción y en el techo de ADR-0020 §7; si el principal y un hijo juntos no caben, el agente lo presenta al propietario.
 2. **Desde el 2026-11-23 a las 00:00 UTC, el corte al log 5,** el primero con el perfil de publicación (F2.5, PR 5). El agente no ve la línea de `ingest` con `quality_profile_id`, que en producción solo se escribe al terminar el proceso, así que comprueba en la base que los puntos de control del log 5 (`live_derivation_checkpoints`) llevan el `quality_profile_sha256` de su fila de `log_quality_profile` y las reglas `3.0.0`. Comprueba también que la salud sigue `healthy` y que ningún log se detuvo con `publication_not_derivable`.
@@ -67,7 +67,7 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 
 **`F2.5` — Datasets vivos, en curso.** Su ADR es [ADR-0020](docs/arquitectura/adr/0020-datasets-vivos.md), con la secuencia de seis PR de su §13. Los PR 2 a 5 están fusionados, el último (PR #108) el 2026-11-14. Desde el PR 4 (PR #107, del 2026-11-14), `buoh-operaciones` publica en `buoh_datasets` un dataset cada 6 horas y lo verifica en los dos modos. El log 5, el primero con el perfil de publicación `deriv_options-publication-v1-R_100` y las reglas 3.0.0, lo preparó `buoh-operaciones` el 2026-11-16, y la captura entra en él con el corte del 2026-11-23 (paso 2). Falta el PR 6, la evidencia (paso 3). El detalle de cada PR está en el [historial de entregas](docs/plan/historial-de-entregas.md) («Siguiente tarea autorizada», F2.5).
 
-**En paralelo, la documentación más corta** (decisión del propietario del 2026-11-21; [decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Documentación más corta»). Con el primero de tres PR, este archivo queda en lo vigente, y las decisiones, la historia de las entregas y los pendientes de la Fase 1 pasan, con el mismo texto, a sus documentos. Siguen dos PR: uno aligera la lectura del arranque de cada sesión, y otro fija reglas para que la documentación no vuelva a crecer, entre ellas la de la revisión semántica de esa decisión. No esperan a ningún paso de la lista.
+**En paralelo, la documentación más corta** (decisión del propietario del 2026-11-21; [decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Documentación más corta»). Con el primero de tres PR (PR #122), este archivo quedó en lo vigente, y las decisiones, la historia de las entregas y los pendientes de la Fase 1 pasaron, con el mismo texto, a sus documentos. Con el segundo, cada sesión lee al arrancar solo una parte del plan de Fase 2 (`AGENTS.md`, «Lectura obligatoria»), y lo ocasional del sandbox pasa a `.kiro/steering/sandbox-ocasional.md`. Falta el tercero, que fija reglas para que la documentación no vuelva a crecer, entre ellas la de la revisión semántica de esa decisión. No espera a ningún paso de la lista.
 
 ## Bloqueos
 
