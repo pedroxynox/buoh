@@ -7,7 +7,7 @@ La medición no usa datos de mercado: la captura es sintética, con precios inve
 ## Entorno
 
 - Sandbox de Kiro, sin Docker: 8 núcleos y 31 GiB de memoria, sin ningún límite que Node pueda ver. No es Render, así que las cifras absolutas son orientativas, como en la [evidencia de memoria de F2.3](evidencia-memoria-f2-3.md).
-- PostgreSQL 18.4 y SeaweedFS 4.48 portátiles, el almacenamiento de objetos compatible con S3, los dos solo en `127.0.0.1` y sin TLS, del arnés de integración local que describe el steering del sandbox (`.kiro/steering/entorno-sandbox-kiro.md`). La API corre con `BUOH_DEPLOYMENT_ENVIRONMENT=development`, que no exige `https` ni TLS.
+- PostgreSQL 18.4 y SeaweedFS 4.48 portátiles, el almacenamiento de objetos compatible con S3, los dos solo en `127.0.0.1` y sin TLS, del arnés de integración local que describe el steering del sandbox (`.kiro/steering/sandbox-ocasional.md`). La API corre con `BUOH_DEPLOYMENT_ENVIRONMENT=development`, que no exige `https` ni TLS.
 - Node.js 24.22.0 y pnpm 12.14.0. Cada proceso de la API corre con los tamaños de V8 de `API_NODE_FLAGS` (`apps/api/src/node-flags.ts`): `--max-semi-space-size=1` y `--max-old-space-size=256`.
 - La release de esquemas fijada `production_v20260901_0`, descargada de su URL fijada y comprobada con su SHA-256.
 - El código del primer commit de este PR, `e1450f9`, sobre `main` en `85f16e9`, compilado con `pnpm run build`, y `scripts/evidencia-f2-4/medir-memoria.mjs`, que no es un comando del producto. La medición se repitió con el código después de la revisión (abajo, «Resultado»).

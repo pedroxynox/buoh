@@ -13,7 +13,7 @@ El 2026-10-29 el propietario pidió: «si comprare el servidor que me mencionas,
 
 ### Medición
 
-El 2026-10-29, en el sandbox de Kiro, con el PostgreSQL 18.4 y el SeaweedFS 4.48 portátiles del [steering del sandbox](../../../.kiro/steering/entorno-sandbox-kiro.md) y Node 24.22.0. No es Render, así que las cifras son orientativas.
+El 2026-10-29, en el sandbox de Kiro, con el PostgreSQL 18.4 y el SeaweedFS 4.48 portátiles del [steering del sandbox](../../../.kiro/steering/sandbox-ocasional.md) y Node 24.22.0. No es Render, así que las cifras son orientativas.
 
 | Prueba | Memoria (RSS) | CPU y tiempo |
 |---|---|---|

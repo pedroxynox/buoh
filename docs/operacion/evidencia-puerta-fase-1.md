@@ -6,7 +6,7 @@ Los ensayos capturaron datos reales de Deriv en un PostgreSQL y un almacenamient
 
 ## Entorno
 
-- Sandbox de Kiro, sin Docker. PostgreSQL 18.4 y SeaweedFS 4.48 portátiles, como dice `.kiro/steering/entorno-sandbox-kiro.md` («PostgreSQL y SeaweedFS sin Docker»), solo en la interfaz local y con credenciales generadas para la sesión, fuera del repositorio. CI usa PostgreSQL 18.6 (`infra/compose.yaml`).
+- Sandbox de Kiro, sin Docker. PostgreSQL 18.4 y SeaweedFS 4.48 portátiles, como dice `.kiro/steering/sandbox-ocasional.md` («PostgreSQL y SeaweedFS sin Docker»), solo en la interfaz local y con credenciales generadas para la sesión, fuera del repositorio. CI usa PostgreSQL 18.6 (`infra/compose.yaml`).
 - Node.js 24.22.0 (`devEngines`) y pnpm 12.14.0 (`packageManager`). `BUOH_DEPLOYMENT_ENVIRONMENT=test`. Cada secuencia, con un esquema y un bucket propios, creados y borrados con los pasos de «Captura viva continua (`ingest`)» del [runbook](runbook-ingesta-de-datos.md).
 - Deriv: el canal público fijado (`DERIV_PUBLIC_ENDPOINT`), la release de esquemas `production_v20260901_0` (SHA-256 `adaab0acaf33bd159e45912995af2b78101049f43683d223f0ac11be0a39e7c3`), el conector `deriv-options-ws-1.1.0` y el símbolo `R_100`, sin credenciales.
 - Código: `main` en `2dffd23` (PR #35 a #40) más las herramientas de `scripts/evidencia-f1-5/`, salvo el punto 9, que corrió antes, sobre `7e460fc` con las herramientas que luego fueron `9ff4f85`. Las herramientas no son comandos del producto («Puerta de salida de Fase 1» en el runbook dice cómo repetir cada secuencia). `psql` no estaba instalado, así que los bloques SQL del runbook corrieron tal cual con un sustituto mínimo sobre `pg` de Node.

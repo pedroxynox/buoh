@@ -8,7 +8,7 @@ Antes de proponer o modificar archivos, lee en este orden:
 
 1. [`AGENTS.md`](AGENTS.md): proceso y jerarquía de autoridad.
 2. [`PROJECT_STATUS.md`](PROJECT_STATUS.md): estado vigente, objetivo y siguiente tarea.
-3. Los planes activos enlazados desde `PROJECT_STATUS.md`: el de la fase (`plan`) y los que corren en paralelo (`parallel_plans`).
+3. De los planes activos enlazados desde `PROJECT_STATUS.md`, el de la fase (`plan`) y los que corren en paralelo (`parallel_plans`): el objetivo, las restricciones, la secuencia de entrega y los requisitos de la tarea. Sus demás secciones, cuando la tarea las toque.
 4. Los contratos, ADR y runbooks afectados por la tarea.
 5. El código y las pruebas relacionados, cuando existan.
 

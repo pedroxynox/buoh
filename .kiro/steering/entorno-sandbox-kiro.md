@@ -12,11 +12,11 @@ Kiro Web abre el espacio de trabajo en `/projects/sandbox`, con el repositorio e
 
 1. Instalar las skills: `node /projects/sandbox/buoh/.kiro/instalar-skills.mjs`. Si termina con 1, decir al propietario en una línea qué origen faltó y seguir con las demás. Si el instalador de la rama de la sesión no es el de `main` (`git -C /projects/sandbox/buoh diff --quiet origin/main -- .kiro/instalar-skills.mjs` falla), no ejecutarlo sin preguntar antes al propietario: puede traer skills que nadie ha revisado (ADR-0014, «Consecuencias»).
 2. Activar la skill `caveman` («Comunicación con el propietario»).
-3. Leer, en orden: `AGENTS.md`, `PROJECT_STATUS.md`, `.kiro/steering/fundamentos-buoh.md`, este archivo, [`skills-de-kiro.md`](skills-de-kiro.md), el plan activo y lo que toque la tarea.
+3. Leer, en orden: `AGENTS.md`, `PROJECT_STATUS.md`, `.kiro/steering/fundamentos-buoh.md`, este archivo y [`skills-de-kiro.md`](skills-de-kiro.md). Del plan de Fase 2, solo §1 (objetivo), §4 (restricciones), §9 (secuencia de entrega) y, de §7, los requisitos de `next_requirements` en `PROJECT_STATUS.md` o los de la tarea (`AGENTS.md`, «Lectura obligatoria»). El resto del plan se lee cuando la tarea lo toca: por ejemplo, §6 si crea directorios o dependencias, §8 si escribe una ADR, §11 si cambia el costo, §12 si necesita una decisión del propietario y §13 si cierra la fase. Las [decisiones vigentes](../../docs/gobierno/decisiones-vigentes.md), el [historial de entregas](../../docs/plan/historial-de-entregas.md) y [`sandbox-ocasional.md`](sandbox-ocasional.md) también se leen solo cuando la tarea los toca.
 4. Comprobar el estado real: `git fetch`, la rama actual y `gh api "repos/pedroxynox/buoh/pulls?state=all&per_page=5"`. Cada incremento empieza en una rama nueva desde `main` actualizado; una rama ya fusionada no se reutiliza. Si un PR listo sigue abierto (`gh api "repos/pedroxynox/buoh/pulls?state=open"`), recordarle al propietario en una línea que espera su fusión.
 5. Poner título y descripción a la sesión de Kiro.
 
-El contexto que dura vive en `AGENTS.md`, `PROJECT_STATUS.md` y `.kiro/steering/`. No crear otros archivos de contexto o memoria en el repositorio, como `.claude/napkin.md`.
+El contexto que dura vive en `AGENTS.md`, `PROJECT_STATUS.md`, las decisiones vigentes (`docs/gobierno/decisiones-vigentes.md`) y `.kiro/steering/`. No crear otros archivos de contexto o memoria en el repositorio, como `.claude/napkin.md`.
 
 Estos pasos los pone en marcha el steering personal del propietario: en app.kiro.dev, Agent Config → Steering, un archivo `buoh-arranque.md` con este texto.
 
@@ -67,25 +67,6 @@ Los secretos de Kiro (*Settings → Sandbox → Secrets*) llegan al sandbox como
 - El encargo a un subagente repite estas reglas, con los comandos prohibidos.
 - Si un secreto aparece en el registro de la sesión, en Git o en GitHub, el agente se lo dice al propietario en frases completas y registra en un PR lo que decida, con sus palabras y su fecha. Si es una contraseña o un token, le recomienda rotarlo con los pasos del runbook («Rotar credenciales»). El servidor y el endpoint no se rotan: lo que abre la base y el bucket es la contraseña o el token.
 
-## Cambio de sesión
+## Tareas ocasionales
 
-Una sesión nueva no ve la conversación anterior, y puede no ver lo guardado fuera del repositorio, como `/projects/sandbox/.buoh-local/`. Cuando el propietario va a cambiar de sesión:
-
-1. Llevar a un PR lo que el repositorio todavía no recoge: las decisiones del propietario, con sus palabras y su fecha, las mediciones y los pendientes.
-2. Darle un mensaje para la sesión nueva que remita al repositorio, nombre los PR abiertos y diga cuál es la siguiente tarea. Si ese mensaje y el repositorio difieren, manda el repositorio.
-3. Si pasa a otra cuenta de Kiro, el propietario, en la cuenta nueva: conecta su cuenta de GitHub, para que la sesión pueda abrir `pedroxynox/buoh` y `gh` actúe con ella; crea su steering personal `buoh-arranque.md` («Arranque de sesión»); y guarda los cinco secretos `BUOH_AGENTE_*`. Cuando una sesión de la cuenta nueva, abierta después de guardarlos, los ve y su `data:health` da `healthy`, los borra de la cuenta anterior (runbook, «Acceso del agente», «Otra cuenta de Kiro»). Lo demás no hace falta pasarlo: las skills las instala el arranque, y los servicios de las pruebas de integración se vuelven a montar con «PostgreSQL y SeaweedFS sin Docker». Lo que quedó en `/projects/sandbox/.buoh-local/` y los informes de las revisiones semánticas se pierden, así que lo que importa tiene que estar antes en el repositorio o en los PR.
-
-## PostgreSQL y SeaweedFS sin Docker
-
-Docker y podman no arrancan en el sandbox y `dnf` no puede instalar paquetes. CI sigue usando las imágenes fijadas de `infra/compose.yaml`; esta alternativa solo sirve para ejecutar `pnpm run test:integration` dentro del sandbox.
-
-- `/tmp` no se conserva entre comandos y los procesos en segundo plano mueren al terminar cada comando. Arrancar los servicios, ejecutar las pruebas y detenerlos en un mismo comando, con un script auxiliar fuera del repo.
-- **PostgreSQL 18.4 portátil** (CI usa 18.6, así que una diferencia de versión menor puede separar ambos resultados):
-  1. `npm pack @embedded-postgres/linux-x64@18.4.0-beta.17`, comprobar que el `.tgz` tiene SHA-256 `795d587bb466423385db256dc81e61f2ee40c9e10efde21e881f3e997dd1bdb2` y extraerlo.
-  2. Recrear los enlaces de `native/pg-symlinks.json` con `fs.symlinkSync(basename(source), target)` y dar permiso de ejecución a `native/bin/*`.
-  3. Usar `LD_LIBRARY_PATH=<paquete>/native/lib`. `initdb` y `postgres` no corren como root: ejecutarlos con `setpriv --reuid=nobody --regid=nobody --clear-groups`.
-  4. `initdb -D <datos> -U buoh --pwfile=<archivo> -A scram-sha-256 -E UTF8 --locale=C`.
-  5. `postgres -D <datos> -k <dir-socket> -h 127.0.0.1 -p 55432`.
-- **SeaweedFS 4.48:** descargar `https://github.com/seaweedfs/seaweedfs/releases/download/4.48/linux_amd64.tar.gz` y comprobar su SHA-256 `4a7d108384d044d95212d1342cdda9533fa55842c1c9b41f606ca3c8a9561124`. Ejecutar `weed mini -dir=<datos> -ip=127.0.0.1 -ip.bind=127.0.0.1 -master.telemetry=false -webdav=false -admin.ui=false` con `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` y `S3_BUCKET=buoh-local`. Sin `-ip.bind`, `mini` escucha en todas las interfaces, incluidos componentes sin autenticación que ADR-0005 §1 mantiene fuera de la red. Con esas opciones todo queda en `127.0.0.1` y S3 responde en `127.0.0.1:8333`.
-- **Variables:** exportar las `BUOH_*` de `infra/.env.example` con `BUOH_DEPLOYMENT_ENVIRONMENT=test`, `BUOH_POSTGRES_PORT=55432` y `BUOH_POSTGRES_DB=postgres`. `BUOH_POSTGRES_PASSWORD` es el contenido del `--pwfile`, y `BUOH_S3_ACCESS_KEY_ID` y `BUOH_S3_SECRET_ACCESS_KEY` son los mismos valores de `AWS_ACCESS_KEY_ID` y `AWS_SECRET_ACCESS_KEY` que recibe `weed`.
-- **Credenciales:** generarlas en cada sandbox con `openssl rand -hex 24` y guardarlas fuera del repo. Nunca escribirlas en commits, PR ni mensajes.
+«Cambio de sesión» y «PostgreSQL y SeaweedFS sin Docker» están en [`sandbox-ocasional.md`](sandbox-ocasional.md). Se leen antes de cambiar de sesión o de cuenta de Kiro, y antes de correr `pnpm run test:integration` dentro del sandbox.

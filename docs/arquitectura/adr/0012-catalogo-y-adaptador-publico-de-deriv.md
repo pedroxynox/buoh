@@ -9,7 +9,7 @@
 
 ## Contexto
 
-F1.4b conecta buoh con el canal público de Deriv, solo para escuchar: el catálogo de símbolos (`active_symbols`) y el flujo de ticks, sin credenciales, sin operar y sin publicar datos vivos. `PROJECT_STATUS.md` (sus pendientes están hoy en P-F1-07 de la especificación de pendientes) y la [especificación de pendientes](../../plan/especificacion-de-pendientes.md) (P-F1-01 a P-F1-03) dejan abiertos estos puntos:
+F1.4b conecta buoh con el canal público de Deriv, solo para escuchar: el catálogo de símbolos (`active_symbols`) y el flujo de ticks, sin credenciales, sin operar y sin publicar datos vivos. `PROJECT_STATUS.md` (sus pendientes registrados de la Fase 1 están hoy en P-F1-07 de la especificación de pendientes) y la [especificación de pendientes](../../plan/especificacion-de-pendientes.md) (P-F1-01 a P-F1-03) dejan abiertos estos puntos:
 
 - la forma del registro de snapshot del catálogo y qué incidencia deja un catálogo inválido;
 - el validador draft-04 y el cliente WebSocket, dos dependencias nuevas;

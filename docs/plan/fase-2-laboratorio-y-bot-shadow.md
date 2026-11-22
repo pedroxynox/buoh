@@ -25,7 +25,7 @@ El propietario aprueba el plan al fusionarlo. Las decisiones suyas que la fase t
 
 ## 3. Punto de partida
 
-Hechos comprobados al cerrar la Fase 1 y al decidir el alojamiento ([`PROJECT_STATUS.md`](../../PROJECT_STATUS.md) y ADR-0016):
+Hechos comprobados al cerrar la Fase 1 y al decidir el alojamiento ([`PROJECT_STATUS.md`](../../PROJECT_STATUS.md) de entonces, que guarda Git, y ADR-0016):
 
 - **Captura.** `ingest` captura R_100 sobre PostgreSQL y almacenamiento de objetos, pero no corre en ningún servidor: rechaza `staging` y `production` y para a las 23 horas para borrar la captura antes de las 24 ([ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §7).
 - **Memoria.** El arranque, la vigilancia de huecos y `data:health` leen y derivan el log durable entero. Con 17,8 horas de log, `ingest` llegó a 358 MB y `data:health` a 317 MB, y el worker Starter tiene 512 MB (ADR-0016, «Medición»). La reparación de cierres no registrados, que corre antes de cada reconexión, también lee el log entero (`RawFirstIngestor.repairUnrecordedClose`), aunque ADR-0016 no la nombra.
