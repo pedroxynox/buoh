@@ -90,6 +90,10 @@ El primer PR de código debe implementar la interfaz de comandos definida en el 
 
 Cada ADR nueva empieza, después de su encabezado, con una sección «Resumen para el propietario», en palabras sencillas y de unas diez líneas: qué decide, qué cuesta, qué riesgo tiene y qué aprueba quien la fusiona. Es lo que lee el propietario, que decidió el 2026-11-16 leer de cada ADR solo un resumen ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Orden del trabajo»); la forma la propone la dirección técnica.
 
+Cada dato vive en su fuente canónica (`AGENTS.md`, «Autoridad por materia»). Los demás documentos la enlazan, con su sección, en lugar de repetir el dato: así un cambio toca un solo lugar, y la revisión no encuentra dos versiones del mismo dato. Al escribir o cambiar un texto, si otro documento necesita el dato, basta una frase con el enlace, sin sus cifras ni sus detalles.
+
+Una ADR nueva fija decisiones y sus razones, y apunta a unas 4 000 palabras sin contar su resumen. Fija la secuencia de sus PR ([plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md) §8), pero lo que no decide va a su lugar: los pasos de operación, al runbook; las cifras de cada medición, a la evidencia; y el detalle de cada PR, a su descripción. Si una ADR necesita más, su PR dice por qué.
+
 Revisa impacto documental en todo PR. Actualiza `PROJECT_STATUS.md` cuando cambien fase, objetivo, siguiente tarea, bloqueos, decisiones pendientes, componentes autorizados o evidencia de salida. No lo conviertas en un changelog. Las decisiones del propietario, con sus palabras y su fecha, van a las [decisiones vigentes](docs/gobierno/decisiones-vigentes.md).
 
 La guardia documental de `F1-GOV-001` usa [`docs/impact-map.json`](docs/impact-map.json):

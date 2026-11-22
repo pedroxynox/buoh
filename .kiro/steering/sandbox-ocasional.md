@@ -4,7 +4,7 @@ inclusion: manual
 
 # Tareas ocasionales en el sandbox de Kiro Web
 
-No se lee al arrancar. Se lee antes de cambiar de sesión o de cuenta de Kiro, y antes de correr `pnpm run test:integration` dentro del sandbox. Lo que vale en cada sesión está en [`entorno-sandbox-kiro.md`](entorno-sandbox-kiro.md). Estas dos secciones estaban allí hasta el 2026-11-21 y pasaron con el mismo texto, salvo la referencia a «Arranque de sesión», que ahora nombra su archivo.
+No se lee al arrancar. Se lee antes de cambiar de sesión o de cuenta de Kiro, y antes de correr `pnpm run test:integration` dentro del sandbox. Lo que vale en cada sesión está en [`entorno-sandbox-kiro.md`](entorno-sandbox-kiro.md). Estas dos secciones estaban allí hasta el PR #123, del 2026-11-22, y pasaron con el mismo texto, salvo la referencia a «Arranque de sesión», que ahora nombra su archivo.
 
 ## Cambio de sesión
 
