@@ -85,8 +85,8 @@ El modelo revisor contrasta el diff con fuentes canónicas y vectores independie
 
 - Cada PR recibe una sola revisión semántica.
 - Solo se repite si encontró hallazgos bloqueantes, y únicamente tras corregirlos.
-- En lo que dice un documento, solo bloquean un dato falso, una contradicción con otra fuente, una regla o una información perdida, una cita o un enlace roto, o una decisión del propietario que falta o está mal registrada. Un problema de redacción es menor.
-- Los hallazgos menores no reabren la revisión. Se corrigen en el mismo PR, antes del comentario de listo ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Documentación más corta»). El que no se pueda corregir ahí queda anotado en el PR con su motivo.
+- En lo que dice un documento, solo bloquean un dato falso, una contradicción con otra fuente, una regla o una información perdida, una cita o un enlace roto, una decisión del propietario que falta o está mal registrada, o algo que prohíben las «Invariantes no negociables», como un secreto. Un problema de redacción es menor.
+- Los hallazgos menores no reabren la revisión. Se corrigen en el mismo PR, antes del comentario de listo ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Documentación más corta»). El que no se pueda corregir ahí queda anotado, con su motivo, en el «Relevo» del PR y, si sigue abierto después de fusionarlo, en `PROJECT_STATUS.md` («Quedan abiertos de las entregas hechas»).
 
 ### Fusión
 

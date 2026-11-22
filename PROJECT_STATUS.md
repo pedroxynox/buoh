@@ -105,5 +105,6 @@ Este archivo solo describe lo vigente:
 
 - una entrega terminada queda en una línea de «Entregas de la Fase 2», con el enlace a su evidencia; su detalle queda en su ADR, en su evidencia y en sus PR;
 - cada decisión del propietario, con sus palabras y su fecha, va a las [decisiones vigentes](docs/gobierno/decisiones-vigentes.md), y aquí solo su efecto en el trabajo siguiente;
-- el [historial de entregas](docs/plan/historial-de-entregas.md) está congelado: no se le añade nada;
-- al cambiar `plan`, el mismo PR actualiza las partes del plan que se leen al arrancar (`.kiro/steering/entorno-sandbox-kiro.md`, «Arranque de sesión», paso 3).
+- el [historial de entregas](docs/plan/historial-de-entregas.md) está congelado: no se le añade nada.
+
+Al cambiar `plan` o `parallel_plans`, el mismo PR actualiza las partes de los planes que se leen al arrancar (`.kiro/steering/entorno-sandbox-kiro.md`, «Arranque de sesión», paso 3).

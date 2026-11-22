@@ -115,7 +115,7 @@ Tipos de pendiente:
 
 ### P-F1-07. Pendientes menores ya registrados — menor registrado
 
-Hasta el 2026-11-21 estaban en `PROJECT_STATUS.md`. El PR #122 los pasó aquí abajo, en el mismo orden, a «Pendientes registrados de F1.4a», «de F1.3» y «de F1.2», con el mismo texto salvo las rutas de los enlaces y la referencia a «Siguiente tarea autorizada», que ahora nombra el [historial de entregas](historial-de-entregas.md). Desde entonces cambian aquí, como el resto de este documento. Entre ellos, dos tenían fecha límite explícita, y los dos están resueltos:
+Hasta el PR #122, del 2026-11-22, estaban en `PROJECT_STATUS.md`. Ese PR los pasó aquí abajo, en el mismo orden, a «Pendientes registrados de F1.4a», «de F1.3» y «de F1.2», con el mismo texto salvo las rutas de los enlaces y la referencia a «Siguiente tarea autorizada», que ahora nombra el [historial de entregas](historial-de-entregas.md). Desde entonces cambian aquí, como el resto de este documento. Entre ellos, dos tenían fecha límite explícita, y los dos están resueltos:
 
 - antes de publicar datasets vivos largos: límites de lectura y artefactos que crecen sin segmentar (F1.3, pendiente 2). Lo resolvió F2.5 (`F2-DATASET-001`), con los PR 2 y 3a de [ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) (abajo, «de F1.3»);
 - antes de desplegar: un rol de PostgreSQL de solo inserción y lectura (F1.3, pendiente 4; ADR-0006). Lo resolvió F2.2 (`F2-ROLE-001`; abajo, «de F1.3»).
@@ -136,7 +136,7 @@ El antiguo pendiente 3 (el sink `nonTickFrame` no deja ver un `error`) quedó re
 
 #### Pendientes registrados de F1.3
 
-Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la lista completa está en cada PR. Los más relevantes para el despliegue están abajo. [ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) decidió cómo se resolvían los tres primeros (§7 y §9), que ya están resueltos:
+Detectados en las revisiones semánticas de F1.3a (PR #6) y F1.3b (PR #7); la lista completa está en cada PR. Los más relevantes para el despliegue están abajo. [ADR-0020](../arquitectura/adr/0020-datasets-vivos.md) decidió cómo se resolvían los tres primeros (§7 y §9), ya resueltos (abajo, después de la lista). Sigue abierto:
 
 <!-- Los pendientes 1 a 4 quedaron resueltos: ver los párrafos debajo de la lista. -->
 
