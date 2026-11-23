@@ -13,6 +13,7 @@ import {
 import { failureReason } from '../source-log/source-event-log.js';
 import {
   isLogExpired,
+  LOG_SEQUENCES,
   logLocation,
   MAX_LOG_NUMBER,
   R_100_SEQUENCE,
@@ -603,18 +604,24 @@ const UNOBSERVED_HEALTH_ALERTS: ReadonlySet<string> = new Set([
  * `data:health --symbol <símbolo> --log <n>` sobre el log de la secuencia, en un proceso aparte con
  * el entorno de `healthEnvironment`. Su `HealthReport` va al informe, con la secuencia, que se
  * guarda en ese log. Una salud que no es `healthy` no es un fallo; sí lo son la salida 2, un proceso
- * que no termina en su plazo o una línea que no es un `HealthReport`.
+ * que no termina en su plazo, uno que no arranca, con su motivo saneado, o una línea que no es un
+ * `HealthReport`. Nunca rechaza: así el fallo de una secuencia no se lleva el informe de otra.
  */
 async function observeLog(
   input: OperationsInput,
   log: LogLocation,
   sequence: LogSequence,
 ): Promise<StepOutcome> {
-  const result = await input.runChild(
-    'health',
-    ['--json', '--symbol', sequence.name, '--log', String(log.number)],
-    healthEnvironment(input.config),
-  );
+  let result: Awaited<ReturnType<RunChild>>;
+  try {
+    result = await input.runChild(
+      'health',
+      ['--json', '--symbol', sequence.name, '--log', String(log.number)],
+      healthEnvironment(input.config),
+    );
+  } catch (error) {
+    return failedHealth(log, sequence, { reason: failureReason(error) });
+  }
   if (result.stderr.length > 0) {
     input.forwardChildStderr(result.stderr);
   }
@@ -660,10 +667,12 @@ function failedHealth(log: LogLocation | null, sequence: LogSequence, fields: Re
 }
 
 /**
- * Paso 3 (ADR-0018 §7 y §11): la retención. De los logs vencidos de todas las secuencias de la
- * configuración (ADR-0021 §1), uno por ejecución: el de menor número de cada secuencia y, de esos, el
+ * Paso 3 (ADR-0018 §7 y §11): la retención. De los logs vencidos de todas las secuencias de
+ * `LOG_SEQUENCES` (ADR-0021 §1), también la de un símbolo que ya no está en la configuración, para
+ * que sus logs se borren igual, uno por ejecución: el de menor número de cada secuencia y, de esos, el
  * de la última escritura más antigua, o, con la misma, el de la secuencia que va antes en la tabla.
- * Borra
+ * Una secuencia cuyos logs no se pueden listar va en `unlisted` con su motivo, y el paso falla, pero
+ * sigue con las demás. Borra
  * con el token `operaciones` los objetos de su prefijo, por páginas de `RETENTION_PAGE_KEYS` claves
  * y con `RETENTION_CONCURRENCY` borrados a la vez. Un objeto que la regla de bloqueo del bucket
  * todavía protege queda para una ejecución siguiente (`locked`). Cuando no queda ninguno así y el
@@ -677,54 +686,53 @@ function failedHealth(log: LogLocation | null, sequence: LogSequence, fields: Re
  */
 async function retention(input: OperationsInput): Promise<StepOutcome> {
   const startedMs = Date.parse(input.now());
-  let target: { readonly log: CaptureLog; readonly sequence: LogSequence } | undefined;
-  try {
-    const now = input.now();
-    const candidates: { readonly log: CaptureLog; readonly sequence: LogSequence }[] = [];
-    for (const sequence of input.config.sequences) {
+  const now = input.now();
+  const candidates: { readonly log: CaptureLog; readonly sequence: LogSequence }[] = [];
+  const unlisted: Report[] = [];
+  for (const sequence of LOG_SEQUENCES) {
+    try {
       const [lowest] = (await input.database.listLogs(sequence))
         .filter((log) => isLogExpired(log, now))
         .sort((left, right) => left.location.number - right.location.number);
       if (lowest !== undefined) {
         candidates.push({ log: lowest, sequence });
       }
+    } catch (error) {
+      unlisted.push({ reason: failureReason(error), sequence: sequence.name });
     }
-    // Un log vencido tiene escrituras. Con la misma hora gana el primero: la secuencia que va antes.
-    target = candidates.reduce<(typeof candidates)[number] | undefined>(
-      (best, item) =>
-        best === undefined ||
-        Date.parse(item.log.lastWriteUtc ?? '') < Date.parse(best.log.lastWriteUtc ?? '')
-          ? item
-          : best,
-      undefined,
-    );
-  } catch (error) {
-    return {
-      log: null,
-      report: { log: null, reason: failureReason(error) },
-      status: 'failed',
-      store: true,
-    };
   }
+  // Un log vencido tiene escrituras. Con la misma hora gana el primero: la secuencia que va antes.
+  const target = candidates.reduce<(typeof candidates)[number] | undefined>(
+    (best, item) =>
+      best === undefined ||
+      Date.parse(item.log.lastWriteUtc ?? '') < Date.parse(best.log.lastWriteUtc ?? '')
+        ? item
+        : best,
+    undefined,
+  );
+  /** Las secuencias sin listar: el paso falla con el motivo de la primera. */
+  const listing: Report =
+    unlisted[0] === undefined ? {} : { reason: unlisted[0]['reason'] ?? null, unlisted };
   if (target === undefined) {
-    return { log: null, report: { log: null }, status: 'completed', store: false };
+    return unlisted.length === 0
+      ? { log: null, report: { log: null }, status: 'completed', store: false }
+      : { log: null, report: { log: null, ...listing }, status: 'failed', store: true };
   }
   const expired = target.log.location;
   const { sequence } = target;
   const progress: DeletionProgress = { deleted: 0, locked: 0, stopped: false };
-  const outcome = (fields: Report = {}): StepOutcome => ({
-    log: null,
-    report: {
+  const outcome = (fields: Report = {}): StepOutcome => {
+    const report: Report = {
       deleted: progress.deleted,
       locked: progress.locked,
       log: expired.number,
       schema_dropped: false,
       sequence: sequence.name,
+      ...listing,
       ...fields,
-    },
-    status: 'reason' in fields ? 'failed' : 'completed',
-    store: true,
-  });
+    };
+    return { log: null, report, status: 'reason' in report ? 'failed' : 'completed', store: true };
+  };
   /** `work` con lo que queda del plazo de la retención, o `null` si ya venció o vence antes. */
   const timed = <T>(work: () => Promise<T>): Promise<T | null> => {
     const left = RETENTION_DEADLINE_MS - (Date.parse(input.now()) - startedMs);
@@ -785,8 +793,9 @@ async function retention(input: OperationsInput): Promise<StepOutcome> {
  * coincide va al informe y deja la alerta `operations_segment_mismatch`: es un resultado, no un fallo
  * del paso. Sí lo son que PostgreSQL o el almacenamiento no respondan y que no termine en
  * `VERIFICATION_DEADLINE_MS`; lo que queda espera a su ejecución del día siguiente. Cada segmento
- * del informe y de la alerta lleva la secuencia de su log. El informe se guarda en cada ejecución, en
- * el log activo de R_100.
+ * del informe y de la alerta lleva la secuencia de su log. Una secuencia cuyos logs o segmentos no se
+ * pueden buscar va en `unlisted` con su motivo, y el paso falla, pero lee los de las demás. El
+ * informe se guarda en cada ejecución, en el log activo de R_100.
  */
 async function verification(input: OperationsInput, startedAt: string): Promise<StepOutcome> {
   const slot = verificationSlot(startedAt);
@@ -794,35 +803,45 @@ async function verification(input: OperationsInput, startedAt: string): Promise<
   const mismatched: Report[] = [];
   let due: number | null = null;
   let read = 0;
-  const outcome = (fields: Report = {}): StepOutcome => ({
-    log: null,
-    report: { due, mismatched, read, slot, ...fields },
-    status: 'reason' in fields ? 'failed' : 'completed',
-    store: true,
-  });
-  const work: {
+  interface Work {
     readonly log: LogLocation;
     readonly segments: DueSegment[];
     readonly sequence: LogSequence;
-  }[] = [];
-  try {
-    for (const sequence of input.config.sequences) {
+  }
+  const work: Work[] = [];
+  const unlisted: Report[] = [];
+  for (const sequence of input.config.sequences) {
+    // Una secuencia entra entera o no entra.
+    const found: Work[] = [];
+    try {
       const logs = await input.database.listLogs(sequence);
       const now = input.now();
       for (const log of logs) {
         if (log.readable && !isLogExpired(log, now)) {
-          work.push({
+          found.push({
             log: log.location,
             segments: await input.database.listSegmentsDue(log.location, slot),
             sequence,
           });
         }
       }
+      work.push(...found);
+    } catch (error) {
+      unlisted.push({ reason: failureReason(error), sequence: sequence.name });
     }
-  } catch (error) {
-    return outcome({ reason: failureReason(error) });
   }
-  due = work.reduce((sum, item) => sum + item.segments.length, 0);
+  /** Las secuencias sin buscar: el paso falla con el motivo de la primera. */
+  const listing: Report =
+    unlisted[0] === undefined ? {} : { reason: unlisted[0]['reason'] ?? null, unlisted };
+  const outcome = (fields: Report = {}): StepOutcome => {
+    const report: Report = { due, mismatched, read, slot, ...listing, ...fields };
+    return { log: null, report, status: 'reason' in report ? 'failed' : 'completed', store: true };
+  };
+  // Sin ningún log buscado, los que tocaban no se saben.
+  due =
+    unlisted.length > 0 && work.length === 0
+      ? null
+      : work.reduce((sum, item) => sum + item.segments.length, 0);
   for (const { log, segments, sequence } of work) {
     if (segments.length === 0) {
       continue;

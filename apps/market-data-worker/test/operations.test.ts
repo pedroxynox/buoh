@@ -47,6 +47,7 @@ import {
   type LoginCheck,
   type LogProfileAssignment,
   type LogObjects,
+  type LogSequence,
   type LogSchemaDrop,
   type OperationalAlert,
   type OperationsConfig,
@@ -890,8 +891,10 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       'report:1:health',
       // El informe final: ningún log terminó, así que no lee nada más ni guarda ningún informe.
       'list',
-      // La retención: ningún log venció, así que no abre los objetos ni guarda su informe.
+      // La retención, en cada secuencia de la tabla: ningún log venció, así que no abre los objetos
+      // ni guarda su informe.
       'list',
+      'list:frxXAUUSD',
       'list',
       'segments:1:120',
       'list',
@@ -1475,8 +1478,10 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
       'list',
       'list',
       'list',
-      // La retención: la búsqueda del log vencido y el intento de guardar su informe.
+      // La retención: la búsqueda del log vencido en cada secuencia y el intento de guardar su
+      // informe.
       'list',
+      'list:frxXAUUSD',
       'list',
       'list',
       'list',
@@ -1538,13 +1543,29 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
         status: 'failed',
         step: 'final_health',
       }),
+      // Cada secuencia que no se pudo listar va en unlisted, con su motivo: la retención mira todas
+      // las de la tabla, y la verificación, las de la configuración.
       expect.objectContaining({
-        report: { log: null, reason: 'ECONNREFUSED' },
+        report: {
+          log: null,
+          reason: 'ECONNREFUSED',
+          unlisted: [
+            { reason: 'ECONNREFUSED', sequence: 'R_100' },
+            { reason: 'ECONNREFUSED', sequence: 'frxXAUUSD' },
+          ],
+        },
         status: 'failed',
         step: 'retention',
       }),
       expect.objectContaining({
-        report: { due: null, mismatched: [], read: 0, reason: 'ECONNREFUSED', slot: 120 },
+        report: {
+          due: null,
+          mismatched: [],
+          read: 0,
+          reason: 'ECONNREFUSED',
+          slot: 120,
+          unlisted: [{ reason: 'ECONNREFUSED', sequence: 'R_100' }],
+        },
         status: 'failed',
         step: 'verification',
       }),
@@ -4664,6 +4685,97 @@ describe('buoh-operaciones por secuencia (ADR-0021 §1, precisión del PR 2b)', 
     ).toEqual([['buoh_log_000001', 'R_100']]);
   });
 
+  it('un data:health del oro que no arranca es un fallo de su secuencia, en su log: la salud de R_100 se guarda igual', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, NOW), goldLog(1, NOW)] });
+    const base = fakeChildren();
+    const children: ReturnType<typeof fakeChildren> = {
+      ...base,
+      runChild: (child, args, env, options) =>
+        child === 'health' && args.includes('frxXAUUSD')
+          ? Promise.reject(Object.assign(new Error('spawn sintético'), { code: 'EAGAIN' }))
+          : base.runChild(child, args, env, options),
+    };
+    const { alerts, lines, result } = await run(db, children, { config: GOLD_CONFIG });
+
+    expect(result.status).toBe('failed');
+    expect(linesOf(lines, 'health').map((line) => [line['status'], line['report']])).toEqual([
+      ['completed', { alerts: [], exit_code: 1, log: 1, report: REPORT, sequence: 'R_100' }],
+      ['failed', { log: 1, reason: 'EAGAIN', sequence: 'frxXAUUSD' }],
+    ]);
+    expect(alerts).toContainEqual({
+      event: 'operations_step_failed',
+      reason: 'EAGAIN',
+      sequence: 'frxXAUUSD',
+      step: 'health',
+    });
+    expect(
+      db.reports
+        .filter(({ row }) => row.step === 'health')
+        .map(({ row, schema }) => [schema, row.status]),
+    ).toEqual([
+      ['buoh_log_000001', 'completed'],
+      [GOLD_1, 'failed'],
+    ]);
+  });
+
+  it('la retención y la verificación siguen con las demás secuencias si una no se puede listar, y la retención borra también los logs de una secuencia que ya no está en la configuración', async () => {
+    const OLD = '2026-01-20T00:00:00.000Z';
+    const r100Key = `${logLocation(1).prefix}sha256/0000`;
+    const listed = (database: ReturnType<typeof fakeDatabase>, failing: LogSequence) => {
+      const list = database.database.listLogs.bind(database.database);
+      database.database.listLogs = (sequence) =>
+        sequence === failing ? Promise.reject(coded('57P01')) : list(sequence);
+    };
+    const kept = segment(120);
+    const db = fakeDatabase({
+      loggedIn: loggedIn(),
+      logs: [log(1, OLD), log(2, NOW), log(3)],
+      segments: { 2: [kept.row] },
+    });
+    // Los logs del oro no se pueden listar en ningún paso.
+    listed(db, GOLD_SEQUENCE);
+    const deletion = fakeDeletion({ keys: [r100Key] });
+    const objects = fakeObjects({ stored: { [segmentKey(2, kept.row)]: kept.physical } });
+    const { lines } = await run(db, fakeChildren(), { config: GOLD_CONFIG, deletion, objects });
+
+    expect(linesOf(lines, 'retention')[0]).toMatchObject({
+      report: {
+        deleted: 1,
+        log: 1,
+        reason: '57P01',
+        schema_dropped: true,
+        sequence: 'R_100',
+        unlisted: [{ reason: '57P01', sequence: 'frxXAUUSD' }],
+      },
+      status: 'failed',
+    });
+    expect(linesOf(lines, 'verification')[0]).toMatchObject({
+      report: {
+        due: 1,
+        read: 1,
+        reason: '57P01',
+        unlisted: [{ reason: '57P01', sequence: 'frxXAUUSD' }],
+      },
+      status: 'failed',
+    });
+
+    // Sin el oro en la configuración, su log vencido se borra igual.
+    const left = fakeDatabase({
+      loggedIn: loggedIn(),
+      logs: [log(1, NOW), goldLog(1, OLD), goldLog(2, OLD)],
+    });
+    const goldKey = `${gold(1).prefix}sha256/0000`;
+    const goldDeletion = fakeDeletion({ keys: [goldKey] });
+    const after = await run(left, fakeChildren(), { deletion: goldDeletion });
+    expect(linesOf(after.lines, 'retention')[0]).toMatchObject({
+      report: { deleted: 1, log: 1, schema_dropped: true, sequence: 'frxXAUUSD' },
+      status: 'completed',
+    });
+    expect(left.drops).toEqual([{ log: 1, now: NOW, sequence: 'frxXAUUSD' }]);
+    // Sin el oro en la configuración, ni la salud ni la verificación miran sus logs.
+    expect(left.calls.filter((call) => call.startsWith(`segments:${GOLD_1}`))).toEqual([]);
+  });
+
   it('el informe final de un log del oro que terminó se pide con su símbolo y se guarda en ese log', async () => {
     const db = fakeDatabase({
       loggedIn: loggedIn(),
@@ -4815,7 +4927,7 @@ describe('buoh-operaciones por secuencia (ADR-0021 §1, precisión del PR 2b)', 
       ...extra,
     });
 
-    it('un estado de antes de las secuencias es de R_100: el log detenido se salta, y el estado nuevo lleva la secuencia', async () => {
+    it('un estado sin secuencia es de R_100: el log detenido se salta, y el estado se guarda igual, sin secuencia', async () => {
       const db = datasetsDatabase();
       db.reports.push(
         stateRow(700, {

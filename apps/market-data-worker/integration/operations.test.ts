@@ -1532,6 +1532,12 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       ]);
       // Sin escrituras no vence: el borrado de su esquema no borra nada.
       expect(await database.dropExpiredLog(gold, clock.now(), GOLD_SEQUENCE)).toBe('not_expired');
+      // Un log de otra secuencia se rechaza sin leer nada, exista o no un log con su número.
+      for (const other of [logLocation(1), logLocation(999_997)]) {
+        await expect(
+          database.dropExpiredLog(other, clock.now(), GOLD_SEQUENCE),
+        ).rejects.toBeInstanceOf(TypeError);
+      }
     } finally {
       await database.close();
     }
@@ -1544,6 +1550,36 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       expect(await deletion.list(null, 10)).toEqual(['sha256/oro-retencion']);
       expect(await deletion.delete('sha256/oro-retencion')).toBe('deleted');
       expect(await deletion.list(null, 10)).toEqual([]);
+
+      // Con una escritura de hace más de 30 días, el log 1 del oro vence, y la retención lo borra
+      // entero en una ejecución: su objeto, bajo su prefijo, y su esquema.
+      expect(
+        await sqlStateAs(
+          POSTGRES_ROLES.ingest,
+          passwords.ingest,
+          `INSERT INTO ${gold.schema}.ingestion_heartbeats
+             (heartbeat_id, source, run_id, observed_at_utc, pg_backend_pid, connection_state,
+              backlog_count, backlog_bytes)
+           VALUES ('${uuid(9501)}', '${DERIV_SOURCE}', '${uuid(9502)}', '2026-01-01T00:00:00.000Z',
+                   4343, 'connecting', 0, 0)`,
+        ),
+      ).toBeNull();
+      await objects.putIfAbsent('sha256/oro-vencido', new TextEncoder().encode('oro'), 'x/y');
+      const expired = await operations(env);
+      expect(expired.step('retention')).toMatchObject({
+        report: { deleted: 1, locked: 0, log: 1, schema_dropped: true, sequence: 'frxXAUUSD' },
+        status: 'completed',
+      });
+      expect(await deletion.list(null, 10)).toEqual([]);
+      const { rows: left } = await ready(admin).query(
+        'SELECT 1 FROM pg_namespace WHERE nspname = $1',
+        [gold.schema],
+      );
+      expect(left).toEqual([]);
+      // El oro sigue con su log 2, que preparó la misma ejecución.
+      expect(await reportsOf(logLocation(2, GOLD_SEQUENCE).schema)).toContainEqual(
+        expect.objectContaining({ step: 'health' }),
+      );
     } finally {
       deletion.close();
       objects.destroy();

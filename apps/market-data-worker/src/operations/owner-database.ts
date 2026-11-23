@@ -20,6 +20,7 @@ import {
   isLogExpired,
   listCaptureLogs,
   LOG_SEQUENCES,
+  logLocation,
   logOfSchema,
   logSchemaPattern,
   readCaptureLog,
@@ -353,34 +354,34 @@ export function openOwnerDatabase(
         await client.query(`CREATE SCHEMA IF NOT EXISTS ${pg.escapeIdentifier(log.schema)}`);
       }),
     dropExpiredLog: (log, now, sequence) =>
-      asOwner(async (client) => {
-        await client.query('BEGIN');
-        try {
-          await client.query(`SET LOCAL lock_timeout = ${String(DROP_LOG_LOCK_TIMEOUT_MS)}`);
-          const current = await readCaptureLog(client, {
-            number: log.number,
-            sequence,
-            source: input.source,
-          });
-          if (current !== null && current.location.schema !== log.schema) {
-            throw new TypeError('El log que se borra no es de esa secuencia.');
-          }
-          let result: LogSchemaDrop = 'absent';
-          if (current !== null) {
-            result = isLogExpired(current, now) ? 'dropped' : 'not_expired';
-          }
-          if (result === 'dropped') {
-            await client.query(`DROP SCHEMA ${pg.escapeIdentifier(log.schema)} CASCADE`);
-            await client.query('COMMIT');
-          } else {
-            await client.query('ROLLBACK');
-          }
-          return result;
-        } catch (error) {
-          await client.query('ROLLBACK').catch(() => undefined);
-          throw error;
-        }
-      }),
+      // Un log de otra secuencia se rechaza antes de leer nada: la lectura sería la de otro esquema.
+      logLocation(log.number, sequence).schema !== log.schema
+        ? Promise.reject(new TypeError('El log que se borra no es de esa secuencia.'))
+        : asOwner(async (client) => {
+            await client.query('BEGIN');
+            try {
+              await client.query(`SET LOCAL lock_timeout = ${String(DROP_LOG_LOCK_TIMEOUT_MS)}`);
+              const current = await readCaptureLog(client, {
+                number: log.number,
+                sequence,
+                source: input.source,
+              });
+              let result: LogSchemaDrop = 'absent';
+              if (current !== null) {
+                result = isLogExpired(current, now) ? 'dropped' : 'not_expired';
+              }
+              if (result === 'dropped') {
+                await client.query(`DROP SCHEMA ${pg.escapeIdentifier(log.schema)} CASCADE`);
+                await client.query('COMMIT');
+              } else {
+                await client.query('ROLLBACK');
+              }
+              return result;
+            } catch (error) {
+              await client.query('ROLLBACK').catch(() => undefined);
+              throw error;
+            }
+          }),
     ensureApiReaderRole: () => withClient((client) => ensureApiReaderRole(client)),
     ensureApiRole: () => withClient((client) => ensureApiRole(client)),
     ensurePublicationRole: () => withClient((client) => ensurePublicationRole(client)),

@@ -29,7 +29,8 @@ import { SANITIZED } from './sanitized.js';
 export const PUBLICATION_STEP = 'publication';
 /**
  * La secuencia que publica el paso 6, la única con umbrales medidos (ADR-0020 §1): pasa su símbolo a
- * `datasets:publish` (`--symbol`), y cada log detenido de su estado lleva su nombre (ADR-0021 §1).
+ * `datasets:publish` (`--symbol`). En el estado, solo un log de otra secuencia lleva `sequence`;
+ * uno sin ella es de R_100 (`storedState`; ADR-0021 §1).
  * El PR 7 de ADR-0021 §9 publica también el oro.
  */
 export const PUBLISHED_SEQUENCE = R_100_SEQUENCE;
@@ -115,8 +116,8 @@ const attemptLineSchema = z.object({
 });
 
 /**
- * La secuencia de un log del estado (ADR-0021 §1). Un estado de antes de las secuencias no la lleva,
- * y es de R_100, la única que se publicaba.
+ * La secuencia de un log del estado (ADR-0021 §1). Los de R_100 se guardan sin ella, como antes de
+ * las secuencias (`storedState`), así que una entrada sin ella es de R_100.
  */
 const stateSequence = z
   .enum(LOG_SEQUENCES.map((item) => item.name) as [string, ...string[]])
