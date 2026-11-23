@@ -61,7 +61,7 @@ La duración de la publicación es la que informa el proceso (`duration_ms`), de
 
 ### Cómo se midió
 
-El agente leyó producción el 2026-11-23, de las 00:25 a las 00:40 UTC, con su acceso de solo lectura ([runbook de ingesta](runbook-ingesta-de-datos.md), «Acceso del agente»): el rol `buoh_agente`, con `verify-full` y en transacciones de solo lectura, y el token `agente`. Mientras leía, la única sesión de `buoh_agente` era la suya.
+El agente leyó producción el 2026-11-23, de las 00:25 a las 00:48 UTC, con su acceso de solo lectura ([runbook de ingesta](runbook-ingesta-de-datos.md), «Acceso del agente»): el rol `buoh_agente`, con `verify-full` y en transacciones de solo lectura, y el token `agente`. Mientras leía, la única sesión de `buoh_agente` era la suya.
 
 - En `buoh_datasets`: `published_manifest_records`, `dataset_log_ranges`, `dataset_verifications`, `dataset_quality_incidents` y el registro de la publicación (`operational_incidents` y `operational_conditions`).
 - En los logs 1 a 6: los informes de `buoh-operaciones` (`operations_reports`), los segmentos cerrados, los latidos y el índice de los source events, los puntos de control del estado vivo (`live_derivation_checkpoints`) y la fila de `log_quality_profile`.
