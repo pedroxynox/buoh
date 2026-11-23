@@ -673,8 +673,16 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
     return pool;
   }
 
-  /** La publicación de `logNumber` con `pool`, y su registro operativo con `registryPool`. */
-  async function publisher(logNumber: number, pool: Pool, registryPool: Pool = pool) {
+  /**
+   * La publicación de `logNumber` de `sequence` (R_100 sin ella) con `pool`, y su registro operativo
+   * con `registryPool`.
+   */
+  async function publisher(
+    logNumber: number,
+    pool: Pool,
+    registryPool: Pool = pool,
+    sequence = 'R_100',
+  ) {
     const store = new PostgresDatasetStore(pool);
     const operational = new PostgresOperationalStore(registryPool);
     const registry = await OperationalRegistry.open({
@@ -690,7 +698,7 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
           environment: 'test',
           keyPrefix: KEY_PREFIX,
           logNumber,
-          sequence: 'R_100',
+          sequence,
           now: () => at.replace(/\.000Z$/u, '.500Z'),
           objects: target,
           plan: due,
@@ -706,6 +714,30 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
       target,
     };
   }
+
+  it('el log 1 del oro se publica en su propia secuencia, aparte del log 1 de R_100 (ADR-0021 §1)', async () => {
+    const publication = poolAs(PUBLICATION_ROLE, passwords.publication);
+    const r100 = await publisher(1, publication);
+    const before = await r100.store.lastLogRange('R_100', 1);
+    const gold = await publisher(1, publication, publication, 'frxXAUUSD');
+    const principal = fixture.scenarios.find((item) => item.name === 'principal');
+    if (principal === undefined) throw new TypeError('Falta principal.');
+    const due = { ...plan('principal', 0), segments: principal.segments.slice(1, 2), to: 0 };
+    const outcome = await gold.publish(
+      due,
+      '019a8000-0000-7000-8000-000000000071',
+      '2026-11-14T07:05:00.000Z',
+    );
+    expect(outcome.status).toBe('published');
+    expect(outcome.range).toMatchObject({ first_segment: 0, log_number: 1, sequence: 'frxXAUUSD' });
+    const { rows } = await ready(admin).query<{ sequence: string }>(
+      `SELECT sequence FROM ${DATASETS_SCHEMA}.dataset_log_ranges
+        WHERE publication_id = '019a8000-0000-7000-8000-000000000071'`,
+    );
+    expect(rows).toEqual([{ sequence: 'frxXAUUSD' }]);
+    expect(await gold.store.lastLogRange('frxXAUUSD', 1)).toEqual(outcome.range);
+    expect(await r100.store.lastLogRange('R_100', 1)).toEqual(before);
+  });
 
   it('publica con su fila de rango en el mismo commit, en gzip bajo datasets/, y se reproduce en los dos modos', async () => {
     const { publish, store, target } = await publisher(
