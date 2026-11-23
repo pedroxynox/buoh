@@ -322,9 +322,9 @@ describe('publishLiveDataset (ADR-0020 §9)', () => {
       PublicationConflictError,
     );
     // El mismo log y los mismos segmentos de otra secuencia son otro rango (ADR-0021 §1).
-    await expect(
-      publish(due, ATTEMPT_2, AT_2, { sequence: 'frxXAUUSD' }),
-    ).rejects.toBeInstanceOf(PublicationConflictError);
+    await expect(publish(due, ATTEMPT_2, AT_2, { sequence: 'frxXAUUSD' })).rejects.toBeInstanceOf(
+      PublicationConflictError,
+    );
     expect(store.records).toHaveLength(1);
   });
 
