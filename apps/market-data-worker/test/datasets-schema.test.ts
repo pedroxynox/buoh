@@ -60,6 +60,7 @@ describe('las migraciones de buoh_datasets (ADR-0020 §5)', () => {
     expect(DATASETS_SCHEMA).toBe('buoh_datasets');
     expect((await loadMigrations(DATASETS_MIGRATIONS)).map((m) => m.name)).toEqual([
       '0001_datasets.sql',
+      '0002_secuencias.sql',
     ]);
     expect((await loadMigrations()).map((m) => m.name)).not.toContain('0001_datasets.sql');
     expect(DATASETS_MIGRATIONS.directory.pathname).toMatch(/\/migrations-datasets\/$/u);
@@ -68,7 +69,10 @@ describe('las migraciones de buoh_datasets (ADR-0020 §5)', () => {
   it('migrateDatasets las aplica como el dueño, en buoh_datasets, que crea si no existe, con su propio bloqueo', async () => {
     const { pool, queries } = fakeClient();
     const result = await migrateDatasets(pool, { ownerRole: 'buoh_dueno' });
-    expect(result).toEqual({ applied: ['0001_datasets.sql'], current: ['0001_datasets.sql'] });
+    expect(result).toEqual({
+      applied: ['0001_datasets.sql', '0002_secuencias.sql'],
+      current: ['0001_datasets.sql', '0002_secuencias.sql'],
+    });
     const sent = normalized(queries);
     expect(sent.slice(0, 5)).toEqual([
       'BEGIN',

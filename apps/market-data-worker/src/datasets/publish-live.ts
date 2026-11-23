@@ -30,7 +30,7 @@ export interface PublishLiveDatasetInput {
   readonly keyPrefix?: string;
   /** Los límites de lectura del replay; por defecto, los suyos. */
   readonly limits?: ReplayReadLimits;
-  /** El número del log de los segmentos del plan. */
+  /** El número del log de los segmentos del plan, en su secuencia (`sequence`). */
   readonly logNumber: number;
   /** Reloj UTC inyectado, para la hora de una incidencia. */
   readonly now: () => string;
@@ -46,6 +46,8 @@ export interface PublishLiveDatasetInput {
   readonly published_at_utc: string;
   /** El registro operativo de la publicación, sobre las tablas de `buoh_datasets`. */
   readonly registry: OperationalRegistry;
+  /** El nombre de la secuencia del log (ADR-0021 §1), como `R_100`. */
+  readonly sequence: string;
   readonly store: DatasetStore;
   /** Versión de zlib del writer gzip (`process.versions.zlib` en runtime). */
   readonly zlibVersion: string;
@@ -77,6 +79,7 @@ function sameRange(left: DatasetLogRange, right: DatasetLogRange): boolean {
   const same = (a: readonly string[], b: readonly string[]) =>
     a.length === b.length && a.every((value, index) => value === b[index]);
   return (
+    left.sequence === right.sequence &&
     left.log_number === right.log_number &&
     left.first_segment === right.first_segment &&
     left.last_segment === right.last_segment &&
@@ -139,6 +142,7 @@ export async function publishLiveDataset(
     first_segment: plan.from,
     last_segment: plan.to,
     log_number: input.logNumber,
+    sequence: input.sequence,
     // Únicos y ordenados, para que la fila y su comparación no dependan del orden en que llegan.
     open: {
       open_condition_types: canonical(plan.open.open_condition_types),

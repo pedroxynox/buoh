@@ -25,6 +25,7 @@ const RANGE = {
   last_segment: 1,
   log_number: 1,
   open: { open_condition_types: [], pending_continuity_symbols: [] },
+  sequence: 'R_100',
 };
 
 async function commitInput() {

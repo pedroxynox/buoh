@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { connect as tcpConnect, createServer, type Server } from 'node:net';
 import { resolve } from 'node:path';
 
@@ -10,6 +10,7 @@ import {
   CommitOutcomeUnknownError,
   createPool,
   createS3Client,
+  DATASETS_MIGRATIONS,
   DATASETS_OWNER_TABLES,
   DATASETS_PREFIX,
   DATASETS_PUBLICATION_TABLES,
@@ -20,6 +21,7 @@ import {
   grantDatasetsPrivileges,
   loadConfig,
   loadSyntheticFixture,
+  loadMigrations,
   LOGIN_ROLES,
   migrateDatasets,
   MIGRATIONS_TABLE,
@@ -179,8 +181,8 @@ afterAll(async () => {
 describe('las migraciones de buoh_datasets (ADR-0020 §5)', () => {
   it('crean el esquema y sus tablas, de buoh_dueno, y una segunda vez no aplican nada', async () => {
     expect(firstMigration).toEqual({
-      applied: ['0001_datasets.sql'],
-      current: ['0001_datasets.sql'],
+      applied: ['0001_datasets.sql', '0002_secuencias.sql'],
+      current: ['0001_datasets.sql', '0002_secuencias.sql'],
     });
     const { rows } = await ready(admin).query<{ owner: string; table_name: string }>(
       `SELECT tablename AS table_name, tableowner AS owner FROM pg_tables
@@ -196,7 +198,7 @@ describe('las migraciones de buoh_datasets (ADR-0020 §5)', () => {
     expect(schema.rows[0]?.owner).toBe(POSTGRES_ROLES.owner);
     expect(await migrateDatasets(ready(renderPool), { ownerRole: POSTGRES_ROLES.owner })).toEqual({
       applied: [],
-      current: ['0001_datasets.sql'],
+      current: ['0001_datasets.sql', '0002_secuencias.sql'],
     });
   });
 
@@ -205,9 +207,9 @@ describe('las migraciones de buoh_datasets (ADR-0020 §5)', () => {
       sqlState(
         ready(admin),
         `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
-           (dataset_id, publication_id, log_number, first_segment, last_segment, clean,
+           (dataset_id, publication_id, sequence, log_number, first_segment, last_segment, clean,
             open_condition_types, pending_continuity_symbols)
-         VALUES ('sha256:${'0'.repeat(64)}', gen_random_uuid(), 99, ${String(first)}, 5,
+         VALUES ('sha256:${'0'.repeat(64)}', gen_random_uuid(), 'R_100', 99, ${String(first)}, 5,
                  ${String(clean)}, '${open}'::text[], '${pending}'::text[])`,
       );
     // Limpio solo sin continuidad pendiente ni connection_lost abierta.
@@ -246,9 +248,9 @@ describe('las migraciones de buoh_datasets (ADR-0020 §5)', () => {
       sqlState(
         owner,
         `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
-           (dataset_id, publication_id, log_number, first_segment, last_segment, clean,
+           (dataset_id, publication_id, sequence, log_number, first_segment, last_segment, clean,
             open_condition_types, pending_continuity_symbols)
-         VALUES ('${dataset}', '${publication}', 98, 0, 0, true, '{}', '{}')`,
+         VALUES ('${dataset}', '${publication}', 'R_100', 98, 0, 0, true, '{}', '{}')`,
       );
     expect(await range(second)).toBe('23503');
     expect(await range(first)).toBe(null);
@@ -286,18 +288,18 @@ describe('las migraciones de buoh_datasets (ADR-0020 §5)', () => {
       }
       await first.query(
         `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
-           (dataset_id, publication_id, log_number, first_segment, last_segment, clean,
+           (dataset_id, publication_id, sequence, log_number, first_segment, last_segment, clean,
             open_condition_types, pending_continuity_symbols)
-         VALUES ($1, $2, 97, 0, 0, true, '{}', '{}')`,
+         VALUES ($1, $2, 'R_100', 97, 0, 0, true, '{}', '{}')`,
         [dataset, publication],
       );
       await first.query('COMMIT');
       const state = await second
         .query(
           `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
-             (dataset_id, publication_id, log_number, first_segment, last_segment, clean,
+             (dataset_id, publication_id, sequence, log_number, first_segment, last_segment, clean,
               open_condition_types, pending_continuity_symbols)
-           VALUES ($1, gen_random_uuid(), 97, 0, 3, true, '{}', '{}')`,
+           VALUES ($1, gen_random_uuid(), 'R_100', 97, 0, 3, true, '{}', '{}')`,
           [`sha256:${'2'.repeat(64)}`],
         )
         .then(
@@ -309,6 +311,153 @@ describe('las migraciones de buoh_datasets (ADR-0020 §5)', () => {
       await second.query('ROLLBACK').catch(() => undefined);
       first.release();
       second.release();
+    }
+  });
+
+  it('cada rango nombra su secuencia, y la contigüidad y la clave única son por secuencia (ADR-0021 §1)', async () => {
+    const owner = ready(admin);
+    const publication = '019a8000-0000-7000-8000-0000000000f3';
+    // Cada dataset sintético es el SHA-256 de su core, como pide datasets_check.
+    const cores = ['"a1"', '"a2"', '"a3"', '"a4"'];
+    const ids = cores.map((core) => `sha256:${createHash('sha256').update(core).digest('hex')}`);
+    const publicationOf = (dataset: string) =>
+      publication.replace(/f3$/u, `a${String(ids.indexOf(dataset) + 1)}`);
+    for (const [index, dataset] of ids.entries()) {
+      await owner.query(
+        `INSERT INTO ${DATASETS_SCHEMA}.datasets (dataset_id, state, source, manifest_core_jcs)
+         VALUES ($1, 'published', 'synthetic', $2)`,
+        [dataset, cores[index]],
+      );
+    }
+    const range = (dataset: string, sequence: string | null, first: number, last: number) =>
+      sqlState(
+        owner,
+        `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
+           (dataset_id, publication_id, sequence, log_number, first_segment, last_segment, clean,
+            open_condition_types, pending_continuity_symbols)
+         VALUES ('${dataset}', gen_random_uuid(), ${sequence === null ? 'NULL' : `'${sequence}'`},
+                 96, ${String(first)}, ${String(last)}, true, '{}', '{}')`,
+      );
+    // Las publicaciones de esas filas no existen: el disparador de la contigüidad va antes que la
+    // clave foránea, así que con la secuencia y el primer segmento correctos el rechazo es 23503.
+    expect(await range(ids[0] ?? '', null, 0, 5)).toBe('23502');
+    expect(await range(ids[0] ?? '', 'R-100', 0, 5)).toBe('23514');
+    expect(await range(ids[0] ?? '', 'R_100', 0, 5)).toBe('23503');
+    // Con sus publicaciones: el log 96 de R_100 y el log 96 del oro empiezan los dos en el 0.
+    for (const dataset of ids) {
+      await owner.query(
+        `INSERT INTO ${DATASETS_SCHEMA}.published_manifest_records
+           (publication_id, deployment_environment, dataset_id, schema_version,
+            manifest_document_sha256, manifest_object_uri, manifest_object_bytes_sha256,
+            published_at_utc, state)
+         VALUES ($1, 'development', $2, '1.0.0', $3, 's3://x/y', $3, '2026-11-14T00:00:00.000Z',
+                 'superseded')`,
+        [publicationOf(dataset), dataset, '0'.repeat(64)],
+      );
+    }
+    const withPublication = (dataset: string, sequence: string, first: number, last: number) =>
+      sqlState(
+        owner,
+        `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
+           (dataset_id, publication_id, sequence, log_number, first_segment, last_segment, clean,
+            open_condition_types, pending_continuity_symbols)
+         VALUES ('${dataset}', '${publicationOf(dataset)}',
+                 '${sequence}', 96, ${String(first)}, ${String(last)}, true, '{}', '{}')`,
+      );
+    expect(await withPublication(ids[0] ?? '', 'R_100', 0, 5)).toBe(null);
+    expect(await withPublication(ids[1] ?? '', 'frxXAUUSD', 1, 2)).toBe('23514');
+    expect(await withPublication(ids[1] ?? '', 'frxXAUUSD', 0, 2)).toBe(null);
+    // Cada una sigue desde el último segmento de su propia secuencia.
+    expect(await withPublication(ids[2] ?? '', 'frxXAUUSD', 6, 7)).toBe('23514');
+    expect(await withPublication(ids[2] ?? '', 'frxXAUUSD', 3, 7)).toBe(null);
+    expect(await withPublication(ids[3] ?? '', 'R_100', 6, 9)).toBe(null);
+    // Sin nombrarla, la secuencia es R_100, la del código de antes de las secuencias.
+    const legacy = `sha256:${createHash('sha256').update('"a5"').digest('hex')}`;
+    const legacyPublication = publication.replace(/f3$/u, 'a5');
+    await owner.query(
+      `INSERT INTO ${DATASETS_SCHEMA}.datasets (dataset_id, state, source, manifest_core_jcs)
+       VALUES ($1, 'published', 'synthetic', '"a5"')`,
+      [legacy],
+    );
+    await owner.query(
+      `INSERT INTO ${DATASETS_SCHEMA}.published_manifest_records
+         (publication_id, deployment_environment, dataset_id, schema_version,
+          manifest_document_sha256, manifest_object_uri, manifest_object_bytes_sha256,
+          published_at_utc, state)
+       VALUES ($1, 'development', $2, '1.0.0', $3, 's3://x/y', $3, '2026-11-14T00:00:00.000Z',
+               'superseded')`,
+      [legacyPublication, legacy, '0'.repeat(64)],
+    );
+    await owner.query(
+      `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
+         (dataset_id, publication_id, log_number, first_segment, last_segment, clean,
+          open_condition_types, pending_continuity_symbols)
+       VALUES ($1, $2, 96, 10, 11, true, '{}', '{}')`,
+      [legacy, legacyPublication],
+    );
+    // La publicación sigue cada log desde el último rango de su propia secuencia.
+    const datasetsPool = createPool({ ...config.postgres, schema: DATASETS_SCHEMA });
+    pools.push(datasetsPool);
+    const store = new PostgresDatasetStore(datasetsPool);
+    expect((await store.lastLogRange('R_100', 96))?.last_segment).toBe(11);
+    expect(await store.lastLogRange('frxXAUUSD', 96)).toMatchObject({
+      first_segment: 3,
+      last_segment: 7,
+      log_number: 96,
+      sequence: 'frxXAUUSD',
+    });
+    expect(await store.lastLogRange('frxXAUUSD', 95)).toBe(null);
+  });
+
+  it('la 0002 da R_100 a las filas que ya existían y lo deja por defecto (ADR-0021 §1)', async () => {
+    const owner = ready(admin);
+    const schema = 'buoh_datasets_secuencias';
+    const [first, second] = await loadMigrations(DATASETS_MIGRATIONS);
+    if (first === undefined || second === undefined) throw new Error('faltan las migraciones');
+    const client = await owner.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`CREATE SCHEMA ${schema}`);
+      await client.query(`SET LOCAL search_path TO ${schema}`);
+      await client.query(first.sql);
+      const dataset = `sha256:${createHash('sha256').update('"b1"').digest('hex')}`;
+      const publication = '019a8000-0000-7000-8000-0000000000f9';
+      await client.query(
+        `INSERT INTO datasets (dataset_id, state, source, manifest_core_jcs)
+         VALUES ($1, 'published', 'synthetic', '"b1"')`,
+        [dataset],
+      );
+      await client.query(
+        `INSERT INTO published_manifest_records
+           (publication_id, deployment_environment, dataset_id, schema_version,
+            manifest_document_sha256, manifest_object_uri, manifest_object_bytes_sha256,
+            published_at_utc, state)
+         VALUES ($1, 'production', $2, '1.0.0', $3, 's3://x/y', $3, '2026-11-14T00:00:00.000Z',
+                 'active')`,
+        [publication, dataset, '0'.repeat(64)],
+      );
+      await client.query(
+        `INSERT INTO dataset_log_ranges
+           (dataset_id, publication_id, log_number, first_segment, last_segment, clean,
+            open_condition_types, pending_continuity_symbols)
+         VALUES ($1, $2, 1, 0, 70, true, '{}', '{}')`,
+        [dataset, publication],
+      );
+      await client.query(second.sql);
+      const { rows } = await client.query<{ sequence: string }>(
+        'SELECT sequence FROM dataset_log_ranges',
+      );
+      expect(rows).toEqual([{ sequence: 'R_100' }]);
+      const column = await client.query<{ default_value: string | null; nullable: string }>(
+        `SELECT column_default AS default_value, is_nullable AS nullable
+           FROM information_schema.columns
+          WHERE table_schema = $1 AND table_name = 'dataset_log_ranges' AND column_name = 'sequence'`,
+        [schema],
+      );
+      expect(column.rows).toEqual([{ default_value: "'R_100'::text", nullable: 'NO' }]);
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
     }
   });
 
@@ -524,8 +673,16 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
     return pool;
   }
 
-  /** La publicación de `logNumber` con `pool`, y su registro operativo con `registryPool`. */
-  async function publisher(logNumber: number, pool: Pool, registryPool: Pool = pool) {
+  /**
+   * La publicación de `logNumber` de `sequence` (R_100 sin ella) con `pool`, y su registro operativo
+   * con `registryPool`.
+   */
+  async function publisher(
+    logNumber: number,
+    pool: Pool,
+    registryPool: Pool = pool,
+    sequence = 'R_100',
+  ) {
     const store = new PostgresDatasetStore(pool);
     const operational = new PostgresOperationalStore(registryPool);
     const registry = await OperationalRegistry.open({
@@ -541,6 +698,7 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
           environment: 'test',
           keyPrefix: KEY_PREFIX,
           logNumber,
+          sequence,
           now: () => at.replace(/\.000Z$/u, '.500Z'),
           objects: target,
           plan: due,
@@ -557,6 +715,30 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
     };
   }
 
+  it('el log 1 del oro se publica en su propia secuencia, aparte del log 1 de R_100 (ADR-0021 §1)', async () => {
+    const publication = poolAs(PUBLICATION_ROLE, passwords.publication);
+    const r100 = await publisher(1, publication);
+    const before = await r100.store.lastLogRange('R_100', 1);
+    const gold = await publisher(1, publication, publication, 'frxXAUUSD');
+    const principal = fixture.scenarios.find((item) => item.name === 'principal');
+    if (principal === undefined) throw new TypeError('Falta principal.');
+    const due = { ...plan('principal', 0), segments: principal.segments.slice(1, 2), to: 0 };
+    const outcome = await gold.publish(
+      due,
+      '019a8000-0000-7000-8000-000000000071',
+      '2026-11-14T07:05:00.000Z',
+    );
+    expect(outcome.status).toBe('published');
+    expect(outcome.range).toMatchObject({ first_segment: 0, log_number: 1, sequence: 'frxXAUUSD' });
+    const { rows } = await ready(admin).query<{ sequence: string }>(
+      `SELECT sequence FROM ${DATASETS_SCHEMA}.dataset_log_ranges
+        WHERE publication_id = '019a8000-0000-7000-8000-000000000071'`,
+    );
+    expect(rows).toEqual([{ sequence: 'frxXAUUSD' }]);
+    expect(await gold.store.lastLogRange('frxXAUUSD', 1)).toEqual(outcome.range);
+    expect(await r100.store.lastLogRange('R_100', 1)).toEqual(before);
+  });
+
   it('publica con su fila de rango en el mismo commit, en gzip bajo datasets/, y se reproduce en los dos modos', async () => {
     const { publish, store, target } = await publisher(
       1,
@@ -571,7 +753,7 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
     expect(outcome.status).toBe('published');
     if (outcome.status !== 'published') return;
     const datasetId = outcome.publication.dataset_id;
-    expect(await store.lastLogRange(1)).toEqual(outcome.range);
+    expect(await store.lastLogRange('R_100', 1)).toEqual(outcome.range);
     const { rows } = await ready(admin).query<{ publication_id: string }>(
       `SELECT publication_id::text FROM ${DATASETS_SCHEMA}.dataset_log_ranges WHERE dataset_id = $1`,
       [datasetId],
@@ -641,7 +823,7 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
       .catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(CommitOutcomeUnknownError);
     expect(failure).toMatchObject({ reason: 'commit_outcome_unknown', step: 'manifest_commit' });
-    expect(await cut.store.lastLogRange(2)).toBe(null);
+    expect(await cut.store.lastLogRange('R_100', 2)).toBe(null);
     expect(cut.registry.openConditionTypes()).toEqual(['persistence_unavailable']);
 
     const retry = await publisher(2, registryPool, registryPool);
@@ -651,7 +833,7 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
       '2026-11-14T07:10:00.000Z',
     );
     expect(outcome.status).toBe('published');
-    expect((await retry.store.lastLogRange(2))?.last_segment).toBe(due.to);
+    expect((await retry.store.lastLogRange('R_100', 2))?.last_segment).toBe(due.to);
     // La publicación nueva resuelve la condición del intento cortado.
     expect(retry.registry.openConditionTypes()).toEqual([]);
     const resolved = (await retry.operational.load(fixture.profile.source)).conditions.filter(
@@ -671,7 +853,7 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
       .catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(CommitOutcomeUnknownError);
     // Sí se confirmó: el dataset y su rango son visibles.
-    expect((await cut.store.lastLogRange(3))?.last_segment).toBe(0);
+    expect((await cut.store.lastLogRange('R_100', 3))?.last_segment).toBe(0);
 
     const retry = await publisher(3, registryPool, registryPool);
     const outcome = await retry.publish(

@@ -30,8 +30,10 @@ import {
   LOG_RETENTION_MS,
   MAX_LOG_NUMBER,
   productionLogConfigErrors,
+  R_100_SEQUENCE,
   type CaptureLog,
   type LogLocation,
+  type LogSequence,
 } from '../successive-logs.js';
 import { DATASETS_SCHEMA } from './location.js';
 import { planDataset } from './plan.js';
@@ -73,8 +75,8 @@ export interface PublicationStores {
   readonly datasetObjects: ObjectStore;
   readonly datasets: DatasetStore;
   readonly operational: OperationalStore;
-  /** Los logs que existen, con su última escritura (`listCaptureLogs`). */
-  listLogs(): Promise<CaptureLog[]>;
+  /** Los logs de una secuencia que existen, en orden, con su última escritura (`listCaptureLogs`). */
+  listLogs(sequence: LogSequence): Promise<CaptureLog[]>;
   log(location: LogLocation): PublicationLogReader;
   close(): Promise<void>;
 }
@@ -231,6 +233,8 @@ export function publicationFailure(
 }
 
 interface PublishArgs {
+  /** La secuencia del símbolo (ADR-0021 §1), la de los logs que publica. */
+  readonly sequence: LogSequence;
   readonly skip: ReadonlySet<number>;
   readonly symbol: string;
 }
@@ -265,7 +269,7 @@ function parsePublishArgs(argv: readonly string[]): PublishArgs {
       '--symbol solo admite R_100, el único símbolo con umbrales medidos.',
     );
   }
-  return { skip, symbol };
+  return { sequence: R_100_SEQUENCE, skip, symbol };
 }
 
 /**
@@ -303,9 +307,16 @@ function expiresAt(log: CaptureLog): string | null {
     : new Date(Date.parse(log.lastWriteUtc) + LOG_RETENTION_MS).toISOString();
 }
 
-/** El primer segmento del dataset siguiente de un log: el que sigue al último publicado, o el 0. */
-async function nextFirstSegment(stores: PublicationStores, log: number): Promise<number> {
-  const last = await storage(() => stores.datasets.lastLogRange(log));
+/**
+ * El primer segmento del dataset siguiente del log `log` de `sequence`: el que sigue al último
+ * publicado, o el 0.
+ */
+async function nextFirstSegment(
+  stores: PublicationStores,
+  sequence: LogSequence,
+  log: number,
+): Promise<number> {
+  const last = await storage(() => stores.datasets.lastLogRange(sequence.name, log));
   return last === null ? 0 : last.last_segment + 1;
 }
 
@@ -362,7 +373,7 @@ export async function publishDatasetCommand(
     stores = dependencies.open(config);
     const opened = stores;
     const now = dependencies.now();
-    const logs = await storage(() => opened.listLogs());
+    const logs = await storage(() => opened.listLogs(args.sequence));
     const live = logs
       .filter((log) => log.readable && !isLogExpired(log, now))
       .sort((left, right) => left.location.number - right.location.number);
@@ -374,7 +385,7 @@ export async function publishDatasetCommand(
       if (expires === null || Date.parse(expires) - Date.parse(now) >= PUBLICATION_BEHIND_MS) {
         continue;
       }
-      const first = await nextFirstSegment(opened, log.location.number);
+      const first = await nextFirstSegment(opened, args.sequence, log.location.number);
       stage = 'plan';
       const pending = await opened.log(log.location).closedSegments(first);
       stage = undefined;
@@ -392,7 +403,7 @@ export async function publishDatasetCommand(
       }
       context.log = number;
       context.first = null;
-      const first = await nextFirstSegment(opened, number);
+      const first = await nextFirstSegment(opened, args.sequence, number);
       context.first = first;
       stage = 'plan';
       const reader = opened.log(log.location);
@@ -433,6 +444,7 @@ export async function publishDatasetCommand(
             first_segment: first,
             log: number,
             reason: 'publication_segment_too_large',
+            sequence: args.sequence.name,
             stage: 'plan',
             status: 'failed',
             ...measured(),
@@ -462,6 +474,7 @@ export async function publishDatasetCommand(
         publication_id: publicationId,
         published_at_utc: dependencies.now(),
         registry,
+        sequence: args.sequence.name,
         store: opened.datasets,
         zlibVersion: dependencies.zlibVersion,
       });
@@ -475,6 +488,7 @@ export async function publishDatasetCommand(
         log: number,
         open_condition_types: range.open.open_condition_types,
         pending_continuity_symbols: range.open.pending_continuity_symbols,
+        sequence: range.sequence,
       };
       if (outcome.status === 'already_published') {
         return {
@@ -505,7 +519,12 @@ export async function publishDatasetCommand(
     }
     return {
       exitCode: 0,
-      line: JSON.stringify({ behind: context.behind, status: 'nothing_due', ...measured() }),
+      line: JSON.stringify({
+        behind: context.behind,
+        sequence: args.sequence.name,
+        status: 'nothing_due',
+        ...measured(),
+      }),
     };
   } catch (error) {
     const failure = publicationFailure(error, stage);
@@ -517,6 +536,7 @@ export async function publishDatasetCommand(
         ...(context.first === null ? {} : { first_segment: context.first }),
         log: context.log,
         reason: failure.reason,
+        sequence: args.sequence.name,
         stage: failure.stage,
         status: 'failed',
         ...measured(),

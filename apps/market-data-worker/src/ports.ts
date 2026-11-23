@@ -21,14 +21,17 @@ export interface ObjectStore {
 
 /**
  * El log y los segmentos de un dataset vivo, y cómo terminó (ADR-0020 §5 y §7): la fila de
- * `dataset_log_ranges`. `clean` es que su derivación terminó sin continuidad pendiente ni
- * `connection_lost` abierta; si no, `open` dice qué dejó abierto.
+ * `dataset_log_ranges`. El log es el `log_number` de su secuencia, `sequence` (ADR-0021 §1).
+ * `clean` es que su derivación terminó sin continuidad pendiente ni `connection_lost` abierta; si
+ * no, `open` dice qué dejó abierto.
  */
 export interface DatasetLogRange {
   readonly clean: boolean;
   readonly first_segment: number;
   readonly last_segment: number;
   readonly log_number: number;
+  /** El nombre de la secuencia del log (`LogSequence.name`), como `R_100`. */
+  readonly sequence: string;
   readonly open: {
     readonly open_condition_types: readonly string[];
     readonly pending_continuity_symbols: readonly string[];
@@ -89,6 +92,9 @@ export interface DatasetStore extends MetadataStore {
   lastConfirmedPublication(
     environment: DeploymentEnvironment,
   ): Promise<ConfirmedPublication | null>;
-  /** La fila de rango del último dataset de un log, la de mayor `last_segment`, o `null`. */
-  lastLogRange(logNumber: number): Promise<DatasetLogRange | null>;
+  /**
+   * La fila de rango del último dataset del log `logNumber` de la secuencia `sequence`, la de mayor
+   * `last_segment`, o `null`.
+   */
+  lastLogRange(sequence: string, logNumber: number): Promise<DatasetLogRange | null>;
 }

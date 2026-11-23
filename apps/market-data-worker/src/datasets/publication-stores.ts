@@ -44,7 +44,7 @@ export function openPublicationStores(
     },
     datasetObjects: new S3ObjectStore(s3, config.s3.bucket, ''),
     datasets: new PostgresDatasetStore(pool),
-    listLogs: () => listCaptureLogs(pool, DERIV_SOURCE),
+    listLogs: (sequence) => listCaptureLogs(pool, DERIV_SOURCE, sequence),
     log: (location) =>
       logReader({
         objects: new S3ObjectStore(s3, config.s3.bucket, location.prefix),
