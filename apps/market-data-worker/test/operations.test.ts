@@ -16,9 +16,13 @@ import {
   derivLogProfileRow,
   healthEnvironment,
   loadOperationsConfig,
+  GOLD_SEQUENCE,
+  LOG_SEQUENCES,
   logLocation,
+  logNumberOf,
   migrateEnvironment,
   nextLogToPrepare,
+  R_100_SEQUENCE,
   publishEnvironment,
   replayEnvironment,
   ObjectReadError,
@@ -43,6 +47,7 @@ import {
   type LoginCheck,
   type LogProfileAssignment,
   type LogObjects,
+  type LogSequence,
   type LogSchemaDrop,
   type OperationalAlert,
   type OperationsConfig,
@@ -189,6 +194,7 @@ describe('loadOperationsConfig (ADR-0018 §11)', () => {
         buoh_salud: 'salud-sintetica-0123456789',
       },
       publicationPassword: null,
+      sequences: [R_100_SEQUENCE],
     });
   });
 
@@ -377,8 +383,17 @@ describe('nextLogToPrepare (ADR-0018 §6, «Preparación»)', () => {
 });
 
 /**
+ * El nombre de un log en las llamadas y las claves de la base falsa: su número en R_100, como antes
+ * de las secuencias, y su esquema en otra secuencia (ADR-0021 §1).
+ */
+const logKey = (target: LogLocation): number | string =>
+  logNumberOf(target.schema) === null ? target.schema : target.number;
+
+/**
  * Una base falsa: anota cada llamada y responde con `state`. Los segmentos que tocan en una
- * ejecución son los de índice *i* con *i* mod 288 = la ejecución, como en la consulta real.
+ * ejecución son los de índice *i* con *i* mod 288 = la ejecución, como en la consulta real. Los
+ * logs de `logs` pueden ser de cualquier secuencia: `listLogs` da los de la que se le pide, por su
+ * esquema, y los de R_100 se nombran por su número y los demás por su esquema (`logKey`).
  */
 function fakeDatabase(state: {
   logs: CaptureLog[];
@@ -390,25 +405,26 @@ function fakeDatabase(state: {
    * existir, como tras `DROP SCHEMA`.
    */
   dropResult?: LogSchemaDrop;
-  /** Los segmentos cerrados de cada log, por su número. */
-  segments?: Readonly<Record<number, readonly DueSegment[]>>;
+  /** Los segmentos cerrados de cada log, por su número en R_100 o su esquema (`logKey`). */
+  segments?: Readonly<Record<number | string, readonly DueSegment[]>>;
   space?: SpaceMeasure;
   /** Las publicaciones activas de `production`, en orden de publicación (ADR-0020 §8, paso 7). */
   publications?: readonly { dataset_id: string; publication_id: string }[];
   /**
-   * Los logs en los que `buoh_ingesta` todavía no tiene el uso del esquema, por su número. Sin él,
-   * ninguno: los de `logs` ya están preparados. Un log que crea `createLogSchema` entra, y sale con
-   * `grantLogPrivileges`.
+   * Los logs en los que `buoh_ingesta` todavía no tiene el uso del esquema, por su número en R_100
+   * o su esquema (`logKey`). Sin él, ninguno: los de `logs` ya están preparados. Un log que crea
+   * `createLogSchema` entra, y sale con `grantLogPrivileges`.
    */
-  ungranted?: Set<number>;
+  ungranted?: Set<number | string>;
 }) {
   const calls: string[] = [];
-  const ungranted = state.ungranted ?? new Set<number>();
-  /** La fila de `log_quality_profile` de cada log, por su número (ADR-0020 §4). */
-  const profiles = new Map<number, LogProfileAssignment>();
-  /** La hora con la que se pidió borrar cada esquema. */
-  const drops: { log: number; now: string }[] = [];
-  const reports: { log: number; row: OperationsReportRow }[] = [];
+  const ungranted = state.ungranted ?? new Set<number | string>();
+  /** La fila de `log_quality_profile` de cada log, por `logKey` (ADR-0020 §4). */
+  const profiles = new Map<number | string, LogProfileAssignment>();
+  /** La hora y la secuencia con las que se pidió borrar cada esquema. */
+  const drops: { log: number; now: string; sequence: string }[] = [];
+  const reports: { log: number; row: OperationsReportRow; schema: string }[] = [];
+  const sameLog = (item: CaptureLog, target: LogLocation) => item.location.schema === target.schema;
   const verifications: DatasetVerificationRow[] = [];
   const answer = <T>(name: keyof OwnerDatabase, value: () => T): Promise<T> => {
     const error = state.fail?.[name];
@@ -425,9 +441,9 @@ function fakeDatabase(state: {
       });
     },
     appendReport: (target, row) => {
-      calls.push(`report:${String(target.number)}:${row.step}`);
+      calls.push(`report:${String(logKey(target))}:${row.step}`);
       return answer('appendReport', () => {
-        reports.push({ log: target.number, row });
+        reports.push({ log: target.number, row, schema: target.schema });
       });
     },
     checkLogin: (role) => {
@@ -439,20 +455,20 @@ function fakeDatabase(state: {
       return Promise.resolve();
     },
     createLogSchema: (target) => {
-      calls.push(`create:${String(target.number)}`);
+      calls.push(`create:${String(logKey(target))}`);
       return answer('createLogSchema', () => {
-        state.logs.push(log(target.number));
-        ungranted.add(target.number);
+        state.logs.push({ lastWriteUtc: null, location: target, readable: true });
+        ungranted.add(logKey(target));
       });
     },
-    dropExpiredLog: (target, now) => {
-      calls.push(`drop:${String(target.number)}`);
-      drops.push({ log: target.number, now });
+    dropExpiredLog: (target, now, sequence) => {
+      calls.push(`drop:${String(logKey(target))}`);
+      drops.push({ log: target.number, now, sequence: sequence.name });
       return answer('dropExpiredLog', () => {
         if (state.dropResult !== undefined) {
           return state.dropResult;
         }
-        const index = state.logs.findIndex((item) => item.location.number === target.number);
+        const index = state.logs.findIndex((item) => sameLog(item, target));
         if (index < 0) {
           return 'absent';
         }
@@ -485,33 +501,33 @@ function fakeDatabase(state: {
       return answer('grantDatasetsPrivileges', () => undefined);
     },
     grantLogPrivileges: (target) => {
-      calls.push(`grant:${String(target.number)}`);
+      calls.push(`grant:${String(logKey(target))}`);
       return answer('grantLogPrivileges', () => {
-        ungranted.delete(target.number);
+        ungranted.delete(logKey(target));
       });
     },
     assignLogProfile: (target, row) => {
-      calls.push(`profile:${String(target.number)}`);
+      calls.push(`profile:${String(logKey(target))}`);
       return answer('assignLogProfile', () => {
-        const current = state.logs.find((item) => item.location.number === target.number);
+        const current = state.logs.find((item) => sameLog(item, target));
         if (
-          profiles.has(target.number) ||
-          !ungranted.has(target.number) ||
+          profiles.has(logKey(target)) ||
+          !ungranted.has(logKey(target)) ||
           (current?.lastWriteUtc ?? null) !== null
         ) {
           return false;
         }
-        profiles.set(target.number, row);
+        profiles.set(logKey(target), row);
         return true;
       });
     },
     lastCompletedReport: (target, step) => {
-      calls.push(`last:${String(target.number)}:${step}`);
+      calls.push(`last:${String(logKey(target))}:${step}`);
       return answer('lastCompletedReport', () => {
         const times = reports
           .filter(
             (item) =>
-              item.log === target.number &&
+              item.schema === target.schema &&
               item.row.step === step &&
               item.row.status === 'completed',
           )
@@ -521,12 +537,12 @@ function fakeDatabase(state: {
       });
     },
     latestReportWithState: (target, step) => {
-      calls.push(`latest:${String(target.number)}:${step}`);
+      calls.push(`latest:${String(logKey(target))}:${step}`);
       return answer('latestReportWithState', () => {
         const found = reports
           .filter(
             (item) =>
-              item.log === target.number && item.row.step === step && 'state' in item.row.report,
+              item.schema === target.schema && item.row.step === step && 'state' in item.row.report,
           )
           .map((item) => item.row)
           .sort((left, right) => left.report_id.localeCompare(right.report_id))
@@ -540,14 +556,16 @@ function fakeDatabase(state: {
             };
       });
     },
-    listLogs: () => {
-      calls.push('list');
-      return answer('listLogs', () => [...state.logs]);
+    listLogs: (sequence) => {
+      calls.push(sequence === R_100_SEQUENCE ? 'list' : `list:${sequence.name}`);
+      return answer('listLogs', () =>
+        state.logs.filter((item) => logNumberOf(item.location.schema, sequence) !== null),
+      );
     },
     listSegmentsDue: (target, slot) => {
-      calls.push(`segments:${String(target.number)}:${String(slot)}`);
+      calls.push(`segments:${String(logKey(target))}:${String(slot)}`);
       return answer('listSegmentsDue', () =>
-        (state.segments?.[target.number] ?? []).filter(
+        (state.segments?.[logKey(target)] ?? []).filter(
           (segment) => segment.segment_index % 288 === slot,
         ),
       );
@@ -577,7 +595,15 @@ function fakeDatabase(state: {
         () =>
           state.space ?? {
             database_bytes: 1000,
-            logs: state.logs.map((item) => ({ bytes: 100, log: item.location.number })),
+            logs: LOG_SEQUENCES.flatMap((sequence) =>
+              state.logs
+                .filter((item) => logNumberOf(item.location.schema, sequence) !== null)
+                .map((item) => ({
+                  bytes: 100,
+                  log: item.location.number,
+                  sequence: sequence.name,
+                })),
+            ),
           },
       );
     },
@@ -865,8 +891,10 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       'report:1:health',
       // El informe final: ningún log terminó, así que no lee nada más ni guarda ningún informe.
       'list',
-      // La retención: ningún log venció, así que no abre los objetos ni guarda su informe.
+      // La retención, en cada secuencia de la tabla: ningún log venció, así que no abre los objetos
+      // ni guarda su informe.
       'list',
+      'list:frxXAUUSD',
       'list',
       'segments:1:120',
       'list',
@@ -880,7 +908,7 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
     ]);
     expect(children.runs.map((item) => [item.child, item.args, item.env])).toEqual([
       ['migrate', [], migrateEnvironment(CONFIG, 'buoh_log_000001')],
-      ['health', ['--json', '--log', '1'], healthEnvironment(CONFIG)],
+      ['health', ['--json', '--symbol', 'R_100', '--log', '1'], healthEnvironment(CONFIG)],
     ]);
     expect(result.status).toBe('completed');
     expect(alerts).toEqual([]);
@@ -890,11 +918,11 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
         log: null,
         report: {
           failures: [],
-          migrated: [{ applied: ['0001_x.sql', '0006_y.sql'], log: 1 }],
+          migrated: [{ applied: ['0001_x.sql', '0006_y.sql'], log: 1, sequence: 'R_100' }],
           passwords_set: ['buoh_ingesta', 'buoh_salud', 'buoh_agente'],
           passwords_unchecked: [],
-          prepared: 1,
-          profiles_assigned: [1],
+          prepared: [{ log: 1, sequence: 'R_100' }],
+          profiles_assigned: [{ log: 1, sequence: 'R_100' }],
         },
         run_id: uuid(1),
         status: 'completed',
@@ -903,7 +931,7 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       {
         event: 'operations_step',
         log: 1,
-        report: { alerts: [], exit_code: 1, log: 1, report: REPORT },
+        report: { alerts: [], exit_code: 1, log: 1, report: REPORT, sequence: 'R_100' },
         run_id: uuid(1),
         status: 'completed',
         step: 'health',
@@ -911,7 +939,7 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       {
         event: 'operations_step',
         log: null,
-        report: { log: null },
+        report: { log: null, sequence: 'R_100' },
         run_id: uuid(1),
         status: 'completed',
         step: 'final_health',
@@ -935,7 +963,11 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       {
         event: 'operations_step',
         log: 1,
-        report: { database_bytes: 1000, logs: [{ bytes: 100, log: 1 }], measured: true },
+        report: {
+          database_bytes: 1000,
+          logs: [{ bytes: 100, log: 1, sequence: 'R_100' }],
+          measured: true,
+        },
         run_id: uuid(1),
         status: 'completed',
         step: 'space',
@@ -971,7 +1003,13 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       [1, 'space', 'completed', uuid(1)],
       [1, 'memory', 'completed', uuid(1)],
     ]);
-    expect(db.reports[1]?.row.report).toEqual({ alerts: [], exit_code: 1, log: 1, report: REPORT });
+    expect(db.reports[1]?.row.report).toEqual({
+      alerts: [],
+      exit_code: 1,
+      log: 1,
+      report: REPORT,
+      sequence: 'R_100',
+    });
   });
 
   it('sin nada que cambiar, migra y da privilegios a cada log, no crea otro ni toca las contraseñas, y no guarda el informe del paso 1', async () => {
@@ -1002,7 +1040,7 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
     expect(children.runs.map((item) => [item.child, item.args])).toEqual([
       ['migrate', []],
       ['migrate', []],
-      ['health', ['--json', '--log', '1']],
+      ['health', ['--json', '--symbol', 'R_100', '--log', '1']],
     ]);
     expect(children.runs.map((item) => item.env['BUOH_POSTGRES_SCHEMA'])).toEqual([
       'buoh_log_000001',
@@ -1016,7 +1054,7 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
         migrated: [],
         passwords_set: [],
         passwords_unchecked: [],
-        prepared: null,
+        prepared: [],
         profiles_assigned: [],
       },
       status: 'completed',
@@ -1043,7 +1081,11 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       [2, { ...derivLogProfileRow('R_100'), assigned_at_utc: NOW, run_id: uuid(1) }],
     ]);
     expect(lines[0]).toMatchObject({
-      report: { failures: [], prepared: 2, profiles_assigned: [2] },
+      report: {
+        failures: [],
+        prepared: [{ log: 2, sequence: 'R_100' }],
+        profiles_assigned: [{ log: 2, sequence: 'R_100' }],
+      },
       status: 'completed',
     });
   });
@@ -1056,7 +1098,9 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
     });
     const { lines } = await run(db, fakeChildren());
     expect([...db.profiles.keys()]).toEqual([3]);
-    expect(lines[0]).toMatchObject({ report: { profiles_assigned: [3] } });
+    expect(lines[0]).toMatchObject({
+      report: { profiles_assigned: [{ log: 3, sequence: 'R_100' }] },
+    });
     // Dar un perfil es un cambio: el informe del paso 1 se guarda, aunque no haya otro.
     expect(db.reports.filter(({ row }) => row.step === 'roles_and_logs')).toHaveLength(1);
     const again = await run(db, fakeChildren());
@@ -1078,7 +1122,7 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
           { action: 'profile', log: 1, reason: '57014' },
           { action: 'profile', log: 2, reason: '57014' },
         ],
-        prepared: null,
+        prepared: [],
         profiles_assigned: [],
       },
       status: 'failed',
@@ -1103,8 +1147,8 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       'profile:2',
       'grant:2',
     ]);
-    expect(lines[0]).toMatchObject({ report: { prepared: 2 } });
-    expect(children.runs.at(-1)?.args).toEqual(['--json', '--log', '1']);
+    expect(lines[0]).toMatchObject({ report: { prepared: [{ log: 2, sequence: 'R_100' }] } });
+    expect(children.runs.at(-1)?.args).toEqual(['--json', '--symbol', 'R_100', '--log', '1']);
   });
 });
 
@@ -1169,7 +1213,7 @@ describe('runOperations: el esquema y el rol de la API en el paso 1 (ADR-0019 §
       migrated: [],
       passwords_set: ['buoh_api'],
       passwords_unchecked: [],
-      prepared: null,
+      prepared: [],
       profiles_assigned: [],
     };
     expect(lines[0]).toMatchObject({ report, status: 'completed', step: 'roles_and_logs' });
@@ -1312,7 +1356,7 @@ describe('runOperations: el rol de lectura de la API en el paso 1 (ADR-0019 §7 
       migrated: [],
       passwords_set: ['buoh_api_lectura'],
       passwords_unchecked: [],
-      prepared: null,
+      prepared: [],
       profiles_assigned: [],
     };
     expect(lines[0]).toMatchObject({ report, status: 'completed', step: 'roles_and_logs' });
@@ -1434,8 +1478,10 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
       'list',
       'list',
       'list',
-      // La retención: la búsqueda del log vencido y el intento de guardar su informe.
+      // La retención: la búsqueda del log vencido en cada secuencia y el intento de guardar su
+      // informe.
       'list',
+      'list:frxXAUUSD',
       'list',
       'list',
       'list',
@@ -1452,14 +1498,14 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
           migrated: [],
           passwords_set: [],
           passwords_unchecked: [],
-          prepared: null,
+          prepared: [],
           profiles_assigned: [],
         },
         status: 'failed',
         step: 'roles_and_logs',
       }),
       expect.objectContaining({
-        report: { log: null, reason: 'ECONNREFUSED' },
+        report: { log: null, reason: 'ECONNREFUSED', sequence: 'R_100' },
         status: 'failed',
         step: 'health',
       }),
@@ -1468,9 +1514,19 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
     expect(alerts).toEqual([
       { event: 'operations_step_failed', reason: 'ECONNREFUSED', step: 'roles_and_logs' },
       { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'roles_and_logs' },
-      { event: 'operations_step_failed', reason: 'ECONNREFUSED', step: 'health' },
+      {
+        event: 'operations_step_failed',
+        reason: 'ECONNREFUSED',
+        sequence: 'R_100',
+        step: 'health',
+      },
       { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'health' },
-      { event: 'operations_step_failed', reason: 'ECONNREFUSED', step: 'final_health' },
+      {
+        event: 'operations_step_failed',
+        reason: 'ECONNREFUSED',
+        sequence: 'R_100',
+        step: 'final_health',
+      },
       { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'final_health' },
       { event: 'operations_step_failed', reason: 'ECONNREFUSED', step: 'retention' },
       { event: 'operations_report_unavailable', reason: 'ECONNREFUSED', step: 'retention' },
@@ -1483,17 +1539,33 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
     ]);
     expect(lines.slice(2, 6)).toEqual([
       expect.objectContaining({
-        report: { log: null, reason: 'ECONNREFUSED' },
+        report: { log: null, reason: 'ECONNREFUSED', sequence: 'R_100' },
         status: 'failed',
         step: 'final_health',
       }),
+      // Cada secuencia que no se pudo listar va en unlisted, con su motivo: la retención mira todas
+      // las de la tabla, y la verificación, las de la configuración.
       expect.objectContaining({
-        report: { log: null, reason: 'ECONNREFUSED' },
+        report: {
+          log: null,
+          reason: 'ECONNREFUSED',
+          unlisted: [
+            { reason: 'ECONNREFUSED', sequence: 'R_100' },
+            { reason: 'ECONNREFUSED', sequence: 'frxXAUUSD' },
+          ],
+        },
         status: 'failed',
         step: 'retention',
       }),
       expect.objectContaining({
-        report: { due: null, mismatched: [], read: 0, reason: 'ECONNREFUSED', slot: 120 },
+        report: {
+          due: null,
+          mismatched: [],
+          read: 0,
+          reason: 'ECONNREFUSED',
+          slot: 120,
+          unlisted: [{ reason: 'ECONNREFUSED', sequence: 'R_100' }],
+        },
         status: 'failed',
         step: 'verification',
       }),
@@ -1805,11 +1877,14 @@ describe('runOperations: el informe final de un log que terminó (ADR-0018 §6, 
     const children = fakeChildren();
     const first = await run(db, children);
 
-    expect(healthRuns(children)).toEqual(['--json --log 2', '--json --log 1']);
+    expect(healthRuns(children)).toEqual([
+      '--json --symbol R_100 --log 2',
+      '--json --symbol R_100 --log 1',
+    ]);
     expect(first.lines[2]).toEqual({
       event: 'operations_step',
       log: 1,
-      report: { alerts: [], exit_code: 1, log: 1, report: REPORT },
+      report: { alerts: [], exit_code: 1, log: 1, report: REPORT, sequence: 'R_100' },
       run_id: uuid(1),
       status: 'completed',
       step: 'final_health',
@@ -1826,7 +1901,7 @@ describe('runOperations: el informe final de un log que terminó (ADR-0018 §6, 
 
     const again = fakeChildren();
     const second = await run(db, again);
-    expect(healthRuns(again)).toEqual(['--json --log 2']);
+    expect(healthRuns(again)).toEqual(['--json --symbol R_100 --log 2']);
     expect(second.lines[2]).toMatchObject({
       log: null,
       report: { log: null },
@@ -1846,8 +1921,14 @@ describe('runOperations: el informe final de un log que terminó (ADR-0018 §6, 
     const second = fakeChildren();
     await run(db, second);
 
-    expect(healthRuns(first)).toEqual(['--json --log 3', '--json --log 1']);
-    expect(healthRuns(second)).toEqual(['--json --log 3', '--json --log 2']);
+    expect(healthRuns(first)).toEqual([
+      '--json --symbol R_100 --log 3',
+      '--json --symbol R_100 --log 1',
+    ]);
+    expect(healthRuns(second)).toEqual([
+      '--json --symbol R_100 --log 3',
+      '--json --symbol R_100 --log 2',
+    ]);
     expect(
       db.reports.filter(({ row }) => row.step === 'final_health').map(({ log: number }) => number),
     ).toEqual([1, 2]);
@@ -1869,13 +1950,21 @@ describe('runOperations: el informe final de un log que terminó (ADR-0018 §6, 
       step: 'final_health',
     });
     expect(first.alerts).toEqual([
-      { event: 'operations_step_failed', reason: 'health_command_failed', step: 'final_health' },
+      {
+        event: 'operations_step_failed',
+        reason: 'health_command_failed',
+        sequence: 'R_100',
+        step: 'final_health',
+      },
     ]);
     expect(first.result.status).toBe('failed');
 
     const retry = fakeChildren();
     await run(db, retry);
-    expect(healthRuns(retry)).toEqual(['--json --log 2', '--json --log 1']);
+    expect(healthRuns(retry)).toEqual([
+      '--json --symbol R_100 --log 2',
+      '--json --symbol R_100 --log 1',
+    ]);
     expect(
       db.reports
         .filter(({ row }) => row.step === 'final_health')
@@ -1917,12 +2006,20 @@ describe('runOperations: el informe final de un log que terminó (ADR-0018 §6, 
         step: 'final_health',
       });
       expect(first.alerts).toEqual([
-        { event: 'operations_step_failed', reason: 'health_not_observed', step: 'final_health' },
+        {
+          event: 'operations_step_failed',
+          reason: 'health_not_observed',
+          sequence: 'R_100',
+          step: 'final_health',
+        },
       ]);
 
       const retry = fakeChildren();
       await run(db, retry);
-      expect(healthRuns(retry)).toEqual(['--json --log 2', '--json --log 1']);
+      expect(healthRuns(retry)).toEqual([
+        '--json --symbol R_100 --log 2',
+        '--json --symbol R_100 --log 1',
+      ]);
       expect(
         db.reports.filter(({ row }) => row.step === 'final_health').map(({ row }) => row.status),
       ).toEqual(['failed', 'completed']);
@@ -1943,7 +2040,7 @@ describe('runOperations: el informe final de un log que terminó (ADR-0018 §6, 
     const children = fakeChildren();
     const { lines } = await run(db, children);
 
-    expect(healthRuns(children)).toEqual(['--json --log 4']);
+    expect(healthRuns(children)).toEqual(['--json --symbol R_100 --log 4']);
     expect(lines[2]).toMatchObject({ log: null, report: { log: null }, step: 'final_health' });
     expect(db.calls.filter((call) => call.endsWith(':final_health'))).toEqual([]);
   });
@@ -2000,11 +2097,11 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
       'close:logs/000001/',
     ]);
     expect([...deletion.stored]).toEqual(keysOf(2, 2));
-    expect(db.drops).toEqual([{ log: 1, now: NOW }]);
+    expect(db.drops).toEqual([{ log: 1, now: NOW, sequence: 'R_100' }]);
     expect(retentionLine(lines)).toEqual({
       event: 'operations_step',
       log: null,
-      report: { deleted: 3, locked: 0, log: 1, schema_dropped: true },
+      report: { deleted: 3, locked: 0, log: 1, schema_dropped: true, sequence: 'R_100' },
       run_id: uuid(1),
       status: 'completed',
       step: 'retention',
@@ -2029,14 +2126,14 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
     const first = await run(db, fakeChildren(), { deletion });
     expect(prefixesOf(deletion.calls)).toEqual(['logs/000001/']);
     expect(retentionLine(first.lines)).toMatchObject({
-      report: { deleted: 1, log: 1, schema_dropped: true },
+      report: { deleted: 1, log: 1, schema_dropped: true, sequence: 'R_100' },
     });
 
     deletion.calls.length = 0;
     const second = await run(db, fakeChildren(), { deletion });
     expect(prefixesOf(deletion.calls)).toEqual(['logs/000002/']);
     expect(retentionLine(second.lines)).toMatchObject({
-      report: { deleted: 1, log: 2, schema_dropped: true },
+      report: { deleted: 1, log: 2, schema_dropped: true, sequence: 'R_100' },
     });
 
     deletion.calls.length = 0;
@@ -2053,7 +2150,7 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
     const { lines } = await run(db, fakeChildren(), { deletion });
 
     expect(retentionLine(lines)).toMatchObject({
-      report: { deleted: 2, log: 1, schema_dropped: true },
+      report: { deleted: 2, log: 1, schema_dropped: true, sequence: 'R_100' },
       status: 'completed',
     });
     expect([...deletion.stored]).toEqual(keysOf(2, 1));
@@ -2067,7 +2164,7 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
 
     const first = await run(db, fakeChildren(), { deletion });
     expect(retentionLine(first.lines)).toMatchObject({
-      report: { deleted: 2, locked: 1, log: 1, schema_dropped: false },
+      report: { deleted: 2, locked: 1, log: 1, schema_dropped: false, sequence: 'R_100' },
       status: 'completed',
     });
     expect(first.alerts).toEqual([]);
@@ -2082,7 +2179,7 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
     locked.clear();
     const second = await run(db, fakeChildren(), { deletion });
     expect(retentionLine(second.lines)).toMatchObject({
-      report: { deleted: 1, locked: 0, log: 1, schema_dropped: true },
+      report: { deleted: 1, locked: 0, log: 1, schema_dropped: true, sequence: 'R_100' },
       status: 'completed',
     });
     expect(deletion.stored.size).toBe(0);
@@ -2101,7 +2198,13 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
       `list:logs/000001/:sha256/1000:${String(RETENTION_PAGE_KEYS)}`,
     ]);
     expect(retentionLine(lines)).toMatchObject({
-      report: { deleted: RETENTION_PAGE_KEYS, locked: 1, log: 1, schema_dropped: false },
+      report: {
+        deleted: RETENTION_PAGE_KEYS,
+        locked: 1,
+        log: 1,
+        schema_dropped: false,
+        sequence: 'R_100',
+      },
     });
   });
 
@@ -2121,14 +2224,14 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
     });
     const remainingAtDrop: number[] = [];
     const drop = db.database.dropExpiredLog.bind(db.database);
-    db.database.dropExpiredLog = (target, now) => {
+    db.database.dropExpiredLog = (target, now, sequence) => {
       remainingAtDrop.push(deletion.stored.size);
-      return drop(target, now);
+      return drop(target, now, sequence);
     };
 
     const first = await run(db, fakeChildren(), { deletion });
     expect(retentionLine(first.lines)).toMatchObject({
-      report: { deleted: 2, locked: 0, log: 1, schema_dropped: false },
+      report: { deleted: 2, locked: 0, log: 1, schema_dropped: false, sequence: 'R_100' },
       status: 'completed',
     });
     expect(deletion.calls.at(-2)).toBe('list:logs/000001/:null:1');
@@ -2136,7 +2239,7 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
 
     const second = await run(db, fakeChildren(), { deletion });
     expect(retentionLine(second.lines)).toMatchObject({
-      report: { deleted: 1, log: 1, schema_dropped: true },
+      report: { deleted: 1, log: 1, schema_dropped: true, sequence: 'R_100' },
     });
     expect(remainingAtDrop).toEqual([0]);
   });
@@ -2154,11 +2257,23 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
 
     const first = await run(db, fakeChildren(), { deletion });
     expect(retentionLine(first.lines)).toMatchObject({
-      report: { deleted: 2, locked: 0, log: 1, reason: 'ETIMEDOUT', schema_dropped: false },
+      report: {
+        deleted: 2,
+        locked: 0,
+        log: 1,
+        reason: 'ETIMEDOUT',
+        schema_dropped: false,
+        sequence: 'R_100',
+      },
       status: 'failed',
     });
     expect(first.alerts).toEqual([
-      { event: 'operations_step_failed', reason: 'ETIMEDOUT', step: 'retention' },
+      {
+        event: 'operations_step_failed',
+        reason: 'ETIMEDOUT',
+        sequence: 'R_100',
+        step: 'retention',
+      },
     ]);
     expect(deletion.calls.at(-1)).toBe('close:logs/000001/');
     expect(db.drops).toEqual([]);
@@ -2176,7 +2291,7 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
     failing = false;
     const second = await run(db, fakeChildren(), { deletion });
     expect(retentionLine(second.lines)).toMatchObject({
-      report: { deleted: 1, log: 1, schema_dropped: true },
+      report: { deleted: 1, log: 1, schema_dropped: true, sequence: 'R_100' },
       status: 'completed',
     });
 
@@ -2184,7 +2299,7 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
     const other = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, EXPIRED), log(2, NOW)] });
     const third = await run(other, fakeChildren(), { deletion: listing });
     expect(retentionLine(third.lines)).toMatchObject({
-      report: { deleted: 0, log: 1, reason: 'ETIMEDOUT', schema_dropped: false },
+      report: { deleted: 0, log: 1, reason: 'ETIMEDOUT', schema_dropped: false, sequence: 'R_100' },
       status: 'failed',
     });
     expect(listing.calls).toEqual([
@@ -2232,7 +2347,7 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
 
     const second = await run(db, fakeChildren(), { deletion });
     expect(retentionLine(second.lines)).toMatchObject({
-      report: { deleted: 1, log: 1, schema_dropped: true },
+      report: { deleted: 1, log: 1, schema_dropped: true, sequence: 'R_100' },
     });
   });
 
@@ -2253,7 +2368,13 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
     await clock.advance(RETENTION_DEADLINE_MS);
     const { lines } = await running;
     expect(retentionLine(lines)).toMatchObject({
-      report: { deadline_reached: true, deleted: 0, log: 1, schema_dropped: false },
+      report: {
+        deadline_reached: true,
+        deleted: 0,
+        log: 1,
+        schema_dropped: false,
+        sequence: 'R_100',
+      },
       status: 'completed',
     });
 
@@ -2284,7 +2405,14 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
       'close:logs/000001/',
     ]);
     expect(retentionLine(lines)).toMatchObject({
-      report: { deadline_reached: true, deleted: 0, locked: 0, log: 1, schema_dropped: false },
+      report: {
+        deadline_reached: true,
+        deleted: 0,
+        locked: 0,
+        log: 1,
+        schema_dropped: false,
+        sequence: 'R_100',
+      },
       status: 'completed',
     });
     expect(alerts).toEqual([]);
@@ -2303,11 +2431,22 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
       deletion: fakeDeletion({ keys: keysOf(1, 1) }),
     });
     expect(retentionLine(first.lines)).toMatchObject({
-      report: { deleted: 1, log: 1, reason: 'log_not_expired', schema_dropped: false },
+      report: {
+        deleted: 1,
+        log: 1,
+        reason: 'log_not_expired',
+        schema_dropped: false,
+        sequence: 'R_100',
+      },
       status: 'failed',
     });
     expect(first.alerts).toEqual([
-      { event: 'operations_step_failed', reason: 'log_not_expired', step: 'retention' },
+      {
+        event: 'operations_step_failed',
+        reason: 'log_not_expired',
+        sequence: 'R_100',
+        step: 'retention',
+      },
     ]);
 
     const absent = fakeDatabase({
@@ -2317,7 +2456,7 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
     });
     const second = await run(absent, fakeChildren());
     expect(retentionLine(second.lines)).toMatchObject({
-      report: { deleted: 0, log: 1, schema_dropped: false },
+      report: { deleted: 0, log: 1, schema_dropped: false, sequence: 'R_100' },
       status: 'completed',
     });
   });
@@ -2332,7 +2471,7 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
     const deletion = fakeDeletion({ keys: keysOf(1, 3) });
     const first = await run(db, fakeChildren(), { deletion });
     expect(retentionLine(first.lines)).toMatchObject({
-      report: { deleted: 3, log: 1, reason: '55P03', schema_dropped: false },
+      report: { deleted: 3, log: 1, reason: '55P03', schema_dropped: false, sequence: 'R_100' },
       status: 'failed',
     });
 
@@ -2345,7 +2484,7 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
       'close:logs/000001/',
     ]);
     expect(retentionLine(second.lines)).toMatchObject({
-      report: { deleted: 0, log: 1, schema_dropped: true },
+      report: { deleted: 0, log: 1, schema_dropped: true, sequence: 'R_100' },
       status: 'completed',
     });
     // Los dos informes se guardan en el log activo, también el de la ejecución que no borró ningún
@@ -2355,8 +2494,19 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
         .filter(({ row }) => row.step === 'retention')
         .map(({ log: number, row }) => [number, row.status, row.report]),
     ).toEqual([
-      [2, 'failed', { deleted: 3, locked: 0, log: 1, reason: '55P03', schema_dropped: false }],
-      [2, 'completed', { deleted: 0, locked: 0, log: 1, schema_dropped: true }],
+      [
+        2,
+        'failed',
+        {
+          deleted: 3,
+          locked: 0,
+          log: 1,
+          reason: '55P03',
+          schema_dropped: false,
+          sequence: 'R_100',
+        },
+      ],
+      [2, 'completed', { deleted: 0, locked: 0, log: 1, schema_dropped: true, sequence: 'R_100' }],
     ]);
   });
 
@@ -2366,14 +2516,14 @@ describe('runOperations: la retención (ADR-0018 §7 y §11, paso 3)', () => {
     let afterHealth = 0;
     // Después de guardar la salud, el informe final lee los logs una vez, y la retención, la
     // siguiente.
-    db.database.listLogs = () => {
+    db.database.listLogs = (sequence) => {
       if (db.calls.includes('report:2:health')) {
         afterHealth += 1;
         if (afterHealth === 2) {
           return Promise.reject(coded('57P01'));
         }
       }
-      return list();
+      return list(sequence);
     };
     const deletion = fakeDeletion({ keys: keysOf(1, 1) });
     const { lines } = await run(db, fakeChildren(), { deletion });
@@ -2535,7 +2685,7 @@ describe('runOperations: la verificación por partes (ADR-0018 §11, paso 4)', (
     const { alerts, lines } = await run(db, fakeChildren(), { deletion, objects });
 
     expect(lines.find((line) => line['step'] === 'retention')).toMatchObject({
-      report: { locked: 1, log: 1, schema_dropped: false },
+      report: { locked: 1, log: 1, schema_dropped: false, sequence: 'R_100' },
     });
     expect(db.calls.filter((call) => call.startsWith('segments:'))).toEqual([
       'segments:2:120',
@@ -2576,12 +2726,14 @@ describe('runOperations: la verificación por partes (ADR-0018 §11, paso 4)', (
         log: '2',
         reason: 'object_missing',
         segment_index: '120',
+        sequence: 'R_100',
       },
       {
         event: 'operations_segment_mismatch',
         log: '2',
         reason: 'object_sha256_mismatch',
         segment_index: '408',
+        sequence: 'R_100',
       },
     ]);
     expect(result.status).toBe('completed');
@@ -2620,7 +2772,12 @@ describe('runOperations: la verificación por partes (ADR-0018 §11, paso 4)', (
       status: 'failed',
     });
     expect(alerts).toEqual([
-      { event: 'operations_step_failed', reason: 'ETIMEDOUT', step: 'verification' },
+      {
+        event: 'operations_step_failed',
+        reason: 'ETIMEDOUT',
+        sequence: 'R_100',
+        step: 'verification',
+      },
     ]);
     expect(lines.find((line) => line['step'] === 'space')).toMatchObject({ status: 'completed' });
     expect(result.status).toBe('failed');
@@ -2714,7 +2871,12 @@ describe('runOperations: la verificación por partes (ADR-0018 §11, paso 4)', (
       status: 'failed',
     });
     expect(alerts).toEqual([
-      { event: 'operations_step_failed', reason: 'deadline_exceeded', step: 'verification' },
+      {
+        event: 'operations_step_failed',
+        reason: 'deadline_exceeded',
+        sequence: 'R_100',
+        step: 'verification',
+      },
     ]);
     expect(lines.find((line) => line['step'] === 'space')).toMatchObject({ status: 'completed' });
     expect(result.status).toBe('failed');
@@ -2742,8 +2904,8 @@ describe('runOperations: el espacio, una vez al día (ADR-0018 §11, paso 5, y �
     space: {
       database_bytes: 52_428_800,
       logs: [
-        { bytes: 41_943_040, log: 1 },
-        { bytes: 98_304, log: 2 },
+        { bytes: 41_943_040, log: 1, sequence: 'R_100' },
+        { bytes: 98_304, log: 2, sequence: 'R_100' },
       ],
     },
   });
@@ -2927,7 +3089,7 @@ describe('runNodeScript: un proceso aparte con su entorno y su plazo', () => {
       'process.stdout.write(JSON.stringify({ argv: process.argv.slice(2), env: process.env, flags: process.execArgv })); process.stderr.write("aviso"); process.exitCode = 3;',
     );
     const result = await runNodeScript({
-      args: ['--json', '--log', '2'],
+      args: ['--json', '--symbol', 'R_100', '--log', '2'],
       env: { BUOH_POSTGRES_USER: 'buoh_salud' },
       nodeFlags: ['--max-semi-space-size=1', '--max-old-space-size=256'],
       script: path,
@@ -2939,7 +3101,7 @@ describe('runNodeScript: un proceso aparte con su entorno y su plazo', () => {
       env: Record<string, string>;
       flags: string[];
     };
-    expect(seen.argv).toEqual(['--json', '--log', '2']);
+    expect(seen.argv).toEqual(['--json', '--symbol', 'R_100', '--log', '2']);
     expect(seen.flags).toEqual(['--max-semi-space-size=1', '--max-old-space-size=256']);
     expect(seen.env).toEqual({ BUOH_POSTGRES_USER: 'buoh_salud' });
     // Sin `reportMemory`, el proceso no carga el módulo de la memoria y no da ninguna.
@@ -3097,14 +3259,16 @@ describe('workerChildScript: el proceso de cada comando del worker (ADR-0018 §1
   const env = { BUOH_POSTGRES_USER: 'buoh_salud' };
 
   it('data:health corre su CLI con WORKER_NODE_FLAGS, 60 s de plazo, sus argumentos, el entorno dado y su memoria', () => {
-    expect(workerChildScript('health', ['--json', '--log', '1'], env)).toEqual({
-      args: ['--json', '--log', '1'],
-      env,
-      nodeFlags: WORKER_NODE_FLAGS,
-      reportMemory: true,
-      script: fileURLToPath(new URL('../src/cli/health.js', import.meta.url)),
-      timeoutMs: 60_000,
-    });
+    expect(workerChildScript('health', ['--json', '--symbol', 'R_100', '--log', '1'], env)).toEqual(
+      {
+        args: ['--json', '--symbol', 'R_100', '--log', '1'],
+        env,
+        nodeFlags: WORKER_NODE_FLAGS,
+        reportMemory: true,
+        script: fileURLToPath(new URL('../src/cli/health.js', import.meta.url)),
+        timeoutMs: 60_000,
+      },
+    );
   });
 
   it('db:migrate corre su CLI con WORKER_NODE_FLAGS, 120 s de plazo y su memoria', () => {
@@ -3168,11 +3332,18 @@ const publishedLine = (log: number, first: number, last: number) =>
     open_condition_types: [],
     pending_continuity_symbols: [],
     publication_id: PUBLICATION,
+    sequence: 'R_100',
     source_event_count: 1000,
     status: 'published',
   });
 const nothingDueLine = (behind: unknown = null) =>
-  JSON.stringify({ behind, duration_ms: 100, max_rss_bytes: 90 * 1048576, status: 'nothing_due' });
+  JSON.stringify({
+    behind,
+    duration_ms: 100,
+    max_rss_bytes: 90 * 1048576,
+    sequence: 'R_100',
+    status: 'nothing_due',
+  });
 const failedLine = (reason: string, log: number | null, first?: number, behind: unknown = null) =>
   JSON.stringify({
     behind,
@@ -3182,6 +3353,7 @@ const failedLine = (reason: string, log: number | null, first?: number, behind: 
     log,
     max_rss_bytes: 90 * 1048576,
     reason,
+    sequence: 'R_100',
     stage: 'plan',
     status: 'failed',
   });
@@ -3409,7 +3581,12 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
     const { alerts, lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
     const publish = children.runs.filter((item) => item.child === 'publish');
     expect(publish).toEqual([
-      { args: [], child: 'publish', env: publishEnvironment(DATASETS_CONFIG), timeoutMs: 60_000 },
+      {
+        args: ['--symbol', 'R_100'],
+        child: 'publish',
+        env: publishEnvironment(DATASETS_CONFIG),
+        timeoutMs: 60_000,
+      },
     ]);
     expect(alerts).toEqual([]);
     const line = stepLine(lines, 'publication');
@@ -3431,6 +3608,7 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
         open_condition_types: [],
         pending_continuity_symbols: [],
         publication_id: PUBLICATION,
+        sequence: 'R_100',
         source_event_count: 1000,
         status: 'published',
       },
@@ -3456,7 +3634,12 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
       { config: DATASETS_CONFIG, nextId: growing },
     );
     expect(late.alerts).toEqual([
-      { event: 'publication_behind', expires_at_utc: '2026-03-04T00:00:00.000Z', log: '1' },
+      {
+        event: 'publication_behind',
+        expires_at_utc: '2026-03-04T00:00:00.000Z',
+        log: '1',
+        sequence: 'R_100',
+      },
     ]);
     expect(stepLine(late.lines, 'publication')?.['report']).toMatchObject({ behind });
   });
@@ -3490,13 +3673,25 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
         },
         status: 'failed',
       });
-      expect(first.alerts).toContainEqual({ event: reason, first_segment: '72', log: '1' });
+      expect(first.alerts).toContainEqual({
+        event: reason,
+        first_segment: '72',
+        log: '1',
+        sequence: 'R_100',
+      });
       const second = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
       expect(children.runs.filter((item) => item.child === 'publish').at(-1)?.args).toEqual([
+        '--symbol',
+        'R_100',
         '--skip',
         '1',
       ]);
-      expect(second.alerts).toContainEqual({ event: reason, first_segment: '72', log: '1' });
+      expect(second.alerts).toContainEqual({
+        event: reason,
+        first_segment: '72',
+        log: '1',
+        sequence: 'R_100',
+      });
       expect(stepLine(second.lines, 'publication')).toMatchObject({ status: 'failed' });
       // Con otro commit, el log vuelve a intentarse.
       const other = loadOperationsConfig({
@@ -3505,7 +3700,10 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
         RENDER_GIT_COMMIT: COMMIT_B,
       });
       const third = await run(db, children, { config: other, nextId: growing });
-      expect(children.runs.filter((item) => item.child === 'publish').at(-1)?.args).toEqual([]);
+      expect(children.runs.filter((item) => item.child === 'publish').at(-1)?.args).toEqual([
+        '--symbol',
+        'R_100',
+      ]);
       expect(stepLine(third.lines, 'publication')).toMatchObject({
         report: { state: { stopped: [] } },
         status: 'completed',
@@ -3524,7 +3722,10 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
     const later = '2026-03-31T00:00:00.000Z';
     const after = datasetsChildren({});
     await run(db, after, { config: DATASETS_CONFIG, nextId: growing, now: () => later });
-    expect(after.runs.find((item) => item.child === 'publish')?.args).toEqual([]);
+    expect(after.runs.find((item) => item.child === 'publish')?.args).toEqual([
+      '--symbol',
+      'R_100',
+    ]);
   });
 
   it.each([
@@ -3539,7 +3740,12 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
       const children = datasetsChildren({ publish: () => answer });
       const one = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
       expect(stepLine(one.lines, 'publication')).toMatchObject({
-        report: { state: { attempts: { count: 1, first_segment: 144, log: 1 }, stopped: [] } },
+        report: {
+          state: {
+            attempts: { count: 1, first_segment: 144, log: 1 },
+            stopped: [],
+          },
+        },
         status: 'failed',
       });
       const two = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
@@ -3565,9 +3771,12 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
         event: 'publication_incomplete',
         first_segment: '144',
         log: '1',
+        sequence: 'R_100',
       });
       await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
       expect(children.runs.filter((item) => item.child === 'publish').at(-1)?.args).toEqual([
+        '--symbol',
+        'R_100',
         '--skip',
         '1',
       ]);
@@ -3666,7 +3875,12 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
       moved.reports.push(item);
     }
     await run(moved, after, { config: DATASETS_CONFIG, nextId: growing });
-    expect(after.runs.find((item) => item.child === 'publish')?.args).toEqual(['--skip', '1']);
+    expect(after.runs.find((item) => item.child === 'publish')?.args).toEqual([
+      '--symbol',
+      'R_100',
+      '--skip',
+      '1',
+    ]);
     const stored = moved.reports.filter((item) => item.row.step === 'publication').at(-1);
     expect(stored?.log).toBe(3);
     expect(stored?.row.report['state']).toMatchObject({
@@ -3681,7 +3895,7 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
     const db = datasetsDatabase();
     const children = datasetsChildren({
       publish: (args) =>
-        args.length === 0
+        !args.includes('--skip')
           ? { exitCode: 1, stdout: failedLine('publication_conflict', 1, 0) }
           : { exitCode: 0, stdout: nothingDueLine() },
     });
@@ -3713,6 +3927,7 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
       event: 'publication_behind',
       expires_at_utc: '2026-03-04T00:00:00.000Z',
       log: '1',
+      sequence: 'R_100',
     });
     expect(stepLine(lines, 'publication')?.['report']).toMatchObject({ behind });
   });
@@ -3721,7 +3936,7 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
     const db = datasetsDatabase();
     const children = datasetsChildren({
       publish: (args) =>
-        args.length === 0
+        !args.includes('--skip')
           ? { exitCode: 1, stdout: failedLine('publication_conflict', 1, 0) }
           : { exitCode: 0, stdout: nothingDueLine() },
     });
@@ -3737,6 +3952,8 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
     db.database.latestReportWithState = latest;
     const healed = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
     expect(children.runs.filter((item) => item.child === 'publish').at(-1)?.args).toEqual([
+      '--symbol',
+      'R_100',
       '--skip',
       '1',
     ]);
@@ -3750,6 +3967,7 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
     const db = datasetsDatabase();
     db.reports.push({
       log: 2,
+      schema: logLocation(2).schema,
       row: {
         observed_at_utc: NOW,
         report: { state: { stopped: 'roto' } },
@@ -4103,6 +4321,7 @@ describe('el paso 7, dataset_verification (ADR-0020 §8)', () => {
 describe('los pasos 6 y 7: casos que deciden (ADR-0020 §8)', () => {
   const stateReport = (logNumber: number, id: number, step: string, state: unknown) => ({
     log: logNumber,
+    schema: logLocation(logNumber).schema,
     row: {
       observed_at_utc: NOW,
       report: { state } as Record<string, JsonValue>,
@@ -4125,7 +4344,10 @@ describe('los pasos 6 y 7: casos que deciden (ADR-0020 §8)', () => {
     db.reports.push(stateReport(3, 501, 'publication', { attempts: null, stopped: [] }));
     const children = datasetsChildren({});
     await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
-    expect(children.runs.find((item) => item.child === 'publish')?.args).toEqual([]);
+    expect(children.runs.find((item) => item.child === 'publish')?.args).toEqual([
+      '--symbol',
+      'R_100',
+    ]);
   });
 
   it('no lee los informes de un log que no se puede leer', async () => {
@@ -4291,5 +4513,497 @@ describe('los pasos 6 y 7: casos que deciden (ADR-0020 §8)', () => {
     );
     await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
     expect(db.reports.filter((item) => item.row.step === 'roles_and_logs')).toHaveLength(1);
+  });
+});
+
+describe('buoh-operaciones por secuencia (ADR-0021 §1, precisión del PR 2b)', () => {
+  /** Con el oro, como en producción desde el PR 3 de ADR-0021 §9. */
+  const GOLD_ENV = { ...ENV, BUOH_OPERACIONES_SIMBOLOS: 'R_100,frxXAUUSD' };
+  const GOLD_CONFIG = loadOperationsConfig(GOLD_ENV);
+  const GOLD_DATASETS_CONFIG = loadOperationsConfig({
+    ...GOLD_ENV,
+    BUOH_PUBLICACION_POSTGRES_PASSWORD: PUBLICATION_PASSWORD,
+    RENDER_GIT_COMMIT: COMMIT_A,
+  });
+  const gold = (number: number) => logLocation(number, GOLD_SEQUENCE);
+  /** El log `number` del oro, legible, con su última escritura o sin ninguna. */
+  const goldLog = (number: number, lastWriteUtc: string | null = null): CaptureLog => ({
+    lastWriteUtc,
+    location: gold(number),
+    readable: true,
+  });
+  const GOLD_1 = gold(1).schema;
+  const EARLIER = '2026-03-01T00:00:00.000Z';
+  const loggedIn = () => new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']);
+  const healthArgs = (children: ReturnType<typeof fakeChildren>) =>
+    children.runs.filter((item) => item.child === 'health').map((item) => item.args.join(' '));
+  const linesOf = (lines: Record<string, unknown>[], step: string) =>
+    lines.filter((line) => line['step'] === step);
+
+  /** Las variables que rechaza `loadOperationsConfig`, o `[]`. */
+  const rejectedWith = (value: string): readonly string[] => {
+    try {
+      loadOperationsConfig({ ...ENV, BUOH_OPERACIONES_SIMBOLOS: value });
+      return [];
+    } catch (error) {
+      if (error instanceof ConfigError) {
+        return error.variables;
+      }
+      throw error;
+    }
+  };
+
+  it('BUOH_OPERACIONES_SIMBOLOS: sin ella, solo R_100; con ella, la secuencia de cada símbolo en el orden de la tabla, con R_100 siempre, sin repetir y solo símbolos con secuencia', () => {
+    expect(CONFIG.sequences).toEqual([R_100_SEQUENCE]);
+    expect(GOLD_CONFIG.sequences).toEqual([R_100_SEQUENCE, GOLD_SEQUENCE]);
+    expect(rejectedWith('frxXAUUSD,R_100')).toEqual([]);
+    expect(
+      loadOperationsConfig({ ...ENV, BUOH_OPERACIONES_SIMBOLOS: 'frxXAUUSD,R_100' }).sequences,
+    ).toEqual([R_100_SEQUENCE, GOLD_SEQUENCE]);
+    for (const value of [
+      'frxXAUUSD',
+      'R_100,R_100',
+      'R_100,SYNTH_100',
+      'R_100,frxxauusd',
+      'R_100, frxXAUUSD',
+      'R_100,',
+      '',
+    ]) {
+      expect(rejectedWith(value)).toEqual(['BUOH_OPERACIONES_SIMBOLOS']);
+    }
+  });
+
+  it('nextLogToPrepare da los logs de la secuencia que se le pide', () => {
+    expect(nextLogToPrepare([], GOLD_SEQUENCE)).toEqual(gold(1));
+    expect(nextLogToPrepare([goldLog(1, NOW)], GOLD_SEQUENCE)).toEqual(gold(2));
+    expect(nextLogToPrepare([goldLog(1, NOW), goldLog(2)], GOLD_SEQUENCE)).toBeNull();
+  });
+
+  it('el paso 1 prepara el log 1 de cada secuencia, el de R_100 con su perfil y el del oro sin ninguno, y la salud observa cada uno con su símbolo y guarda su informe en él', async () => {
+    const state: Parameters<typeof fakeDatabase>[0] = { loggedIn: loggedIn(), logs: [] };
+    const db = fakeDatabase(state);
+    const children = fakeChildren();
+    const { lines, result } = await run(db, children, { config: GOLD_CONFIG });
+
+    expect(result.status).toBe('completed');
+    expect(db.calls.slice(0, 10)).toEqual([
+      'roles',
+      'list',
+      'list',
+      'create:1',
+      'profile:1',
+      'grant:1',
+      'list:frxXAUUSD',
+      'list:frxXAUUSD',
+      `create:${GOLD_1}`,
+      `grant:${GOLD_1}`,
+    ]);
+    expect([...db.profiles.keys()]).toEqual([1]);
+    expect(
+      children.runs.filter((item) => item.child === 'migrate').map((item) => item.env),
+    ).toEqual([
+      migrateEnvironment(GOLD_CONFIG, 'buoh_log_000001'),
+      migrateEnvironment(GOLD_CONFIG, GOLD_1),
+    ]);
+    expect(linesOf(lines, 'roles_and_logs')[0]).toMatchObject({
+      report: {
+        failures: [],
+        prepared: [
+          { log: 1, sequence: 'R_100' },
+          { log: 1, sequence: 'frxXAUUSD' },
+        ],
+        profiles_assigned: [{ log: 1, sequence: 'R_100' }],
+      },
+      status: 'completed',
+    });
+    expect(healthArgs(children)).toEqual([
+      '--json --symbol R_100 --log 1',
+      '--json --symbol frxXAUUSD --log 1',
+    ]);
+    expect(
+      linesOf(lines, 'health').map((line) => [line['log'], line['report'], line['status']]),
+    ).toEqual([
+      [1, { alerts: [], exit_code: 1, log: 1, report: REPORT, sequence: 'R_100' }, 'completed'],
+      [1, { alerts: [], exit_code: 1, log: 1, report: REPORT, sequence: 'frxXAUUSD' }, 'completed'],
+    ]);
+    // Cada salud va a su log; los demás informes, al log activo de R_100.
+    expect(
+      db.reports
+        .map(({ row, schema }) => [schema, row.step])
+        .filter(([, step]) => step !== 'memory'),
+    ).toEqual([
+      ['buoh_log_000001', 'roles_and_logs'],
+      ['buoh_log_000001', 'health'],
+      [GOLD_1, 'health'],
+      ['buoh_log_000001', 'verification'],
+      ['buoh_log_000001', 'space'],
+    ]);
+
+    // En cuanto el log 1 del oro tiene una escritura, prepara su log 2, y solo ese.
+    state.logs = state.logs.map((item) =>
+      item.location.schema === GOLD_1 ? { ...item, lastWriteUtc: NOW } : item,
+    );
+    const second = await run(db, fakeChildren(), { config: GOLD_CONFIG });
+    expect(linesOf(second.lines, 'roles_and_logs')[0]).toMatchObject({
+      report: { prepared: [{ log: 2, sequence: 'frxXAUUSD' }], profiles_assigned: [] },
+    });
+    expect(db.calls.filter((call) => call.startsWith('create:'))).toEqual([
+      'create:1',
+      `create:${GOLD_1}`,
+      `create:${gold(2).schema}`,
+    ]);
+  });
+
+  it('una secuencia que falla no impide la otra, y la salud del oro sin log no se guarda en el de R_100, cuya salud leen la API y el motor', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, NOW), log(2)] });
+    const list = db.database.listLogs.bind(db.database);
+    db.database.listLogs = (sequence) =>
+      sequence === GOLD_SEQUENCE ? Promise.reject(coded('57P01')) : list(sequence);
+    const children = fakeChildren();
+    const { alerts, lines, result } = await run(db, children, { config: GOLD_CONFIG });
+
+    expect(result.status).toBe('failed');
+    expect(linesOf(lines, 'roles_and_logs')[0]).toMatchObject({
+      report: { failures: [{ action: 'logs', reason: '57P01', sequence: 'frxXAUUSD' }] },
+      status: 'failed',
+    });
+    expect(healthArgs(children)).toEqual(['--json --symbol R_100 --log 1']);
+    expect(linesOf(lines, 'health').map((line) => [line['status'], line['report']])).toEqual([
+      ['completed', { alerts: [], exit_code: 1, log: 1, report: REPORT, sequence: 'R_100' }],
+      ['failed', { log: null, reason: '57P01', sequence: 'frxXAUUSD' }],
+    ]);
+    expect(alerts).toContainEqual({
+      event: 'operations_step_failed',
+      reason: '57P01',
+      sequence: 'frxXAUUSD',
+      step: 'health',
+    });
+    expect(
+      db.reports
+        .filter(({ row }) => row.step === 'health' || row.step === 'final_health')
+        .map(({ row, schema }) => [schema, row.report['sequence']]),
+    ).toEqual([['buoh_log_000001', 'R_100']]);
+  });
+
+  it('un data:health del oro que no arranca es un fallo de su secuencia, en su log: la salud de R_100 se guarda igual', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, NOW), goldLog(1, NOW)] });
+    const base = fakeChildren();
+    const children: ReturnType<typeof fakeChildren> = {
+      ...base,
+      runChild: (child, args, env, options) =>
+        child === 'health' && args.includes('frxXAUUSD')
+          ? Promise.reject(Object.assign(new Error('spawn sintético'), { code: 'EAGAIN' }))
+          : base.runChild(child, args, env, options),
+    };
+    const { alerts, lines, result } = await run(db, children, { config: GOLD_CONFIG });
+
+    expect(result.status).toBe('failed');
+    expect(linesOf(lines, 'health').map((line) => [line['status'], line['report']])).toEqual([
+      ['completed', { alerts: [], exit_code: 1, log: 1, report: REPORT, sequence: 'R_100' }],
+      ['failed', { log: 1, reason: 'EAGAIN', sequence: 'frxXAUUSD' }],
+    ]);
+    expect(alerts).toContainEqual({
+      event: 'operations_step_failed',
+      reason: 'EAGAIN',
+      sequence: 'frxXAUUSD',
+      step: 'health',
+    });
+    expect(
+      db.reports
+        .filter(({ row }) => row.step === 'health')
+        .map(({ row, schema }) => [schema, row.status]),
+    ).toEqual([
+      ['buoh_log_000001', 'completed'],
+      [GOLD_1, 'failed'],
+    ]);
+  });
+
+  it('la retención y la verificación siguen con las demás secuencias si una no se puede listar, y la retención borra también los logs de una secuencia que ya no está en la configuración', async () => {
+    const OLD = '2026-01-20T00:00:00.000Z';
+    const r100Key = `${logLocation(1).prefix}sha256/0000`;
+    const listed = (database: ReturnType<typeof fakeDatabase>, failing: LogSequence) => {
+      const list = database.database.listLogs.bind(database.database);
+      database.database.listLogs = (sequence) =>
+        sequence === failing ? Promise.reject(coded('57P01')) : list(sequence);
+    };
+    const kept = segment(120);
+    const db = fakeDatabase({
+      loggedIn: loggedIn(),
+      logs: [log(1, OLD), log(2, NOW), log(3)],
+      segments: { 2: [kept.row] },
+    });
+    // Los logs del oro no se pueden listar en ningún paso.
+    listed(db, GOLD_SEQUENCE);
+    const deletion = fakeDeletion({ keys: [r100Key] });
+    const objects = fakeObjects({ stored: { [segmentKey(2, kept.row)]: kept.physical } });
+    const { lines } = await run(db, fakeChildren(), { config: GOLD_CONFIG, deletion, objects });
+
+    expect(linesOf(lines, 'retention')[0]).toMatchObject({
+      report: {
+        deleted: 1,
+        log: 1,
+        reason: '57P01',
+        schema_dropped: true,
+        sequence: 'R_100',
+        unlisted: [{ reason: '57P01', sequence: 'frxXAUUSD' }],
+      },
+      status: 'failed',
+    });
+    expect(linesOf(lines, 'verification')[0]).toMatchObject({
+      report: {
+        due: 1,
+        read: 1,
+        reason: '57P01',
+        unlisted: [{ reason: '57P01', sequence: 'frxXAUUSD' }],
+      },
+      status: 'failed',
+    });
+
+    // Sin el oro en la configuración, su log vencido se borra igual.
+    const left = fakeDatabase({
+      loggedIn: loggedIn(),
+      logs: [log(1, NOW), goldLog(1, OLD), goldLog(2, OLD)],
+    });
+    const goldKey = `${gold(1).prefix}sha256/0000`;
+    const goldDeletion = fakeDeletion({ keys: [goldKey] });
+    const after = await run(left, fakeChildren(), { deletion: goldDeletion });
+    expect(linesOf(after.lines, 'retention')[0]).toMatchObject({
+      report: { deleted: 1, log: 1, schema_dropped: true, sequence: 'frxXAUUSD' },
+      status: 'completed',
+    });
+    expect(left.drops).toEqual([{ log: 1, now: NOW, sequence: 'frxXAUUSD' }]);
+    // Sin el oro en la configuración, ni la salud ni la verificación miran sus logs.
+    expect(left.calls.filter((call) => call.startsWith(`segments:${GOLD_1}`))).toEqual([]);
+  });
+
+  it('el informe final de un log del oro que terminó se pide con su símbolo y se guarda en ese log', async () => {
+    const db = fakeDatabase({
+      loggedIn: loggedIn(),
+      logs: [log(1, NOW), log(2), goldLog(1, EARLIER), goldLog(2, NOW), goldLog(3)],
+    });
+    const children = fakeChildren();
+    const { lines } = await run(db, children, { config: GOLD_CONFIG });
+
+    expect(healthArgs(children)).toEqual([
+      '--json --symbol R_100 --log 1',
+      '--json --symbol frxXAUUSD --log 2',
+      '--json --symbol frxXAUUSD --log 1',
+    ]);
+    expect(linesOf(lines, 'final_health').map((line) => [line['log'], line['report']])).toEqual([
+      [null, { log: null, sequence: 'R_100' }],
+      [1, { alerts: [], exit_code: 1, log: 1, report: REPORT, sequence: 'frxXAUUSD' }],
+    ]);
+    expect(
+      db.reports.filter(({ row }) => row.step === 'final_health').map(({ schema }) => schema),
+    ).toEqual([GOLD_1]);
+  });
+
+  it('la retención borra un log vencido por ejecución, de cualquier secuencia: el de la última escritura más antigua, con su prefijo y su secuencia', async () => {
+    const OLDEST = '2026-01-10T00:00:00.000Z';
+    const OLDER = '2026-01-20T00:00:00.000Z';
+    const db = fakeDatabase({
+      loggedIn: loggedIn(),
+      logs: [log(1, OLDER), log(2, NOW), goldLog(1, OLDEST), goldLog(2, NOW)],
+    });
+    const r100Key = `${logLocation(1).prefix}sha256/0000`;
+    const goldKey = `${gold(1).prefix}sha256/0000`;
+    const deletion = fakeDeletion({ keys: [r100Key, goldKey] });
+    const retentionOf = (lines: Record<string, unknown>[]) => linesOf(lines, 'retention')[0];
+
+    const first = await run(db, fakeChildren(), { config: GOLD_CONFIG, deletion });
+    expect(retentionOf(first.lines)).toMatchObject({
+      report: { deleted: 1, log: 1, schema_dropped: true, sequence: 'frxXAUUSD' },
+      status: 'completed',
+    });
+    expect([...deletion.stored]).toEqual([r100Key]);
+    expect(db.drops).toEqual([{ log: 1, now: NOW, sequence: 'frxXAUUSD' }]);
+    expect(db.calls).toContain(`drop:${GOLD_1}`);
+
+    const second = await run(db, fakeChildren(), { config: GOLD_CONFIG, deletion });
+    expect(retentionOf(second.lines)).toMatchObject({
+      report: { deleted: 1, log: 1, schema_dropped: true, sequence: 'R_100' },
+    });
+    expect([...deletion.stored]).toEqual([]);
+    // Los dos informes van al log activo de R_100.
+    expect(
+      db.reports.filter(({ row }) => row.step === 'retention').map(({ schema }) => schema),
+    ).toEqual(['buoh_log_000002', 'buoh_log_000002']);
+
+    // Con la misma última escritura, el de la secuencia que va antes en la tabla: R_100.
+    const tie = fakeDatabase({
+      loggedIn: loggedIn(),
+      logs: [log(1, OLDEST), log(2, NOW), goldLog(1, OLDEST), goldLog(2, NOW)],
+    });
+    const tied = await run(tie, fakeChildren(), { config: GOLD_CONFIG });
+    expect(retentionOf(tied.lines)).toMatchObject({ report: { log: 1, sequence: 'R_100' } });
+  });
+
+  it('la verificación lee los segmentos de los logs de cada secuencia con su prefijo, y un segmento del oro que no coincide lleva su secuencia', async () => {
+    const r100 = segment(120);
+    const missing = segment(408);
+    const db = fakeDatabase({
+      loggedIn: loggedIn(),
+      logs: [log(1, NOW), log(2), goldLog(1, NOW), goldLog(2)],
+      segments: { 1: [r100.row], [GOLD_1]: [missing.row] },
+    });
+    const objects = fakeObjects({ stored: { [segmentKey(1, r100.row)]: r100.physical } });
+    const { alerts, lines, result } = await run(db, fakeChildren(), {
+      config: GOLD_CONFIG,
+      objects,
+    });
+
+    expect(result.status).toBe('completed');
+    expect(db.calls.filter((call) => call.startsWith('segments:'))).toEqual([
+      'segments:1:120',
+      'segments:2:120',
+      `segments:${GOLD_1}:120`,
+      `segments:${gold(2).schema}:120`,
+    ]);
+    expect(objects.calls).toEqual([
+      `get:${segmentKey(1, r100.row)}:${String(r100.row.object_size_bytes)}`,
+      'close:logs/000001/',
+      `get:${gold(1).prefix}sha256/${missing.row.object_bytes_sha256}:${String(missing.row.object_size_bytes)}`,
+      'close:logs/frxxauusd/000001/',
+    ]);
+    expect(linesOf(lines, 'verification')[0]).toMatchObject({
+      report: {
+        due: 2,
+        mismatched: [
+          { log: 1, reason: 'object_missing', segment_index: 408, sequence: 'frxXAUUSD' },
+        ],
+        read: 2,
+      },
+      status: 'completed',
+    });
+    expect(alerts).toEqual([
+      {
+        event: 'operations_segment_mismatch',
+        log: '1',
+        reason: 'object_missing',
+        segment_index: '408',
+        sequence: 'frxXAUUSD',
+      },
+    ]);
+  });
+
+  it('el espacio mide los logs de cada secuencia, cada uno con la suya', async () => {
+    const db = fakeDatabase({
+      loggedIn: loggedIn(),
+      logs: [log(1, NOW), log(2), goldLog(1, NOW), goldLog(2)],
+    });
+    const { lines } = await run(db, fakeChildren(), { config: GOLD_CONFIG });
+    expect(linesOf(lines, 'space')[0]).toMatchObject({
+      log: 1,
+      report: {
+        logs: [
+          { bytes: 100, log: 1, sequence: 'R_100' },
+          { bytes: 100, log: 2, sequence: 'R_100' },
+          { bytes: 100, log: 1, sequence: 'frxXAUUSD' },
+          { bytes: 100, log: 2, sequence: 'frxXAUUSD' },
+        ],
+        measured: true,
+      },
+    });
+  });
+
+  describe('el estado de la publicación', () => {
+    const stateRow = (id: number, state: unknown) => ({
+      log: 2,
+      row: {
+        observed_at_utc: NOW,
+        report: { state } as Record<string, JsonValue>,
+        report_id: uuid(id),
+        run_id: uuid(id + 1),
+        status: 'failed' as const,
+        step: 'publication',
+      },
+      schema: logLocation(2).schema,
+    });
+    const stopOf = (extra: Record<string, unknown> = {}) => ({
+      code_version: COMMIT_A,
+      first_segment: 0,
+      log: 1,
+      reason: 'publication_conflict',
+      ...extra,
+    });
+
+    it('un estado sin secuencia es de R_100: el log detenido se salta, y el estado se guarda igual, sin secuencia', async () => {
+      const db = datasetsDatabase();
+      db.reports.push(
+        stateRow(700, {
+          attempts: { count: 1, first_segment: 144, log: 2 },
+          stopped: [stopOf()],
+        }),
+      );
+      const children = datasetsChildren({});
+      const { lines } = await run(db, children, {
+        config: GOLD_DATASETS_CONFIG,
+        nextId: growing,
+      });
+      expect(children.runs.find((item) => item.child === 'publish')?.args).toEqual([
+        '--symbol',
+        'R_100',
+        '--skip',
+        '1',
+      ]);
+      // Los de R_100 se guardan sin `sequence`, como antes, para que el código anterior siga
+      // leyendo el estado si se vuelve atrás un despliegue.
+      const report = stepLine(lines, 'publication')?.['report'] as { state?: unknown };
+      expect(report.state).toEqual({
+        attempts: null,
+        stopped: [stopOf()],
+      });
+    });
+
+    it('un log detenido de otra secuencia no detiene el de R_100 con su número, y uno de una secuencia que no existe deja el estado inválido', async () => {
+      const db = datasetsDatabase();
+      db.reports.push(
+        stateRow(710, { attempts: null, stopped: [stopOf({ sequence: 'frxXAUUSD' })] }),
+      );
+      const children = datasetsChildren({});
+      const { lines } = await run(db, children, {
+        config: GOLD_DATASETS_CONFIG,
+        nextId: growing,
+      });
+      expect(children.runs.find((item) => item.child === 'publish')?.args).toEqual([
+        '--symbol',
+        'R_100',
+      ]);
+      expect(stepLine(lines, 'publication')).toMatchObject({
+        report: { state: { attempts: null, stopped: [] } },
+        status: 'completed',
+      });
+
+      const invalid = datasetsDatabase();
+      invalid.reports.push(
+        stateRow(720, { attempts: null, stopped: [stopOf({ sequence: 'SYNTH_100' })] }),
+      );
+      const blocked = datasetsChildren({});
+      const after = await run(invalid, blocked, { config: GOLD_DATASETS_CONFIG, nextId: growing });
+      expect(stepLine(after.lines, 'publication')).toMatchObject({
+        report: { reason: 'publication_state_invalid' },
+        status: 'failed',
+      });
+      expect(blocked.runs.filter((item) => item.child === 'publish')).toEqual([]);
+    });
+
+    it('una línea de datasets:publish de otra secuencia no es concluyente', async () => {
+      const db = datasetsDatabase();
+      const line = JSON.parse(publishedLine(1, 0, 71)) as Record<string, unknown>;
+      const children = datasetsChildren({
+        publish: () => ({
+          exitCode: 0,
+          stdout: JSON.stringify({ ...line, sequence: 'frxXAUUSD' }),
+        }),
+      });
+      const { lines } = await run(db, children, { config: GOLD_DATASETS_CONFIG, nextId: growing });
+      expect(stepLine(lines, 'publication')).toMatchObject({
+        report: {
+          reason: 'publish_output_invalid',
+          state: { attempts: null, stopped: [] },
+        },
+        status: 'failed',
+      });
+    });
   });
 });

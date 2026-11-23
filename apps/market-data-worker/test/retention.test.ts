@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   deleteKeys,
   failureReason,
+  GOLD_SEQUENCE,
   isObjectLocked,
   logDeletion,
   logLocation,
@@ -182,6 +183,12 @@ describe('logDeletion: los objetos de un log para borrarlos (ADR-0018 §7)', () 
       'manifests/000001/',
       'logs/000001/sha256/',
       '/logs/000001/',
+      // Desde ADR-0021 §1, tampoco el de una secuencia entera ni uno que no es de ninguna.
+      'logs/frxxauusd/',
+      'logs/frxxauusd/1/',
+      'logs/frxXAUUSD/000001/',
+      'logs/otra/000001/',
+      'logs/000001/frxxauusd/000001/',
     ]) {
       const location: LogLocation = { number: 1, prefix, schema: 'buoh_log_000001' };
       expect(() => logDeletion(client, 'buoh-captura', location)).toThrow(TypeError);
@@ -199,6 +206,16 @@ describe('logDeletion: los objetos de un log para borrarlos (ADR-0018 §7)', () 
       ).toThrow(TypeError);
     }
     expect(requests).toEqual([]);
+  });
+
+  it('trabaja bajo el prefijo de un log de cualquier secuencia de la tabla, como el del oro (ADR-0021 §1)', async () => {
+    const location = logLocation(1, GOLD_SEQUENCE);
+    const { client, requests } = clientAnswering(() => ({
+      body: '<ListBucketResult><KeyCount>0</KeyCount></ListBucketResult>',
+      statusCode: 200,
+    }));
+    expect(await logDeletion(client, 'buoh-captura', location).list(null, 10)).toEqual([]);
+    expect(requests.map((request) => request.query['prefix'])).toEqual(['logs/frxxauusd/000001/']);
   });
 
   it('close libera el cliente, y con él sus conexiones', () => {

@@ -13,11 +13,14 @@ import {
 import { failureReason } from '../source-log/source-event-log.js';
 import {
   isLogExpired,
+  LOG_SEQUENCES,
   logLocation,
   MAX_LOG_NUMBER,
+  R_100_SEQUENCE,
   selectActiveLog,
   type CaptureLog,
   type LogLocation,
+  type LogSequence,
 } from '../successive-logs.js';
 import type { RunChild } from './child.js';
 import {
@@ -27,7 +30,8 @@ import {
   migrateEnvironment,
   type OperationsConfig,
 } from './config.js';
-import { derivLogProfileRow, LOG_PROFILE_SYMBOL } from '../deriv/log-profile.js';
+import { derivLogProfileRow, type LogQualityProfileRow } from '../deriv/log-profile.js';
+import { DERIV_PUBLICATION_THRESHOLDS } from '../deriv/profile.js';
 import { datasetVerificationStep, publicationStep } from './datasets-steps.js';
 import type { OwnerDatabase, OperationsReportRow } from './owner-database.js';
 import {
@@ -49,7 +53,9 @@ import {
 // Una ejecución de `buoh-operaciones` (ADR-0018 §11): los pasos en orden, cada uno con su informe.
 // Un paso que falla deja su alerta saneada y su informe, si PostgreSQL responde, y no impide los
 // siguientes. Están los roles y los logs, la salud con el informe final de un log cortado, la
-// retención, la verificación por partes y el espacio.
+// retención, la verificación por partes y el espacio. Desde ADR-0021 §1, cada paso trabaja con los
+// logs de cada secuencia de `BUOH_OPERACIONES_SIMBOLOS`, y la salud y el informe final dejan un
+// informe por secuencia, en su log; los demás informes van al log activo de R_100.
 
 /**
  * Los pasos de una ejecución, en orden. `final_health` es la segunda parte del paso 2 de §11: el
@@ -74,7 +80,10 @@ export type OperationsStep = (typeof OPERATIONS_STEPS)[number];
 /** Un informe: solo códigos, nombres, números y horas, nunca un mensaje de error ni un precio. */
 type Report = Record<string, JsonValue>;
 
-/** Lo que dejó un paso, y el log en cuya tabla de informes se guarda, si lo hay. */
+/**
+ * Lo que dejó un paso, y el log en cuya tabla de informes se guarda, si lo hay; sin él, el log
+ * activo de R_100.
+ */
 export interface StepOutcome {
   readonly log: LogLocation | null;
   readonly report: Report;
@@ -119,21 +128,36 @@ export interface OperationsRun {
 }
 
 /**
- * El log que hay que preparar (ADR-0018 §6): el log 1 si no hay ninguno, y el log *n*+1 en cuanto
- * el de mayor número tiene una escritura; si no, ninguno, porque ya hay uno vacío por delante.
+ * El log que hay que preparar en una secuencia (ADR-0018 §6; ADR-0021 §1), con los logs que existen
+ * de ella: el log 1 si no hay ninguno, y el log *n*+1 en cuanto el de mayor número tiene una
+ * escritura; si no, ninguno, porque ya hay uno vacío por delante. Sin secuencia, en la de R_100.
  */
-export function nextLogToPrepare(logs: readonly CaptureLog[]): LogLocation | null {
+export function nextLogToPrepare(
+  logs: readonly CaptureLog[],
+  sequence: LogSequence = R_100_SEQUENCE,
+): LogLocation | null {
   const highest = logs.reduce<CaptureLog | null>(
     (best, log) => (best === null || log.location.number > best.location.number ? log : best),
     null,
   );
   if (highest === null) {
-    return logLocation(1);
+    return logLocation(1, sequence);
   }
   if (highest.lastWriteUtc === null || highest.location.number >= MAX_LOG_NUMBER) {
     return null;
   }
-  return logLocation(highest.location.number + 1);
+  return logLocation(highest.location.number + 1, sequence);
+}
+
+/**
+ * La fila del perfil que reciben los logs nuevos de la secuencia (ADR-0020 §4; ADR-0021 §2): la del
+ * perfil de publicación de su símbolo, si tiene umbrales medidos (ADR-0020 §1), como R_100; si no,
+ * ninguna, y sus logs se derivan con el perfil de medición, como el oro hasta su PR 7.
+ */
+function sequenceProfileRow(sequence: LogSequence): LogQualityProfileRow | null {
+  return Object.hasOwn(DERIV_PUBLICATION_THRESHOLDS, sequence.name)
+    ? derivLogProfileRow(sequence.name)
+    : null;
 }
 
 /** El motivo saneado de una línea JSON de `db:migrate` que no es `migrated`, o el código de salida. */
@@ -271,9 +295,11 @@ async function prepareDatasets(
 }
 
 /**
- * Paso 1 (ADR-0018 §11): crea y ajusta los roles; aplica las migraciones pendientes a cada log que
- * existe, cada uno con `db:migrate` en un proceso aparte, y le da los privilegios; prepara el log
- * siguiente, o el log 1 si no hay ninguno (`nextLogToPrepare`); y pone la contraseña a cada rol de
+ * Paso 1 (ADR-0018 §11): crea y ajusta los roles; en cada secuencia de la configuración (ADR-0021
+ * §1), aplica las migraciones pendientes a cada log que existe, cada uno con `db:migrate` en un
+ * proceso aparte, le da su perfil si su símbolo tiene umbrales (`sequenceProfileRow`) y los
+ * privilegios, y prepara el log siguiente, o el log 1 si no hay ninguno (`nextLogToPrepare`); y pone
+ * la contraseña a cada rol de
  * ejecución que no inicia sesión con la suya (§8). Una que no se puede comprobar porque no hay
  * conexiones libres queda en `passwords_unchecked`, sin fallo. Sin los roles no sigue. Si falla otra
  * acción, sigue con las demás, y el paso termina `failed` con todas en `failures`.
@@ -294,8 +320,8 @@ async function rolesAndLogs(input: OperationsInput, runId: string): Promise<Step
   const datasetsMigrated: string[] = [];
   const passwordsSet: string[] = [];
   const passwordsUnchecked: string[] = [];
-  const profilesAssigned: number[] = [];
-  let prepared: number | null = null;
+  const profilesAssigned: Report[] = [];
+  const prepared: Report[] = [];
   const outcome = (): StepOutcome => ({
     log: null,
     report: {
@@ -314,7 +340,7 @@ async function rolesAndLogs(input: OperationsInput, runId: string): Promise<Step
       migrated.length > 0 ||
       apiMigrated.length > 0 ||
       datasetsMigrated.length > 0 ||
-      prepared !== null ||
+      prepared.length > 0 ||
       profilesAssigned.length > 0 ||
       passwordsSet.length > 0,
   });
@@ -324,51 +350,63 @@ async function rolesAndLogs(input: OperationsInput, runId: string): Promise<Step
     failures.push({ action: 'ensure_roles', reason: failureReason(error) });
     return outcome();
   }
-  const profile = derivLogProfileRow(LOG_PROFILE_SYMBOL);
   /**
-   * Migra el log, le da su perfil si todavía no lo usa nadie (ADR-0020 §4) y, si las dos cosas
-   * salieron, le da los privilegios: un log sin su perfil no llega a `buoh_ingesta`.
+   * Migra el log de la secuencia, le da su perfil si la secuencia tiene uno y todavía no lo usa
+   * nadie (ADR-0020 §4) y, si las dos cosas salieron, le da los privilegios: un log de R_100 sin su
+   * perfil no llega a `buoh_ingesta`. Un log sin perfil que dar, como los del oro, solo se migra y
+   * recibe sus privilegios.
    */
-  const prepareSchema = async (log: LogLocation): Promise<boolean> => {
+  const prepareSchema = async (
+    log: LogLocation,
+    sequence: LogSequence,
+    profile: LogQualityProfileRow | null,
+  ): Promise<boolean> => {
+    const where = { log: log.number, sequence: sequence.name };
     const result = await migrateLog(input, log);
     if ('reason' in result) {
-      failures.push({ action: 'migrate', log: log.number, reason: result.reason });
+      failures.push({ action: 'migrate', ...where, reason: result.reason });
       return false;
     }
     if (result.applied.length > 0) {
-      migrated.push({ applied: result.applied, log: log.number });
+      migrated.push({ applied: result.applied, ...where });
     }
-    try {
-      const row = { ...profile, assigned_at_utc: input.now(), run_id: runId };
-      if (await database.assignLogProfile(log, row)) {
-        profilesAssigned.push(log.number);
+    if (profile !== null) {
+      try {
+        const row = { ...profile, assigned_at_utc: input.now(), run_id: runId };
+        if (await database.assignLogProfile(log, row)) {
+          profilesAssigned.push(where);
+        }
+      } catch (error) {
+        failures.push({ action: 'profile', ...where, reason: failureReason(error) });
+        return false;
       }
-    } catch (error) {
-      failures.push({ action: 'profile', log: log.number, reason: failureReason(error) });
-      return false;
     }
     try {
       await database.grantLogPrivileges(log);
     } catch (error) {
-      failures.push({ action: 'grant', log: log.number, reason: failureReason(error) });
+      failures.push({ action: 'grant', ...where, reason: failureReason(error) });
       return false;
     }
     return true;
   };
-  try {
-    for (const log of await database.listLogs()) {
-      await prepareSchema(log.location);
-    }
-    // El log siguiente se decide con los logs ya migrados.
-    const next = nextLogToPrepare(await database.listLogs());
-    if (next !== null) {
-      await database.createLogSchema(next);
-      if (await prepareSchema(next)) {
-        prepared = next.number;
+  for (const sequence of input.config.sequences) {
+    const profile = sequenceProfileRow(sequence);
+    try {
+      for (const log of await database.listLogs(sequence)) {
+        await prepareSchema(log.location, sequence, profile);
       }
+      // El log siguiente se decide con los logs ya migrados.
+      const next = nextLogToPrepare(await database.listLogs(sequence), sequence);
+      if (next !== null) {
+        await database.createLogSchema(next);
+        if (await prepareSchema(next, sequence, profile)) {
+          prepared.push({ log: next.number, sequence: sequence.name });
+        }
+      }
+    } catch (error) {
+      // Una secuencia que falla no impide las demás.
+      failures.push({ action: 'logs', reason: failureReason(error), sequence: sequence.name });
     }
-  } catch (error) {
-    failures.push({ action: 'logs', reason: failureReason(error) });
   }
   const apiRoleReady = apiPassword !== null && (await prepareApi(input, failures, apiMigrated));
   const apiReaderReady = apiReaderPassword !== null && (await prepareApiReader(input, failures));
@@ -456,24 +494,34 @@ function healthErrorCode(stderr: string): string | null {
 }
 
 /**
- * Paso 2 (ADR-0018 §11): `data:health` sobre el log activo (`observeLog`). Sin log activo, el paso
+ * Paso 2 (ADR-0018 §11): en cada secuencia de la configuración (ADR-0021 §1), `data:health` sobre
+ * su log activo (`observeLog`), con un informe por secuencia. Sin log activo, el de esa secuencia
  * falla con `log_not_prepared`.
  */
-async function health(input: OperationsInput): Promise<StepOutcome> {
+async function health(input: OperationsInput): Promise<StepOutcome[]> {
+  const outcomes: StepOutcome[] = [];
+  for (const sequence of input.config.sequences) {
+    outcomes.push(await sequenceHealth(input, sequence));
+  }
+  return outcomes;
+}
+
+async function sequenceHealth(input: OperationsInput, sequence: LogSequence): Promise<StepOutcome> {
   let log: LogLocation | null;
   try {
-    log = selectActiveLog(await input.database.listLogs(), input.now());
+    log = selectActiveLog(await input.database.listLogs(sequence), input.now());
   } catch (error) {
-    return failedHealth(null, { reason: failureReason(error) });
+    return failedHealth(null, sequence, { reason: failureReason(error) });
   }
   if (log === null) {
-    return failedHealth(null, { reason: 'log_not_prepared' });
+    return failedHealth(null, sequence, { reason: 'log_not_prepared' });
   }
-  return observeLog(input, log);
+  return observeLog(input, log, sequence);
 }
 
 /**
- * Paso 2 de ADR-0018 §11, su segunda parte: el informe final de un log que terminó (§6,
+ * Paso 2 de ADR-0018 §11, su segunda parte, en cada secuencia de la configuración (ADR-0021 §1),
+ * con un informe por secuencia: el informe final de un log que terminó (§6,
  * «Traspaso»). Un log terminó cuando un log posterior, el activo, tiene una escritura: después de un
  * corte, `ingest` nunca vuelve a escribir en él. De los que terminaron, que tienen alguna escritura,
  * se pueden leer, no han vencido y todavía no tienen un informe final `completed`, el de menor
@@ -483,10 +531,21 @@ async function health(input: OperationsInput): Promise<StepOutcome> {
  * siguiente lo vuelve a intentar: también uno sin observación (`health_not_observed`), porque un
  * almacén no respondió o la reconstrucción no terminó, que en el paso de la salud no es un fallo.
  */
-async function finalHealth(input: OperationsInput): Promise<StepOutcome> {
+async function finalHealth(input: OperationsInput): Promise<StepOutcome[]> {
+  const outcomes: StepOutcome[] = [];
+  for (const sequence of input.config.sequences) {
+    outcomes.push(await sequenceFinalHealth(input, sequence));
+  }
+  return outcomes;
+}
+
+async function sequenceFinalHealth(
+  input: OperationsInput,
+  sequence: LogSequence,
+): Promise<StepOutcome> {
   let target: LogLocation | null = null;
   try {
-    const logs = await input.database.listLogs();
+    const logs = await input.database.listLogs(sequence);
     const now = input.now();
     const active = selectActiveLog(logs, now);
     const ended = logs
@@ -506,12 +565,17 @@ async function finalHealth(input: OperationsInput): Promise<StepOutcome> {
       }
     }
   } catch (error) {
-    return failedHealth(null, { reason: failureReason(error) });
+    return failedHealth(null, sequence, { reason: failureReason(error) });
   }
   if (target === null) {
-    return { log: null, report: { log: null }, status: 'completed', store: false };
+    return {
+      log: null,
+      report: { log: null, sequence: sequence.name },
+      status: 'completed',
+      store: false,
+    };
   }
-  const outcome = await observeLog(input, target);
+  const outcome = await observeLog(input, target, sequence);
   // Un informe sin observación, porque un almacén no respondió (regla 3) o la reconstrucción del
   // estado vivo no terminó, no registra lo que quedó abierto: es un fallo, y se repite.
   const alerts = outcome.report['alerts'];
@@ -537,27 +601,37 @@ const UNOBSERVED_HEALTH_ALERTS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * `data:health --log` sobre el log, en un proceso aparte con el entorno de `healthEnvironment`. Su
- * `HealthReport` va al informe, que se guarda en ese log. Una salud que no es `healthy` no es un
- * fallo; sí lo son la salida 2, un proceso que no termina en su plazo o una línea que no es un
- * `HealthReport`.
+ * `data:health --symbol <símbolo> --log <n>` sobre el log de la secuencia, en un proceso aparte con
+ * el entorno de `healthEnvironment`. Su `HealthReport` va al informe, con la secuencia, que se
+ * guarda en ese log. Una salud que no es `healthy` no es un fallo; sí lo son la salida 2, un proceso
+ * que no termina en su plazo, uno que no arranca, con su motivo saneado, o una línea que no es un
+ * `HealthReport`. Nunca rechaza: así el fallo de una secuencia no se lleva el informe de otra.
  */
-async function observeLog(input: OperationsInput, log: LogLocation): Promise<StepOutcome> {
-  const result = await input.runChild(
-    'health',
-    ['--json', '--log', String(log.number)],
-    healthEnvironment(input.config),
-  );
+async function observeLog(
+  input: OperationsInput,
+  log: LogLocation,
+  sequence: LogSequence,
+): Promise<StepOutcome> {
+  let result: Awaited<ReturnType<RunChild>>;
+  try {
+    result = await input.runChild(
+      'health',
+      ['--json', '--symbol', sequence.name, '--log', String(log.number)],
+      healthEnvironment(input.config),
+    );
+  } catch (error) {
+    return failedHealth(log, sequence, { reason: failureReason(error) });
+  }
   if (result.stderr.length > 0) {
     input.forwardChildStderr(result.stderr);
   }
   if (result.timedOut) {
-    return failedHealth(log, { reason: 'child_timeout' });
+    return failedHealth(log, sequence, { reason: 'child_timeout' });
   }
   const report =
     result.exitCode === 0 || result.exitCode === 1 ? healthReportOf(result.stdout) : null;
   if (report === null) {
-    return failedHealth(log, {
+    return failedHealth(log, sequence, {
       code: healthErrorCode(result.stderr),
       exit_code: result.exitCode,
       reason: 'health_command_failed',
@@ -570,23 +644,35 @@ async function observeLog(input: OperationsInput, log: LogLocation): Promise<Ste
       exit_code: result.exitCode,
       log: log.number,
       report,
+      sequence: sequence.name,
     },
     status: 'completed',
     store: true,
   };
 }
 
-function failedHealth(log: LogLocation | null, fields: Report): StepOutcome {
+/**
+ * El informe de una salud que falló, con la secuencia. Se guarda en su log, o, sin log, en el log
+ * activo de R_100 solo si es de R_100: el paso de la salud de ese log es la salud que leen la API y
+ * el motor (`readLatestStoredHealth`), y no puede ser la de otra secuencia. Uno de otra secuencia sin
+ * log se queda en su línea y su alerta.
+ */
+function failedHealth(log: LogLocation | null, sequence: LogSequence, fields: Report): StepOutcome {
   return {
     log,
-    report: { ...fields, log: log?.number ?? null },
+    report: { ...fields, log: log?.number ?? null, sequence: sequence.name },
     status: 'failed',
-    store: true,
+    store: log !== null || sequence === R_100_SEQUENCE,
   };
 }
 
 /**
- * Paso 3 (ADR-0018 §7 y §11): la retención. Del log vencido de menor número, uno por ejecución, borra
+ * Paso 3 (ADR-0018 §7 y §11): la retención. De los logs vencidos de todas las secuencias de
+ * `LOG_SEQUENCES` (ADR-0021 §1), también la de un símbolo que ya no está en la configuración, para
+ * que sus logs se borren igual, uno por ejecución: el de menor número de cada secuencia y, de esos, el
+ * de la última escritura más antigua, o, con la misma, el de la secuencia que va antes en la tabla.
+ * Una secuencia cuyos logs no se pueden listar va en `unlisted` con su motivo, y el paso falla, pero
+ * sigue con las demás. Borra
  * con el token `operaciones` los objetos de su prefijo, por páginas de `RETENTION_PAGE_KEYS` claves
  * y con `RETENTION_CONCURRENCY` borrados a la vez. Un objeto que la regla de bloqueo del bucket
  * todavía protege queda para una ejecución siguiente (`locked`). Cuando no queda ninguno así y el
@@ -595,43 +681,58 @@ function failedHealth(log: LogLocation | null, fields: Report): StepOutcome {
  * (`deadline_reached`), y lo que queda sigue en la ejecución siguiente: borrar un log lleva varias.
  * Son fallos que PostgreSQL o el almacenamiento no respondan, con su motivo saneado, y que el log ya
  * no haya vencido al borrar su esquema (`log_not_expired`), porque entonces se borraron objetos de un
- * log que volvió a recibir escrituras. El informe se guarda en el log activo, solo si había un log
- * vencido o si el paso falló.
+ * log que volvió a recibir escrituras. El informe, con la secuencia del log, se guarda en el log
+ * activo de R_100, solo si había un log vencido o si el paso falló.
  */
 async function retention(input: OperationsInput): Promise<StepOutcome> {
   const startedMs = Date.parse(input.now());
-  let target: LogLocation | undefined;
-  try {
-    const now = input.now();
-    target = (await input.database.listLogs())
-      .filter((log) => isLogExpired(log, now))
-      .map((log) => log.location)
-      .sort((left, right) => left.number - right.number)[0];
-  } catch (error) {
-    return {
-      log: null,
-      report: { log: null, reason: failureReason(error) },
-      status: 'failed',
-      store: true,
-    };
+  const now = input.now();
+  const candidates: { readonly log: CaptureLog; readonly sequence: LogSequence }[] = [];
+  const unlisted: Report[] = [];
+  for (const sequence of LOG_SEQUENCES) {
+    try {
+      const [lowest] = (await input.database.listLogs(sequence))
+        .filter((log) => isLogExpired(log, now))
+        .sort((left, right) => left.location.number - right.location.number);
+      if (lowest !== undefined) {
+        candidates.push({ log: lowest, sequence });
+      }
+    } catch (error) {
+      unlisted.push({ reason: failureReason(error), sequence: sequence.name });
+    }
   }
+  // Un log vencido tiene escrituras. Con la misma hora gana el primero: la secuencia que va antes.
+  const target = candidates.reduce<(typeof candidates)[number] | undefined>(
+    (best, item) =>
+      best === undefined ||
+      Date.parse(item.log.lastWriteUtc ?? '') < Date.parse(best.log.lastWriteUtc ?? '')
+        ? item
+        : best,
+    undefined,
+  );
+  /** Las secuencias sin listar: el paso falla con el motivo de la primera. */
+  const listing: Report =
+    unlisted[0] === undefined ? {} : { reason: unlisted[0]['reason'] ?? null, unlisted };
   if (target === undefined) {
-    return { log: null, report: { log: null }, status: 'completed', store: false };
+    return unlisted.length === 0
+      ? { log: null, report: { log: null }, status: 'completed', store: false }
+      : { log: null, report: { log: null, ...listing }, status: 'failed', store: true };
   }
-  const expired = target;
+  const expired = target.log.location;
+  const { sequence } = target;
   const progress: DeletionProgress = { deleted: 0, locked: 0, stopped: false };
-  const outcome = (fields: Report = {}): StepOutcome => ({
-    log: null,
-    report: {
+  const outcome = (fields: Report = {}): StepOutcome => {
+    const report: Report = {
       deleted: progress.deleted,
       locked: progress.locked,
       log: expired.number,
       schema_dropped: false,
+      sequence: sequence.name,
+      ...listing,
       ...fields,
-    },
-    status: 'reason' in fields ? 'failed' : 'completed',
-    store: true,
-  });
+    };
+    return { log: null, report, status: 'reason' in report ? 'failed' : 'completed', store: true };
+  };
   /** `work` con lo que queda del plazo de la retención, o `null` si ya venció o vence antes. */
   const timed = <T>(work: () => Promise<T>): Promise<T | null> => {
     const left = RETENTION_DEADLINE_MS - (Date.parse(input.now()) - startedMs);
@@ -674,7 +775,7 @@ async function retention(input: OperationsInput): Promise<StepOutcome> {
     objects.close();
   }
   try {
-    const dropped = await input.database.dropExpiredLog(expired, input.now());
+    const dropped = await input.database.dropExpiredLog(expired, input.now(), sequence);
     return dropped === 'not_expired'
       ? outcome({ reason: 'log_not_expired' })
       : outcome({ schema_dropped: dropped === 'dropped' });
@@ -686,12 +787,15 @@ async function retention(input: OperationsInput): Promise<StepOutcome> {
 /**
  * Paso 4 (ADR-0018 §11): la verificación por partes, la periódica de ADR-0017 §4. Toma la ejecución
  * del día de la hora de inicio (`verificationSlot`) y, de cada log que se puede leer y no ha vencido,
- * los segmentos cerrados que le tocan, todos antes de leer ningún objeto. Después vuelve a leer sus
+ * de cada secuencia de la configuración (ADR-0021 §1), los segmentos cerrados que le tocan, todos
+ * antes de leer ningún objeto. Después vuelve a leer sus
  * objetos con el token `operaciones` y compara sus hashes (`verifySegment`). Cada segmento que no
  * coincide va al informe y deja la alerta `operations_segment_mismatch`: es un resultado, no un fallo
  * del paso. Sí lo son que PostgreSQL o el almacenamiento no respondan y que no termine en
- * `VERIFICATION_DEADLINE_MS`; lo que queda espera a su ejecución del día siguiente. El informe se
- * guarda en cada ejecución, en el log activo.
+ * `VERIFICATION_DEADLINE_MS`; lo que queda espera a su ejecución del día siguiente. Cada segmento
+ * del informe y de la alerta lleva la secuencia de su log. Una secuencia cuyos logs o segmentos no se
+ * pueden buscar va en `unlisted` con su motivo, y el paso falla, pero lee los de las demás. El
+ * informe se guarda en cada ejecución, en el log activo de R_100.
  */
 async function verification(input: OperationsInput, startedAt: string): Promise<StepOutcome> {
   const slot = verificationSlot(startedAt);
@@ -699,29 +803,46 @@ async function verification(input: OperationsInput, startedAt: string): Promise<
   const mismatched: Report[] = [];
   let due: number | null = null;
   let read = 0;
-  const outcome = (fields: Report = {}): StepOutcome => ({
-    log: null,
-    report: { due, mismatched, read, slot, ...fields },
-    status: 'reason' in fields ? 'failed' : 'completed',
-    store: true,
-  });
-  const work: { readonly log: LogLocation; readonly segments: DueSegment[] }[] = [];
-  try {
-    const logs = await input.database.listLogs();
-    const now = input.now();
-    for (const log of logs) {
-      if (log.readable && !isLogExpired(log, now)) {
-        work.push({
-          log: log.location,
-          segments: await input.database.listSegmentsDue(log.location, slot),
-        });
-      }
-    }
-  } catch (error) {
-    return outcome({ reason: failureReason(error) });
+  interface Work {
+    readonly log: LogLocation;
+    readonly segments: DueSegment[];
+    readonly sequence: LogSequence;
   }
-  due = work.reduce((sum, item) => sum + item.segments.length, 0);
-  for (const { log, segments } of work) {
+  const work: Work[] = [];
+  const unlisted: Report[] = [];
+  for (const sequence of input.config.sequences) {
+    // Una secuencia entra entera o no entra.
+    const found: Work[] = [];
+    try {
+      const logs = await input.database.listLogs(sequence);
+      const now = input.now();
+      for (const log of logs) {
+        if (log.readable && !isLogExpired(log, now)) {
+          found.push({
+            log: log.location,
+            segments: await input.database.listSegmentsDue(log.location, slot),
+            sequence,
+          });
+        }
+      }
+      work.push(...found);
+    } catch (error) {
+      unlisted.push({ reason: failureReason(error), sequence: sequence.name });
+    }
+  }
+  /** Las secuencias sin buscar: el paso falla con el motivo de la primera. */
+  const listing: Report =
+    unlisted[0] === undefined ? {} : { reason: unlisted[0]['reason'] ?? null, unlisted };
+  const outcome = (fields: Report = {}): StepOutcome => {
+    const report: Report = { due, mismatched, read, slot, ...listing, ...fields };
+    return { log: null, report, status: 'reason' in report ? 'failed' : 'completed', store: true };
+  };
+  // Sin ningún log buscado, los que tocaban no se saben.
+  due =
+    unlisted.length > 0 && work.length === 0
+      ? null
+      : work.reduce((sum, item) => sum + item.segments.length, 0);
+  for (const { log, segments, sequence } of work) {
     if (segments.length === 0) {
       continue;
     }
@@ -747,6 +868,7 @@ async function verification(input: OperationsInput, startedAt: string): Promise<
             log: log.number,
             reason: failureReason(error),
             segment_index: segment.segment_index,
+            sequence: sequence.name,
           });
         }
         if (checked === null) {
@@ -754,6 +876,7 @@ async function verification(input: OperationsInput, startedAt: string): Promise<
             log: log.number,
             reason: 'deadline_exceeded',
             segment_index: segment.segment_index,
+            sequence: sequence.name,
           });
         }
         const { mismatch } = checked;
@@ -763,12 +886,14 @@ async function verification(input: OperationsInput, startedAt: string): Promise<
             log: log.number,
             reason: mismatch,
             segment_index: segment.segment_index,
+            sequence: sequence.name,
           });
           input.alert({
             event: 'operations_segment_mismatch',
             log: String(log.number),
             reason: mismatch,
             segment_index: String(segment.segment_index),
+            sequence: sequence.name,
           });
         }
       }
@@ -813,7 +938,8 @@ function withinDeadline<T>(scheduler: Scheduler, ms: number, work: Promise<T>): 
 
 /**
  * Paso 5 (ADR-0018 §11 y §7): una vez al día UTC, el espacio de la base y el de cada log en
- * PostgreSQL (`measureSpace`), con su informe en el log activo. Mide si el log activo todavía no
+ * PostgreSQL, de cualquier secuencia, cada uno con la suya (`measureSpace`; ADR-0021 §1), con su
+ * informe en el log activo de R_100. Mide si ese log todavía no
  * tiene un informe `completed` de este paso de ese día, así que una medida que falla se vuelve a
  * intentar en la ejecución siguiente; si ya lo tiene, el paso termina sin medir ni guardar nada. El
  * espacio de R2 lo copia el propietario del panel de Cloudflare (§13).
@@ -821,7 +947,7 @@ function withinDeadline<T>(scheduler: Scheduler, ms: number, work: Promise<T>): 
 async function space(input: OperationsInput): Promise<StepOutcome> {
   try {
     const now = input.now();
-    const active = selectActiveLog(await input.database.listLogs(), now);
+    const active = selectActiveLog(await input.database.listLogs(R_100_SEQUENCE), now);
     if (active !== null) {
       const last = await input.database.lastCompletedReport(active, 'space');
       if (last !== null && last.slice(0, 10) === now.slice(0, 10)) {
@@ -838,7 +964,11 @@ async function space(input: OperationsInput): Promise<StepOutcome> {
       log: active,
       report: {
         database_bytes: measure.database_bytes,
-        logs: measure.logs.map((item) => ({ bytes: item.bytes, log: item.log })),
+        logs: measure.logs.map((item) => ({
+          bytes: item.bytes,
+          log: item.log,
+          sequence: item.sequence,
+        })),
         measured: true,
       },
       status: 'completed',
@@ -852,8 +982,10 @@ async function space(input: OperationsInput): Promise<StepOutcome> {
 /**
  * Una ejecución de `buoh-operaciones` (ADR-0018 §11), con la configuración ya cargada: los pasos en
  * orden. Cada uno deja una línea JSON en stdout (`operations_step`), y uno que falla, además, la
- * alerta `operations_step_failed` con el primer motivo. El informe de cada paso se guarda en la
- * tabla `operations_reports` de su log (el de la salud) o del log activo después del paso, salvo
+ * alerta `operations_step_failed` con el primer motivo y, si su informe la lleva, la secuencia. La
+ * salud y el informe final dejan una línea y un informe por secuencia (ADR-0021 §1). El informe de
+ * cada paso se guarda en la tabla `operations_reports` de su log (el de la salud) o del log activo
+ * de R_100 después del paso, salvo
  * el del paso 1 cuando no cambió nada, el de la retención cuando no había ningún log vencido y el
  * del espacio cuando ya se midió ese día, y los de los pasos 6 y 7 cuando no hicieron nada. Sin la
  * contraseña de `buoh_publicacion`, los pasos 6 y 7 no corren ni dejan línea. Si no se puede
@@ -870,7 +1002,7 @@ export async function runOperations(input: OperationsInput): Promise<OperationsR
     ...input,
     runChild: recordedRunChild(input.runChild, launches),
   };
-  const steps: Record<OperationsStep, () => Promise<StepOutcome>> = {
+  const steps: Record<OperationsStep, () => Promise<StepOutcome | StepOutcome[]>> = {
     final_health: () => finalHealth(measured),
     health: () => health(measured),
     retention: () => retention(measured),
@@ -894,34 +1026,45 @@ export async function runOperations(input: OperationsInput): Promise<OperationsR
       (step !== 'publication' && step !== 'dataset_verification'),
   );
   for (const step of enabled) {
-    let outcome: StepOutcome;
+    let outcomes: StepOutcome[];
     try {
-      outcome = await steps[step]();
+      const result = await steps[step]();
+      outcomes = Array.isArray(result) ? result : [result];
     } catch (error) {
-      outcome = {
-        log: null,
-        report: { reason: failureReason(error) },
-        status: 'failed',
-        store: true,
-      };
+      outcomes = [
+        {
+          log: null,
+          report: { reason: failureReason(error) },
+          status: 'failed',
+          store: true,
+        },
+      ];
     }
-    const observedAt = input.now();
-    if (outcome.status === 'failed') {
-      failed = true;
-      input.alert({ event: 'operations_step_failed', reason: firstReason(outcome.report), step });
-    }
-    lines.push(
-      JSON.stringify({
-        event: 'operations_step',
-        log: outcome.log?.number ?? null,
-        report: outcome.report,
-        run_id: runId,
-        status: outcome.status,
-        step,
-      }),
-    );
-    if (outcome.store && !(await storeReport(input, step, outcome, { observedAt, runId }))) {
-      failed = true;
+    for (const outcome of outcomes) {
+      const observedAt = input.now();
+      if (outcome.status === 'failed') {
+        failed = true;
+        const sequence = outcome.report['sequence'];
+        input.alert({
+          event: 'operations_step_failed',
+          reason: firstReason(outcome.report),
+          ...(typeof sequence === 'string' ? { sequence } : {}),
+          step,
+        });
+      }
+      lines.push(
+        JSON.stringify({
+          event: 'operations_step',
+          log: outcome.log?.number ?? null,
+          report: outcome.report,
+          run_id: runId,
+          status: outcome.status,
+          step,
+        }),
+      );
+      if (outcome.store && !(await storeReport(input, step, outcome, { observedAt, runId }))) {
+        failed = true;
+      }
     }
   }
   const status = failed ? 'failed' : 'completed';
@@ -973,9 +1116,9 @@ function firstReason(report: Report): string {
 }
 
 /**
- * Guarda el informe del paso en su log, o en el log activo si el paso no lo dice. Sin ningún log no
- * hay dónde guardarlo, y no es un fallo: lo dice la línea del paso. Si PostgreSQL no responde, deja
- * la alerta `operations_report_unavailable` y da `false`.
+ * Guarda el informe del paso en su log, o en el log activo de R_100 si el paso no lo dice. Sin
+ * ningún log no hay dónde guardarlo, y no es un fallo: lo dice la línea del paso. Si PostgreSQL no
+ * responde, deja la alerta `operations_report_unavailable` y da `false`.
  */
 async function storeReport(
   input: OperationsInput,
@@ -984,7 +1127,8 @@ async function storeReport(
   meta: { readonly observedAt: string; readonly runId: string },
 ): Promise<boolean> {
   try {
-    const log = outcome.log ?? selectActiveLog(await input.database.listLogs(), input.now());
+    const log =
+      outcome.log ?? selectActiveLog(await input.database.listLogs(R_100_SEQUENCE), input.now());
     if (log === null) {
       return true;
     }

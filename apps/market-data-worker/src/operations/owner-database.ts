@@ -19,10 +19,14 @@ import { failureReason } from '../source-log/source-event-log.js';
 import {
   isLogExpired,
   listCaptureLogs,
-  logNumberOf,
+  LOG_SEQUENCES,
+  logLocation,
+  logOfSchema,
+  logSchemaPattern,
   readCaptureLog,
   type CaptureLog,
   type LogLocation,
+  type LogSequence,
 } from '../successive-logs.js';
 import { DATASETS_SCHEMA } from '../datasets/location.js';
 import type { LogQualityProfileRow } from '../deriv/log-profile.js';
@@ -63,10 +67,17 @@ export const DROP_LOG_LOCK_TIMEOUT_MS = 5_000;
  */
 export type LogSchemaDrop = 'absent' | 'dropped' | 'not_expired';
 
-/** El espacio de la base y el de cada log, en bytes, en orden de log. */
+/**
+ * El espacio de la base y el de cada log de cada secuencia (ADR-0021 §1), en bytes, en el orden de
+ * `LOG_SEQUENCES` y, dentro de cada secuencia, de log. `sequence` es su nombre.
+ */
 export interface SpaceMeasure {
   readonly database_bytes: number;
-  readonly logs: readonly { readonly bytes: number; readonly log: number }[];
+  readonly logs: readonly {
+    readonly bytes: number;
+    readonly log: number;
+    readonly sequence: string;
+  }[];
 }
 
 /** Un informe de un paso de `buoh-operaciones`, como lo guarda `operations_reports` (`0006`). */
@@ -126,8 +137,8 @@ export interface DatasetVerificationRow {
 export interface OwnerDatabase {
   /** Crea los roles que falten y fija sus atributos (`ensureRuntimeRoles`). */
   ensureRuntimeRoles(): Promise<void>;
-  /** Los logs que existen, con su última escritura (`listCaptureLogs`). */
-  listLogs(): Promise<CaptureLog[]>;
+  /** Los logs de la secuencia que existen, con su última escritura (`listCaptureLogs`). */
+  listLogs(sequence: LogSequence): Promise<CaptureLog[]>;
   /** Da a los roles de ejecución sus privilegios en el esquema del log (`grantLogPrivileges`). */
   grantLogPrivileges(log: LogLocation): Promise<void>;
   /** Crea el esquema del log como `buoh_dueno`, si no existe. */
@@ -190,18 +201,20 @@ export interface OwnerDatabase {
    */
   listSegmentsDue(log: LogLocation, slot: number): Promise<DueSegment[]>;
   /**
-   * El espacio de la base (`pg_database_size`) y el de cada log que existe, la suma de sus tablas con
-   * sus índices y su TOAST (`pg_total_relation_size`), en bytes (ADR-0018 §7).
+   * El espacio de la base (`pg_database_size`) y el de cada log que existe, de cualquier secuencia de
+   * `LOG_SEQUENCES`, la suma de sus tablas con sus índices y su TOAST (`pg_total_relation_size`), en
+   * bytes (ADR-0018 §7).
    */
   measureSpace(): Promise<SpaceMeasure>;
   /**
-   * Borra el esquema del log entero, con sus tablas (`DROP SCHEMA … CASCADE`), como `buoh_dueno`,
-   * si a la hora `now` sigue vencido (ADR-0018 §7): en la misma transacción vuelve a leer su última
-   * escritura (`readCaptureLog`) y no borra nada si ya no venció o si el esquema no existe. Espera
+   * Borra el esquema del log entero, de su secuencia, con sus tablas (`DROP SCHEMA … CASCADE`), como
+   * `buoh_dueno`, si a la hora `now` sigue vencido (ADR-0018 §7): en la misma transacción vuelve a
+   * leer su última escritura (`readCaptureLog`) y no borra nada si ya no venció o si el esquema no
+   * existe. Espera
    * los bloqueos de sus tablas como mucho `DROP_LOG_LOCK_TIMEOUT_MS`. Ninguna fila se modifica: se
    * borran las tablas enteras.
    */
-  dropExpiredLog(log: LogLocation, now: string): Promise<LogSchemaDrop>;
+  dropExpiredLog(log: LogLocation, now: string, sequence: LogSequence): Promise<LogSchemaDrop>;
   /** Libera las conexiones. */
   close(): Promise<void>;
 }
@@ -340,31 +353,35 @@ export function openOwnerDatabase(
       asOwner(async (client) => {
         await client.query(`CREATE SCHEMA IF NOT EXISTS ${pg.escapeIdentifier(log.schema)}`);
       }),
-    dropExpiredLog: (log, now) =>
-      asOwner(async (client) => {
-        await client.query('BEGIN');
-        try {
-          await client.query(`SET LOCAL lock_timeout = ${String(DROP_LOG_LOCK_TIMEOUT_MS)}`);
-          const current = await readCaptureLog(client, {
-            number: log.number,
-            source: input.source,
-          });
-          let result: LogSchemaDrop = 'absent';
-          if (current !== null) {
-            result = isLogExpired(current, now) ? 'dropped' : 'not_expired';
-          }
-          if (result === 'dropped') {
-            await client.query(`DROP SCHEMA ${pg.escapeIdentifier(log.schema)} CASCADE`);
-            await client.query('COMMIT');
-          } else {
-            await client.query('ROLLBACK');
-          }
-          return result;
-        } catch (error) {
-          await client.query('ROLLBACK').catch(() => undefined);
-          throw error;
-        }
-      }),
+    dropExpiredLog: (log, now, sequence) =>
+      // Un log de otra secuencia se rechaza antes de leer nada: la lectura sería la de otro esquema.
+      logLocation(log.number, sequence).schema !== log.schema
+        ? Promise.reject(new TypeError('El log que se borra no es de esa secuencia.'))
+        : asOwner(async (client) => {
+            await client.query('BEGIN');
+            try {
+              await client.query(`SET LOCAL lock_timeout = ${String(DROP_LOG_LOCK_TIMEOUT_MS)}`);
+              const current = await readCaptureLog(client, {
+                number: log.number,
+                sequence,
+                source: input.source,
+              });
+              let result: LogSchemaDrop = 'absent';
+              if (current !== null) {
+                result = isLogExpired(current, now) ? 'dropped' : 'not_expired';
+              }
+              if (result === 'dropped') {
+                await client.query(`DROP SCHEMA ${pg.escapeIdentifier(log.schema)} CASCADE`);
+                await client.query('COMMIT');
+              } else {
+                await client.query('ROLLBACK');
+              }
+              return result;
+            } catch (error) {
+              await client.query('ROLLBACK').catch(() => undefined);
+              throw error;
+            }
+          }),
     ensureApiReaderRole: () => withClient((client) => ensureApiReaderRole(client)),
     ensureApiRole: () => withClient((client) => ensureApiRole(client)),
     ensurePublicationRole: () => withClient((client) => ensurePublicationRole(client)),
@@ -403,7 +420,7 @@ export function openOwnerDatabase(
               status: row.status,
             };
       }),
-    listLogs: () => asOwner((client) => listCaptureLogs(client, input.source)),
+    listLogs: (sequence) => asOwner((client) => listCaptureLogs(client, input.source, sequence)),
     nextPublicationToVerify: () =>
       asOwner(async (client) => {
         const { rows } = await client.query<{
@@ -447,16 +464,25 @@ export function openOwnerDatabase(
                   COALESCE(sum(pg_total_relation_size(c.oid)), 0) AS bytes
              FROM pg_namespace n
              LEFT JOIN pg_class c ON c.relnamespace = n.oid AND c.relkind = 'r'
-            WHERE n.nspname ~ '^buoh_log_[0-9]{6}$'
+            WHERE n.nspname ~ ANY ($1::text[])
             GROUP BY n.nspname
             ORDER BY n.nspname`,
+          [LOG_SEQUENCES.map((sequence) => logSchemaPattern(sequence))],
         );
+        const measured = logs.rows.flatMap((row) => {
+          const found = logOfSchema(row.schema);
+          return found === null
+            ? []
+            : [{ bytes: Number(row.bytes), log: found.number, sequence: found.sequence }];
+        });
         return {
           database_bytes: Number(database.rows[0]?.bytes ?? 0),
-          logs: logs.rows.flatMap((row) => {
-            const log = logNumberOf(row.schema);
-            return log === null ? [] : [{ bytes: Number(row.bytes), log }];
-          }),
+          logs: LOG_SEQUENCES.flatMap((sequence) =>
+            measured
+              .filter((item) => item.sequence === sequence)
+              .sort((left, right) => left.log - right.log)
+              .map((item) => ({ bytes: item.bytes, log: item.log, sequence: sequence.name })),
+          ),
         };
       }),
     setRolePassword: (role, password) =>

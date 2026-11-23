@@ -5,6 +5,7 @@ import {
   firstWriteOf,
   GOLD_SEQUENCE,
   isLogExpired,
+  isLogPrefix,
   listCaptureLogs,
   liveSequenceOf,
   loadConfig,
@@ -12,6 +13,8 @@ import {
   LOG_SEQUENCES,
   logLocation,
   logNumberOf,
+  logOfSchema,
+  logSchemaPattern,
   MAX_LOG_NUMBER,
   productionLogConfigErrors,
   R_100_SEQUENCE,
@@ -156,6 +159,40 @@ describe('las secuencias de logs (ADR-0021 §1)', () => {
   it('un símbolo sin secuencia no tiene ninguna, tampoco en otras mayúsculas', () => {
     for (const symbol of ['r_100', 'FRXXAUUSD', 'frxxauusd', 'SYNTH_100', '']) {
       expect(liveSequenceOf(symbol)).toBeNull();
+    }
+  });
+
+  it('logOfSchema da el log y la secuencia de un esquema de cualquiera, y logSchemaPattern el patrón de cada una (precisión del PR 2b)', () => {
+    expect(logOfSchema('buoh_log_000007')).toEqual({ number: 7, sequence: R_100_SEQUENCE });
+    expect(logOfSchema('buoh_frxxauusd_log_000002')).toEqual({
+      number: 2,
+      sequence: GOLD_SEQUENCE,
+    });
+    for (const schema of ['buoh_log_000000', 'buoh_log_1', 'buoh_x_log_000001', 'public']) {
+      expect(logOfSchema(schema)).toBeNull();
+    }
+    expect(logSchemaPattern(R_100_SEQUENCE)).toBe('^buoh_log_[0-9]{6}$');
+    expect(logSchemaPattern(GOLD_SEQUENCE)).toBe('^buoh_frxxauusd_log_[0-9]{6}$');
+  });
+
+  it('isLogPrefix: el prefijo de un log de cualquier secuencia, y nada más', () => {
+    for (const sequence of LOG_SEQUENCES) {
+      for (const number of [1, 42, MAX_LOG_NUMBER]) {
+        expect(isLogPrefix(logLocation(number, sequence).prefix)).toBe(true);
+      }
+    }
+    for (const prefix of [
+      '',
+      'logs/',
+      'logs/frxxauusd/',
+      'logs/frxxauusd/1/',
+      'logs/frxXAUUSD/000001/',
+      'logs/otra/000001/',
+      'logs/000001',
+      'logs/000001/sha256/',
+      'datasets/000001/',
+    ]) {
+      expect(isLogPrefix(prefix)).toBe(false);
     }
   });
 

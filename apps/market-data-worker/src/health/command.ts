@@ -5,7 +5,15 @@ import type { ExpectedSchemaArchive } from '../deriv/schema-release.js';
 import { HEALTH_USAGE, parseHealthArgs } from '../health-args.js';
 import { UsageError } from '../replay-args.js';
 import { failureReason } from '../source-log/source-event-log.js';
-import { productionLogConfigErrors, withLog, type LogLocation } from '../successive-logs.js';
+import {
+  LOG_SEQUENCES,
+  liveSequenceOf,
+  productionLogConfigErrors,
+  R_100_SEQUENCE,
+  withLog,
+  type LogLocation,
+  type LogSequence,
+} from '../successive-logs.js';
 import { evaluateDataHealth, type HealthEvaluation } from './evaluate.js';
 import { observeDataHealth, type HealthObservationProgress, type HealthStores } from './observe.js';
 
@@ -23,21 +31,23 @@ export interface HealthDependencies {
   /** La hora UTC con milisegundos (`toISOString()`). */
   readonly now: () => string;
   /**
-   * En `production`, busca con esa configuración, ya comprobada, el log que observa (ADR-0018 §6):
-   * el log `requested` de `--log` si existe y se puede leer, o el log activo de la fuente sin él;
-   * `null` si no hay ninguno. En `data:health`, `locateActiveLog`. Fuera de `production` no se
-   * llama.
+   * En `production`, busca con esa configuración, ya comprobada, el log que observa en la secuencia
+   * del símbolo (ADR-0018 §6; ADR-0021 §1): el log `requested` de `--log` si existe y se puede
+   * leer, o el log activo de la fuente sin él; `null` si no hay ninguno. En `data:health`,
+   * `locateActiveLog`. Fuera de `production` no se llama.
    */
   readonly locateLog: (
     config: WorkerConfig,
     requested: number | null,
+    sequence: LogSequence,
   ) => Promise<LogLocation | null>;
   /**
-   * Abre las lecturas con esa configuración, ya comprobada: `openHealthStores` en `data:health`,
-   * sobre `openStores` y su pool. En `production`, con el esquema y el prefijo del log activo
-   * (`withLog`).
+   * Abre las lecturas con esa configuración, ya comprobada, y el escritor vivo de esa secuencia:
+   * `openHealthStores` en `data:health`, sobre `openStores` y su pool. En `production`, con el
+   * esquema y el prefijo del log que observa (`withLog`) y la secuencia del símbolo; fuera, con la de
+   * R_100, cuyo bloqueo es el de la fuente.
    */
-  readonly openStores: (config: WorkerConfig) => HealthCommandStores;
+  readonly openStores: (config: WorkerConfig, sequence: LogSequence) => HealthCommandStores;
   /** El temporizador del plazo total y del cierre; en `data:health`, el real. */
   readonly scheduler: Scheduler;
 }
@@ -127,6 +137,7 @@ async function locateAndObserve(
   input: {
     readonly log: number | null;
     readonly progress: HealthObservationProgress;
+    readonly sequence: LogSequence;
     readonly symbol: string;
   },
 ): Promise<HealthEvaluation> {
@@ -135,11 +146,11 @@ async function locateAndObserve(
   if (config.environment === 'production') {
     let log: LogLocation | null;
     try {
-      log = await dependencies.locateLog(config, input.log);
+      log = await dependencies.locateLog(config, input.log, input.sequence);
       // Un log anterior al activo terminó (ADR-0018 §6): quien tiene el bloqueo de la fuente escribe
       // en otro log y nunca vuelve a este.
       if (log !== null && input.log !== null) {
-        const active = await dependencies.locateLog(config, null);
+        const active = await dependencies.locateLog(config, null, input.sequence);
         ended = active !== null && active.number > log.number;
       }
     } catch (error) {
@@ -166,7 +177,7 @@ async function locateAndObserve(
     }
     target = withLog(config, log);
   }
-  const stores = dependencies.openStores(target);
+  const stores = dependencies.openStores(target, input.sequence);
   opened.stores = stores;
   const observation = await observeDataHealth({
     environment: config.environment,
@@ -180,6 +191,22 @@ async function locateAndObserve(
     symbol: input.symbol,
   });
   return evaluateDataHealth(observation);
+}
+
+/**
+ * La secuencia de logs de `--symbol` en `production` (ADR-0021 §1): el log activo, `--log` y el
+ * escritor vivo son los de esa secuencia. Un símbolo sin secuencia es un error de uso, porque no
+ * tiene logs que observar.
+ */
+function productionSequence(symbol: string): LogSequence {
+  const sequence = liveSequenceOf(symbol);
+  if (sequence === null) {
+    const names = LOG_SEQUENCES.map((item) => item.name).join(', ');
+    throw new UsageError(
+      `En production, --symbol es el de una secuencia de logs: ${names}. ${HEALTH_USAGE}`,
+    );
+  }
+  return sequence;
 }
 
 /**
@@ -221,8 +248,10 @@ function loadHealthConfig(env: Readonly<Record<string, string | undefined>>): Wo
  * - Argumentos o variables de entorno inválidos (`UsageError`, `ConfigError`, regla 1): salida 2,
  *   nada en stdout y en stderr una línea con `code` y el mensaje, que solo nombra variables, sin
  *   abrir nada. En `production`, `BUOH_POSTGRES_SCHEMA` también es inválida.
- * - En `production`, observa el log activo (ADR-0018 §6), o el de `--log`: lo busca dentro del
- *   plazo total y abre los almacenes con su esquema y su prefijo. Sin log activo, o si el pedido no
+ * - En `production`, observa el log activo (ADR-0018 §6), o el de `--log`, en la secuencia de
+ *   `--symbol` (ADR-0021 §1), y el escritor vivo es el de su bloqueo: lo busca dentro del plazo
+ *   total y abre los almacenes con su esquema y su prefijo. Un símbolo sin secuencia es un error de
+ *   uso. Sin log activo, o si el pedido no
  *   existe o todavía no se puede leer, la regla 2 con `log_not_prepared`. Un log de `--log` anterior
  *   al activo terminó: lo observa sin escritor vivo, con la regla 4. Fuera de `production`, `--log`
  *   es un error de uso.
@@ -241,6 +270,7 @@ export async function healthCommand(
   let symbol: string;
   let log: number | null;
   let config: WorkerConfig;
+  let sequence: LogSequence;
   try {
     ({ log, symbol } = parseHealthArgs(argv));
     config = loadHealthConfig(env);
@@ -249,6 +279,7 @@ export async function healthCommand(
         `--log solo vale en production, donde la captura es una sucesión de logs. ${HEALTH_USAGE}`,
       );
     }
+    sequence = config.environment === 'production' ? productionSequence(symbol) : R_100_SEQUENCE;
   } catch (error) {
     if (error instanceof UsageError || error instanceof ConfigError) {
       return {
@@ -267,7 +298,7 @@ export async function healthCommand(
     evaluation = await withinDeadline(
       scheduler,
       HEALTH_DEADLINE_MS,
-      locateAndObserve(dependencies, config, opened, { log, progress, symbol }),
+      locateAndObserve(dependencies, config, opened, { log, progress, sequence, symbol }),
       () =>
         evaluateDataHealth(
           progress.rebuilding

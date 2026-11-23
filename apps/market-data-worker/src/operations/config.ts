@@ -7,6 +7,12 @@ import {
   PUBLICATION_ROLE,
   type LoginRole,
 } from '../postgres/roles.js';
+import {
+  LOG_SEQUENCES,
+  liveSequenceOf,
+  R_100_SEQUENCE,
+  type LogSequence,
+} from '../successive-logs.js';
 
 // La configuración de `buoh-operaciones` (ADR-0018 §11): cada credencial tiene su propio nombre, para
 // que ningún proceso tome la de otro por error, y el servicio no tiene ninguna variable con los
@@ -63,6 +69,29 @@ const operationsEnvironmentSchema = z.object({
   BUOH_SALUD_S3_ENDPOINT: z.url(),
   BUOH_SALUD_S3_REGION: nonEmpty,
   BUOH_SALUD_S3_SECRET_ACCESS_KEY: nonEmpty,
+  /**
+   * Los símbolos capturados en vivo, separados por comas (ADR-0021 §1, precisión del PR 2b): el
+   * servicio prepara, observa, verifica, mide y borra los logs de la secuencia de cada uno. Cada uno
+   * tiene que tener su secuencia en `LOG_SEQUENCES`, sin repetirse, y R_100 tiene que estar, porque
+   * su log activo guarda los informes. Sin la variable, solo R_100.
+   */
+  BUOH_OPERACIONES_SIMBOLOS: z
+    .string()
+    .optional()
+    .transform((value, context) => {
+      const names = (value ?? R_100_SEQUENCE.name).split(',');
+      const sequences = names.map((name) => liveSequenceOf(name));
+      if (
+        sequences.some((sequence) => sequence === null) ||
+        new Set(names).size !== names.length ||
+        !sequences.includes(R_100_SEQUENCE)
+      ) {
+        context.addIssue({ code: 'custom', message: 'símbolos sin secuencia' });
+        return z.NEVER;
+      }
+      // En el orden de la tabla, con R_100 primero, sea cual sea el de la variable.
+      return LOG_SEQUENCES.filter((sequence) => sequences.includes(sequence));
+    }),
   /** El token `operaciones` de R2, el del propio servicio: la verificación por partes (§10). */
   BUOH_OPERACIONES_S3_ACCESS_KEY_ID: nonEmpty,
   BUOH_OPERACIONES_S3_BUCKET: bucket,
@@ -98,6 +127,11 @@ export interface OperationsConfig {
   readonly owner: WorkerConfig['postgres'];
   /** La contraseña que debe tener cada rol de ejecución que inicia sesión. */
   readonly passwords: Readonly<Record<LoginRole, string>>;
+  /**
+   * Las secuencias de los símbolos de `BUOH_OPERACIONES_SIMBOLOS` (ADR-0021 §1), en el orden de
+   * `LOG_SEQUENCES`: R_100 siempre, y la primera.
+   */
+  readonly sequences: readonly LogSequence[];
   /**
    * La contraseña que debe tener `buoh_publicacion` (ADR-0020 §5), o `null` mientras el servicio
    * no la tiene: entonces no toca `buoh_datasets` ni corren los pasos 6 y 7.
@@ -169,6 +203,7 @@ export function loadOperationsConfig(
       [POSTGRES_ROLES.ingest]: value.BUOH_INGESTA_POSTGRES_PASSWORD,
     },
     publicationPassword: value.BUOH_PUBLICACION_POSTGRES_PASSWORD ?? null,
+    sequences: value.BUOH_OPERACIONES_SIMBOLOS,
   };
 }
 

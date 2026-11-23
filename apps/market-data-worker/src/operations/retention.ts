@@ -3,7 +3,7 @@ import { DeleteObjectCommand, ListObjectsV2Command, type S3Client } from '@aws-s
 import type { WorkerConfig } from '../config.js';
 import { HEALTH_CONNECTION_TIMEOUT_MS, HEALTH_REQUEST_TIMEOUT_MS } from '../runtime.js';
 import { createS3Client, isObjectLocked } from '../s3/object-store.js';
-import type { LogLocation } from '../successive-logs.js';
+import { isLogPrefix, type LogLocation } from '../successive-logs.js';
 
 // La retención de `buoh-operaciones` (ADR-0018 §7 y §11, paso 3): borra el log que venció, primero
 // los objetos de su prefijo, por partes, y, cuando el listado del prefijo vuelve vacío, su esquema.
@@ -21,9 +21,6 @@ export const RETENTION_PAGE_KEYS = 1000;
 
 /** Los borrados que van a la vez, uno por objeto (`DeleteObject`). */
 export const RETENTION_CONCURRENCY = 8;
-
-/** El prefijo de un log de producción: `logs/` y su número en seis cifras (`logLocation`). */
-const LOG_PREFIX = /^logs\/[0-9]{6}\/$/u;
 
 /** Lo que pasó al borrar un objeto. */
 export type ObjectDeletion = 'deleted' | 'locked';
@@ -59,16 +56,22 @@ export class ListingOutsidePrefixError extends Error {
   }
 }
 
-/** Lanza `TypeError` si el prefijo no es el de un log de producción, por ejemplo uno vacío. */
+/**
+ * Lanza `TypeError` si el prefijo no es el de un log de producción de alguna secuencia
+ * (`isLogPrefix`; ADR-0021 §1), por ejemplo uno vacío o el de una secuencia entera.
+ */
 function assertLogPrefix(log: LogLocation): void {
-  if (!LOG_PREFIX.test(log.prefix)) {
-    throw new TypeError('La retención solo borra bajo el prefijo de un log: logs/ y seis cifras.');
+  if (!isLogPrefix(log.prefix)) {
+    throw new TypeError(
+      'La retención solo borra bajo el prefijo de un log: el de su secuencia y seis cifras.',
+    );
   }
 }
 
 /**
  * Los objetos del log en el bucket, con el cliente dado. Solo trabaja bajo el prefijo de un log de
- * producción: con otro, por ejemplo uno vacío, que sería el bucket entero, lanza `TypeError`. Las
+ * producción, de cualquier secuencia: con otro, por ejemplo uno vacío, que sería el bucket entero, o
+ * `logs/frxxauusd/`, que serían todos los logs del oro, lanza `TypeError`. Las
  * claves que lista son las de ese prefijo, sin él, y las que borra van siempre bajo él. Borra un
  * objeto por petición (`DeleteObject`): R2 respondió así a la regla de bloqueo en las comprobaciones
  * previas (ADR-0018 §10), mientras que `DeleteObjects` exige una suma de comprobación del cuerpo.

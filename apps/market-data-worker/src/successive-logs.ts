@@ -89,6 +89,44 @@ function schemaRegex(sequence: LogSequence, capture: boolean): string {
   return `^${knownSequence(sequence).schemaStem}${capture ? `(${digits})` : digits}$`;
 }
 
+/**
+ * El esquema de los logs de `sequence` como expresión regular, sin paréntesis, que vale igual en
+ * POSIX y en JavaScript: en R_100, `^buoh_log_[0-9]{6}$`. Lanza `TypeError` con una secuencia que
+ * no está en `LOG_SEQUENCES`.
+ */
+export function logSchemaPattern(sequence: LogSequence): string {
+  return schemaRegex(sequence, false);
+}
+
+/**
+ * El log de un esquema de cualquier secuencia de `LOG_SEQUENCES`, con su secuencia, o `null` si el
+ * nombre no es el de un log. Los esquemas de dos secuencias nunca casan entre sí.
+ */
+export function logOfSchema(
+  schema: string,
+): { readonly number: number; readonly sequence: LogSequence } | null {
+  for (const sequence of LOG_SEQUENCES) {
+    const number = logNumberOf(schema, sequence);
+    if (number !== null) {
+      return { number, sequence };
+    }
+  }
+  return null;
+}
+
+/**
+ * Si `prefix` es el prefijo de un log de alguna secuencia de `LOG_SEQUENCES`: el comienzo de su
+ * prefijo, seis cifras y `/`, como `logs/000001/` o `logs/frxxauusd/000001/`. Un prefijo vacío, el
+ * de una secuencia entera o el de otra cosa del bucket no lo es.
+ */
+export function isLogPrefix(prefix: string): boolean {
+  return LOG_SEQUENCES.some(
+    (sequence) =>
+      prefix.startsWith(sequence.prefixStem) &&
+      /^[0-9]{6}\/$/u.test(prefix.slice(sequence.prefixStem.length)),
+  );
+}
+
 /** La tabla no existe (`undefined_table`): al esquema le faltan las migraciones del worker. */
 const UNDEFINED_TABLE = '42P01';
 /** Sin privilegios (`insufficient_privilege`): el esquema todavía no tiene los del rol. */
