@@ -46,6 +46,7 @@ Quedan abiertos de las entregas hechas:
 
 - mostrar una por una las incidencias de cada dataset: Datos las cuenta por tipo y gravedad, y ninguna pantalla las lista todavía, tampoco la Auditoría ([concepto de interfaz](docs/diseno/concepto-de-interfaz.md) §14);
 - la primera rotación de la credencial dueña de PostgreSQL, que el propietario aplazó el 2026-11-17 y es una precondición de la Fase 3B del roadmap (decisiones vigentes, «Rotación de la credencial dueña de PostgreSQL»);
+- el último dataset del informe de la salud: en producción, `last_published_dataset_id` sigue en `null` con 88 datasets publicados, porque `data:health` lo busca en las tablas de publicación del log observado y los datasets viven en `buoh_datasets` (runbook de ingesta, «Salud de datos (`data:health`)»; [evidencia de los datasets vivos](docs/operacion/evidencia-datasets-f2-5.md), «Límites»). Así, la tarjeta «Último dataset» del Observatorio dice que no hay ninguno ([concepto de interfaz](docs/diseno/concepto-de-interfaz.md) §10). Va en un PR de código posterior;
 - el menor 8 de la revisión del PR #121: si lanzar un proceso falla con `EMFILE`, `runNodeScript` puede terminar `buoh-operaciones` sin el paso `memory`; ya pasaba antes de ese PR y va en uno posterior (PR #121, «Relevo»);
 - los pendientes técnicos registrados de la Fase 1, en la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md) (P-F1-07).
 
