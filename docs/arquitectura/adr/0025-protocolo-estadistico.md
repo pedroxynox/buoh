@@ -147,7 +147,7 @@ Si se cumple, la API la pasa a `reviewed`, con el sistema como autor. Si no, la 
 - **Qué hace.** Una deriva material pausa la estrategia (protocolo §5), con la causa `drift`, y solo vuelve a mano, con la decisión auditada del propietario (`F2-STOP-001`; precisión de ADR-0022 §7 y §10).
 - **El criterio de pausa** del registro previo es la deriva y la caída máxima. **El de retiro** lo decide el propietario, y el informe le propone retirar una estrategia pausada dos veces por deriva.
 
-Las pruebas usan un 1 % y no un 5 % porque se repiten con cada evaluación. Las operaciones llegan a veces en rachas, con más varianza que una Poisson, así que las falsas alarmas pueden pasar de ese 1 %: la ADR del motor `shadow` lo mide con su cadencia, en sus vectores, y si hace falta lo corrige.
+Las pruebas usan un 1 % y no un 5 % porque se repiten con cada evaluación. Las operaciones llegan a veces en rachas, con más varianza que una Poisson, así que las falsas alarmas pueden pasar de ese 1 %: la ADR del motor `shadow` lo mide con su cadencia, en sus vectores, y si hace falta lo corrige. (Precisión de [ADR-0026](0026-motor-de-senales-shadow.md) §8: la prueba corre una vez por día UTC sobre lo acumulado, y la probabilidad de una pausa falsa en 56 días no pasa del 5 %; si pasa en los vectores, su PR baja el umbral de cada mirada.)
 
 ### 10. Lo que guarda la API y su cola
 

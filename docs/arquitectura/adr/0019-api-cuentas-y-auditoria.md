@@ -130,7 +130,7 @@ El propietario entra con su nombre de usuario, su contraseña de buoh y un códi
 - La tabla de auditoría está en el esquema de la API (§7). Es append-only como las de la Fase 1: el rol de la API solo puede insertar y leer, y un trigger rechaza `UPDATE`, `DELETE` y `TRUNCATE`.
 - Cada entrada tiene:
   - un identificador UUIDv7 y la hora UTC del reloj inyectado;
-  - el autor: una cuenta, `operador` para la orden `cuenta`, `sistema` para la propia API o `anonimo` para un intento sin sesión;
+  - el autor: una cuenta, `operador` para la orden `cuenta`, `sistema` para la propia API o `anonimo` para un intento sin sesión; (Precisión de [ADR-0026](0026-motor-de-senales-shadow.md) §9: `sistema` es también el motor `shadow`, que escribe sus eventos en su propia tabla, y la sección Auditoría los lee de ahí.)
   - la acción, el motivo y los objetos afectados, con su identificador o su hash;
   - y el identificador de la petición.
 - El motivo es un código. En las acciones del propietario que lo piden, desde F2.6, lleva también su texto.

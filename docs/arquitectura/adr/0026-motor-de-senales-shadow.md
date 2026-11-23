@@ -3,7 +3,7 @@
 - **Estado:** Aceptada
 - **Fecha:** 2026-11-23
 - **Ámbito:** Fase 2, incrementos F2.9 (`F2-SHADOW-001`, `F2-SIGNAL-001`, `F2-STOP-001`, `F2-AUDIT-001` en lo de las activaciones, las detenciones y las reanudaciones, y `F2-GOV-001` en lo de `apps/signal-engine`) y F2.10 (`F2-POSITION-001` y `F2-REPLAY-001`) del [plan de Fase 2](../../plan/fase-2-laboratorio-y-bot-shadow.md), §8, punto 8, con los ensayos de la puerta de salida y los cierres programados del mercado. Cambia el [protocolo de validación](../../gobierno/protocolo-de-validacion-de-estrategias.md) §5 y el [catálogo de funciones](../../producto/funciones-y-disponibilidad.md) («Volver a encender»), como pide `F2-STOP-001` (§11).
-- **Decisores:** Propietario de buoh (el servidor propio del motor, del 2026-10-29; la reanudación sola tras datos degradados, del 2026-11-16; y el costo de las lecturas del motor, §10), a propuesta de la dirección técnica (lo demás).
+- **Decisores:** Propietario de buoh (el servidor propio del motor, del 2026-10-29; la reanudación sola tras datos degradados, del 2026-11-16; y el costo de las lecturas del motor, del 2026-11-23, §10), a propuesta de la dirección técnica (lo demás).
 - **Complementa:** [ADR-0018](0018-sistema-de-datos-en-produccion.md) §2, §8 y §10, con el servicio, el rol y el token del motor (§1); [ADR-0019](0019-api-cuentas-y-auditoria.md) §5 y §7, con quién es el autor `sistema` y qué lee `buoh_lectura` (§1 y §9); [ADR-0022](0022-modelo-de-estrategia.md) §7 y §8, con lo que impone la salud, el atraso del motor y la reanudación a mano (§4 y §5); [ADR-0024](0024-semantica-del-backtest.md) §3, con las entradas propias del motor (§3); y [ADR-0025](0025-protocolo-estadistico.md) §9, con la cadencia de la deriva y sus falsas alarmas (§8).
 
 ## Resumen para el propietario
@@ -13,7 +13,7 @@
 - **A tiempo.** Lee cada tick en cuanto está guardado, con alrededor de 1 segundo de retraso. Si se atrasa más de 5 segundos o se reinicia, las señales de ese rato quedan como omitidas, con su causa, y vuelve solo al ponerse al día.
 - **Se para solo.** Cuando los datos fallan, también cuando Deriv deja de mandar ticks con la conexión abierta, como los 6 min 26 s del 2026-11-12, la estrategia se detiene a los pocos segundos y vuelve sola cuando los datos están bien, como decidiste. Lo demás, como una deriva o la caída del 50 %, solo vuelve si tú lo decides desde Laboratorio.
 - **Se puede repetir.** Cada decisión se reproduce después desde los datasets publicados y da el mismo registro, con el mismo hash.
-- **Costo.** Leer cada tick suma unos 1,60 USD al mes a lo aprobado (estimación, §10): el total de la fase pasa de unos 56,50 a unos 58,10 USD. Te lo pido antes de fusionar.
+- **Costo.** Leer cada tick suma unos 1,60 USD al mes a lo aprobado (estimación, §10): el total de la fase pasa de unos 56,50 a unos 58,10 USD. Lo aprobaste el 2026-11-23.
 - **Riesgo.** Nada opera ni toca dinero. Para la puerta de salida puede hacer falta que suspendas la captura 2 minutos una vez, si en la semana no hay ningún corte natural (§12).
 - **Qué apruebas al fusionarla.** Las reglas de esta ADR, que son propuestas de la dirección técnica, los cambios del protocolo de validación y del catálogo, y el orden de doce PR de §13.
 
@@ -128,7 +128,7 @@ La web, por la API, nunca muestra como vigente una señal con el vencimiento pas
 - **R2.** Una lectura de clase B por evento, tantas como escrituras de eventos de la captura: unos 1,35 millones al mes con R_100 y unos 1,8 con el oro (ADR-0021 §6), unos 3,2 millones. Con los unos 12,1 millones que ya suman ADR-0021 y ADR-0023, pasan de 3 millones cobrados a 6, por el redondeo de R2: unos 1,10 USD más al mes. Ponerse al día y la réplica leen segmentos enteros, unos pocos miles al mes.
 - **Tráfico de salida.** Cada petición sale de Render con alrededor de 1 KB (ADR-0016): unos 3,2 GB al mes, unos 0,50 USD a 0,15 USD por GB, porque el tráfico ya pasa de los 5 GB incluidos.
 - **PostgreSQL.** Cada 500 ms, una consulta por secuencia al índice por su clave primaria, y cada 5 s, al registro de estrategias y a los latidos: lo mide la evidencia de F2.9 frente a los 0,1 CPU de la base (plan §14). Lo que escribe el motor, sin contar las decisiones, que son pocas, son menos de 1 MB al día.
-- **Total.** El worker, 7 USD ya aprobados (plan §11), y unos 1,60 USD más al mes por las lecturas y el tráfico (estimación): la fase pasa de unos 56,50 a unos 58,10 USD. Con solo R_100, hasta que se capture el oro, son unos 0,55 USD. La evidencia de F2.9 los mide (`F2-SHADOW-001`).
+- **Total.** El worker, 7 USD ya aprobados (plan §11), y unos 1,60 USD más al mes por las lecturas y el tráfico (estimación): la fase pasa de unos 56,50 a unos 58,10 USD. Lo aprobó el propietario el 2026-11-23 («Elijo A»), frente a leer cada 5 minutos, sin costo pero con todas las señales vencidas, y a los avisos de PostgreSQL de «Alternativas descartadas» ([decisiones vigentes](../../gobierno/decisiones-vigentes.md), «Lecturas del motor *shadow*»). Con solo R_100, hasta que se capture el oro, son unos 0,55 USD. La evidencia de F2.9 los mide (`F2-SHADOW-001`).
 
 ### 11. El protocolo y el catálogo
 
