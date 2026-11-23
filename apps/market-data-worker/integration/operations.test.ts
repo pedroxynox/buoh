@@ -15,6 +15,7 @@ import {
   DATASETS_SCHEMA,
   DROP_LOG_LOCK_TIMEOUT_MS,
   findActiveLog,
+  GOLD_SEQUENCE,
   healthCommand,
   LOGIN_ROLES,
   loadConfig,
@@ -36,6 +37,7 @@ import {
   PostgresSourceLogStore,
   PUBLICATION_ROLE,
   publishDatasetCommand,
+  R_100_SEQUENCE,
   readLatestStoredHealth,
   replayCommand,
   runNodeScript,
@@ -203,15 +205,17 @@ const inProcess: RunChild = async (child, args, env) => {
   }
   const result = await healthCommand(args, env, {
     expected: fixture.expected,
-    locateLog: (config, requested) =>
+    locateLog: (config, requested, logSequence) =>
       locateActiveLog(plainConfig(config), {
         now: clock.now,
         number: requested,
+        sequence: logSequence,
         source: DERIV_SOURCE,
       }),
     nextId: () => uuid((sequence += 1)),
     now: clock.now,
-    openStores: (config) => openHealthStores(plainConfig(config)),
+    openStores: (config, logSequence) =>
+      openHealthStores(plainConfig(config), { sequence: logSequence }),
     scheduler: clock.scheduler,
   });
   return {
@@ -339,7 +343,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       failures: [],
       migrated: [{ log: 1 }],
       passwords_set: ['buoh_ingesta', 'buoh_salud', 'buoh_agente'],
-      prepared: 1,
+      prepared: [{ log: 1, sequence: 'R_100' }],
     });
     const owners = await ready(admin).query<{ owner: string }>(
       `SELECT DISTINCT tableowner AS owner FROM pg_tables WHERE schemaname = $1
@@ -350,7 +354,9 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     const migrations = await ready(admin).query(`SELECT name FROM ${LOG_1}.buoh_schema_migrations`);
     expect(migrations.rowCount).toBe(7);
     // El perfil del log nuevo (ADR-0020 §4): el de publicación, que dio esta ejecución.
-    expect(run.steps[0]?.['report']).toMatchObject({ profiles_assigned: [1] });
+    expect(run.steps[0]?.['report']).toMatchObject({
+      profiles_assigned: [{ log: 1, sequence: 'R_100' }],
+    });
     const profile = await ready(admin).query(
       `SELECT profile_slot, profile_id, quality_profile_sha256, run_id::text, assigned_at_utc
          FROM ${LOG_1}.log_quality_profile`,
@@ -467,7 +473,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       migrated: [],
       passwords_set: [],
       passwords_unchecked: [],
-      prepared: null,
+      prepared: [],
       profiles_assigned: [],
     });
     // El espacio ya se midió hoy: no vuelve a medir ni guarda su informe.
@@ -502,7 +508,10 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     ).toBeNull();
     const run = await operations();
     expect(run.exitCode).toBe(0);
-    expect(run.steps[0]?.['report']).toMatchObject({ migrated: [{ log: 2 }], prepared: 2 });
+    expect(run.steps[0]?.['report']).toMatchObject({
+      migrated: [{ log: 2 }],
+      prepared: [{ log: 2, sequence: 'R_100' }],
+    });
     expect(run.steps[1]).toMatchObject({ log: 1, status: 'completed' });
     expect(
       await sqlStateAs(
@@ -539,7 +548,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
         migrated: [],
         passwords_set: [],
         passwords_unchecked: [POSTGRES_ROLES.agent],
-        prepared: null,
+        prepared: [],
         profiles_assigned: [],
       });
 
@@ -773,6 +782,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
           log: '1',
           reason: 'object_missing',
           segment_index: '0',
+          sequence: 'R_100',
         },
       ]);
       expect(second.step('space')?.['report']).toMatchObject({ measured: false });
@@ -891,7 +901,9 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
         ).toBe('created');
       }
       const prepared = await operations();
-      expect(prepared.steps[0]?.['report']).toMatchObject({ prepared: 3 });
+      expect(prepared.steps[0]?.['report']).toMatchObject({
+        prepared: [{ log: 3, sequence: 'R_100' }],
+      });
 
       const firstKeys = await keysUnder('logs/000001/');
       const secondKeys = await keysUnder('logs/000002/');
@@ -933,17 +945,19 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
         { source: DERIV_SOURCE },
       );
       try {
-        expect(await database.dropExpiredLog(logLocation(1), '2026-04-01T09:59:59.999Z')).toBe(
-          'not_expired',
-        );
-        expect(await database.dropExpiredLog(logLocation(999_998), clock.now())).toBe('absent');
+        expect(
+          await database.dropExpiredLog(logLocation(1), '2026-04-01T09:59:59.999Z', R_100_SEQUENCE),
+        ).toBe('not_expired');
+        expect(
+          await database.dropExpiredLog(logLocation(999_998), clock.now(), R_100_SEQUENCE),
+        ).toBe('absent');
         const reader = await ready(admin).connect();
         try {
           await reader.query('BEGIN');
           await reader.query(`SELECT 1 FROM ${LOG_1}.ingestion_heartbeats LIMIT 1`);
           const started = Date.now();
           await expect(
-            database.dropExpiredLog(logLocation(1), '2026-04-01T10:00:00.000Z'),
+            database.dropExpiredLog(logLocation(1), '2026-04-01T10:00:00.000Z', R_100_SEQUENCE),
           ).rejects.toMatchObject({ code: '55P03' });
           const waited = Date.now() - started;
           expect(waited).toBeGreaterThanOrEqual(DROP_LOG_LOCK_TIMEOUT_MS - 50);
@@ -981,6 +995,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
         locked: 0,
         log: 1,
         schema_dropped: true,
+        sequence: 'R_100',
       });
       expect(await keysUnder('logs/000001/')).toEqual([]);
       expect(await schemaExists(LOG_1)).toBe(false);
@@ -993,7 +1008,13 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       // El informe queda en el log activo, el 2.
       expect((await reportsOf(LOG_2)).filter((item) => item.step === 'retention')).toEqual([
         {
-          report: { deleted: firstKeys.length, locked: 0, log: 1, schema_dropped: true },
+          report: {
+            deleted: firstKeys.length,
+            locked: 0,
+            log: 1,
+            schema_dropped: true,
+            sequence: 'R_100',
+          },
           status: 'completed',
           step: 'retention',
         },
@@ -1014,7 +1035,7 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       expect(await keysUnder(datasetKey)).toEqual([datasetKey]);
       expect(await datasetRows()).toEqual(datasetsBefore);
       expect(await schemaExists(LOG_3)).toBe(true);
-      expect(stopped.steps[0]?.['report']).toMatchObject({ prepared: null });
+      expect(stopped.steps[0]?.['report']).toMatchObject({ prepared: [] });
       expect((await reportsOf(LOG_3)).map((item) => item.step)).toContain('retention');
     } finally {
       secondObjects.destroy();
@@ -1362,9 +1383,8 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     }
     // El servicio prepara el log siguiente; una escritura en él termina el de la captura.
     const prepared = await operations(env);
-    const next = (prepared.step('roles_and_logs')?.['report'] as { prepared: number | null })
-      .prepared;
-    expect(next).toBe(location.number + 1);
+    const next = (prepared.step('roles_and_logs')?.['report'] as { prepared: unknown[] }).prepared;
+    expect(next).toEqual([{ log: location.number + 1, sequence: 'R_100' }]);
     expect(
       await sqlStateAs(
         POSTGRES_ROLES.ingest,
@@ -1441,6 +1461,92 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       );
     } finally {
       await database.close();
+    }
+  });
+
+  it('con el oro en BUOH_OPERACIONES_SIMBOLOS (ADR-0021 §1): el paso 1 prepara su log 1 con sus migraciones y sus privilegios y sin perfil, la salud lo observa con su símbolo y guarda su informe en él, el espacio lo mide y la retención trabaja bajo su prefijo', async () => {
+    const gold = logLocation(1, GOLD_SEQUENCE);
+    const env = { ...operationsEnvironment(), BUOH_OPERACIONES_SIMBOLOS: 'R_100,frxXAUUSD' };
+    const run = await operations(env);
+    expect(run.step('roles_and_logs')).toMatchObject({
+      report: { failures: [] },
+      status: 'completed',
+    });
+    const report = run.step('roles_and_logs')?.['report'] as {
+      prepared: unknown[];
+      profiles_assigned: unknown[];
+    };
+    expect(report.prepared).toContainEqual({ log: 1, sequence: 'frxXAUUSD' });
+    expect(report.profiles_assigned).not.toContainEqual({ log: 1, sequence: 'frxXAUUSD' });
+    // Sus siete migraciones, de buoh_dueno, el uso de buoh_ingesta y ningún perfil: se deriva con el
+    // de medición (ADR-0021 §2).
+    const { rows: applied } = await ready(admin).query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM ${gold.schema}.buoh_schema_migrations`,
+    );
+    expect(applied).toEqual([{ n: 7 }]);
+    const { rows: owners } = await ready(admin).query<{ owner: string; usage: boolean }>(
+      `SELECT nspowner::regrole::text AS owner, has_schema_privilege($2, nspname, 'USAGE') AS usage
+         FROM pg_namespace WHERE nspname = $1`,
+      [gold.schema, POSTGRES_ROLES.ingest],
+    );
+    expect(owners).toEqual([{ owner: POSTGRES_ROLES.owner, usage: true }]);
+    expect(await readLogQualityProfile(ready(admin), gold.schema)).toBeNull();
+
+    // Una salud por secuencia: la del oro, con su símbolo, va a su log.
+    const healths = run.steps.filter((line) => line['step'] === 'health');
+    expect(healths.map((line) => (line['report'] as { sequence: string }).sequence)).toEqual([
+      'R_100',
+      'frxXAUUSD',
+    ]);
+    expect(healths[1]).toMatchObject({
+      log: 1,
+      report: { log: 1, report: { service_health: 'paused' }, sequence: 'frxXAUUSD' },
+      status: 'completed',
+    });
+    const goldReports = await reportsOf(gold.schema);
+    expect(goldReports.map((item) => [item.step, item.status, item.report['sequence']])).toEqual([
+      ['health', 'completed', 'frxXAUUSD'],
+    ]);
+    // La salud que leen la API y el motor, la del log activo de R_100, sigue siendo la de R_100.
+    const active = await findActiveLog(ready(admin), { now: clock.now, source: DERIV_SOURCE });
+    if (active === null) {
+      throw new TypeError('Falta el log activo de R_100.');
+    }
+    const { rows: latest } = await ready(admin).query<{ report_jcs: string }>(
+      `SELECT report_jcs FROM ${active.schema}.operations_reports
+        WHERE step = 'health' ORDER BY report_id DESC LIMIT 1`,
+    );
+    expect(JSON.parse(latest[0]?.report_jcs ?? '{}')).toMatchObject({ sequence: 'R_100' });
+
+    const config = loadOperationsConfig(env);
+    const database = openOwnerDatabase(
+      { ...config, owner: plain(config.owner) },
+      { source: DERIV_SOURCE },
+    );
+    try {
+      expect((await database.measureSpace()).logs).toContainEqual(
+        expect.objectContaining({ log: 1, sequence: 'frxXAUUSD' }),
+      );
+      expect(await database.listLogs(GOLD_SEQUENCE)).toEqual([
+        { lastWriteUtc: null, location: gold, readable: true },
+      ]);
+      // Sin escrituras no vence: el borrado de su esquema no borra nada.
+      expect(await database.dropExpiredLog(gold, clock.now(), GOLD_SEQUENCE)).toBe('not_expired');
+    } finally {
+      await database.close();
+    }
+
+    // La retención lista y borra bajo el prefijo del log del oro, y solo bajo él.
+    const objects = new S3ObjectStore(createS3Client(local.s3), local.s3.bucket, gold.prefix);
+    const deletion = openLogDeletion(config.operationsObjects, gold);
+    try {
+      await objects.putIfAbsent('sha256/oro-retencion', new TextEncoder().encode('oro'), 'x/y');
+      expect(await deletion.list(null, 10)).toEqual(['sha256/oro-retencion']);
+      expect(await deletion.delete('sha256/oro-retencion')).toBe('deleted');
+      expect(await deletion.list(null, 10)).toEqual([]);
+    } finally {
+      deletion.close();
+      objects.destroy();
     }
   });
 });

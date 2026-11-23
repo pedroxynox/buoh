@@ -7,7 +7,12 @@ import {
 import { z } from 'zod';
 
 import { failureReason } from '../source-log/source-event-log.js';
-import { isLogExpired, type CaptureLog } from '../successive-logs.js';
+import {
+  isLogExpired,
+  LOG_SEQUENCES,
+  R_100_SEQUENCE,
+  type CaptureLog,
+} from '../successive-logs.js';
 import type { ChildResult } from './child.js';
 import { CODE_VERSION, publishEnvironment, replayEnvironment } from './config.js';
 import type { PublicationToVerify } from './owner-database.js';
@@ -22,6 +27,12 @@ import { SANITIZED } from './sanitized.js';
 
 /** El paso 6: la publicación. */
 export const PUBLICATION_STEP = 'publication';
+/**
+ * La secuencia que publica el paso 6, la única con umbrales medidos (ADR-0020 §1): pasa su símbolo a
+ * `datasets:publish` (`--symbol`), y cada log detenido de su estado lleva su nombre (ADR-0021 §1).
+ * El PR 7 de ADR-0021 §9 publica también el oro.
+ */
+export const PUBLISHED_SEQUENCE = R_100_SEQUENCE;
 /** El paso 7: la verificación de los datasets publicados. */
 export const DATASET_VERIFICATION_STEP = 'dataset_verification';
 /** Los dos pasos solo empiezan si la ejecución lleva menos de esto (ADR-0020 §8). */
@@ -51,6 +62,8 @@ const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const sanitized = z.string().regex(SANITIZED);
 const logNumber = z.number().int().min(1).max(999_999);
 const behindSchema = z.strictObject({ expires_at_utc: utcTimestampMsSchema, log: logNumber });
+/** La secuencia de cada línea de `datasets:publish`: la que pidió el paso. */
+const publishedSequence = z.literal(PUBLISHED_SEQUENCE.name);
 
 // Las líneas de `datasets:publish` (runbook, «Publicación de los datasets vivos»). `z.object` deja
 // fuera cualquier campo que no esté aquí: al informe solo pasan conteos, códigos y horas.
@@ -69,12 +82,14 @@ const publishedLineSchema = z.object({
   open_condition_types: z.array(sanitized),
   pending_continuity_symbols: z.array(sanitized),
   publication_id: uuidV7Schema,
+  sequence: publishedSequence,
   source_event_count: count.optional(),
   status: z.enum(['already_published', 'published']),
 });
 const nothingDueLineSchema = z.object({
   ...measured,
   behind: behindSchema.nullable(),
+  sequence: publishedSequence,
   status: z.literal('nothing_due'),
 });
 const failedLineSchema = z.object({
@@ -84,6 +99,7 @@ const failedLineSchema = z.object({
   first_segment: count.optional(),
   log: logNumber.nullable(),
   reason: sanitized,
+  sequence: publishedSequence,
   stage: sanitized,
   status: z.literal('failed'),
 });
@@ -98,17 +114,27 @@ const attemptLineSchema = z.object({
   log: logNumber,
 });
 
+/**
+ * La secuencia de un log del estado (ADR-0021 §1). Un estado de antes de las secuencias no la lleva,
+ * y es de R_100, la única que se publicaba.
+ */
+const stateSequence = z
+  .enum(LOG_SEQUENCES.map((item) => item.name) as [string, ...string[]])
+  .default(R_100_SEQUENCE.name);
 /** Un log detenido: el dataset que no se pudo publicar, por qué y con qué código. */
 const stopSchema = z.strictObject({
   code_version: z.string().regex(CODE_VERSION).nullable(),
   first_segment: count,
   log: logNumber,
   reason: z.enum(PUBLICATION_STOP_REASONS),
+  sequence: stateSequence,
 });
 type Stop = z.infer<typeof stopSchema>;
 const publicationStateSchema = z.strictObject({
   /** Las ejecuciones seguidas sin un resultado concluyente con ese dataset. */
-  attempts: z.strictObject({ count, first_segment: count, log: logNumber }).nullable(),
+  attempts: z
+    .strictObject({ count, first_segment: count, log: logNumber, sequence: stateSequence })
+    .nullable(),
   stopped: z.array(stopSchema),
 });
 type PublicationState = z.infer<typeof publicationStateSchema>;
@@ -295,14 +321,16 @@ function classifyPublish(result: ChildResult): PublishResult {
 }
 
 /**
- * Paso 6 (ADR-0020 §8): `datasets:publish` en un proceso aparte, con `buoh_publicacion`, el token
- * `operaciones` y un plazo de 60 s, que publica como mucho un dataset.
+ * Paso 6 (ADR-0020 §8): `datasets:publish --symbol R_100` en un proceso aparte, con
+ * `buoh_publicacion`, el token `operaciones` y un plazo de 60 s, que publica como mucho un dataset
+ * de los logs de esa secuencia (`PUBLISHED_SEQUENCE`; ADR-0021 §1). Una línea de otra secuencia no
+ * es concluyente (`publish_output_invalid`).
  *
  * - **Logs detenidos.** Un log se detiene cuando su publicación falla por una causa que repetir no
  *   cambia (`PUBLICATION_STOP_REASONS`), y sigue detenido mientras el código es el mismo
  *   (`codeVersion`, el commit que da Render): la orden lo salta (`--skip`), y el paso deja su
- *   alerta, con el nombre del motivo, en cada ejecución. Un log que venció o ya no existe deja de
- *   contar.
+ *   alerta, con el nombre del motivo y la secuencia, en cada ejecución. Un log que venció o ya no
+ *   existe deja de contar, y uno de otra secuencia también, porque ese paso no la publica.
  * - **Sin un resultado concluyente.** Un plazo vencido, un proceso que muere, una salida sin su
  *   línea o un error inesperado (`unexpected`) cuentan como una ejecución sin resultado del dataset
  *   que intentaba, que dicen su línea o su aviso `publication_attempt`. A la tercera seguida con el
@@ -327,7 +355,8 @@ export async function publicationStep(
   let logs: CaptureLog[];
   let loaded: PublicationState | 'invalid';
   try {
-    logs = await input.database.listLogs();
+    // El estado va en los informes del paso, en el log activo de R_100.
+    logs = await input.database.listLogs(R_100_SEQUENCE);
     loaded = await loadState(input, logs, PUBLICATION_STEP, publicationStateSchema, empty);
   } catch (error) {
     return { log: null, report: { reason: failureReason(error) }, status: 'failed', store: true };
@@ -341,19 +370,26 @@ export async function publicationStep(
     };
   }
   const now = input.now();
+  const sequence = PUBLISHED_SEQUENCE.name;
+  // Los logs de la secuencia que publica: `logs` son los de R_100, que es esa.
   const live = new Set(
     logs.filter((log) => !isLogExpired(log, now)).map((log) => log.location.number),
   );
   const code = input.config.codeVersion;
   let stopped: Stop[] = loaded.stopped.filter(
-    (stop) => live.has(stop.log) && stop.code_version === code,
+    (stop) => stop.sequence === sequence && live.has(stop.log) && stop.code_version === code,
   );
-  let attempts = loaded.attempts !== null && live.has(loaded.attempts.log) ? loaded.attempts : null;
+  let attempts =
+    loaded.attempts !== null &&
+    loaded.attempts.sequence === sequence &&
+    live.has(loaded.attempts.log)
+      ? loaded.attempts
+      : null;
   const skip = [...new Set(stopped.map((stop) => stop.log))].sort((a, b) => a - b);
 
   const result = await input.runChild(
     'publish',
-    skip.length === 0 ? [] : ['--skip', skip.join(',')],
+    ['--symbol', sequence, ...(skip.length === 0 ? [] : ['--skip', skip.join(',')])],
     publishEnvironment(input.config),
     { timeoutMs: DATASETS_STEP_DEADLINE_MS },
   );
@@ -394,6 +430,7 @@ export async function publicationStep(
             code_version: code,
             ...classified.dataset,
             reason: classified.report['reason'] as Stop['reason'],
+            sequence,
           },
         ];
         attempts = null;
@@ -407,11 +444,11 @@ export async function publicationStep(
         if (next >= INCONCLUSIVE_RUNS) {
           stopped = [
             ...stopped.filter((stop) => stop.log !== dataset.log),
-            { code_version: code, ...dataset, reason: 'publication_incomplete' },
+            { code_version: code, ...dataset, reason: 'publication_incomplete', sequence },
           ];
           attempts = null;
         } else {
-          attempts = { count: next, ...dataset };
+          attempts = { count: next, ...dataset, sequence };
         }
       }
       break;
@@ -424,6 +461,7 @@ export async function publicationStep(
       event: stop.reason,
       first_segment: String(stop.first_segment),
       log: String(stop.log),
+      sequence: stop.sequence,
     });
   }
   if (behind !== null) {
@@ -431,6 +469,7 @@ export async function publicationStep(
       event: 'publication_behind',
       expires_at_utc: behind.expires_at_utc,
       log: String(behind.log),
+      sequence,
     });
   }
   const state: PublicationState = { attempts, stopped };
@@ -545,7 +584,8 @@ export async function datasetVerificationStep(
   let target: PublicationToVerify | null;
   let loaded: VerificationState | 'invalid';
   try {
-    const logs = await input.database.listLogs();
+    // El estado va en los informes del paso, en el log activo de R_100.
+    const logs = await input.database.listLogs(R_100_SEQUENCE);
     loaded = await loadState(input, logs, DATASET_VERIFICATION_STEP, verificationStateSchema, {
       attempts: null,
     });

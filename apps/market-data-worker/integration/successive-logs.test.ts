@@ -29,6 +29,7 @@ import {
 } from '../src/index.js';
 import { START, START_EPOCH, uuid } from '../test/support/connection-harness.js';
 import {
+  catalogEntry,
   derivMessages,
   FakeDerivSocket,
   ManualClock,
@@ -58,7 +59,11 @@ import { heartbeatOf } from '../test/support/status-store-rules.js';
  */
 const DATABASE = 'buoh_integration_logs';
 const READER = 'buoh_integration_logs_lector';
-const SYMBOL = 'SYNTH_100';
+/**
+ * El símbolo de la captura: en `production`, `data:health` solo admite el de una secuencia de logs
+ * (ADR-0021 §1), y la de R_100 es la de estos nombres.
+ */
+const SYMBOL = 'R_100';
 const LOGS = [1, 2, 3, 4].map((number) => logLocation(number));
 /** Esquemas con nombres parecidos que no son de log: la búsqueda los ignora. */
 const NOT_LOGS = ['buoh_log_1', 'buoh_log_000000', 'buoh_logs_000005'];
@@ -164,10 +169,10 @@ async function capture(log: ReturnType<typeof logLocation>): Promise<void> {
     }
     socket.open();
     await eventually(() => socket.requests().some((request) => 'active_symbols' in request));
-    socket.text(derivMessages.catalog(1));
+    socket.text(derivMessages.catalog(1, [catalogEntry(SYMBOL, 'Volatility 100 Index')]));
     await eventually(() => socket.requests().some((request) => 'ticks' in request));
     await clock.advance(200);
-    socket.text(derivMessages.tick(2, START_EPOCH, '100.25'));
+    socket.text(derivMessages.tick(2, START_EPOCH, '100.25', SYMBOL));
     await eventually(async () => (await rows()) === 3);
     (signal as (() => void) | null)?.();
     await eventually(() => socket.requests().some((request) => 'forget_all' in request));
@@ -244,10 +249,13 @@ function local(production: WorkerConfig): WorkerConfig {
 /** Los esquemas con los que `data:health` abrió sus almacenes, en orden. */
 const observedSchemas: string[] = [];
 
-/** `data:health` en `production` con el rol de lectura, a la hora `now`, y con `--log` si se pide. */
-function productionHealth(now: string, log: number | null = null) {
+/**
+ * `data:health` en `production` con el rol de lectura, a la hora `now`, con `--log` si se pide y
+ * con el símbolo de la captura u otro.
+ */
+function productionHealth(now: string, log: number | null = null, symbol = SYMBOL) {
   return healthCommand(
-    ['--', '--json', '--symbol', SYMBOL, ...(log === null ? [] : ['--log', String(log)])],
+    ['--', '--json', '--symbol', symbol, ...(log === null ? [] : ['--log', String(log)])],
     {
       ...environment,
       BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
@@ -257,17 +265,18 @@ function productionHealth(now: string, log: number | null = null) {
     },
     {
       expected: fixture.expected,
-      locateLog: (production, requested) =>
+      locateLog: (production, requested, logSequence) =>
         locateActiveLog(local(production), {
           now: () => now,
           number: requested,
+          sequence: logSequence,
           source: DERIV_SOURCE,
         }),
       nextId: () => uuid((sequence += 1)),
       now: () => now,
-      openStores: (located) => {
+      openStores: (located, logSequence) => {
         observedSchemas.push(located.postgres.schema);
-        return openHealthStores(local(located));
+        return openHealthStores(local(located), { sequence: logSequence });
       },
       scheduler: clock.scheduler,
     },
@@ -395,6 +404,17 @@ describe('data:health en production (ADR-0018 §6 y §11)', () => {
       expect(result.stderr).toBe('{"event":"data_health_failed","reason":"log_not_prepared"}');
     }
     expect(observedSchemas).toEqual([logAt(0).schema]);
+  });
+
+  it('con --symbol frxXAUUSD busca en la secuencia del oro, que no tiene logs: log_not_prepared sin abrir los almacenes, nunca un log de R_100 (ADR-0021 §1)', async () => {
+    observedSchemas.length = 0;
+    const now = await lastWriteOf(logAt(1).schema);
+    for (const log of [null, 2]) {
+      const result = await productionHealth(now, log, 'frxXAUUSD');
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toBe('{"event":"data_health_failed","reason":"log_not_prepared"}');
+    }
+    expect(observedSchemas).toEqual([]);
   });
 
   it('cuando el log 2 vence, observa el preparado, el 3, vacío', async () => {

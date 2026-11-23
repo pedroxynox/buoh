@@ -26,6 +26,7 @@ import {
   openStores,
   POSTGRES_ROLES,
   PostgresSessionLockProvider,
+  R_100_SEQUENCE,
   runIngest,
   setRolePassword,
   type OperationsConfig,
@@ -676,6 +677,7 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
       healthObjects: config.s3,
       operationsObjects: config.s3,
       owner: { ...roleConfig(user, password).postgres, schema: 'public' },
+      sequences: [R_100_SEQUENCE],
       passwords: {
         [POSTGRES_ROLES.agent]: passwords.health,
         [POSTGRES_ROLES.health]: passwords.health,
@@ -712,7 +714,7 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
         status: 'completed',
         step: 'roles_and_logs',
       });
-      expect(await owner.listLogs()).toContainEqual({
+      expect(await owner.listLogs(R_100_SEQUENCE)).toContainEqual({
         lastWriteUtc: null,
         location,
         readable: true,
@@ -794,7 +796,7 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
       await expect(owner.createLogSchema(logLocation(10))).rejects.toMatchObject({
         code: '42501',
       });
-      await expect(owner.listLogs()).rejects.toMatchObject({ code: '42501' });
+      await expect(owner.listLogs(R_100_SEQUENCE)).rejects.toMatchObject({ code: '42501' });
     } finally {
       await owner.close();
     }

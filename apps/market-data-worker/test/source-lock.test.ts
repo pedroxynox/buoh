@@ -4,12 +4,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
 import { openSchemaArchive } from '../src/deriv/schema-archive.js';
 import { SourceLockUnavailableError } from '../src/deriv/session.js';
-import { sourceLockHolder } from '../src/postgres/source-lock.js';
+import { sequenceLockKey, sourceLockHolder } from '../src/postgres/source-lock.js';
 import {
+  GOLD_SEQUENCE,
   lockedSourceLogStore,
   openLockedSourceLog,
   OperationalRegistry,
   PostgresSessionLockProvider,
+  R_100_SEQUENCE,
   RawFirstIngestor,
   SOURCE_LOCK_LOST,
   SourceLock,
@@ -65,6 +67,19 @@ describe('sourceLockKey', () => {
   });
 });
 
+describe('sequenceLockKey (ADR-0021 §1)', () => {
+  it('la de R_100 es la de la fuente, la de siempre; la del oro, la de buoh:source-log:<fuente>:frxXAUUSD', () => {
+    expect(sequenceLockKey('deriv_options', R_100_SEQUENCE)).toBe(sourceLockKey('deriv_options'));
+    // Calculado con hashlib de Python, fuera del código probado.
+    expect(sequenceLockKey('deriv_options', GOLD_SEQUENCE)).toBe('-3474799499284759871');
+  });
+
+  it('una secuencia que no está en la tabla no tiene clave', () => {
+    const outside = { name: 'X', prefixStem: 'logs/x/', schemaStem: 'buoh_x_log_' };
+    expect(() => sequenceLockKey('deriv_options', outside)).toThrow(TypeError);
+  });
+});
+
 describe('sourceLockHolder (ADR-0015 §8, «Escritor vivo»)', () => {
   /** Un pool que responde cada consulta con `rows` y anota su texto y sus valores. */
   function fakePool(rows: readonly { pid: number }[]) {
@@ -104,6 +119,17 @@ describe('sourceLockHolder (ADR-0015 §8, «Escritor vivo»)', () => {
 
   it('sin una sesión que tenga el bloqueo da null', async () => {
     expect(await sourceLockHolder(fakePool([]).pool, 'deriv_options')).toBeNull();
+  });
+
+  it('con una secuencia, busca el bloqueo de esa secuencia: el de R_100 es el de la fuente (ADR-0021 §1)', async () => {
+    const { pool, queries } = fakePool([{ pid: 4343 }]);
+    expect(await sourceLockHolder(pool, 'deriv_options', GOLD_SEQUENCE)).toBe(4343);
+    expect(await sourceLockHolder(pool, 'deriv_options', R_100_SEQUENCE)).toBe(4343);
+    // Las mitades sin signo de la clave del oro, calculadas con hashlib de Python.
+    expect(queries.map((query) => query.values)).toEqual([
+      ['3485927492', '57490113'],
+      ['3457171552', '1299793908'],
+    ]);
   });
 });
 

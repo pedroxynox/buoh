@@ -4,6 +4,7 @@ import pg from 'pg';
 
 import type { WorkerConfig } from '../config.js';
 import type { SourceLogStore } from '../source-log/ports.js';
+import { LOG_SEQUENCES, R_100_SEQUENCE, type LogSequence } from '../successive-logs.js';
 import { postgresSslOption } from './metadata-store.js';
 
 /** Código del error de una escritura del log sin el bloqueo de su fuente. */
@@ -25,13 +26,35 @@ export const SOURCE_LOCK_QUERY_TIMEOUT_MS = 5_000;
  * `BUOH_POSTGRES_SCHEMA` de la misma base.
  */
 export function sourceLockKey(source: string): string {
-  const digest = createHash('sha256').update(`buoh:source-log:${source}`, 'utf8').digest();
+  return lockKeyOf(`buoh:source-log:${source}`);
+}
+
+/** Los 8 primeros bytes del SHA-256 del nombre, como entero de 64 bits con signo. */
+function lockKeyOf(name: string): string {
+  const digest = createHash('sha256').update(name, 'utf8').digest();
   return BigInt.asIntN(64, digest.readBigUInt64BE(0)).toString();
 }
 
 /**
- * El PID de la sesión de PostgreSQL que tiene el bloqueo de la fuente según `pg_locks`, o `null` si
- * no lo tiene ninguna: el escritor vivo de `data:health` (ADR-0015 §8). Es la consulta del runbook
+ * Clave del bloqueo de una secuencia de logs de la fuente (ADR-0021 §1): la de R_100 es la de la
+ * fuente (`sourceLockKey`), la de siempre, así que un `ingest` de antes de las secuencias y uno de
+ * después se excluyen; la de otra secuencia sale igual de `buoh:source-log:<fuente>:<nombre>`, con
+ * el nombre de la secuencia. Dos secuencias nunca comparten clave, porque nunca comparten nombre.
+ * Lanza `TypeError` con una secuencia que no está en `LOG_SEQUENCES`.
+ */
+export function sequenceLockKey(source: string, sequence: LogSequence): string {
+  if (!LOG_SEQUENCES.includes(sequence)) {
+    throw new TypeError(`La secuencia ${sequence.name} no está en LOG_SEQUENCES.`);
+  }
+  return sequence === R_100_SEQUENCE
+    ? sourceLockKey(source)
+    : lockKeyOf(`buoh:source-log:${source}:${sequence.name}`);
+}
+
+/**
+ * El PID de la sesión de PostgreSQL que tiene el bloqueo de la fuente en `sequence` (sin ella, en
+ * R_100; `sequenceLockKey`) según `pg_locks`, o `null` si no lo tiene ninguna: el escritor vivo de
+ * `data:health` (ADR-0015 §8; ADR-0021 §1). Es la consulta del runbook
  * («Una sola instancia por fuente»): un bloqueo de 64 bits guarda los 32 bits altos de la clave en
  * `classid`, los 32 bajos en `objid` y `objsubid = 1`. Como el bloqueo, mira solo la base de datos
  * del pool: otra base del mismo servidor tiene sus propios bloqueos. Solo lee: nunca toma el
@@ -40,8 +63,9 @@ export function sourceLockKey(source: string): string {
 export async function sourceLockHolder(
   pool: Pick<pg.Pool, 'query'>,
   source: string,
+  sequence: LogSequence = R_100_SEQUENCE,
 ): Promise<number | null> {
-  const key = BigInt.asUintN(64, BigInt(sourceLockKey(source)));
+  const key = BigInt.asUintN(64, BigInt(sequenceLockKey(source, sequence)));
   const { rows } = await pool.query<{ pid: number }>(
     `SELECT pid FROM pg_locks
       WHERE locktype = 'advisory' AND granted AND objsubid = 1

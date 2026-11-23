@@ -16,8 +16,10 @@ import { failureReason } from './source-log/source-event-log.js';
 import {
   findActiveLog,
   firstWriteOf,
+  R_100_SEQUENCE,
   readCaptureLog,
   type LogLocation,
+  type LogSequence,
 } from './successive-logs.js';
 
 export interface OpenStoresOptions {
@@ -86,8 +88,9 @@ export function openStores(config: WorkerConfig, options: OpenStoresOptions = {}
 /**
  * Las lecturas de `data:health` (ADR-0015 §8) sobre `openStores`, con su pool y su alerta: el log,
  * el esquema de fuente guardado, el registro operativo, el cursor y el latido, el último dataset,
- * el escritor vivo según `pg_locks` (`sourceLockHolder`) y las migraciones pendientes. Ninguna
- * escribe ni toma el bloqueo. `close` libera las conexiones.
+ * el escritor vivo según `pg_locks` (`sourceLockHolder`), el del bloqueo de `sequence` (sin ella,
+ * el de R_100, que es el de la fuente; ADR-0021 §1), y las migraciones pendientes. Ninguna escribe
+ * ni toma el bloqueo. `close` libera las conexiones.
  *
  * Cada lectura tiene plazo, para que un almacén que acepta la conexión y no contesta termine en la
  * regla 3: cada conexión, `HEALTH_CONNECTION_TIMEOUT_MS`, y cada consulta o petición,
@@ -96,17 +99,18 @@ export function openStores(config: WorkerConfig, options: OpenStoresOptions = {}
  */
 export function openHealthStores(
   config: WorkerConfig,
-  options: Pick<OpenStoresOptions, 'alert'> = {},
+  options: Pick<OpenStoresOptions, 'alert'> & { readonly sequence?: LogSequence } = {},
 ): HealthCommandStores {
+  const { sequence = R_100_SEQUENCE, ...rest } = options;
   const stores = openStores(config, {
-    ...options,
+    ...rest,
     timeouts: { connectionMs: HEALTH_CONNECTION_TIMEOUT_MS, requestMs: HEALTH_REQUEST_TIMEOUT_MS },
   });
   return {
     close: stores.close,
     datasets: stores.metadata,
     ingestionStatus: stores.ingestionStatus,
-    lockHolder: (source) => sourceLockHolder(stores.pool, source),
+    lockHolder: (source) => sourceLockHolder(stores.pool, source, sequence),
     objects: stores.objects,
     logProfile: () => readLogQualityProfile(stores.pool),
     operational: stores.operational,
@@ -159,8 +163,9 @@ export function openStartupReads(
 }
 
 /**
- * El log que observa `data:health` en `production` (ADR-0018 §6): el log activo de `source`, o,
- * con `number`, ese log si existe y se puede leer (`--log`; ADR-0018 §11), vencido o no. Abre un
+ * El log que observa `data:health` en `production` (ADR-0018 §6), en `sequence` (sin ella, en
+ * R_100; ADR-0021 §1): el log activo de `source`, o, con `number`, ese log de la secuencia si
+ * existe y se puede leer (`--log`; ADR-0018 §11), vencido o no. Abre un
  * pool propio con los plazos de `openHealthStores` y la credencial de la configuración, busca el log
  * (`findActiveLog` o `readCaptureLog`) sin escribir nada y lo cierra. Si PostgreSQL cierra una
  * conexión libre del pool, deja la alerta `postgres_connection_lost`, como `openStores`. Rechaza
@@ -172,10 +177,12 @@ export async function locateActiveLog(
     readonly now: () => string;
     /** El log pedido, o `null` o sin él para el log activo. */
     readonly number?: number | null;
+    readonly sequence?: LogSequence;
     readonly source: string;
   },
 ): Promise<LogLocation | null> {
   const alert = input.alert ?? stderrAlert;
+  const sequence = input.sequence ?? R_100_SEQUENCE;
   const pool = createPool(config.postgres, {
     connectionTimeoutMillis: HEALTH_CONNECTION_TIMEOUT_MS,
     query_timeout: HEALTH_REQUEST_TIMEOUT_MS,
@@ -185,9 +192,13 @@ export async function locateActiveLog(
   });
   try {
     if (input.number === undefined || input.number === null) {
-      return await findActiveLog(pool, { now: input.now, source: input.source });
+      return await findActiveLog(pool, { now: input.now, sequence, source: input.source });
     }
-    const log = await readCaptureLog(pool, { number: input.number, source: input.source });
+    const log = await readCaptureLog(pool, {
+      number: input.number,
+      sequence,
+      source: input.source,
+    });
     return log?.readable === true ? log.location : null;
   } finally {
     await pool.end();

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDerivMeasurementProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
 import {
   contentKey,
+  GOLD_SEQUENCE,
   HEALTH_CLOSE_DEADLINE_MS,
   HEALTH_DEADLINE_MS,
   HEALTH_USAGE,
@@ -14,10 +15,12 @@ import {
   SourceEventLog,
   type HealthCommandStores,
   type HealthDependencies,
+  type LogSequence,
   type WorkerConfig,
 } from '../src/index.js';
+import { buildRawSourceFrame } from '../src/ingestion/raw-first-ingestor.js';
 import { syntheticSchemas, uuid } from './support/connection-harness.js';
-import { ManualClock, syntheticSchemaArchive } from './support/deriv-fixtures.js';
+import { derivMessages, ManualClock, syntheticSchemaArchive } from './support/deriv-fixtures.js';
 import { checkpointRowsOf } from './support/live-checkpoint-rows.js';
 import {
   MemoryIngestionStatusStore,
@@ -25,7 +28,7 @@ import {
   MemoryOperationalStore,
   MemorySourceLogStore,
 } from './support/memory-stores.js';
-import { previousConnectionEvents } from './support/recovery-harness.js';
+import { PREVIOUS, previousConnectionEvents, S } from './support/recovery-harness.js';
 import { cursorOf, heartbeatOf } from './support/status-store-rules.js';
 
 // `data:health` (ADR-0015 §8) sin red ni servicios: almacenes en memoria, un lector falso del
@@ -73,9 +76,26 @@ const WRITER_PID = 4242;
 /** La hora de la observación: 5 s después del latido. */
 const NOW = '2026-03-02T09:59:10.000Z';
 
-/** La conexión anterior todavía abierta: su apertura (09:58:00) y su tick durable (09:59:00). */
-function openConnection(): SourceEvent[] {
-  return previousConnectionEvents().slice(0, 2);
+/**
+ * La conexión anterior todavía abierta: su apertura (09:58:00) y su tick durable (09:59:00), del
+ * símbolo pedido; por defecto, `SYMBOL`.
+ */
+function openConnection(symbol: string = SYMBOL): SourceEvent[] {
+  const events = previousConnectionEvents().slice(0, 2);
+  if (symbol === SYMBOL) {
+    return events;
+  }
+  const profile = createDerivMeasurementProfile({ schemas: syntheticSchemas(), symbol });
+  const frame = buildRawSourceFrame(
+    {
+      connection_id: PREVIOUS,
+      observation_id: uuid(9003),
+      payload_utf8: derivMessages.tick(2, S, '100.25', symbol),
+      received_at_utc: '2026-03-02T09:59:00.000Z',
+    },
+    profile,
+  );
+  return [...events.slice(0, 1), frame];
 }
 
 /** El informe sin observación fiable: desconectado, backlog 0 y los demás campos `null`. */
@@ -101,6 +121,11 @@ interface CommandOptions {
   readonly events?: readonly SourceEvent[];
   /** Los bytes bajo la clave del esquema de fuente; por defecto, los del esquema guardado. */
   readonly schema?: Uint8Array;
+  /**
+   * El símbolo del log, de su cursor y de los puntos de control; por defecto, `SYMBOL`. Las pruebas
+   * de `production` usan el de una secuencia (ADR-0021 §1).
+   */
+  readonly symbol?: string;
   /** El PID del escritor vivo; por defecto, el del latido. */
   readonly writerPid?: number | null;
 }
@@ -122,7 +147,8 @@ async function commandHarness(options: CommandOptions = {}) {
     store: sourceLog,
     zlibVersion: 'test',
   });
-  for (const [index, event] of (options.events ?? openConnection()).entries()) {
+  const symbol = options.symbol ?? SYMBOL;
+  for (const [index, event] of (options.events ?? openConnection(symbol)).entries()) {
     if (options.closedEvents?.includes(index) === true) {
       await seed.close('requested');
     }
@@ -133,7 +159,9 @@ async function commandHarness(options: CommandOptions = {}) {
     options.schema ?? FIXTURE.entries['ticks_response.schema.json'],
   );
   // El último cursor del símbolo apunta al tick durable del log (`uuid(9003)`).
-  await status.appendCursor(cursorOf(DERIV_SOURCE, { last_durable_source_event_id: uuid(9003) }));
+  await status.appendCursor(
+    cursorOf(DERIV_SOURCE, { last_durable_source_event_id: uuid(9003), symbol }),
+  );
   await status.appendHeartbeat(
     heartbeatOf(DERIV_SOURCE, 1, {
       connection_state: 'connected',
@@ -147,6 +175,8 @@ async function commandHarness(options: CommandOptions = {}) {
   const located: WorkerConfig[] = [];
   /** El log pedido con `--log` en cada búsqueda, o `null`. */
   const requests: (number | null)[] = [];
+  /** La secuencia de cada búsqueda y de cada apertura, en orden (ADR-0021 §1). */
+  const sequences: string[] = [];
   let closed = 0;
   /** El temporizador del plazo total y del cierre: el tiempo solo avanza con `advance`. */
   const clock = new ManualClock(NOW);
@@ -169,15 +199,17 @@ async function commandHarness(options: CommandOptions = {}) {
   const deps = (overrides: Partial<HealthCommandStores> = {}): HealthDependencies => ({
     expected: FIXTURE.expected,
     // El log activo de `production`: el 2, como si el 1 ya hubiera terminado. Con `--log`, el pedido.
-    locateLog: (config, requested) => {
+    locateLog: (config, requested, logSequence: LogSequence) => {
       located.push(config);
       requests.push(requested);
-      return Promise.resolve(logLocation(requested ?? 2));
+      sequences.push(`locate:${logSequence.name}`);
+      return Promise.resolve(logLocation(requested ?? 2, logSequence));
     },
     nextId: () => uuid(7000 + (sequence += 1)),
     now: () => NOW,
-    openStores: (config) => {
+    openStores: (config, logSequence: LogSequence) => {
       opened.push(config);
+      sequences.push(`open:${logSequence.name}`);
       return { ...stores, ...overrides };
     },
     scheduler: clock.scheduler,
@@ -198,8 +230,8 @@ async function commandHarness(options: CommandOptions = {}) {
   const checkpointRows = () =>
     checkpointRowsOf({
       log: seed,
-      profile: createDerivMeasurementProfile({ schemas: syntheticSchemas(), symbol: SYMBOL }),
-      symbol: SYMBOL,
+      profile: createDerivMeasurementProfile({ schemas: syntheticSchemas(), symbol }),
+      symbol,
       writtenAt: NOW,
     });
   return {
@@ -212,6 +244,7 @@ async function commandHarness(options: CommandOptions = {}) {
     objects,
     opened,
     requests,
+    sequences,
     sourceLog,
     status,
     stores,
@@ -610,6 +643,12 @@ describe('healthCommand: un error inesperado', () => {
   });
 });
 
+/**
+ * Los argumentos de `production`: el símbolo de una secuencia de logs (ADR-0021 §1), con el log y el
+ * cursor de ese símbolo (`commandHarness({ symbol: 'R_100' })`).
+ */
+const PRODUCTION_ARGS = ['--', '--json', '--symbol', 'R_100'];
+
 /** Las variables de `production`: con el cifrado obligatorio y sin `BUOH_POSTGRES_SCHEMA`. */
 const PRODUCTION_ENV = {
   ...ENV,
@@ -620,8 +659,8 @@ const PRODUCTION_ENV = {
 
 describe('healthCommand en production: el log activo (ADR-0018 §6)', () => {
   it('busca el log activo con la configuración y abre los almacenes con su esquema y el prefijo de sus objetos, y nada más cambia', async () => {
-    const run = await commandHarness();
-    const result = await healthCommand(ARGS, PRODUCTION_ENV, run.deps());
+    const run = await commandHarness({ symbol: 'R_100' });
+    const result = await healthCommand(PRODUCTION_ARGS, PRODUCTION_ENV, run.deps());
 
     expect(result.exitCode).toBe(0);
     expect(reportOf(result.stdout)).toMatchObject({ service_health: 'healthy' });
@@ -638,11 +677,47 @@ describe('healthCommand en production: el log activo (ADR-0018 §6)', () => {
       s3: { ...config?.s3, keyPrefix: located?.s3.keyPrefix },
     }).toEqual(located);
     expect(run.closed()).toBe(1);
+    // El log activo y el escritor vivo son los de la secuencia de R_100 (ADR-0021 §1).
+    expect(run.sequences).toEqual(['locate:R_100', 'open:R_100']);
+  });
+
+  it('con --symbol frxXAUUSD, el log activo, --log y el escritor vivo son los de la secuencia del oro (ADR-0021 §1)', async () => {
+    const run = await commandHarness({ symbol: 'frxXAUUSD' });
+    const args = ['--', '--json', '--symbol', 'frxXAUUSD'];
+    const result = await healthCommand(args, PRODUCTION_ENV, run.deps());
+
+    expect(result.exitCode).toBe(0);
+    expect(reportOf(result.stdout)).toMatchObject({ service_health: 'healthy' });
+    expect(run.sequences).toEqual(['locate:frxXAUUSD', 'open:frxXAUUSD']);
+    expect(run.opened.map((config) => [config.postgres.schema, config.s3.keyPrefix])).toEqual([
+      ['buoh_frxxauusd_log_000002', 'logs/frxxauusd/000002/'],
+    ]);
+
+    const ended = await commandHarness({ symbol: 'frxXAUUSD' });
+    await healthCommand([...args, '--log', '1'], PRODUCTION_ENV, ended.deps());
+    expect(ended.requests).toEqual([1, null]);
+    expect(ended.sequences).toEqual(['locate:frxXAUUSD', 'locate:frxXAUUSD', 'open:frxXAUUSD']);
+    expect(ended.opened.map((config) => config.postgres.schema)).toEqual([
+      logLocation(1, GOLD_SEQUENCE).schema,
+    ]);
+  });
+
+  it('un --symbol sin secuencia de logs es un error de uso: salida 2, sin buscar ni abrir nada', async () => {
+    const run = await commandHarness();
+    const result = await healthCommand(ARGS, PRODUCTION_ENV, run.deps());
+
+    expect(result).toMatchObject({ exitCode: 2, stdout: null });
+    const line = JSON.parse(result.stderr ?? '') as Record<string, unknown>;
+    expect(line).toMatchObject({ code: 'UsageError', status: 'failed' });
+    expect(line['message']).toContain('R_100, frxXAUUSD');
+    expect(line['message']).toContain(HEALTH_USAGE);
+    expect(run.located).toEqual([]);
+    expect(run.opened).toEqual([]);
   });
 
   it('sin log activo, la regla 2: el informe failed con la alerta log_not_prepared y salida 1, sin abrir ningún almacén', async () => {
-    const run = await commandHarness();
-    const result = await healthCommand(ARGS, PRODUCTION_ENV, {
+    const run = await commandHarness({ symbol: 'R_100' });
+    const result = await healthCommand(PRODUCTION_ARGS, PRODUCTION_ENV, {
       ...run.deps(),
       locateLog: () => Promise.resolve(null),
     });
@@ -655,12 +730,12 @@ describe('healthCommand en production: el log activo (ADR-0018 §6)', () => {
   });
 
   it('si PostgreSQL no responde a la búsqueda, la regla 3 con el código del error y nunca su mensaje, sin abrir ningún almacén', async () => {
-    const run = await commandHarness();
+    const run = await commandHarness({ symbol: 'R_100' });
     const unavailable = Object.assign(
       new Error('connect ECONNREFUSED db.interno.invalid:5432 rol_sintetico base_sintetica'),
       { code: 'ECONNREFUSED' },
     );
-    const result = await healthCommand(ARGS, PRODUCTION_ENV, {
+    const result = await healthCommand(PRODUCTION_ARGS, PRODUCTION_ENV, {
       ...run.deps(),
       locateLog: () => Promise.reject(unavailable),
     });
@@ -677,9 +752,9 @@ describe('healthCommand en production: el log activo (ADR-0018 §6)', () => {
   });
 
   it('una búsqueda que no termina en el plazo total da deadline_exceeded, y si termina después no abre ningún almacén', async () => {
-    const run = await commandHarness();
+    const run = await commandHarness({ symbol: 'R_100' });
     let finish: (log: ReturnType<typeof logLocation>) => void = () => undefined;
-    const pending = healthCommand(ARGS, PRODUCTION_ENV, {
+    const pending = healthCommand(PRODUCTION_ARGS, PRODUCTION_ENV, {
       ...run.deps(),
       locateLog: () =>
         new Promise((resolve) => {
@@ -703,9 +778,9 @@ describe('healthCommand en production: el log activo (ADR-0018 §6)', () => {
   });
 
   it('BUOH_POSTGRES_SCHEMA no se admite: salida 2 con un ConfigError que la nombra junto con las demás variables rechazadas, sin buscar ni abrir nada', async () => {
-    const run = await commandHarness();
+    const run = await commandHarness({ symbol: 'R_100' });
     const result = await healthCommand(
-      ARGS,
+      PRODUCTION_ARGS,
       {
         ...PRODUCTION_ENV,
         BUOH_POSTGRES_SCHEMA: 'buoh_log_000001',
@@ -725,8 +800,12 @@ describe('healthCommand en production: el log activo (ADR-0018 §6)', () => {
   });
 
   it('con --log, busca ese log y el activo, y lo observa con su esquema y su prefijo (ADR-0018 §11)', async () => {
-    const run = await commandHarness();
-    const result = await healthCommand([...ARGS, '--log', '2'], PRODUCTION_ENV, run.deps());
+    const run = await commandHarness({ symbol: 'R_100' });
+    const result = await healthCommand(
+      [...PRODUCTION_ARGS, '--log', '2'],
+      PRODUCTION_ENV,
+      run.deps(),
+    );
 
     // El log 2 es el activo: el escritor vivo es el suyo, como sin --log.
     expect(result.exitCode).toBe(0);
@@ -738,9 +817,13 @@ describe('healthCommand en production: el log activo (ADR-0018 §6)', () => {
   });
 
   it('con --log de un log anterior al activo, que terminó, lo observa sin escritor vivo: la regla 4 cierra en memoria la conexión que quedó abierta (ADR-0018 §6, «Traspaso»)', async () => {
-    const run = await commandHarness();
+    const run = await commandHarness({ symbol: 'R_100' });
     const before = run.contents();
-    const result = await healthCommand([...ARGS, '--log', '1'], PRODUCTION_ENV, run.deps());
+    const result = await healthCommand(
+      [...PRODUCTION_ARGS, '--log', '1'],
+      PRODUCTION_ENV,
+      run.deps(),
+    );
 
     // El bloqueo de la fuente lo tiene el escritor del log 2, el activo, y nunca vuelve al log 1.
     expect(result.exitCode).toBe(1);
@@ -782,6 +865,8 @@ describe('healthCommand en production: el log activo (ADR-0018 §6)', () => {
       expect(run.opened.map((config) => [config.postgres.schema, config.s3.keyPrefix])).toEqual([
         ['buoh_captura', ''],
       ]);
+      // Sin secuencias: el escritor vivo es el del bloqueo de la fuente, el de R_100.
+      expect(run.sequences).toEqual(['open:R_100']);
     }
   });
 });

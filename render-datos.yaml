@@ -210,6 +210,10 @@ services:
         sync: false
       - key: BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY
         sync: false
+      # Los símbolos capturados en vivo, cada uno con su secuencia de logs: los pasos trabajan con
+      # los logs de cada uno (ADR-0021 §1). El PR 3 de ADR-0021 §9 añade frxXAUUSD.
+      - key: BUOH_OPERACIONES_SIMBOLOS
+        value: R_100
 
   - type: web
     name: buoh-api

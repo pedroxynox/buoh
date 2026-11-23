@@ -69,7 +69,9 @@ export {
   SOURCE_LOCK_HEARTBEAT_MS,
   SOURCE_LOCK_LOST,
   SOURCE_LOCK_QUERY_TIMEOUT_MS,
+  sequenceLockKey,
   SourceLock,
+  sourceLockHolder,
   sourceLockKey,
 } from './postgres/source-lock.js';
 export { PostgresSourceLogStore } from './postgres/source-log-store.js';
@@ -350,6 +352,7 @@ export {
   PUBLICATION_STEP,
   PUBLICATION_STOP_REASONS,
   publicationStep,
+  PUBLISHED_SEQUENCE,
 } from './operations/datasets-steps.js';
 export {
   parseStoredHealthObservation,
@@ -427,6 +430,7 @@ export {
   firstWriteOf,
   GOLD_SEQUENCE,
   isLogExpired,
+  isLogPrefix,
   listCaptureLogs,
   liveSequenceOf,
   LOG_NUMBER_DIGITS,
@@ -434,6 +438,8 @@ export {
   LOG_SEQUENCES,
   logLocation,
   logNumberOf,
+  logOfSchema,
+  logSchemaPattern,
   MAX_LOG_NUMBER,
   productionLogConfigErrors,
   R_100_SEQUENCE,
