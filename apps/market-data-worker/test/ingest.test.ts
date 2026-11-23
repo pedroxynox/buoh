@@ -7,6 +7,7 @@ import {
   INGEST_RETENTION_MS,
   INGEST_RESTART_FIRST_WAIT_MS,
   INGEST_RESTART_MAX_WAIT_MS,
+  INGEST_RESTART_STEADY_MS,
   ingestCommand,
   ingestRestartDelay,
   lockedSourceLogStore,
@@ -893,9 +894,9 @@ describe('ingestCommand en production (ADR-0018 §4)', () => {
     const open = run.deps.openStores;
     const { command } = await start(run, PRODUCTION_ARGV, PRODUCTION_ENV, {
       ...run.deps,
-      openStores: (config) => {
+      openStores: (config, alert) => {
         run.raise();
-        return open(config);
+        return open(config, alert);
       },
     });
 
@@ -1291,8 +1292,8 @@ describe('ingestCommand en production: el corte semanal (ADR-0018 §6)', () => {
     const open = run.deps.openStartupReads;
     const { command } = await start(run, PRODUCTION_ARGV, PRODUCTION_ENV, {
       ...run.deps,
-      openStartupReads: (config, sequence) => {
-        const reads = open(config, sequence);
+      openStartupReads: (config, sequence, alert) => {
+        const reads = open(config, sequence, alert);
         return {
           ...reads,
           pendingMigrations: (log) => {
@@ -1338,14 +1339,18 @@ describe('ingestCommand en production con varios símbolos (ADR-0021 §1)', () =
         opened.push(`lock:${sequence.name}`);
         return run.deps.lockProvider(config, sequence);
       },
-      openStartupReads: (config, sequence) => {
+      openStartupReads: (config, sequence, alert) => {
         opened.push(`reads:${sequence.name}`);
-        const reads = run.deps.openStartupReads(config, sequence);
+        const reads = run.deps.openStartupReads(config, sequence, alert);
         return {
           ...reads,
           locateLog: async () => {
             await reads.locateLog();
             return logLocation(2, sequence);
+          },
+          readiness: (log) => {
+            opened.push(`readiness:${log.schema}`);
+            return reads.readiness(log);
           },
         };
       },
@@ -1450,6 +1455,82 @@ describe('ingestCommand en production con varios símbolos (ADR-0021 §1)', () =
     expect(parsed.captures[1]?.result.end?.reason).toBe('symbol_not_in_catalog');
     expect(run.sockets).toHaveLength(2);
     expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
+  /** La conexión `number` del oro abre, recibe un catálogo con el oro y un tick suyo. */
+  const subscribeGold = async (run: Awaited<ReturnType<typeof ingestHarness>>, number: number) => {
+    run.socket(number).open();
+    await settle();
+    run.socket(number).text(derivMessages.catalog(1, [catalogEntry('frxXAUUSD', 'Gold/USD')]));
+    await settle();
+    run.socket(number).text(derivMessages.tick(2, epochNow(run), '100.25', 'frxXAUUSD'));
+    await settle();
+  };
+
+  it('el corte del oro lleva su captura al log siguiente de su secuencia, también en la vigilancia del corte', async () => {
+    const run = await ingestHarness();
+    run.startup.firstWrites.set(2, START);
+    run.startup.prepared.add(3);
+    const { deps, opened } = perSequence(run);
+    const { command } = await start(run, ['--live', '--symbol', 'frxXAUUSD'], PRODUCTION_ENV, deps);
+    await settleHandover();
+    await subscribeGold(run, 1);
+    await run.clock.advance(0);
+    run.clock.jumpWallClock(Date.parse(CUT_TIME) - Date.parse(run.clock.now()) - LOG_CUT_CHECK_MS);
+    await run.clock.advance(LOG_CUT_CHECK_MS);
+    expect(run.alerts).toEqual([{ event: 'log_cut', forced: 'false', log: '2', next: '3' }]);
+    answerForgetAll(run.socket(1));
+    await settleHandover();
+    expect(run.sockets).toHaveLength(2);
+    // La vigilancia y la espera miran el log 3 del oro, nunca el de R_100.
+    expect(opened.filter((item) => item.startsWith('readiness:'))).toEqual([
+      'readiness:buoh_frxxauusd_log_000003',
+      'readiness:buoh_frxxauusd_log_000003',
+      'readiness:buoh_frxxauusd_log_000003',
+    ]);
+    expect(
+      run.configs.map((config) => config.postgres.schema).filter((schema) => schema !== 'public'),
+    ).toEqual(['buoh_frxxauusd_log_000002', 'buoh_frxxauusd_log_000003']);
+    await subscribeGold(run, 2);
+    run.raise();
+    answerForgetAll(run.socket(2));
+    const { exitCode, line } = await command;
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(line)).toMatchObject({ status: 'completed', symbol: 'frxXAUUSD' });
+  });
+
+  it('la espera para volver a empezar crece con cada fallo seguido y vuelve a 5 s después de una captura de 10 minutos', async () => {
+    const run = await ingestHarness();
+    const { deps } = perSequence(run);
+    const { command } = await start(run, ARGV, PRODUCTION_ENV, deps);
+    await settleHandover();
+    await subscribe(run, 1);
+    /** La conexión `number` del oro abre y recibe un catálogo sin el oro: su sesión falla. */
+    const failGold = async (number: number) => {
+      run.socket(number).open();
+      await settle();
+      run.socket(number).text(derivMessages.catalog(1, R_100_CATALOG));
+      await settleHandover();
+    };
+    const waits = () =>
+      run.alerts
+        .filter((alert) => alert['event'] === 'ingest_capture_restart')
+        .map((alert) => alert['wait_ms']);
+    await failGold(2);
+    await run.clock.advance(INGEST_RESTART_FIRST_WAIT_MS);
+    await settleHandover();
+    // La captura siguiente dura 10 minutos antes de fallar.
+    run.clock.jumpWallClock(INGEST_RESTART_STEADY_MS);
+    await failGold(3);
+    await run.clock.advance(INGEST_RESTART_FIRST_WAIT_MS);
+    await settleHandover();
+    await failGold(4);
+    expect(waits()).toEqual(['5000', '5000', '10000']);
+    run.raise();
+    await settle();
+    answerForgetAll(run.socket(1));
+    await settleHandover();
+    expect((await command).exitCode).toBe(1);
   });
 
   it('ingestRestartDelay: 5 s, el doble cada fallo seguido, hasta 5 minutos', () => {

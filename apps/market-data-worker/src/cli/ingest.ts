@@ -36,10 +36,10 @@ const { exitCode, line } = await ingestCommand(process.argv.slice(2), process.en
   nextId: createUuidV7Generator({ now: () => Date.now(), randomBytes }),
   now,
   openLog: openLockedSourceLog,
-  openStartupReads: (config, sequence) =>
-    openStartupReads(config, { now, sequence, source: DERIV_SOURCE }),
-  openStores: (config) => {
-    const stores = openStores(config);
+  openStartupReads: (config, sequence, alert) =>
+    openStartupReads(config, { alert, now, sequence, source: DERIV_SOURCE }),
+  openStores: (config, alert) => {
+    const stores = openStores(config, { alert });
     return {
       ...stores,
       logProfile: () => readLogQualityProfile(stores.pool),

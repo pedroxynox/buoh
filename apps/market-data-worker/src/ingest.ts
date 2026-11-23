@@ -306,15 +306,19 @@ export interface IngestDependencies extends Omit<
   readonly openLog: (lock: SessionLock, input: OpenSourceEventLogInput) => Promise<SourceEventLog>;
   /**
    * En `production`, abre las lecturas de la espera del arranque con esa configuración, ya
-   * comprobada (ADR-0018 §4), en la secuencia de logs del símbolo (ADR-0021 §1):
-   * `openStartupReads`. Fuera de `production` no se llama.
+   * comprobada (ADR-0018 §4), en la secuencia de logs del símbolo (ADR-0021 §1), con la alerta de
+   * la captura: `openStartupReads`. Fuera de `production` no se llama.
    */
-  readonly openStartupReads: (config: WorkerConfig, sequence: LogSequence) => StartupReads;
+  readonly openStartupReads: (
+    config: WorkerConfig,
+    sequence: LogSequence,
+    alert: OperationalAlert,
+  ) => StartupReads;
   /**
-   * Abre los almacenes con esa configuración, ya comprobada: `openStores` y sus migraciones. En
-   * `production`, con el esquema y el prefijo del log activo (`withLog`).
+   * Abre los almacenes con esa configuración, ya comprobada, y la alerta de la captura: `openStores`
+   * y sus migraciones. En `production`, con el esquema y el prefijo del log activo (`withLog`).
    */
-  readonly openStores: (config: WorkerConfig) => IngestStores;
+  readonly openStores: (config: WorkerConfig, alert: OperationalAlert) => IngestStores;
   /** Versión de zlib del writer gzip de segmentos. */
   readonly zlibVersion: string;
 }
@@ -436,7 +440,7 @@ export async function ingestCommand(
     of: { readonly alert?: OperationalAlert; readonly symbol: string },
     cut?: Pick<IngestInput, 'releaseLock' | 'watchSession'>,
   ): Promise<{ readonly exitCode: 0 | 1 | 2; readonly line: string }> => {
-    const stores = openStores(target);
+    const stores = openStores(target, of.alert ?? ports.alert ?? stderrAlert);
     try {
       // En `production`, el perfil lo leyó la espera del arranque; fuera, se lee aquí (ADR-0020 §4).
       let logProfile = production?.profile ?? null;
@@ -631,7 +635,7 @@ export async function ingestCommand(
     alert: OperationalAlert,
   ): Promise<{ readonly exitCode: 0 | 1 | 2; readonly line: string }> => {
     const provider = lockProvider(config, sequence);
-    const reads = openStartupReads(config, sequence);
+    const reads = openStartupReads(config, sequence, alert);
     try {
       return await captureProduction(provider, reads, { alert, sequence, symbol });
     } finally {
@@ -669,7 +673,8 @@ export async function ingestCommand(
    * Con varios símbolos (ADR-0021 §1), la captura de uno: si su sesión termina `failed`, o con un
    * error inesperado, deja la alerta `ingest_capture_restart`, espera (`ingestRestartDelay`) y
    * vuelve a empezar, desde la espera del arranque, mientras las demás siguen. Termina con la
-   * parada, con la línea de su última captura, o con una salida 2, que volver a empezar no cambia.
+   * parada, con la línea de su última captura, o con una salida 2, que volver a empezar no cambia,
+   * con la alerta `ingest_capture_ended`.
    */
   const restarting = async (
     symbol: string,
@@ -693,6 +698,14 @@ export async function ingestCommand(
             message: error instanceof Error ? error.name : 'Error',
           }),
         };
+      }
+      if (result.exitCode === 2) {
+        // Volver a empezar no cambia un error de uso o de configuración: esa captura termina.
+        alert({
+          event: 'ingest_capture_ended',
+          exit_code: '2',
+          reason: captureReason(result.line),
+        });
       }
       if (result.exitCode !== 1 || stop.raised()) {
         return { ...result, symbol };
