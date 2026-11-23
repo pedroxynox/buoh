@@ -139,6 +139,23 @@ const publicationStateSchema = z.strictObject({
 });
 type PublicationState = z.infer<typeof publicationStateSchema>;
 
+/**
+ * El estado como se guarda en el informe: los logs de R_100 sin `sequence`, como antes de las
+ * secuencias, para que el paso 6 del código anterior, cuyo esquema no admite otros campos, lo siga
+ * leyendo si Render vuelve atrás un despliegue (ADR-0018 §5). Los de otra secuencia la llevan. Al
+ * leerlo, uno sin secuencia es de R_100 (`stateSequence`).
+ */
+function storedState(state: PublicationState): Report {
+  const stored = (item: Readonly<Record<string, JsonValue>>): Report => {
+    const { sequence, ...rest } = item;
+    return sequence === R_100_SEQUENCE.name ? rest : { ...item };
+  };
+  return {
+    attempts: state.attempts === null ? null : stored(state.attempts),
+    stopped: state.stopped.map(stored),
+  };
+}
+
 const replayModeSchema = z.enum(['verify-only', 'recompute']);
 type ReplayMode = z.infer<typeof replayModeSchema>;
 const verificationStateSchema = z.strictObject({
@@ -473,7 +490,7 @@ export async function publicationStep(
     });
   }
   const state: PublicationState = { attempts, stopped };
-  const changed = JSON.stringify(state) !== JSON.stringify(loaded);
+  const changed = JSON.stringify(storedState(state)) !== JSON.stringify(storedState(loaded));
   const reason =
     typeof outcome['reason'] === 'string' ? outcome['reason'] : (stopped[0]?.reason ?? null);
   const status = failed || stopped.length > 0 ? 'failed' : 'completed';
@@ -485,7 +502,7 @@ export async function publicationStep(
       ...(reason === null ? {} : { reason }),
       result: outcome,
       skipped: skip,
-      state,
+      state: storedState(state),
     },
     status,
     // Siempre que falla (§8), también con un log detenido y nada nuevo; y si el estado cambió.

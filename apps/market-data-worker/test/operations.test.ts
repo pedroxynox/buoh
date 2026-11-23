@@ -3721,7 +3721,7 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
       expect(stepLine(one.lines, 'publication')).toMatchObject({
         report: {
           state: {
-            attempts: { count: 1, first_segment: 144, log: 1, sequence: 'R_100' },
+            attempts: { count: 1, first_segment: 144, log: 1 },
             stopped: [],
           },
         },
@@ -3779,11 +3779,11 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
       counts.push(report.state.attempts);
     }
     expect(counts).toEqual([
-      { count: 1, first_segment: 144, log: 1, sequence: 'R_100' },
-      { count: 2, first_segment: 144, log: 1, sequence: 'R_100' },
-      { count: 1, first_segment: 216, log: 1, sequence: 'R_100' },
+      { count: 1, first_segment: 144, log: 1 },
+      { count: 2, first_segment: 144, log: 1 },
+      { count: 1, first_segment: 216, log: 1 },
       null,
-      { count: 1, first_segment: 288, log: 1, sequence: 'R_100' },
+      { count: 1, first_segment: 288, log: 1 },
     ]);
   });
 
@@ -3804,10 +3804,10 @@ describe('el paso 6, publication (ADR-0020 §8)', () => {
       counts.push((line?.['report'] as { state: { attempts: unknown } }).state.attempts);
     }
     expect(counts).toEqual([
-      { count: 1, first_segment: 144, log: 1, sequence: 'R_100' },
-      { count: 1, first_segment: 144, log: 1, sequence: 'R_100' },
-      { count: 1, first_segment: 144, log: 1, sequence: 'R_100' },
-      { count: 2, first_segment: 144, log: 1, sequence: 'R_100' },
+      { count: 1, first_segment: 144, log: 1 },
+      { count: 1, first_segment: 144, log: 1 },
+      { count: 1, first_segment: 144, log: 1 },
+      { count: 2, first_segment: 144, log: 1 },
     ]);
   });
 
@@ -4369,7 +4369,7 @@ describe('los pasos 6 y 7: casos que deciden (ADR-0020 §8)', () => {
       });
       expect(stepLine(lines, 'publication')?.['report'], reason).toMatchObject({
         reason,
-        state: { attempts: { count: 1, first_segment: 1, log: 1, sequence: 'R_100' }, stopped: [] },
+        state: { attempts: { count: 1, first_segment: 1, log: 1 }, stopped: [] },
       });
     }
   });
@@ -4834,8 +4834,12 @@ describe('buoh-operaciones por secuencia (ADR-0021 §1, precisión del PR 2b)', 
         '--skip',
         '1',
       ]);
-      expect(stepLine(lines, 'publication')?.['report']).toMatchObject({
-        state: { attempts: null, stopped: [{ ...stopOf(), sequence: 'R_100' }] },
+      // Los de R_100 se guardan sin `sequence`, como antes, para que el código anterior siga
+      // leyendo el estado si se vuelve atrás un despliegue.
+      const report = stepLine(lines, 'publication')?.['report'] as { state?: unknown };
+      expect(report.state).toEqual({
+        attempts: null,
+        stopped: [stopOf()],
       });
     });
 
