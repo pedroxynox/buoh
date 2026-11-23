@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   checkIngestConfig,
+  GOLD_SEQUENCE,
   IngestConfigError,
+  ingestSequences,
   INGEST_USAGE,
   loadConfig,
   parseIngestArgs,
+  R_100_SEQUENCE,
   UsageError,
 } from '../src/index.js';
 
@@ -20,9 +23,29 @@ describe('parseIngestArgs', () => {
   });
 
   it('usa R_100 por defecto, tolera el separador -- que reenvía pnpm y admite otro símbolo', () => {
-    expect(parseIngestArgs(['--live'])).toEqual({ symbol: 'R_100' });
-    expect(parseIngestArgs(['--', '--live'])).toEqual({ symbol: 'R_100' });
-    expect(parseIngestArgs(['--live', '--symbol', '1HZ100V'])).toEqual({ symbol: '1HZ100V' });
+    expect(parseIngestArgs(['--live'])).toEqual({ symbols: ['R_100'] });
+    expect(parseIngestArgs(['--', '--live'])).toEqual({ symbols: ['R_100'] });
+    expect(parseIngestArgs(['--live', '--symbol', '1HZ100V'])).toEqual({ symbols: ['1HZ100V'] });
+  });
+
+  it('--symbol se repite, una vez por símbolo, en orden; uno repetido es un error de uso (ADR-0021 §1)', () => {
+    expect(parseIngestArgs(['--live', '--symbol', 'R_100', '--symbol', 'frxXAUUSD'])).toEqual({
+      symbols: ['R_100', 'frxXAUUSD'],
+    });
+    expect(() => parseIngestArgs(['--live', '--symbol', 'R_100', '--symbol', 'R_100'])).toThrow(
+      /repite/u,
+    );
+  });
+
+  it('ingestSequences: en production, la secuencia de cada símbolo; uno sin secuencia es un error de uso; fuera, un solo símbolo', () => {
+    expect(ingestSequences(['R_100', 'frxXAUUSD'], 'production')).toEqual([
+      R_100_SEQUENCE,
+      GOLD_SEQUENCE,
+    ]);
+    expect(() => ingestSequences(['R_100', 'SYNTH_100'], 'production')).toThrow(UsageError);
+    expect(() => ingestSequences(['frxxauusd'], 'production')).toThrow(/R_100, frxXAUUSD/u);
+    expect(ingestSequences(['SYNTH_100'], 'development')).toBeNull();
+    expect(() => ingestSequences(['R_100', 'frxXAUUSD'], 'test')).toThrow(/un solo símbolo/u);
   });
 
   it('el símbolo sigue la regla del smoke: rechaza lo que nunca es un código', () => {

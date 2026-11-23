@@ -27,6 +27,7 @@ import {
 import { loadMigrations } from '../src/postgres/migrate.js';
 import { START, START_EPOCH, uuid } from '../test/support/connection-harness.js';
 import {
+  catalogEntry,
   derivMessages,
   FakeDerivSocket,
   ManualClock,
@@ -57,7 +58,8 @@ const DATABASE = 'buoh_integration_ingest_prod';
  * y integration/successive-logs.test.ts comprueba qué hay bajo los prefijos de los logs 1 a 4.
  */
 const LOG = logLocation(101);
-const SYMBOL = 'SYNTH_100';
+/** En `production`, el símbolo de una secuencia de logs (ADR-0021 §1): la de estos nombres. */
+const SYMBOL = 'R_100';
 const TEST_BUCKET = process.env['BUOH_S3_BUCKET'] ?? 'buoh-local';
 const environment = {
   ...process.env,
@@ -194,15 +196,20 @@ describe('ingest en production (ADR-0018 §4)', () => {
       },
       expected: fixture.expected,
       fetch: () => Promise.resolve(new Response(fixture.archive, { status: 200 })),
-      lockProvider: (config) =>
-        new PostgresSessionLockProvider({ postgres: local(config).postgres, source: DERIV_SOURCE }),
+      lockProvider: (config, logSequence) =>
+        new PostgresSessionLockProvider({
+          postgres: local(config).postgres,
+          sequence: logSequence,
+          source: DERIV_SOURCE,
+        }),
       nextId: () => uuid((sequence += 1)),
       now: clock.now,
       openLog: openLockedSourceLog,
-      openStartupReads: (config) =>
+      openStartupReads: (config, logSequence) =>
         openStartupReads(local(config), {
           alert: (payload) => alerts.push(payload),
           now: clock.now,
+          sequence: logSequence,
           source: DERIV_SOURCE,
         }),
       openStores: (config) => {
@@ -306,10 +313,10 @@ describe('ingest en production (ADR-0018 §4)', () => {
     }
     socket.open();
     await eventually(() => socket.requests().some((request) => 'active_symbols' in request));
-    socket.text(derivMessages.catalog(1));
+    socket.text(derivMessages.catalog(1, [catalogEntry(SYMBOL, 'Volatility 100 Index')]));
     await eventually(() => socket.requests().some((request) => 'ticks' in request));
     await clock.advance(200);
-    socket.text(derivMessages.tick(2, START_EPOCH, '100.25'));
+    socket.text(derivMessages.tick(2, START_EPOCH, '100.25', SYMBOL));
     await eventually(async () => (await rowsOf('source_event_index')) === 3);
     (signal as (() => void) | null)?.();
     await eventually(() => socket.requests().some((request) => 'forget_all' in request));

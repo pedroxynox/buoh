@@ -60,6 +60,31 @@ import {
  * vencer, cierra la conexión, salvo en una página de historia (ADR-0015 §4).
  */
 export const REQUEST_TIMEOUT_MS = 15_000;
+/**
+ * El código del error con que Deriv responde a la suscripción `ticks` de un mercado cerrado, con
+ * `msg_type` `ticks` (ADR-0021 §2; medido el 2026-11-23 con `OTC_HSI` y `OTC_N225`).
+ */
+export const MARKET_IS_CLOSED = 'MarketIsClosed';
+/** El motivo del cierre y del fin de una conexión a un mercado cerrado (ADR-0021 §2). */
+export const MARKET_CLOSED = 'market_closed';
+
+/**
+ * La hora UTC de apertura que trae el mensaje de `MarketIsClosed` («Market will open at
+ * 2026-11-24 01:30:00.», en UTC), con milisegundos, o `null` si no la trae o no es una hora
+ * válida. Es lo único que se toma del mensaje: el `detail` del fin, nunca su texto.
+ */
+export function marketOpensAt(message: string | null): string | null {
+  const found = /\bMarket will open at (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\./u.exec(
+    message ?? '',
+  );
+  if (found === null) {
+    return null;
+  }
+  const iso = `${found[1] ?? ''}T${found[2] ?? ''}.000Z`;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) && new Date(ms).toISOString() === iso ? iso : null;
+}
+
 /** Intervalo del `ping` de keepalive: Deriv recomienda de 30 a 60 s (ADR-0004 §2). */
 export const KEEPALIVE_INTERVAL_MS = 45_000;
 
@@ -74,7 +99,8 @@ type HistoryRequest = Extract<DerivRequest, { readonly operation: 'ticks_history
  *   `forget_all` o, sin suscripción, enseguida;
  * - `disconnected`: la conexión se perdió, no se abrió o la cortó `interrupt` (cierre remoto, error
  *   de transporte, tiempo vencido, mensaje binario o el motivo de `interrupt`). Quien sigue la
- *   conexión decide si reconecta;
+ *   conexión decide si reconecta. También el mercado cerrado (`market_closed`, ADR-0021 §2), con
+ *   un cierre pedido y la hora de apertura como `detail`, o `null` si no la trae;
  * - `paused`: un límite de frame o de cola, o el almacenamiento, cerró la entrada (salud `paused`);
  * - `failed`: no se puede seguir sin intervención (salud `failed`): sin snapshot válido, símbolo
  *   ausente, suscripción rechazada o un frame cortado sin tamaño conocido.
@@ -897,14 +923,19 @@ export class DerivConnection {
         this.#onSubscribed(root);
       } else if (msgType === 'ticks' && root.entries.get('error')?.type === 'object') {
         // Las reglas 2.0.0 ya registraron `source_error_response`. Sin suscripción no hay datos que
-        // perder: el cierre es `requested` y la salud, `failed` (ADR-0012 §5).
+        // perder: el cierre es `requested` y la salud, `failed` (ADR-0012 §5). Con el mercado
+        // cerrado, la sesión no falla: espera a la apertura (ADR-0021 §2).
         this.#settle(reqId);
         this.#subscribed = false;
+        const error = root.entries.get('error');
+        const closed = stringMember(error, 'code') === MARKET_IS_CLOSED;
         this.#close({
           closure_type: 'requested',
           drop_waiting: false,
-          end: failed('subscription_failed'),
-          reason: 'subscription_failed',
+          end: closed
+            ? disconnected(MARKET_CLOSED, marketOpensAt(stringMember(error, 'message')))
+            : failed('subscription_failed'),
+          reason: closed ? MARKET_CLOSED : 'subscription_failed',
         });
       }
       return;

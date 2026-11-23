@@ -4,7 +4,13 @@ import type { Scheduler } from './deriv/ports.js';
 import type { SessionLock } from './deriv/session.js';
 import type { OperationalAlert } from './operational/registry.js';
 import { failureReason } from './source-log/source-event-log.js';
-import { logLocation, MAX_LOG_NUMBER, type LogLocation } from './successive-logs.js';
+import {
+  logLocation,
+  MAX_LOG_NUMBER,
+  R_100_SEQUENCE,
+  type LogLocation,
+  type LogSequence,
+} from './successive-logs.js';
 
 // El corte semanal de los logs de producción (ADR-0018 §6). La hora de corte de un log es el primer
 // lunes a las 00:00 UTC posterior a su primera escritura. Desde esa hora, `ingest` corta en el
@@ -63,8 +69,8 @@ export function isCleanForCut(
 }
 
 /** El log siguiente a `number`, o `null` después del último. */
-function nextLog(number: number): LogLocation | null {
-  return number >= MAX_LOG_NUMBER ? null : logLocation(number + 1);
+function nextLog(number: number, sequence: LogSequence = R_100_SEQUENCE): LogLocation | null {
+  return number >= MAX_LOG_NUMBER ? null : logLocation(number + 1, sequence);
 }
 
 /**
@@ -112,14 +118,19 @@ export interface CaptureTarget {
  */
 export async function locateCaptureLog(
   reads: LogCutReads,
-  input: { readonly after: number | null; readonly now: () => string },
+  input: {
+    readonly after: number | null;
+    readonly now: () => string;
+    /** La secuencia de los logs (ADR-0021 §1); sin ella, la de R_100. */
+    readonly sequence?: LogSequence;
+  },
 ): Promise<CaptureTarget | null> {
   const active = await reads.locateLog();
   if (active === null) {
     return null;
   }
   if (input.after !== null && active.number <= input.after) {
-    const next = nextLog(input.after);
+    const next = nextLog(input.after, input.sequence);
     return next !== null && (await usable(reads, next)) ? { log: next, skipped: null } : null;
   }
   const first = await reads.firstWrite(active);
@@ -130,7 +141,7 @@ export async function locateCaptureLog(
   if (Date.parse(input.now()) < forcedAt) {
     return { log: active, skipped: null };
   }
-  const next = nextLog(active.number);
+  const next = nextLog(active.number, input.sequence);
   return next !== null && (await usable(reads, next)) ? { log: next, skipped: active } : null;
 }
 
@@ -168,6 +179,8 @@ export interface LogCutWatchInput {
   readonly onCut: (decision: LogCutDecision) => void;
   readonly reads: Pick<LogCutReads, 'firstWrite' | 'readiness'>;
   readonly scheduler: Scheduler;
+  /** La secuencia del log (ADR-0021 §1): la del log siguiente. Sin ella, la de R_100. */
+  readonly sequence?: LogSequence;
   readonly session: LogCutSession;
 }
 
@@ -256,7 +269,7 @@ export class LogCutWatch {
         this.#schedule(Math.min(LOG_CUT_CHECK_MS, this.#cutAt - nowMs));
         return;
       }
-      const next = nextLog(log.number);
+      const next = nextLog(log.number, this.#input.sequence);
       if (next === null) {
         // Después del último log no hay a dónde cortar: la captura sigue en este.
         return;

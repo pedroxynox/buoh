@@ -5,6 +5,7 @@ import {
   type SessionLockProvider,
 } from '../deriv/session.js';
 import { SourceEventLog, type OpenSourceEventLogInput } from '../source-log/source-event-log.js';
+import type { LogSequence } from '../successive-logs.js';
 import { lockedSourceLogStore, SourceLock } from './source-lock.js';
 
 /**
@@ -17,15 +18,26 @@ import { lockedSourceLogStore, SourceLock } from './source-lock.js';
 export class PostgresSessionLockProvider implements SessionLockProvider {
   readonly source: string;
   readonly #postgres: WorkerConfig['postgres'];
+  readonly #sequence: LogSequence | undefined;
 
-  constructor(input: { readonly postgres: WorkerConfig['postgres']; readonly source: string }) {
+  /** Con `sequence`, el bloqueo de esa secuencia de logs (ADR-0021 §1); sin ella, el de R_100. */
+  constructor(input: {
+    readonly postgres: WorkerConfig['postgres'];
+    readonly sequence?: LogSequence;
+    readonly source: string;
+  }) {
     this.source = input.source;
     this.#postgres = input.postgres;
+    this.#sequence = input.sequence;
   }
 
   async acquire(): Promise<SourceLock | null> {
     try {
-      return await SourceLock.acquire({ postgres: this.#postgres, source: this.source });
+      return await SourceLock.acquire({
+        postgres: this.#postgres,
+        ...(this.#sequence === undefined ? {} : { sequence: this.#sequence }),
+        source: this.source,
+      });
     } catch (error) {
       throw new SourceLockUnavailableError(error);
     }

@@ -21,7 +21,11 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { runDerivAdapter, type DerivAdapterResult } from '../src/deriv/adapter.js';
-import { KEEPALIVE_INTERVAL_MS, REQUEST_TIMEOUT_MS } from '../src/deriv/connection.js';
+import {
+  KEEPALIVE_INTERVAL_MS,
+  marketOpensAt,
+  REQUEST_TIMEOUT_MS,
+} from '../src/deriv/connection.js';
 import {
   createDerivMeasurementProfile,
   DERIV_CONNECTOR_VERSION,
@@ -1810,5 +1814,58 @@ describe('runDerivAdapter: ramas del ingestor y del transporte', () => {
       closure: null,
       end: { detail: 'ERR_INVALID_URL', reason: 'connect_failed', status: 'disconnected' },
     });
+  });
+});
+
+describe('el mercado cerrado en la suscripción (ADR-0021 §2)', () => {
+  it('MarketIsClosed no falla: cierra como pedido, sin símbolos afectados, y termina disconnected con market_closed y la hora de apertura', async () => {
+    const run = await harness();
+    const socket = run.socket();
+    await run.openAndListCatalog();
+    socket.text(derivMessages.marketClosed(2));
+    const result = await run.run;
+
+    const frames = await run.frames();
+    expect(run.invalid).toEqual([
+      { observation_id: frames[1]?.observation_id, reason: 'source_error_response' },
+    ]);
+    expect(result.end).toEqual({
+      detail: '2026-03-02T12:00:00.000Z',
+      reason: 'market_closed',
+      status: 'disconnected',
+    });
+    expect(await run.lastClosed()).toMatchObject({
+      affected_symbols: [],
+      closure_type: 'requested',
+      reason: 'market_closed',
+    });
+    expect(socket.ended).toBe('close');
+  });
+
+  it('sin la hora de apertura en el mensaje, el detail es null; otro código sigue siendo subscription_failed', async () => {
+    const run = await harness();
+    await run.openAndListCatalog();
+    run.socket().text(derivMessages.marketClosed(2, 'This market is presently closed.'));
+    expect((await run.run).end).toEqual({
+      detail: null,
+      reason: 'market_closed',
+      status: 'disconnected',
+    });
+  });
+
+  it('marketOpensAt toma solo una hora UTC válida del mensaje', () => {
+    expect(
+      marketOpensAt('This market is presently closed. Market will open at 2026-11-24 01:30:00.'),
+    ).toBe('2026-11-24T01:30:00.000Z');
+    for (const message of [
+      null,
+      '',
+      'This market is presently closed.',
+      'Market will open at 2026-02-30 10:00:00.',
+      'Market will open at 2026-11-24 25:00:00.',
+      'Market will open at 2026-11-24T01:30:00Z.',
+    ]) {
+      expect(marketOpensAt(message)).toBeNull();
+    }
   });
 });

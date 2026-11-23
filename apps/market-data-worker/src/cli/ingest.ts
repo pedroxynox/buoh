@@ -17,12 +17,13 @@ const RANDOM_RANGE = 2 ** 32;
 const STOP_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
 
 /**
- * `pnpm --filter @buoh/market-data-worker run ingest -- --live [--symbol R_100]` (ADR-0015 §7): la
+ * `pnpm --filter @buoh/market-data-worker run ingest -- --live [--symbol R_100 …]` (ADR-0015 §7): la
  * captura viva continua sobre PostgreSQL y el almacenamiento de objetos de la configuración, con el
  * esquema y el bucket propios de la captura. `SIGINT` o `SIGTERM` la paran; para a las 23 horas del
  * evento durable más antiguo del log. En `production` (ADR-0018 §4), espera antes sin escribir nada
  * el log activo, sus migraciones y el bloqueo, captura en el esquema y el prefijo de ese log y no
- * para a las 23 horas. Escribe una sola línea JSON saneada en stdout al terminar; las alertas van a
+ * para a las 23 horas; con varios `--symbol`, captura cada uno en su secuencia de logs, a la vez
+ * (ADR-0021 §1). Escribe una sola línea JSON saneada en stdout al terminar; las alertas van a
  * stderr. Salida 0: terminó `completed`, o una señal paró la espera; 1: `failed`; 2: error de uso,
  * de configuración o migraciones pendientes.
  */
@@ -30,12 +31,13 @@ const now = (): string => new Date().toISOString();
 const { exitCode, line } = await ingestCommand(process.argv.slice(2), process.env, {
   connect: openWsSocket,
   fetch: globalThis.fetch,
-  lockProvider: (config) =>
-    new PostgresSessionLockProvider({ postgres: config.postgres, source: DERIV_SOURCE }),
+  lockProvider: (config, sequence) =>
+    new PostgresSessionLockProvider({ postgres: config.postgres, sequence, source: DERIV_SOURCE }),
   nextId: createUuidV7Generator({ now: () => Date.now(), randomBytes }),
   now,
   openLog: openLockedSourceLog,
-  openStartupReads: (config) => openStartupReads(config, { now, source: DERIV_SOURCE }),
+  openStartupReads: (config, sequence) =>
+    openStartupReads(config, { now, sequence, source: DERIV_SOURCE }),
   openStores: (config) => {
     const stores = openStores(config);
     return {

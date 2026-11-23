@@ -123,7 +123,8 @@ export function openHealthStores(
  * Las lecturas de la espera del arranque de `ingest` en `production` (ADR-0018 §4) y del corte de
  * los logs (§6), sobre un pool propio con la credencial de la configuración y los mismos plazos de
  * cada conexión y de cada consulta que `data:health`, para que un PostgreSQL que acepta la conexión
- * y no contesta no deje la espera ni el corte parados: el log activo de `source` (`findActiveLog`),
+ * y no contesta no deje la espera ni el corte parados, en la secuencia `sequence` (ADR-0021 §1;
+ * sin ella, la de R_100): el log activo de `source` (`findActiveLog`),
  * las migraciones que le faltan a un log (`pendingMigrations` con su esquema), su primera escritura
  * (`firstWriteOf`) y cómo está para capturar en él (`LogReadiness`): preparado, solo con migraciones
  * pendientes o sin preparar. Ninguna escribe nada. Si PostgreSQL cierra una conexión libre del pool, deja la
@@ -133,9 +134,12 @@ export function openStartupReads(
   config: WorkerConfig,
   input: Pick<OpenStoresOptions, 'alert'> & {
     readonly now: () => string;
+    /** La secuencia de los logs (ADR-0021 §1); sin ella, la de R_100. */
+    readonly sequence?: LogSequence;
     readonly source: string;
   },
 ): StartupReads {
+  const sequence = input.sequence ?? R_100_SEQUENCE;
   const alert = input.alert ?? stderrAlert;
   const pool = createPool(config.postgres, {
     connectionTimeoutMillis: HEALTH_CONNECTION_TIMEOUT_MS,
@@ -148,7 +152,11 @@ export function openStartupReads(
     close: () => pool.end(),
     firstWrite: (log) => firstWriteOf(pool, log, input.source),
     readiness: async (log) => {
-      const found = await readCaptureLog(pool, { number: log.number, source: input.source });
+      const found = await readCaptureLog(pool, {
+        number: log.number,
+        sequence,
+        source: input.source,
+      });
       if (found === null || !found.readable || found.lastWriteUtc !== null) {
         return 'not_prepared';
       }
@@ -156,7 +164,7 @@ export function openStartupReads(
         ? 'ready'
         : 'migrations_pending';
     },
-    locateLog: () => findActiveLog(pool, { now: input.now, source: input.source }),
+    locateLog: () => findActiveLog(pool, { now: input.now, sequence, source: input.source }),
     logProfile: (log) => readLogQualityProfile(pool, log.schema),
     pendingMigrations: (log) => pendingMigrations(pool, log.schema),
   };

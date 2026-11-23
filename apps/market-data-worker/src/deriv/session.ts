@@ -34,7 +34,12 @@ import {
   type DerivSchemaSummary,
 } from './adapter.js';
 import type { LogQualityProfileRow } from './log-profile.js';
-import type { DerivConnection, DerivConnectionResult, DerivSessionEnd } from './connection.js';
+import {
+  MARKET_CLOSED,
+  type DerivConnection,
+  type DerivConnectionResult,
+  type DerivSessionEnd,
+} from './connection.js';
 import { GapWatch, type GapWatchFailure } from './gap-watch.js';
 import type { HistoryRecoveryOutcome } from './history-recovery.js';
 import {
@@ -295,6 +300,12 @@ const COMPLETED: SessionEnd = { status: 'completed' };
 /** Tope de d, en milisegundos (ADR-0015 §3, «Espera»). */
 const MAX_BACKOFF_MS = 60_000;
 /**
+ * La espera creciente con el mercado cerrado (ADR-0021 §2), sin la hora de apertura, con una que ya
+ * pasó o si a esa hora sigue cerrado: 1 minuto, el doble cada vez, hasta 1 hora.
+ */
+export const MARKET_CLOSED_FIRST_WAIT_MS = 60_000;
+export const MARKET_CLOSED_MAX_WAIT_MS = 3_600_000;
+/**
  * Tiempo seguido de conexión con ticks durables, desde el primero hasta el fin, que devuelve el
  * contador de intentos a 1 (ADR-0015 §3, «Espera»).
  */
@@ -425,6 +436,15 @@ class SessionRun {
   #abort: AbortController | null = null;
   /** n, el intento desde el último reinicio del contador: da la próxima espera. */
   #attempt = 1;
+  /**
+   * La última conexión terminó con el mercado cerrado (ADR-0021 §2), con la hora de apertura que
+   * trajo, o `null` sin ella: la espera siguiente es la del mercado cerrado. `undefined` si no.
+   */
+  #marketClosed: string | null | undefined = undefined;
+  /** Desde el último tick, ya se esperó una vez a la hora de apertura. */
+  #waitedForOpening = false;
+  /** Esperas crecientes seguidas con el mercado cerrado, desde el último tick. */
+  #closedWaits = 0;
   /** Cuándo quedó durable el primer tick de la conexión en curso, en ms desde la época. */
   #firstTickAt: number | null = null;
   /** La vigilancia del hueco pendiente durante la conexión en curso (ADR-0015 §4). */
@@ -926,6 +946,11 @@ class SessionRun {
     }
   }
 
+  /** Si la conexión del intento en curso tuvo un tick durable: lo anota la sesión al recibirlo. */
+  #tickedInAttempt(): boolean {
+    return this.#firstTickAt !== null;
+  }
+
   /** El intento de `#connect`. */
   async #runAttempt(
     ingestor: RawFirstIngestor,
@@ -1005,6 +1030,16 @@ class SessionRun {
       // esta pérdida, y después de `finish` no empieza ninguna recuperación. La ejecución siguiente lo
       // recupera.
       return COMPLETED;
+    }
+    if (end.status === 'disconnected' && end.reason === MARKET_CLOSED) {
+      // La espera siguiente es la del mercado cerrado, sin contar como un intento (ADR-0021 §2).
+      this.#marketClosed = end.detail;
+      return null;
+    }
+    if (this.#tickedInAttempt()) {
+      // Con un tick, el mercado abrió: la próxima vez que cierre se espera otra vez a su apertura.
+      this.#waitedForOpening = false;
+      this.#closedWaits = 0;
     }
     // `disconnected` o `paused`: se espera y se reconecta. Después de la parada, la espera no empieza,
     // aunque la conexión no terminara con el cierre pedido.
@@ -1400,8 +1435,16 @@ class SessionRun {
     if (this.#stopped) {
       return false;
     }
-    const delay = backoffDelay(this.#attempt, this.#input.random());
-    this.#attempt += 1;
+    const closed = this.#marketClosed;
+    this.#marketClosed = undefined;
+    let delay: number;
+    if (closed === undefined) {
+      delay = backoffDelay(this.#attempt, this.#input.random());
+      this.#attempt += 1;
+    } else {
+      delay = this.#marketClosedDelay(closed);
+      this.#alert({ event: MARKET_CLOSED, opens_at_utc: closed, wait_ms: String(delay) });
+    }
     this.#waits.push(delay);
     await new Promise<void>((resolve) => {
       const cancel = this.#input.scheduler.schedule(delay, resolve);
@@ -1412,6 +1455,24 @@ class SessionRun {
     });
     this.#cancelWait = null;
     return !this.#stopped;
+  }
+
+  /**
+   * La espera con el mercado cerrado (ADR-0021 §2): hasta la hora de apertura que trajo Deriv, la
+   * primera vez desde el último tick; si no la trae, si ya pasó o si a esa hora sigue cerrado, la
+   * creciente, de `MARKET_CLOSED_FIRST_WAIT_MS` a `MARKET_CLOSED_MAX_WAIT_MS`.
+   */
+  #marketClosedDelay(opensAt: string | null): number {
+    const left = opensAt === null ? 0 : Date.parse(opensAt) - Date.parse(this.#input.now());
+    if (!this.#waitedForOpening && left > 0) {
+      this.#waitedForOpening = true;
+      return left;
+    }
+    this.#closedWaits += 1;
+    return Math.min(
+      MARKET_CLOSED_MAX_WAIT_MS,
+      MARKET_CLOSED_FIRST_WAIT_MS * 2 ** (this.#closedWaits - 1),
+    );
   }
 
   async #releaseLock(): Promise<void> {

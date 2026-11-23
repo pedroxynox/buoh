@@ -264,13 +264,18 @@ export {
   checkIngestConfig,
   IngestConfigError,
   INGEST_USAGE,
+  ingestSequences,
   parseIngestArgs,
   type IngestOptions,
 } from './ingest-args.js';
 export {
+  INGEST_RESTART_FIRST_WAIT_MS,
+  INGEST_RESTART_MAX_WAIT_MS,
+  INGEST_RESTART_STEADY_MS,
   INGEST_RETENTION_MS,
   ingestCommand,
   ingestExitCode,
+  ingestRestartDelay,
   runIngest,
   WAIT_STOPPED,
   type IngestDependencies,

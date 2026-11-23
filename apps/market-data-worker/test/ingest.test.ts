@@ -5,7 +5,10 @@ import { DERIV_SOURCE } from '../src/deriv/profile.js';
 import {
   contentKey,
   INGEST_RETENTION_MS,
+  INGEST_RESTART_FIRST_WAIT_MS,
+  INGEST_RESTART_MAX_WAIT_MS,
   ingestCommand,
+  ingestRestartDelay,
   lockedSourceLogStore,
   LOG_CUT_CHECK_MS,
   LOG_CUT_FORCE_AFTER_MS,
@@ -23,6 +26,7 @@ import {
 import { derivLogProfileRow } from '../src/deriv/log-profile.js';
 import { settle, START, START_EPOCH, uuid } from './support/connection-harness.js';
 import {
+  catalogEntry,
   derivMessages,
   FakeDerivSocket,
   ManualClock,
@@ -502,7 +506,11 @@ describe('ingestCommand: el perfil del log (ADR-0020 §4)', () => {
 
   it('en production, la sesión usa el perfil que leyó la espera del arranque para ese log', async () => {
     const run = await ingestHarness();
-    run.startup.profiles.set(2, unknownForSymbol);
+    // En production el símbolo es R_100: el perfil desconocido es uno con otro SHA-256.
+    run.startup.profiles.set(2, {
+      ...derivLogProfileRow('R_100'),
+      quality_profile_sha256: 'f'.repeat(64),
+    });
     const { exitCode, line } = await (await startProduction(run)).command;
     expect(run.profileReads).toEqual([2]);
     expect(exitCode).toBe(1);
@@ -739,9 +747,17 @@ const PRODUCTION_ENV = {
   BUOH_POSTGRES_SSLMODE: 'require',
 };
 
+/**
+ * Los argumentos de `production`: el símbolo de una secuencia de logs (ADR-0021 §1), R_100, con su
+ * catálogo y sus ticks (`R_100_CATALOG`).
+ */
+const PRODUCTION_ARGV = ['--live', '--symbol', 'R_100'];
+/** El catálogo de `production`, con R_100. */
+const R_100_CATALOG = [catalogEntry('R_100', 'Volatility 100 Index')];
+
 /** Corre `ingestCommand` en production y deja correr la espera y el arranque de la sesión. */
 async function startProduction(run: Awaited<ReturnType<typeof ingestHarness>>) {
-  const started = await start(run, undefined, PRODUCTION_ENV);
+  const started = await start(run, PRODUCTION_ARGV, PRODUCTION_ENV);
   await settle();
   await settle();
   return started;
@@ -751,9 +767,9 @@ async function startProduction(run: Awaited<ReturnType<typeof ingestHarness>>) {
 async function captureAndStop(run: Awaited<ReturnType<typeof ingestHarness>>) {
   run.socket(1).open();
   await settle();
-  run.socket(1).text(derivMessages.catalog(1));
+  run.socket(1).text(derivMessages.catalog(1, R_100_CATALOG));
   await settle();
-  run.socket(1).text(derivMessages.tick(2, START_EPOCH, '100.25'));
+  run.socket(1).text(derivMessages.tick(2, START_EPOCH, '100.25', 'R_100'));
   await settle();
   run.raise();
   run.socket(1).text(derivMessages.forgetAll(3));
@@ -875,7 +891,7 @@ describe('ingestCommand en production (ADR-0018 §4)', () => {
     const run = await ingestHarness();
     // La señal llega al abrir los almacenes, después de la espera y antes de la sesión.
     const open = run.deps.openStores;
-    const { command } = await start(run, undefined, PRODUCTION_ENV, {
+    const { command } = await start(run, PRODUCTION_ARGV, PRODUCTION_ENV, {
       ...run.deps,
       openStores: (config) => {
         run.raise();
@@ -905,10 +921,10 @@ describe('ingestCommand en production (ADR-0018 §4)', () => {
     const { command } = await startProduction(run);
     run.socket(1).open();
     await settle();
-    run.socket(1).text(derivMessages.catalog(1));
+    run.socket(1).text(derivMessages.catalog(1, R_100_CATALOG));
     await settle();
     run.provider.lock(1).lose();
-    run.socket(1).text(derivMessages.tick(2, START_EPOCH, '100.25'));
+    run.socket(1).text(derivMessages.tick(2, START_EPOCH, '100.25', 'R_100'));
     await settle();
     await run.clock.advance(500);
 
@@ -988,9 +1004,9 @@ async function settleHandover(): Promise<void> {
 async function subscribe(run: Awaited<ReturnType<typeof ingestHarness>>, number: number) {
   run.socket(number).open();
   await settle();
-  run.socket(number).text(derivMessages.catalog(1));
+  run.socket(number).text(derivMessages.catalog(1, R_100_CATALOG));
   await settle();
-  run.socket(number).text(derivMessages.tick(2, epochNow(run), '100.25'));
+  run.socket(number).text(derivMessages.tick(2, epochNow(run), '100.25', 'R_100'));
   await settle();
 }
 
@@ -1082,9 +1098,12 @@ describe('ingestCommand en production: el corte semanal (ADR-0018 §6)', () => {
     const run = await ingestHarness();
     run.startup.firstWrites.set(2, START);
     run.startup.prepared.add(3);
-    // El log 3 tiene el perfil de publicación de R_100, que el código no arma para SYNTH_100: su
-    // sesión falla cerrado antes de conectar. El log 2 no tiene fila.
-    run.startup.profiles.set(3, derivLogProfileRow('R_100'));
+    // El log 3 tiene un perfil que el código no arma, con otro SHA-256: su sesión falla cerrado antes
+    // de conectar. El log 2 no tiene fila.
+    run.startup.profiles.set(3, {
+      ...derivLogProfileRow('R_100'),
+      quality_profile_sha256: 'f'.repeat(64),
+    });
     const { command } = await startProduction(run);
     await subscribe(run, 1);
     await run.clock.advance(0);
@@ -1225,7 +1244,7 @@ describe('ingestCommand en production: el corte semanal (ADR-0018 §6)', () => {
           : download(...args);
       },
     };
-    const first = await start(run, undefined, PRODUCTION_ENV, failing);
+    const first = await start(run, PRODUCTION_ARGV, PRODUCTION_ENV, failing);
     await settle();
     await settle();
     await subscribe(run, 1);
@@ -1244,7 +1263,7 @@ describe('ingestCommand en production: el corte semanal (ADR-0018 §6)', () => {
     expect(log3.ingestionStatus.heartbeats).toEqual([]);
 
     // El reinicio: el log 2 sigue siendo el activo, y su hora de corte pasó hace menos de 24 horas.
-    const second = await start(run, undefined, PRODUCTION_ENV);
+    const second = await start(run, PRODUCTION_ARGV, PRODUCTION_ENV);
     await settleHandover();
     expect(run.configs.at(-1)?.postgres.schema).toBe('buoh_log_000002');
     // La conexión nueva espera a pasar la hora del cierre anterior, 1 ms del reloj. La primera
@@ -1270,10 +1289,10 @@ describe('ingestCommand en production: el corte semanal (ADR-0018 §6)', () => {
     run.startup.firstWrites.set(2, START);
     run.startup.prepared.add(3);
     const open = run.deps.openStartupReads;
-    const { command } = await start(run, undefined, PRODUCTION_ENV, {
+    const { command } = await start(run, PRODUCTION_ARGV, PRODUCTION_ENV, {
       ...run.deps,
-      openStartupReads: (config) => {
-        const reads = open(config);
+      openStartupReads: (config, sequence) => {
+        const reads = open(config, sequence);
         return {
           ...reads,
           pendingMigrations: (log) => {
@@ -1306,5 +1325,152 @@ describe('ingestCommand en production: el corte semanal (ADR-0018 §6)', () => {
       'reads:close',
     ]);
     expect(run.sockets).toHaveLength(1);
+  });
+});
+
+describe('ingestCommand en production con varios símbolos (ADR-0021 §1)', () => {
+  /** Las dependencias con lecturas y bloqueos por secuencia: el log 2 de cada una, preparado. */
+  const perSequence = (run: Awaited<ReturnType<typeof ingestHarness>>) => {
+    const opened: string[] = [];
+    const deps: IngestDependencies = {
+      ...run.deps,
+      lockProvider: (config, sequence) => {
+        opened.push(`lock:${sequence.name}`);
+        return run.deps.lockProvider(config, sequence);
+      },
+      openStartupReads: (config, sequence) => {
+        opened.push(`reads:${sequence.name}`);
+        const reads = run.deps.openStartupReads(config, sequence);
+        return {
+          ...reads,
+          locateLog: async () => {
+            await reads.locateLog();
+            return logLocation(2, sequence);
+          },
+        };
+      },
+    };
+    return { deps, opened };
+  };
+  /** El símbolo de la suscripción `ticks` que pidió el socket, o `null`. */
+  const subscribedTo = (socket: FakeDerivSocket): unknown =>
+    (socket.requests().find((request) => 'ticks' in request) as { ticks?: unknown } | undefined)
+      ?.ticks ?? null;
+  const ARGV = ['--live', '--symbol', 'R_100', '--symbol', 'frxXAUUSD'];
+
+  it('captura cada símbolo en su secuencia, con sus lecturas, su bloqueo y su log; una captura que falla vuelve a empezar tras su espera, con su alerta, y la otra sigue; la parada termina las dos', async () => {
+    const run = await ingestHarness();
+    const { deps, opened } = perSequence(run);
+    const { command } = await start(run, ARGV, PRODUCTION_ENV, deps);
+    await settleHandover();
+    expect(opened).toEqual(['lock:R_100', 'reads:R_100', 'lock:frxXAUUSD', 'reads:frxXAUUSD']);
+    expect(
+      run.configs
+        .map((config) => [config.postgres.schema, config.s3.keyPrefix])
+        .filter(([schema]) => schema !== 'public'),
+    ).toEqual([
+      ['buoh_log_000002', 'logs/000002/'],
+      ['buoh_frxxauusd_log_000002', 'logs/frxxauusd/000002/'],
+    ]);
+    expect(run.sockets).toHaveLength(2);
+
+    // R_100 se suscribe; el catálogo del oro no lo tiene, y su sesión falla.
+    await subscribe(run, 1);
+    expect(subscribedTo(run.socket(1))).toBe('R_100');
+    run.socket(2).open();
+    await settle();
+    run.socket(2).text(derivMessages.catalog(1, R_100_CATALOG));
+    await settleHandover();
+    expect(run.alerts).toContainEqual({
+      event: 'ingest_capture_restart',
+      reason: 'symbol_not_in_catalog',
+      symbol: 'frxXAUUSD',
+      wait_ms: String(INGEST_RESTART_FIRST_WAIT_MS),
+    });
+    expect(run.sockets).toHaveLength(2);
+    await run.clock.advance(INGEST_RESTART_FIRST_WAIT_MS - 1);
+    await settleHandover();
+    expect(run.sockets).toHaveLength(2);
+    await run.clock.advance(1);
+    await settleHandover();
+    // Vuelve a empezar desde la espera del arranque, con otras lecturas y otro bloqueo.
+    expect(opened.slice(4)).toEqual(['lock:frxXAUUSD', 'reads:frxXAUUSD']);
+    expect(run.sockets).toHaveLength(3);
+    // Mientras tanto, la conexión de R_100 siguió abierta.
+    expect(forgetAll(run.socket(1))).toEqual([]);
+
+    run.raise();
+    await settle();
+    answerForgetAll(run.socket(1));
+    await settleHandover();
+    const { exitCode, line } = await command;
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(line) as {
+      captures: { exit_code: number; result: { status: string }; symbol: string }[];
+      status: string;
+    };
+    expect(parsed.status).toBe('completed');
+    expect(
+      parsed.captures.map((item) => [item.symbol, item.exit_code, item.result.status]),
+    ).toEqual([
+      ['R_100', 0, 'completed'],
+      ['frxXAUUSD', 0, 'completed'],
+    ]);
+    // Las alertas de cada captura llevan su símbolo.
+    expect(run.alerts.every((alert) => typeof alert['symbol'] === 'string')).toBe(true);
+    expect(run.signal.listening).toBe(false);
+  });
+
+  it('una señal durante la espera antes de volver a empezar la corta: la línea de esa captura es la de su fallo, y la salida 1', async () => {
+    const run = await ingestHarness();
+    const { deps } = perSequence(run);
+    const { command } = await start(run, ARGV, PRODUCTION_ENV, deps);
+    await settleHandover();
+    await subscribe(run, 1);
+    run.socket(2).open();
+    await settle();
+    run.socket(2).text(derivMessages.catalog(1, R_100_CATALOG));
+    await settleHandover();
+    run.raise();
+    await settle();
+    answerForgetAll(run.socket(1));
+    await settleHandover();
+
+    const { exitCode, line } = await command;
+    expect(exitCode).toBe(1);
+    const parsed = JSON.parse(line) as {
+      captures: { exit_code: number; result: { end?: { reason?: string } }; symbol: string }[];
+      status: string;
+    };
+    expect(parsed.status).toBe('failed');
+    expect(parsed.captures.map((item) => [item.symbol, item.exit_code])).toEqual([
+      ['R_100', 0],
+      ['frxXAUUSD', 1],
+    ]);
+    expect(parsed.captures[1]?.result.end?.reason).toBe('symbol_not_in_catalog');
+    expect(run.sockets).toHaveLength(2);
+    expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
+  it('ingestRestartDelay: 5 s, el doble cada fallo seguido, hasta 5 minutos', () => {
+    expect([1, 2, 3, 4, 5, 6, 7, 8, 9].map(ingestRestartDelay)).toEqual([
+      5_000, 10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000, 300_000,
+    ]);
+    expect(INGEST_RESTART_MAX_WAIT_MS).toBe(300_000);
+  });
+
+  it('un símbolo sin secuencia es un error de uso, sin abrir nada; fuera de production, un solo símbolo', async () => {
+    const run = await ingestHarness();
+    const production = await ingestCommand(
+      ['--live', '--symbol', 'R_100', '--symbol', 'SYNTH_100'],
+      PRODUCTION_ENV,
+      run.deps,
+    );
+    expect(production.exitCode).toBe(2);
+    expect(JSON.parse(production.line)).toMatchObject({ code: 'UsageError', status: 'failed' });
+    const local = await ingestCommand(ARGV, ENV, run.deps);
+    expect(local.exitCode).toBe(2);
+    expect(JSON.parse(local.line)).toMatchObject({ code: 'UsageError', status: 'failed' });
+    expect(run.timeline).toEqual([]);
   });
 });
