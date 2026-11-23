@@ -1341,6 +1341,8 @@ describe('ingestCommand en production con varios símbolos (ADR-0021 §1)', () =
       },
       openStartupReads: (config, sequence, alert) => {
         opened.push(`reads:${sequence.name}`);
+        // Como un pool que pierde una conexión libre: su alerta lleva el símbolo de la captura.
+        alert({ event: 'postgres_connection_lost', reason: 'ECONNRESET' });
         const reads = run.deps.openStartupReads(config, sequence, alert);
         return {
           ...reads,
@@ -1421,8 +1423,13 @@ describe('ingestCommand en production con varios símbolos (ADR-0021 §1)', () =
       ['R_100', 0, 'completed'],
       ['frxXAUUSD', 0, 'completed'],
     ]);
-    // Las alertas de cada captura llevan su símbolo.
+    // Las alertas de cada captura llevan su símbolo, también las de sus pools.
     expect(run.alerts.every((alert) => typeof alert['symbol'] === 'string')).toBe(true);
+    expect(run.alerts.filter((alert) => alert['event'] === 'postgres_connection_lost')).toEqual([
+      { event: 'postgres_connection_lost', reason: 'ECONNRESET', symbol: 'R_100' },
+      { event: 'postgres_connection_lost', reason: 'ECONNRESET', symbol: 'frxXAUUSD' },
+      { event: 'postgres_connection_lost', reason: 'ECONNRESET', symbol: 'frxXAUUSD' },
+    ]);
     expect(run.signal.listening).toBe(false);
   });
 
@@ -1478,7 +1485,10 @@ describe('ingestCommand en production con varios símbolos (ADR-0021 §1)', () =
     await run.clock.advance(0);
     run.clock.jumpWallClock(Date.parse(CUT_TIME) - Date.parse(run.clock.now()) - LOG_CUT_CHECK_MS);
     await run.clock.advance(LOG_CUT_CHECK_MS);
-    expect(run.alerts).toEqual([{ event: 'log_cut', forced: 'false', log: '2', next: '3' }]);
+    // Con un solo símbolo, las alertas no llevan `symbol`; las de los pools, aparte.
+    expect(run.alerts.filter((alert) => alert['event'] !== 'postgres_connection_lost')).toEqual([
+      { event: 'log_cut', forced: 'false', log: '2', next: '3' },
+    ]);
     answerForgetAll(run.socket(1));
     await settleHandover();
     expect(run.sockets).toHaveLength(2);
