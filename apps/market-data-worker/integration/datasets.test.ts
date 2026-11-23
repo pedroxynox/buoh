@@ -371,11 +371,35 @@ describe('las migraciones de buoh_datasets (ADR-0020 §5)', () => {
     expect(await withPublication(ids[2] ?? '', 'frxXAUUSD', 6, 7)).toBe('23514');
     expect(await withPublication(ids[2] ?? '', 'frxXAUUSD', 3, 7)).toBe(null);
     expect(await withPublication(ids[3] ?? '', 'R_100', 6, 9)).toBe(null);
+    // Sin nombrarla, la secuencia es R_100, la del código de antes de las secuencias.
+    const legacy = `sha256:${createHash('sha256').update('"a5"').digest('hex')}`;
+    const legacyPublication = publication.replace(/f3$/u, 'a5');
+    await owner.query(
+      `INSERT INTO ${DATASETS_SCHEMA}.datasets (dataset_id, state, source, manifest_core_jcs)
+       VALUES ($1, 'published', 'synthetic', '"a5"')`,
+      [legacy],
+    );
+    await owner.query(
+      `INSERT INTO ${DATASETS_SCHEMA}.published_manifest_records
+         (publication_id, deployment_environment, dataset_id, schema_version,
+          manifest_document_sha256, manifest_object_uri, manifest_object_bytes_sha256,
+          published_at_utc, state)
+       VALUES ($1, 'development', $2, '1.0.0', $3, 's3://x/y', $3, '2026-11-14T00:00:00.000Z',
+               'superseded')`,
+      [legacyPublication, legacy, '0'.repeat(64)],
+    );
+    await owner.query(
+      `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
+         (dataset_id, publication_id, log_number, first_segment, last_segment, clean,
+          open_condition_types, pending_continuity_symbols)
+       VALUES ($1, $2, 96, 10, 11, true, '{}', '{}')`,
+      [legacy, legacyPublication],
+    );
     // La publicación sigue cada log desde el último rango de su propia secuencia.
     const datasetsPool = createPool({ ...config.postgres, schema: DATASETS_SCHEMA });
     pools.push(datasetsPool);
     const store = new PostgresDatasetStore(datasetsPool);
-    expect((await store.lastLogRange('R_100', 96))?.last_segment).toBe(9);
+    expect((await store.lastLogRange('R_100', 96))?.last_segment).toBe(11);
     expect(await store.lastLogRange('frxXAUUSD', 96)).toMatchObject({
       first_segment: 3,
       last_segment: 7,
@@ -385,7 +409,7 @@ describe('las migraciones de buoh_datasets (ADR-0020 §5)', () => {
     expect(await store.lastLogRange('frxXAUUSD', 95)).toBe(null);
   });
 
-  it('la 0002 da R_100 a las filas que ya existían y no deja valor por defecto (ADR-0021 §1)', async () => {
+  it('la 0002 da R_100 a las filas que ya existían y lo deja por defecto (ADR-0021 §1)', async () => {
     const owner = ready(admin);
     const schema = 'buoh_datasets_secuencias';
     const [first, second] = await loadMigrations(DATASETS_MIGRATIONS);
@@ -430,7 +454,7 @@ describe('las migraciones de buoh_datasets (ADR-0020 §5)', () => {
           WHERE table_schema = $1 AND table_name = 'dataset_log_ranges' AND column_name = 'sequence'`,
         [schema],
       );
-      expect(column.rows).toEqual([{ default_value: null, nullable: 'NO' }]);
+      expect(column.rows).toEqual([{ default_value: "'R_100'::text", nullable: 'NO' }]);
     } finally {
       await client.query('ROLLBACK');
       client.release();

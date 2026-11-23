@@ -69,13 +69,24 @@ export function liveSequenceOf(symbol: string): LogSequence | null {
 }
 
 /**
+ * Solo las secuencias de `LOG_SEQUENCES`: sus comienzos van tal cual en el SQL y en las expresiones
+ * regulares, y solo los de la tabla están revisados (minúsculas, cifras y `_` en el esquema).
+ */
+function knownSequence(sequence: LogSequence): LogSequence {
+  if (!LOG_SEQUENCES.includes(sequence)) {
+    throw new TypeError(`La secuencia ${sequence.name} no está en LOG_SEQUENCES.`);
+  }
+  return sequence;
+}
+
+/**
  * El esquema de un log de `sequence` como expresión regular, que vale igual en POSIX, para
  * `pg_namespace`, y en JavaScript. Con `capture`, el número va entre paréntesis. El comienzo del
  * esquema solo lleva minúsculas, cifras y `_`, que no son especiales en ninguna de las dos.
  */
 function schemaRegex(sequence: LogSequence, capture: boolean): string {
   const digits = `[0-9]{${String(LOG_NUMBER_DIGITS)}}`;
-  return `^${sequence.schemaStem}${capture ? `(${digits})` : digits}$`;
+  return `^${knownSequence(sequence).schemaStem}${capture ? `(${digits})` : digits}$`;
 }
 
 /** La tabla no existe (`undefined_table`): al esquema le faltan las migraciones del worker. */
@@ -107,10 +118,11 @@ export function logLocation(number: number, sequence: LogSequence = R_100_SEQUEN
     throw new TypeError(`El número de un log es un entero de 1 a ${String(MAX_LOG_NUMBER)}.`);
   }
   const digits = String(number).padStart(LOG_NUMBER_DIGITS, '0');
+  const known = knownSequence(sequence);
   return {
     number,
-    prefix: `${sequence.prefixStem}${digits}/`,
-    schema: `${sequence.schemaStem}${digits}`,
+    prefix: `${known.prefixStem}${digits}/`,
+    schema: `${known.schemaStem}${digits}`,
   };
 }
 

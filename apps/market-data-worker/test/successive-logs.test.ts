@@ -145,6 +145,14 @@ describe('las secuencias de logs (ADR-0021 §1)', () => {
     }
   });
 
+  it('una secuencia que no está en la tabla no da nombres ni lee logs', async () => {
+    const outside = { name: 'X', prefixStem: 'logs/x/', schemaStem: 'buoh_x_log_' };
+    expect(() => logLocation(1, outside)).toThrow(TypeError);
+    expect(() => logNumberOf('buoh_x_log_000001', outside)).toThrow(TypeError);
+    const { pool } = fakePool(() => ({ rows: [] }));
+    await expect(listCaptureLogs(pool, 'deriv_options', outside)).rejects.toThrow(TypeError);
+  });
+
   it('un símbolo sin secuencia no tiene ninguna, tampoco en otras mayúsculas', () => {
     for (const symbol of ['r_100', 'FRXXAUUSD', 'frxxauusd', 'SYNTH_100', '']) {
       expect(liveSequenceOf(symbol)).toBeNull();

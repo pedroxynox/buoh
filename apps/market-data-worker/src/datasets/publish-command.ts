@@ -75,8 +75,7 @@ export interface PublicationStores {
   readonly datasetObjects: ObjectStore;
   readonly datasets: DatasetStore;
   readonly operational: OperationalStore;
-  /** Los logs que existen, con su última escritura (`listCaptureLogs`). */
-  /** Los logs de una secuencia que existen, en orden (`listCaptureLogs`). */
+  /** Los logs de una secuencia que existen, en orden, con su última escritura (`listCaptureLogs`). */
   listLogs(sequence: LogSequence): Promise<CaptureLog[]>;
   log(location: LogLocation): PublicationLogReader;
   close(): Promise<void>;

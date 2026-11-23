@@ -1,13 +1,13 @@
 -- Las secuencias de logs (ADR-0021 §1): cada rango nombra la secuencia de su log, porque dos
 -- secuencias pueden tener un log con el mismo número, y la contigüidad y la clave única pasan a ser
 -- por secuencia. Hasta esta migración solo existía la de R_100, así que las filas que ya están son
--- suyas. La columna se añade con ese valor por defecto, que PostgreSQL pone en las filas existentes
--- sin reescribirlas ni disparar los triggers append-only, y después se le quita: cada inserción
--- nombra su secuencia.
+-- suyas. La columna lleva R_100 por defecto: PostgreSQL lo pone en las filas existentes sin
+-- reescribirlas ni disparar los triggers append-only, y el código de antes, que solo publica R_100 e
+-- inserta sin la columna, sigue funcionando si se vuelve atrás un despliegue (ADR-0018 §5). El
+-- código de las secuencias nombra siempre la suya.
 ALTER TABLE dataset_log_ranges
   ADD COLUMN sequence text NOT NULL DEFAULT 'R_100'
     CHECK (sequence ~ '^[A-Za-z0-9_]{1,64}$');
-ALTER TABLE dataset_log_ranges ALTER COLUMN sequence DROP DEFAULT;
 
 ALTER TABLE dataset_log_ranges DROP CONSTRAINT dataset_log_ranges_log_number_first_segment_key;
 ALTER TABLE dataset_log_ranges

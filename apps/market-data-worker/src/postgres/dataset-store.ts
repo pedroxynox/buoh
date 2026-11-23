@@ -49,11 +49,11 @@ function rangeOf(row: RangeRow): DatasetLogRange {
 }
 
 /**
- * Los metadatos de `buoh_datasets` sobre PostgreSQL (migraciones `0001_datasets` y `0002_secuencias`
- * de su secuencia; ADR-0020 §5 y §9; ADR-0021 §1). El pool tiene `buoh_datasets` en su `search_path`. Publica como
- * `PostgresMetadataStore`, y el mismo `COMMIT` inserta la fila de rango del dataset, con la
- * publicación que lo hace visible: la base rechaza un rango que no empieza en el segmento siguiente
- * al último del anterior de su log.
+ * Los metadatos de `buoh_datasets` sobre PostgreSQL (sus migraciones `0001_datasets` y
+ * `0002_secuencias`; ADR-0020 §5 y §9; ADR-0021 §1). El pool tiene `buoh_datasets` en su
+ * `search_path`. Publica como `PostgresMetadataStore`, y el mismo `COMMIT` inserta la fila de rango
+ * del dataset, con la publicación que lo hace visible: la base rechaza un rango que no empieza en el
+ * segmento siguiente al último del anterior del mismo log de su secuencia.
  */
 export class PostgresDatasetStore extends PostgresMetadataStore implements DatasetStore {
   readonly #datasetsPool: pg.Pool;

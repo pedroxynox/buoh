@@ -128,10 +128,10 @@ export class MemoryMetadataStore implements MetadataStore {
 
 /**
  * Los metadatos de `buoh_datasets` en memoria (ADR-0020 §5 y §9), con las reglas de las migraciones
- * `0001_datasets` y `0002_secuencias`: la fila de rango va en el mismo commit y cada dataset de un log
- * de una secuencia empieza en el segmento siguiente al último del anterior. `ambiguousCommit` simula un `COMMIT` cortado:
- * `confirmed` lo aplica y aun así lo informa ambiguo; `not_confirmed` no aplica nada. Se consume una
- * vez.
+ * `0001_datasets` y `0002_secuencias`: la fila de rango va en el mismo commit y cada dataset de un
+ * log de una secuencia empieza en el segmento siguiente al último del anterior. `ambiguousCommit`
+ * simula un `COMMIT` cortado: `confirmed` lo aplica y aun así lo informa ambiguo; `not_confirmed` no
+ * aplica nada. Se consume una vez.
  */
 export class MemoryDatasetStore extends MemoryMetadataStore implements DatasetStore {
   readonly ranges = new Map<string, { publication_id: string; range: DatasetLogRange }>();
