@@ -189,6 +189,7 @@ describe('datasets:publish (ADR-0020 §8, paso 6)', () => {
       max_rss_bytes: 100 * 1048576,
       open_condition_types: [],
       pending_continuity_symbols: [],
+      sequence: 'R_100',
       status: 'published',
     });
     expect(report['source_event_count']).toBe(one.store.rows.length);
@@ -224,6 +225,7 @@ describe('datasets:publish (ADR-0020 §8, paso 6)', () => {
       last_segment: segments - 1,
       log_number: 1,
       open: { open_condition_types: [], pending_continuity_symbols: [] },
+      sequence: 'R_100',
     });
   });
 
@@ -297,6 +299,7 @@ describe('datasets:publish (ADR-0020 §8, paso 6)', () => {
       behind: null,
       duration_ms: 1234,
       max_rss_bytes: 100 * 1048576,
+      sequence: 'R_100',
       status: 'nothing_due',
     });
     expect(datasets.records).toHaveLength(1);
@@ -435,12 +438,17 @@ describe('datasets:publish (ADR-0020 §8, paso 6)', () => {
     const two = await fakeLog(2, [], { schema: false });
     const { datasets, run } = harness([one, two], '2026-11-10T01:00:00.000Z');
     const original = datasets.lastLogRange.bind(datasets);
-    datasets.lastLogRange = (number) =>
+    datasets.lastLogRange = (sequence, number) =>
       number === 2
         ? Promise.reject(Object.assign(new Error('caído'), { code: 'ECONNRESET' }))
-        : original(number);
+        : original(sequence, number);
     const { report } = await run();
-    expect(report).toMatchObject({ log: 2, reason: 'storage_unavailable', status: 'failed' });
+    expect(report).toMatchObject({
+      log: 2,
+      reason: 'storage_unavailable',
+      sequence: 'R_100',
+      status: 'failed',
+    });
     expect(report).not.toHaveProperty('first_segment');
     expect(report['behind']).toBe(null);
   });

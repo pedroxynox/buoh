@@ -83,6 +83,7 @@ async function harness() {
     publishLiveDataset({
       environment: 'test',
       logNumber: 1,
+      sequence: 'R_100',
       now: () => published_at_utc.replace(/:00\.000Z$/u, ':30.000Z'),
       objects,
       plan: due,
@@ -114,6 +115,7 @@ describe('publishLiveDataset (ADR-0020 §9)', () => {
       last_segment: due.to,
       log_number: 1,
       open: { open_condition_types: ['event_gap_unresolved'], pending_continuity_symbols: [] },
+      sequence: 'R_100',
     });
     expect(store.ranges.get(datasetId)).toEqual({
       publication_id: ATTEMPT_1,
@@ -319,6 +321,10 @@ describe('publishLiveDataset (ADR-0020 §9)', () => {
     await expect(publish(due, ATTEMPT_2, AT_2, { logNumber: 2 })).rejects.toBeInstanceOf(
       PublicationConflictError,
     );
+    // El mismo log y los mismos segmentos de otra secuencia son otro rango (ADR-0021 §1).
+    await expect(
+      publish(due, ATTEMPT_2, AT_2, { sequence: 'frxXAUUSD' }),
+    ).rejects.toBeInstanceOf(PublicationConflictError);
     expect(store.records).toHaveLength(1);
   });
 

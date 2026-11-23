@@ -289,9 +289,9 @@ async function datasetPublication(
     );
     await client.query(
       `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
-         (dataset_id, publication_id, log_number, first_segment, last_segment, clean,
+         (dataset_id, publication_id, sequence, log_number, first_segment, last_segment, clean,
           pending_continuity_symbols, open_condition_types)
-       VALUES ($1, $2, $3, $4, $5, true, '{}', '{}')`,
+       VALUES ($1, $2, 'R_100', $3, $4, $5, true, '{}', '{}')`,
       [datasetId, publicationId, log, first, first + 5],
     );
     await client.query('COMMIT');

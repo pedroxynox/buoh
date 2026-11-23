@@ -3,14 +3,18 @@ import { describe, expect, it } from 'vitest';
 import {
   findActiveLog,
   firstWriteOf,
+  GOLD_SEQUENCE,
   isLogExpired,
   listCaptureLogs,
+  liveSequenceOf,
   loadConfig,
   LOG_RETENTION_MS,
+  LOG_SEQUENCES,
   logLocation,
   logNumberOf,
   MAX_LOG_NUMBER,
   productionLogConfigErrors,
+  R_100_SEQUENCE,
   selectActiveLog,
   withLog,
   type CaptureLog,
@@ -80,6 +84,83 @@ describe('logLocation y logNumberOf (ADR-0018 §6, «Nombres»)', () => {
     ]) {
       expect(logNumberOf(name)).toBeNull();
     }
+  });
+});
+
+describe('las secuencias de logs (ADR-0021 §1)', () => {
+  it('R_100 conserva sus nombres: buoh_log_<n> y logs/<n>/, también sin nombrar la secuencia', () => {
+    expect(R_100_SEQUENCE.name).toBe('R_100');
+    expect(logLocation(7, R_100_SEQUENCE)).toEqual(logLocation(7));
+    expect(logLocation(7, R_100_SEQUENCE)).toEqual({
+      number: 7,
+      prefix: 'logs/000007/',
+      schema: 'buoh_log_000007',
+    });
+    expect(logNumberOf('buoh_log_000007', R_100_SEQUENCE)).toBe(7);
+    expect(liveSequenceOf('R_100')).toBe(R_100_SEQUENCE);
+  });
+
+  it('el oro lleva su nombre en minúsculas en el esquema y en el prefijo, bajo logs/', () => {
+    expect(GOLD_SEQUENCE.name).toBe('frxXAUUSD');
+    expect(logLocation(1, GOLD_SEQUENCE)).toEqual({
+      number: 1,
+      prefix: 'logs/frxxauusd/000001/',
+      schema: 'buoh_frxxauusd_log_000001',
+    });
+    expect(logNumberOf('buoh_frxxauusd_log_000001', GOLD_SEQUENCE)).toBe(1);
+    expect(liveSequenceOf('frxXAUUSD')).toBe(GOLD_SEQUENCE);
+  });
+
+  it('un esquema de una secuencia nunca es un log de otra', () => {
+    for (const sequence of LOG_SEQUENCES) {
+      for (const other of LOG_SEQUENCES) {
+        if (other === sequence) continue;
+        for (const number of [1, 42, MAX_LOG_NUMBER]) {
+          expect(logNumberOf(logLocation(number, sequence).schema, other)).toBeNull();
+        }
+      }
+    }
+    expect(logNumberOf('buoh_log_000001', GOLD_SEQUENCE)).toBeNull();
+    expect(logNumberOf('buoh_frxxauusd_log_000001')).toBeNull();
+  });
+
+  it('ninguna comparte nombre, esquema ni prefijo, y ningún prefijo de un log cae dentro del de otro', () => {
+    const names = LOG_SEQUENCES.map((sequence) => sequence.name);
+    expect(new Set(names).size).toBe(names.length);
+    expect(new Set(names.map((name) => name.toLowerCase())).size).toBe(names.length);
+    const prefixes = LOG_SEQUENCES.flatMap((sequence) =>
+      [1, 2, MAX_LOG_NUMBER].map((number) => logLocation(number, sequence).prefix),
+    );
+    expect(new Set(prefixes).size).toBe(prefixes.length);
+    for (const prefix of prefixes) {
+      expect(prefix).toMatch(/^logs\/(?:[a-z0-9_]+\/)?[0-9]{6}\/$/u);
+      for (const other of prefixes) {
+        if (other !== prefix) expect(other.startsWith(prefix)).toBe(false);
+      }
+    }
+    const schemas = LOG_SEQUENCES.map((sequence) => logLocation(1, sequence).schema);
+    expect(new Set(schemas).size).toBe(schemas.length);
+    for (const schema of schemas) {
+      expect(schema).toMatch(/^[a-z_][a-z0-9_]{0,62}$/u);
+    }
+  });
+
+  it('un símbolo sin secuencia no tiene ninguna, tampoco en otras mayúsculas', () => {
+    for (const symbol of ['r_100', 'FRXXAUUSD', 'frxxauusd', 'SYNTH_100', '']) {
+      expect(liveSequenceOf(symbol)).toBeNull();
+    }
+  });
+
+  it('el log activo conserva la secuencia de sus logs', () => {
+    const gold = (number: number, lastWriteUtc: string | null = null): CaptureLog => ({
+      lastWriteUtc,
+      location: logLocation(number, GOLD_SEQUENCE),
+      readable: true,
+    });
+    expect(selectActiveLog([gold(1, before(DAY)), gold(2, before(1000))], NOW)).toEqual(
+      logLocation(2, GOLD_SEQUENCE),
+    );
+    expect(selectActiveLog([gold(3), gold(2)], NOW)).toEqual(logLocation(2, GOLD_SEQUENCE));
   });
 });
 
@@ -195,6 +276,29 @@ describe('listCaptureLogs (ADR-0018 §6)', () => {
       expect(query.text).toContain('ORDER BY segment_index DESC, position DESC LIMIT 1');
       expect(query.text).toContain('ORDER BY write_order DESC LIMIT 1');
     }
+  });
+
+  it('lee solo los logs de su secuencia: el oro, con su propio patrón de esquema', async () => {
+    const { pool, queries } = fakePool((text) =>
+      text.includes('pg_namespace')
+        ? {
+            rows: ['buoh_frxxauusd_log_000002', 'buoh_log_000001', 'buoh_frxxauusd_log_000001'].map(
+              (name) => ({ name }),
+            ),
+          }
+        : { rows: [{ event: null, heartbeat: null }] },
+    );
+    expect(await listCaptureLogs(pool, 'deriv_options', GOLD_SEQUENCE)).toEqual([
+      { lastWriteUtc: null, location: logLocation(1, GOLD_SEQUENCE), readable: true },
+      { lastWriteUtc: null, location: logLocation(2, GOLD_SEQUENCE), readable: true },
+    ]);
+    expect(queries[0]?.values).toEqual(['^buoh_frxxauusd_log_[0-9]{6}$']);
+    expect(queries[1]?.text).toContain('FROM buoh_frxxauusd_log_000001.source_event_index');
+    const r100 = fakePool((text) =>
+      text.includes('pg_namespace') ? { rows: [] } : { rows: [{ event: null, heartbeat: null }] },
+    );
+    await listCaptureLogs(r100.pool, 'deriv_options');
+    expect(r100.queries[0]?.values).toEqual(['^buoh_log_[0-9]{6}$']);
   });
 
   it('con solo eventos o solo latidos, esa es la última escritura', async () => {

@@ -127,9 +127,9 @@ export class MemoryMetadataStore implements MetadataStore {
 }
 
 /**
- * Los metadatos de `buoh_datasets` en memoria (ADR-0020 §5 y §9), con las reglas de la migración
- * `0001_datasets`: la fila de rango va en el mismo commit y cada dataset de un log empieza en el
- * segmento siguiente al último del anterior. `ambiguousCommit` simula un `COMMIT` cortado:
+ * Los metadatos de `buoh_datasets` en memoria (ADR-0020 §5 y §9), con las reglas de las migraciones
+ * `0001_datasets` y `0002_secuencias`: la fila de rango va en el mismo commit y cada dataset de un log
+ * de una secuencia empieza en el segmento siguiente al último del anterior. `ambiguousCommit` simula un `COMMIT` cortado:
  * `confirmed` lo aplica y aun así lo informa ambiguo; `not_confirmed` no aplica nada. Se consume una
  * vez.
  */
@@ -189,11 +189,11 @@ export class MemoryDatasetStore extends MemoryMetadataStore implements DatasetSt
     );
   }
 
-  lastLogRange(logNumber: number): Promise<DatasetLogRange | null> {
+  lastLogRange(sequence: string, logNumber: number): Promise<DatasetLogRange | null> {
     this.#read();
     const ranges = [...this.ranges.values()]
       .map((entry) => entry.range)
-      .filter((range) => range.log_number === logNumber)
+      .filter((range) => range.sequence === sequence && range.log_number === logNumber)
       .sort((left, right) => left.last_segment - right.last_segment);
     return Promise.resolve(ranges.at(-1) ?? null);
   }
@@ -208,7 +208,7 @@ export class MemoryDatasetStore extends MemoryMetadataStore implements DatasetSt
     if (ambiguous === 'not_confirmed') {
       throw new CommitOutcomeUnknownError(input.record.dataset_id);
     }
-    const previous = await this.lastLogRange(logRange.log_number);
+    const previous = await this.lastLogRange(logRange.sequence, logRange.log_number);
     if (logRange.first_segment !== (previous === null ? 0 : previous.last_segment + 1)) {
       throw new PublicationConflictError(input.record.dataset_id, {
         kind: 'log_range',

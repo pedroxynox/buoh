@@ -22,6 +22,7 @@ interface RangeRow {
   log_number: number;
   open_condition_types: string[];
   pending_continuity_symbols: string[];
+  sequence: string;
 }
 
 /**
@@ -30,8 +31,8 @@ interface RangeRow {
  */
 const RANGE_CONFLICTS: ReadonlySet<unknown> = new Set(['23505', '23514']);
 
-const RANGE_COLUMNS = `log_number, first_segment, last_segment, clean, open_condition_types,
-  pending_continuity_symbols`;
+const RANGE_COLUMNS = `sequence, log_number, first_segment, last_segment, clean,
+  open_condition_types, pending_continuity_symbols`;
 
 function rangeOf(row: RangeRow): DatasetLogRange {
   return {
@@ -39,6 +40,7 @@ function rangeOf(row: RangeRow): DatasetLogRange {
     first_segment: row.first_segment,
     last_segment: row.last_segment,
     log_number: row.log_number,
+    sequence: row.sequence,
     open: {
       open_condition_types: row.open_condition_types,
       pending_continuity_symbols: row.pending_continuity_symbols,
@@ -47,8 +49,8 @@ function rangeOf(row: RangeRow): DatasetLogRange {
 }
 
 /**
- * Los metadatos de `buoh_datasets` sobre PostgreSQL (migración `0001_datasets` de su secuencia;
- * ADR-0020 §5 y §9). El pool tiene `buoh_datasets` en su `search_path`. Publica como
+ * Los metadatos de `buoh_datasets` sobre PostgreSQL (migraciones `0001_datasets` y `0002_secuencias`
+ * de su secuencia; ADR-0020 §5 y §9; ADR-0021 §1). El pool tiene `buoh_datasets` en su `search_path`. Publica como
  * `PostgresMetadataStore`, y el mismo `COMMIT` inserta la fila de rango del dataset, con la
  * publicación que lo hace visible: la base rechaza un rango que no empieza en el segmento siguiente
  * al último del anterior de su log.
@@ -71,10 +73,11 @@ export class PostgresDatasetStore extends PostgresMetadataStore implements Datas
         await client.query(
           `INSERT INTO dataset_log_ranges
              (dataset_id, publication_id, ${RANGE_COLUMNS})
-           VALUES ($1, $2, $3, $4, $5, $6, $7::text[], $8::text[])`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9::text[])`,
           [
             record.dataset_id,
             record.publication_id,
+            logRange.sequence,
             logRange.log_number,
             logRange.first_segment,
             logRange.last_segment,
@@ -136,11 +139,11 @@ export class PostgresDatasetStore extends PostgresMetadataStore implements Datas
     return row === undefined ? null : confirmedPublicationSchema.parse(row);
   }
 
-  async lastLogRange(logNumber: number): Promise<DatasetLogRange | null> {
+  async lastLogRange(sequence: string, logNumber: number): Promise<DatasetLogRange | null> {
     const { rows } = await this.#datasetsPool.query<RangeRow>(
       `SELECT ${RANGE_COLUMNS} FROM dataset_log_ranges
-        WHERE log_number = $1 ORDER BY last_segment DESC LIMIT 1`,
-      [logNumber],
+        WHERE sequence = $1 AND log_number = $2 ORDER BY last_segment DESC LIMIT 1`,
+      [sequence, logNumber],
     );
     const [row] = rows;
     return row === undefined ? null : rangeOf(row);
