@@ -90,7 +90,10 @@ describe('Observatorio con la salud real (F2-UI-001)', () => {
   });
 
   it('el último dataset: vacío hasta que se publique el primero, y su identificador después', () => {
-    expect(textOf(observatorio(ready(report())))).toContain('Todavía no hay ninguno publicado');
+    const empty = textOf(observatorio(ready(report())));
+    expect(empty).toContain('Todavía no hay ninguno publicado');
+    expect(empty).toContain('un dataset cada 6 horas');
+    expect(empty).not.toContain('más adelante en la Fase 2 (F2.5)');
     const id = `sha256:${'b'.repeat(64)}`;
     expect(observatorio(ready(report({ last_published_dataset_id: id })))).toContain(id);
   });

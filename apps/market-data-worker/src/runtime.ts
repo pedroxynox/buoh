@@ -3,6 +3,7 @@ import type { HealthCommandStores } from './health/command.js';
 import type { StartupReads } from './ingest-startup.js';
 import { stderrAlert, type OperationalAlert } from './operational/registry.js';
 import { PostgresCatalogStore } from './postgres/catalog-store.js';
+import { readLastActiveDatasetId } from './postgres/data-events.js';
 import { PostgresIngestionStatusStore } from './postgres/ingestion-status-store.js';
 import { PostgresMetadataStore, createPool } from './postgres/metadata-store.js';
 import { readLogQualityProfile } from './postgres/log-profile.js';
@@ -87,7 +88,8 @@ export function openStores(config: WorkerConfig, options: OpenStoresOptions = {}
 
 /**
  * Las lecturas de `data:health` (ADR-0015 §8) sobre `openStores`, con su pool y su alerta: el log,
- * el esquema de fuente guardado, el registro operativo, el cursor y el latido, el último dataset,
+ * el esquema de fuente guardado, el registro operativo, el cursor y el latido, el último dataset (en
+ * `production`, el de `sequence` en `buoh_datasets`, `readLastActiveDatasetId`),
  * el escritor vivo según `pg_locks` (`sourceLockHolder`), el del bloqueo de `sequence` (sin ella,
  * el de R_100, que es el de la fuente; ADR-0021 §1), y las migraciones pendientes. Ninguna escribe
  * ni toma el bloqueo. `close` libera las conexiones.
@@ -108,7 +110,20 @@ export function openHealthStores(
   });
   return {
     close: stores.close,
-    datasets: stores.metadata,
+    // En `production`, los datasets viven en `buoh_datasets`, por secuencia (ADR-0020 §5 y ADR-0021
+    // §1), y no en las tablas de publicación del log observado, que están vacías. Fuera, como el
+    // replay local, en las del esquema de la configuración.
+    datasets:
+      config.environment === 'production'
+        ? {
+            lastActiveDatasetId: (source, environment) =>
+              readLastActiveDatasetId(stores.pool, {
+                environment,
+                sequence: sequence.name,
+                source,
+              }),
+          }
+        : stores.metadata,
     ingestionStatus: stores.ingestionStatus,
     lockHolder: (source) => sourceLockHolder(stores.pool, source, sequence),
     objects: stores.objects,
