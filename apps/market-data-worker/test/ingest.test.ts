@@ -1485,8 +1485,9 @@ describe('ingestCommand en production con varios símbolos (ADR-0021 §1)', () =
     await run.clock.advance(0);
     run.clock.jumpWallClock(Date.parse(CUT_TIME) - Date.parse(run.clock.now()) - LOG_CUT_CHECK_MS);
     await run.clock.advance(LOG_CUT_CHECK_MS);
-    // Con un solo símbolo, las alertas no llevan `symbol`; las de los pools, aparte.
-    expect(run.alerts.filter((alert) => alert['event'] !== 'postgres_connection_lost')).toEqual([
+    // Con un solo símbolo, las alertas no llevan `symbol`, tampoco las de los pools.
+    expect(run.alerts).toEqual([
+      { event: 'postgres_connection_lost', reason: 'ECONNRESET' },
       { event: 'log_cut', forced: 'false', log: '2', next: '3' },
     ]);
     answerForgetAll(run.socket(1));
