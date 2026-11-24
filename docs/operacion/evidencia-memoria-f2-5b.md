@@ -10,7 +10,7 @@ La medición no usa datos de mercado: los logs son sintéticos, con precios inve
 - PostgreSQL 18.4 y SeaweedFS 4.48 portátiles, solo en `127.0.0.1` (`.kiro/steering/sandbox-ocasional.md`, «PostgreSQL y SeaweedFS sin Docker»), con los SHA-256 de sus paquetes comprobados.
 - Node.js 24.22.0, con los tamaños de V8 de `ingest` (`WORKER_NODE_FLAGS`: `--max-semi-space-size=1` y `--max-old-space-size=256`).
 - La release de esquemas fijada `production_v20260901_0`, descargada de su URL fijada y comprobada con su SHA-256.
-- El worker de `main` en `de4e27b`, el del PR #129, con las herramientas de `scripts/evidencia-f2-5b/`, que no son comandos del producto (runbook de ingesta, «Medición de memoria de dos sesiones (F2.5b)»).
+- El worker de `main` en `de4e27b`, el del PR #129, con las herramientas de `scripts/evidencia-f2-5b/`, que no son comandos del producto (runbook de ingesta, «Evidencia de las dos sesiones (F2.5b)»).
 
 ## Cómo se midió
 

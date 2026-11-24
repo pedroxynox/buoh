@@ -1112,13 +1112,14 @@ node scripts/evidencia-f2-1/medir-memoria.mjs --estado <estado.json> [--esquemas
 
 Sin `--esquemas`, descarga `schemas.zip` de la URL fijada de la release; la sesión lo comprueba con su SHA-256. Escribir el log de 7 días lleva unos 35 minutos en local. Con `--minutos <n>`, deja de escribir pasado ese tiempo; con `--parar-tras-escribir`, se detiene al terminar de escribir. En los dos casos sale con 3, y otra ejecución con el mismo `--estado` sigue donde quedó, porque los eventos son reproducibles. Una medición que se cortó no se repite: hay que empezar con un estado nuevo, y borrar a mano el esquema y el bucket que nombra el anterior. La línea de stdout, y `--salida` si se da, lleva cada medición y cada criterio, sin precios ni payloads. Salida 0 si los criterios se cumplen y 1 si no.
 
-## Medición de memoria de dos sesiones (F2.5b)
+## Evidencia de las dos sesiones (F2.5b)
 
 [ADR-0021](../arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §1 pide medir el proceso entero de `ingest` con dos sesiones, R_100 y el oro, reconstruyendo a la vez sus puntos de control, por debajo de 256 MB. La medición del 2026-11-24 está en la [evidencia de memoria de F2.5b](evidencia-memoria-f2-5b.md). Los scripts de `scripts/evidencia-f2-5b/` no son comandos del producto: usan la librería compilada del worker, nunca se conectan a Deriv y no escriben datos de mercado.
 
 - `medir-memoria.mjs` crea un esquema y un bucket desechables por mercado y escribe en cada uno, a la vez, una captura sintética de `--dias` días, 7 por defecto, con el `SourceEventLog` del worker (`sintetico.mjs`): un tick cada 2 s en R_100 y cada segundo en el oro. Después mide, cada vez en un proceso aparte con `WORKER_NODE_FLAGS`, las dos sesiones en un proceso: una vez reconstruyendo los puntos de control y `--repeticiones` veces con ellos, 3 por defecto. Al final comprueba el criterio y borra los esquemas y los buckets.
 - `dos-sesiones.mjs` corre las dos sesiones de ingesta a la vez en un proceso, cada una con su secuencia, contra un canal falso de Deriv en el proceso, con una retención de 8 días, como `sesion.mjs` de F2.1.
 - `sintetico.mjs` trae los mensajes, la captura y el canal falso de cada mercado, como `deriv-sintetico.mjs` de F2.1.
+- `sonda-mercado-cerrado.mjs` es la comprobación de `MarketIsClosed` con el oro de ADR-0021 §2, y la única de la carpeta que se conecta a Deriv: al canal público, sin cuenta. En una conexión pide `active_symbols`, `trading_times` del día y la suscripción `ticks` del símbolo (`--simbolo`, `frxXAUUSD` por defecto), que escucha `--segundos`, 20 por defecto, y de la respuesta toma lo que lee `DerivConnection`: el `msg_type`, el `error.code` y la hora de apertura del mensaje, con `marketOpensAt` del worker. Cuenta los ticks sin guardar ninguna cotización. Sale con 0 si la respuesta es la de un mercado cerrado que espera el worker, con 1 si no, como con el mercado abierto, y con 2 sin conexión. Se corre con el oro cerrado: entre semana, de 22:00 a 23:00 UTC, o el fin de semana. El 2026-11-24 a las 11:53 UTC, con el oro abierto, salió con 1, y con `OTC_HSI`, cerrado, con 0.
 
 Con lo mismo que la medición de F2.1:
 
