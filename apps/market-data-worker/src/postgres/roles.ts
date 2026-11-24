@@ -376,7 +376,8 @@ export async function ensurePublicationRole(client: Client): Promise<void> {
  * Da sus privilegios en `buoh_datasets` (ADR-0020 §5), en una transacción y como `buoh_dueno`, el
  * dueño de sus tablas. Es idempotente.
  * - `buoh_lectura`: uso del esquema y `SELECT` en todas sus tablas. Lo heredan `buoh_salud`, para la
- *   verificación, `buoh_agente`, `buoh_api_lectura`, para Datos y la Auditoría, y `buoh_publicacion`.
+ *   verificación y el último dataset de `data:health`, `buoh_agente`, `buoh_api_lectura`, para Datos y
+ *   la Auditoría, y `buoh_publicacion`.
  * - `buoh_publicacion`: uso del esquema, `SELECT` e `INSERT` en `DATASETS_PUBLICATION_TABLES` y uso
  *   de las secuencias; ni `INSERT` en `DATASETS_OWNER_TABLES` ni en la tabla de migraciones.
  * - `buoh_ingesta`: nada.

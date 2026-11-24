@@ -18,6 +18,7 @@ import {
   ensureApiReaderRole,
   ensurePublicationRole,
   ensureRuntimeRoles,
+  GOLD_SEQUENCE,
   grantDatasetsPrivileges,
   loadConfig,
   loadSyntheticFixture,
@@ -32,6 +33,7 @@ import {
   PUBLICATION_ROLE,
   PublicationConflictError,
   publishLiveDataset,
+  R_100_SEQUENCE,
   replayDataset,
   S3ObjectStore,
   setRolePassword,
@@ -39,6 +41,8 @@ import {
   type SyntheticFixture,
   type WorkerConfig,
 } from '../src/index.js';
+import { readLastActiveDatasetId } from '../src/postgres/data-events.js';
+import { openHealthStores } from '../src/runtime.js';
 import { waitForNoSessions } from '../test/support/databases.js';
 
 /**
@@ -459,6 +463,141 @@ describe('las migraciones de buoh_datasets (ADR-0020 §5)', () => {
       await client.query('ROLLBACK');
       client.release();
     }
+  });
+
+  it('el último dataset activo de producción de una secuencia, que data:health lee con buoh_salud en production (ADR-0015 §8; ADR-0020 §5)', async () => {
+    const owner = ready(admin);
+    // Cada dataset es el SHA-256 de su core y va en su propio log, desde el segmento 0.
+    const rows = [
+      // [core, secuencia, log, entorno, estado, fuente, publicación, hora]
+      [
+        '"c1"',
+        'R_100',
+        80,
+        'production',
+        'active',
+        'deriv_options',
+        'c1',
+        '2026-11-20T00:00:00.000Z',
+      ],
+      [
+        '"c2"',
+        'R_100',
+        81,
+        'production',
+        'active',
+        'deriv_options',
+        'c2',
+        '2026-11-21T00:00:00.000Z',
+      ],
+      // A la misma hora, gana el publication_id mayor.
+      [
+        '"c3"',
+        'R_100',
+        82,
+        'production',
+        'active',
+        'deriv_options',
+        'c3',
+        '2026-11-21T00:00:00.000Z',
+      ],
+      // Más tardíos, pero no cuentan: uno sustituido, otro de otro entorno, otro de otra fuente.
+      [
+        '"c4"',
+        'R_100',
+        83,
+        'production',
+        'superseded',
+        'deriv_options',
+        'c4',
+        '2026-11-22T00:00:00.000Z',
+      ],
+      [
+        '"c5"',
+        'R_100',
+        84,
+        'development',
+        'active',
+        'deriv_options',
+        'c5',
+        '2026-11-22T00:00:00.000Z',
+      ],
+      ['"c6"', 'R_100', 85, 'production', 'active', 'synthetic', 'c6', '2026-11-22T00:00:00.000Z'],
+      // El más tardío de todos es del oro: es el del oro y no el de R_100.
+      [
+        '"c7"',
+        'frxXAUUSD',
+        80,
+        'production',
+        'active',
+        'deriv_options',
+        'c7',
+        '2026-11-23T00:00:00.000Z',
+      ],
+    ] as const;
+    const idOf = (core: string) => `sha256:${createHash('sha256').update(core).digest('hex')}`;
+    for (const [core, logSequence, log, env, state, source, suffix, at] of rows) {
+      const dataset = idOf(core);
+      const publication = `019a8000-0000-7000-8000-0000000000${suffix}`;
+      await owner.query(
+        `INSERT INTO ${DATASETS_SCHEMA}.datasets (dataset_id, state, source, manifest_core_jcs)
+         VALUES ($1, 'published', $2, $3)`,
+        [dataset, source, core],
+      );
+      await owner.query(
+        `INSERT INTO ${DATASETS_SCHEMA}.published_manifest_records
+           (publication_id, deployment_environment, dataset_id, schema_version,
+            manifest_document_sha256, manifest_object_uri, manifest_object_bytes_sha256,
+            published_at_utc, state)
+         VALUES ($1, $2, $3, '1.0.0', $4, 's3://x/y', $4, $5, $6)`,
+        [publication, env, dataset, '0'.repeat(64), at, state],
+      );
+      await owner.query(
+        `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
+           (dataset_id, publication_id, sequence, log_number, first_segment, last_segment, clean,
+            open_condition_types, pending_continuity_symbols)
+         VALUES ($1, $2, $3, $4, 0, 70, true, '{}', '{}')`,
+        [dataset, publication, logSequence, log],
+      );
+    }
+    // Con buoh_salud, como data:health en production: su pool tiene el log en el search_path.
+    const healthPassword = randomBytes(32).toString('base64');
+    await setRolePassword(ready(renderClient), POSTGRES_ROLES.health, healthPassword);
+    const production: WorkerConfig = {
+      ...config,
+      environment: 'production',
+      postgres: {
+        ...config.postgres,
+        password: healthPassword,
+        schema: 'buoh_log_000080',
+        user: POSTGRES_ROLES.health,
+      },
+    };
+    const latest = async (logSequence: typeof R_100_SEQUENCE) => {
+      const stores = openHealthStores(production, { sequence: logSequence });
+      try {
+        return await stores.datasets.lastActiveDatasetId('deriv_options', 'production');
+      } finally {
+        await stores.close();
+      }
+    };
+    expect(await latest(R_100_SEQUENCE)).toBe(idOf('"c3"'));
+    expect(await latest(GOLD_SEQUENCE)).toBe(idOf('"c7"'));
+    const reader = poolAs(POSTGRES_ROLES.health, healthPassword);
+    expect(
+      await readLastActiveDatasetId(reader, {
+        environment: 'development',
+        sequence: 'R_100',
+        source: 'deriv_options',
+      }),
+    ).toBe(idOf('"c5"'));
+    expect(
+      await readLastActiveDatasetId(reader, {
+        environment: 'production',
+        sequence: 'R_100',
+        source: 'otra_fuente',
+      }),
+    ).toBe(null);
   });
 
   it('cada verificación tiene la salida de su estado', async () => {

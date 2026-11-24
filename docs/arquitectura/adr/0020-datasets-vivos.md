@@ -124,7 +124,7 @@ Lo pide decidir ADR-0015 §4 al publicar datasets vivos. Sí pasan: sin ellos, u
   | Rol | En `buoh_datasets` | Lo usa |
   |---|---|---|
   | `buoh_publicacion`, nuevo, con inicio de sesión y miembro de `buoh_lectura` | uso del esquema, `SELECT` e `INSERT` en sus tablas, salvo `dataset_verifications`, y uso de sus secuencias | la publicación (§8) |
-  | `buoh_lectura` | uso del esquema y `SELECT` | `buoh_salud`, para la verificación (§8), y `buoh_agente` |
+  | `buoh_lectura` | uso del esquema y `SELECT` | `buoh_salud`, para la verificación (§8) y, desde el PR #130, para el último dataset de `data:health`, y `buoh_agente` |
   | `buoh_api_lectura` | uso del esquema y `SELECT` | la API: Datos y la Auditoría (§10) |
   | `buoh_ingesta` | nada | `ingest` |
 

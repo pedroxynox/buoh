@@ -175,11 +175,18 @@ function datasetPart(view: HealthView): ReactNode {
   if (view.report === null) {
     return <p className="b-secondary w-small">{noReportText(view)}</p>;
   }
+  if (view.unobserved) {
+    return (
+      <p className="b-secondary w-small">
+        Sin dato: la última observación no pudo leer los datos, tampoco el último dataset.
+      </p>
+    );
+  }
   const id = view.report.last_published_dataset_id;
   return id === null ? (
     <p className="b-secondary w-small">
-      Todavía no hay ninguno publicado: la captura de producción se publica como datasets más
-      adelante en la Fase 2 (F2.5).
+      Todavía no hay ninguno publicado: la captura de producción se publica como un dataset cada 6
+      horas.
     </p>
   ) : (
     <span className="b-num w-small">{id}</span>

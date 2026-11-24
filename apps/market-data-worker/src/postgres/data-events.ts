@@ -325,6 +325,67 @@ export async function readLogDataEvents(
 const UNDEFINED_TABLE = '42P01';
 
 /**
+ * Si `error` es el de una consulta a `buoh_datasets` cuando el esquema todavía no existe, como antes
+ * de que `buoh-operaciones` lo cree: `42P01` y el esquema no está. Con el esquema y sin una de sus
+ * tablas, da `false`.
+ */
+async function datasetsSchemaMissing(pool: Pick<Pool, 'query'>, error: unknown): Promise<boolean> {
+  if ((error as { code?: unknown } | null)?.code !== UNDEFINED_TABLE) {
+    return false;
+  }
+  const { rows } = await pool.query<{ missing: boolean }>(
+    'SELECT to_regnamespace($1) IS NULL AS missing',
+    [DATASETS_SCHEMA],
+  );
+  return rows[0]?.missing === true;
+}
+
+export interface ReadLastActiveDatasetInput {
+  readonly environment: DeploymentEnvironment;
+  /** La secuencia de logs del dataset (`dataset_log_ranges.sequence`; ADR-0021 §1), como `R_100`. */
+  readonly sequence: string;
+  readonly source: string;
+}
+
+/**
+ * El `dataset_id` del último dataset activo de la fuente en el entorno, de los logs de la secuencia,
+ * en `buoh_datasets` (ADR-0020 §5), o `null` si no hay ninguno: el de su record `active` con la hora
+ * de publicación más tardía, y a la misma hora, el de `publication_id` mayor, como
+ * `PostgresMetadataStore.lastActiveDatasetId` en las tablas de publicación de un esquema. Lo lee
+ * `data:health` en `production` (ADR-0015 §8, «Entradas»), donde los datasets viven en
+ * `buoh_datasets` y no en el log observado. Un dataset sin fila de rango no es de ninguna secuencia y
+ * no cuenta: la publicación guarda la fila con su record en el mismo commit (ADR-0020 §5), y quien
+ * comprueba esa integridad es `readPublishedDatasets`. Sin el esquema, `null`; con el esquema y sin una de sus
+ * tablas, rechaza con el error de PostgreSQL, como sin privilegios (`42501`). No escribe nada, y
+ * nombra el esquema en cada tabla, para un pool con el log en el `search_path`.
+ */
+export async function readLastActiveDatasetId(
+  pool: Pick<Pool, 'query'>,
+  input: ReadLastActiveDatasetInput,
+): Promise<string | null> {
+  const schema = pg.escapeIdentifier(DATASETS_SCHEMA);
+  try {
+    const { rows } = await pool.query<{ dataset_id: string }>(
+      `SELECT r.dataset_id
+         FROM ${schema}.published_manifest_records r
+         JOIN ${schema}.datasets d USING (dataset_id)
+         JOIN ${schema}.dataset_log_ranges g USING (dataset_id)
+        WHERE d.source = $1 AND r.deployment_environment = $2 AND r.state = 'active'
+          AND g.sequence = $3
+        ORDER BY r.published_at_utc DESC, r.publication_id DESC
+        LIMIT 1`,
+      [input.source, input.environment, input.sequence],
+    );
+    return rows[0]?.dataset_id ?? null;
+  } catch (error) {
+    if (await datasetsSchemaMissing(pool, error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
  * Las publicaciones de los datasets (ADR-0020 §10): las `limit` más recientes de `source` en
  * `environment` de `buoh_datasets.published_manifest_records`, cada una con el log de su dataset
  * (`dataset_log_ranges`) y comprobada contra su contrato. Sin el esquema `buoh_datasets`, que crea
@@ -356,14 +417,7 @@ export async function readDatasetPublications(
     );
     return rows.map(publicationOf);
   } catch (error) {
-    if ((error as { code?: unknown } | null)?.code !== UNDEFINED_TABLE) {
-      throw error;
-    }
-    const { rows } = await pool.query<{ missing: boolean }>(
-      'SELECT to_regnamespace($1) IS NULL AS missing',
-      [DATASETS_SCHEMA],
-    );
-    if (rows[0]?.missing === true) {
+    if (await datasetsSchemaMissing(pool, error)) {
       return [];
     }
     throw error;

@@ -33,7 +33,10 @@ import type { HealthObservation, ObservedLog } from './evaluate.js';
  * salen de `openStores`; en las pruebas, de almacenes en memoria.
  */
 export interface HealthStores {
-  /** El último dataset activo de la fuente en el entorno (`PostgresMetadataStore`). */
+  /**
+   * El último dataset activo de la fuente en el entorno: en `production`, el de la secuencia en
+   * `buoh_datasets` (`readLastActiveDatasetId`); fuera, el de `PostgresMetadataStore`.
+   */
   readonly datasets: {
     lastActiveDatasetId(source: string, environment: DeploymentEnvironment): Promise<string | null>;
   };

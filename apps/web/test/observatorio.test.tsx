@@ -90,7 +90,10 @@ describe('Observatorio con la salud real (F2-UI-001)', () => {
   });
 
   it('el último dataset: vacío hasta que se publique el primero, y su identificador después', () => {
-    expect(textOf(observatorio(ready(report())))).toContain('Todavía no hay ninguno publicado');
+    const empty = textOf(observatorio(ready(report())));
+    expect(empty).toContain('Todavía no hay ninguno publicado');
+    expect(empty).toContain('un dataset cada 6 horas');
+    expect(empty).not.toContain('más adelante en la Fase 2 (F2.5)');
     const id = `sha256:${'b'.repeat(64)}`;
     expect(observatorio(ready(report({ last_published_dataset_id: id })))).toContain(id);
   });
@@ -164,6 +167,33 @@ describe('Observatorio con la salud real (F2-UI-001)', () => {
       expect(text).toContain(expected);
       expect(text).not.toContain('la última observación falló');
     }
+  });
+
+  it('el último dataset de un informe sin observación no se da por vacío: sus campos van en null aunque haya datasets', () => {
+    const unobserved = (alerts: { event: string; reason: string | null }[]) =>
+      textOf(
+        observatorio({
+          kind: 'ready',
+          health: {
+            log: 2,
+            observation: {
+              status: 'completed',
+              observed_at_utc: OBSERVED,
+              report: report({ connection_state: 'disconnected', service_health: 'paused' }),
+              alerts,
+            },
+          },
+          receivedAtMs: OBSERVED_MS + 60_000,
+          checkedAtMs: OBSERVED_MS + 60_000,
+          refreshFailure: null,
+        }),
+      );
+    const text = unobserved([{ event: 'data_health_storage_unavailable', reason: 'ECONNREFUSED' }]);
+    expect(text).toContain('Sin dato: la última observación no pudo leer los datos');
+    expect(text).not.toContain('Todavía no hay ninguno publicado');
+    // Un aviso que no cambia la salud no la hace una observación fallida.
+    const warned = unobserved([{ event: 'checkpoint_rejected', reason: 'versions_mismatch' }]);
+    expect(warned).toContain('Todavía no hay ninguno publicado');
   });
 
   it('los avisos de la observación van aparte de la causa', () => {
