@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 101
-updated_at_utc: "2026-11-24T17:30:00.000Z"
+status_version: 102
+updated_at_utc: "2026-11-24T22:59:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -38,7 +38,7 @@ Transformar una hipótesis en una estrategia viva, explicable y no ejecutora, pa
 | F2.3 API, cuentas y auditoría | Hecha, con el PR 7c de ADR-0019 | [Evidencia de F2.3](docs/operacion/evidencia-api-f2-3.md) |
 | F2.4 Datos reales en pantalla | Hecha, con el 7b | [Evidencia de F2.4](docs/operacion/evidencia-datos-f2-4.md) |
 | F2.5 Datasets vivos | Hecha, con el PR 6 de ADR-0020 | [Evidencia de los datasets vivos](docs/operacion/evidencia-datasets-f2-5.md) |
-| F2.5b Mercados reales | En curso: el PR 2a de ADR-0021 trajo las secuencias de logs y `buoh_datasets` por secuencia, el 2b, `buoh-operaciones` y `data:health` por secuencia, y el 2c, `ingest` con varios símbolos y el mercado cerrado; siguen el 2d (la medición de memoria de dos sesiones, la prueba de integración de ADR-0021 §8 con dos sesiones de `ingest` en un proceso y la comprobación con el oro cerrado, de 22:00 a 23:00 UTC entre semana o el fin de semana) y los PR 3 a 8 (ADR-0021 §9; «Siguiente tarea autorizada») | — |
+| F2.5b Mercados reales | En curso: el PR 2 de ADR-0021 está hecho, en cuatro partes: el 2a trajo las secuencias de logs y `buoh_datasets` por secuencia, el 2b, `buoh-operaciones` y `data:health` por secuencia, el 2c, `ingest` con varios símbolos y el mercado cerrado, y el 2d, la memoria y la prueba de dos sesiones y la comprobación con el oro cerrado; siguen los PR 3 a 8 (ADR-0021 §9; «Siguiente tarea autorizada») | [Evidencia del PR 2d](docs/operacion/evidencia-memoria-f2-5b.md) |
 | F2.6, F2.6b y F2.7 a F2.10 | Sin empezar: las cinco ADR del laboratorio, de ADR-0022 a ADR-0026, están fusionadas | — |
 | F2.11 Puerta de salida | Sin empezar | — |
 
@@ -59,7 +59,7 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 **Próximos pasos, en orden** (el 2026-11-23, con el orden que dio el propietario al empezar la sesión en otra cuenta de Kiro: `.kiro/steering/sandbox-ocasional.md`, «Cambio de sesión»; el paso 2 lo pone el plan de Fase 2, §9). El detalle de cada incremento está en su ADR y en el [historial de entregas](docs/plan/historial-de-entregas.md).
 
 1. **2026-12-02 a las 00:00:03 UTC:** vence el log 1, y el agente comprueba su borrado (runbook de ingesta, «Operaciones (`buoh-operaciones`)», «El primer borrado»). Vuelve a contar los objetos de `logs/000002/`, que tienen que ser los 317 068 de la [evidencia de producción de F2.2](docs/operacion/evidencia-produccion-f2-2.md). Ese día, el agente le pide además al propietario el uso de `buoh-operaciones` en la facturación de Render, para saber si el cron job pasa del mínimo de 1 USD al mes con lo que suman los datasets vivos ([evidencia de los datasets vivos](docs/operacion/evidencia-datasets-f2-5.md), «El costo»).
-2. **El código de F2.5b**, los mercados reales, con los PR 2 a 8 de [ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §9. Esperaba el PR 6 de ADR-0020, y va antes que los demás incrementos nuevos, para que la captura del oro empiece pronto (plan de Fase 2, §9).
+2. **El código de F2.5b**, los mercados reales, con los PR 3 a 8 de [ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §9. Esperaba el PR 6 de ADR-0020, y va antes que los demás incrementos nuevos, para que la captura del oro empiece pronto (plan de Fase 2, §9).
 
 Con la del motor *shadow*, [ADR-0026](docs/arquitectura/adr/0026-motor-de-senales-shadow.md), las cinco ADR del laboratorio están fusionadas (plan de Fase 2, §8): el código de F2.6 a F2.10 ya no espera ninguna ADR y sigue las dependencias del plan (§9), detrás de F2.5b.
 
