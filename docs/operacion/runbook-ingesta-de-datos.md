@@ -1112,6 +1112,22 @@ node scripts/evidencia-f2-1/medir-memoria.mjs --estado <estado.json> [--esquemas
 
 Sin `--esquemas`, descarga `schemas.zip` de la URL fijada de la release; la sesión lo comprueba con su SHA-256. Escribir el log de 7 días lleva unos 35 minutos en local. Con `--minutos <n>`, deja de escribir pasado ese tiempo; con `--parar-tras-escribir`, se detiene al terminar de escribir. En los dos casos sale con 3, y otra ejecución con el mismo `--estado` sigue donde quedó, porque los eventos son reproducibles. Una medición que se cortó no se repite: hay que empezar con un estado nuevo, y borrar a mano el esquema y el bucket que nombra el anterior. La línea de stdout, y `--salida` si se da, lleva cada medición y cada criterio, sin precios ni payloads. Salida 0 si los criterios se cumplen y 1 si no.
 
+## Medición de memoria de dos sesiones (F2.5b)
+
+[ADR-0021](../arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §1 pide medir el proceso entero de `ingest` con dos sesiones, R_100 y el oro, reconstruyendo a la vez sus puntos de control, por debajo de 256 MB. La medición del 2026-11-24 está en la [evidencia de memoria de F2.5b](evidencia-memoria-f2-5b.md). Los scripts de `scripts/evidencia-f2-5b/` no son comandos del producto: usan la librería compilada del worker, nunca se conectan a Deriv y no escriben datos de mercado.
+
+- `medir-memoria.mjs` crea un esquema y un bucket desechables por mercado y escribe en cada uno, a la vez, una captura sintética de `--dias` días, 7 por defecto, con el `SourceEventLog` del worker (`sintetico.mjs`): un tick cada 2 s en R_100 y cada segundo en el oro. Después mide, cada vez en un proceso aparte con `WORKER_NODE_FLAGS`, las dos sesiones en un proceso: una vez reconstruyendo los puntos de control y `--repeticiones` veces con ellos, 3 por defecto. Al final comprueba el criterio y borra los esquemas y los buckets.
+- `dos-sesiones.mjs` corre las dos sesiones de ingesta a la vez en un proceso, cada una con su secuencia, contra un canal falso de Deriv en el proceso, con una retención de 8 días, como `sesion.mjs` de F2.1.
+- `sintetico.mjs` trae los mensajes, la captura y el canal falso de cada mercado, como `deriv-sintetico.mjs` de F2.1.
+
+Con lo mismo que la medición de F2.1:
+
+```sh
+node scripts/evidencia-f2-5b/medir-memoria.mjs --estado <estado.json> [--esquemas <schemas.zip>] [--salida <resultado.json>]
+```
+
+Escribir los dos logs de 7 días lleva unos 72 minutos en local, lo que tarda el oro. `--minutos <n>` funciona como en F2.1: sale con 3, y otra ejecución con el mismo `--estado` sigue donde quedó. La línea de stdout, y `--salida` si se da, lleva cada medición y el criterio, sin precios ni payloads. Salida 0 si el máximo del proceso queda por debajo de 256 MB en todas las mediciones y cada sesión termina `completed` sin alertas, y 1 si no.
+
 ## Puerta de salida de Fase 1
 
 Aplican exactamente la Definition of Done y matriz de evidencia del [plan de Fase 1](../plan/fase-1-fundacion-de-datos.md). Este runbook no define una puerta alternativa. La evidencia reunida el 2026-10-29 está en [evidencia de la puerta de salida de Fase 1](evidencia-puerta-fase-1.md).
