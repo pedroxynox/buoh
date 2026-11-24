@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { WORKER_NODE_FLAGS } from '../node-flags.js';
@@ -131,7 +131,8 @@ export function ownMaxRssBytes(): number {
  * no hereda el entorno de quien lo lanza. Guarda stdout y stderr, cada uno hasta
  * `CHILD_OUTPUT_LIMIT_BYTES`, y si no termina en `timeoutMs` lo corta con `SIGKILL`. Con
  * `reportMemory`, carga `MEMORY_REPORT_MODULE` y da la memoria residente máxima del proceso
- * (`maxRssBytes`). Se rechaza si Node no arranca.
+ * (`maxRssBytes`). Se rechaza si Node no arranca, con el error de Node, también cuando no puede
+ * lanzarlo por falta de descriptores (`EMFILE` o `ENFILE`), sin dejar un error sin escuchar.
  */
 export function runNodeScript(input: {
   readonly args: readonly string[];
@@ -152,6 +153,18 @@ export function runNodeScript(input: {
         stdio: reportMemory ? ['ignore', 'pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
       },
     );
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, input.timeoutMs);
+    // Antes de tocar sus tuberías: si Node no pudo lanzarlo, como con `EMFILE` o `ENFILE`, el
+    // proceso no tiene `stdio` y el error llega después, en el `nextTick`. Sin este oyente, ese
+    // error terminaría `buoh-operaciones` entero, sin el paso `memory`.
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
     const collect = (limit: number) => {
       const chunks: Buffer[] = [];
       let size = 0;
@@ -170,16 +183,8 @@ export function runNodeScript(input: {
     const memory = collect(MEMORY_OUTPUT_LIMIT_BYTES);
     child.stdout?.on('data', stdout.add);
     child.stderr?.on('data', stderr.add);
-    child.stdio[MEMORY_FD]?.on('data', memory.add);
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGKILL');
-    }, input.timeoutMs);
-    child.on('error', (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
+    // `stdio` no existe en un proceso que Node no pudo lanzar (ver el oyente de `error`).
+    (child.stdio as ChildProcess['stdio'] | undefined)?.[MEMORY_FD]?.on('data', memory.add);
     child.on('close', (code) => {
       clearTimeout(timer);
       const result = { exitCode: code, stderr: stderr.text(), stdout: stdout.text(), timedOut };
