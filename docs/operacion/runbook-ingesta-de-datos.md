@@ -437,7 +437,7 @@ Con `pnpm --filter`, el shell recibe 1 para cualquier salida distinta de 0, y pn
 
 Desde el PR 6 de [ADR-0015](../arquitectura/adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §13 (§8), la salud de datos de la fuente `deriv_options` se deriva desde fuera del proceso que ingiere, y nunca se guarda: `observeDataHealth` (`apps/market-data-worker/src/health/observe.ts`) lee lo observado y `evaluateDataHealth` (`src/health/evaluate.ts`) le aplica las reglas (ver «Reporte y evidencia»). La lectura nunca toma el bloqueo de la fuente ni escribe nada: el log se abre con almacenes que rechazan toda escritura, y del registro operativo solo se cargan las condiciones. Desde el PR 5 de [ADR-0017](../arquitectura/adr/0017-punto-de-control-de-la-derivacion-en-vivo.md) §11, ya no lee ni deriva el log entero: parte del último punto de control válido que escribió `ingest` (ver «Adaptador público de Deriv», «Lectores desde el punto de control»).
 
-**Qué lee**, en este orden (ADR-0015 §8, «Entradas»), en el esquema PostgreSQL y el bucket de la configuración, y en `production`, en los del log activo o en los del log de `--log` (ver «Comando»):
+**Qué lee**, en este orden (ADR-0015 §8, «Entradas»), en el esquema PostgreSQL y el bucket de la configuración, y en `production`, en los del log activo o en los del log de `--log` (ver «Comando»), salvo el último dataset, que en `production` está en `buoh_datasets` (punto 9):
 
 1. las migraciones del worker que le faltan al esquema, sin aplicar nada, como `ingest` (ver «Captura viva continua (`ingest`)»). Si falta alguna, no lee nada más;
 2. el escritor vivo: la sesión de PostgreSQL que tiene el bloqueo de la fuente según `pg_locks` (`sourceLockHolder`, en `apps/market-data-worker/src/postgres/source-lock.ts`), con la consulta de «Una sola instancia por fuente» limitada a la base de datos actual, porque otra base del mismo servidor tiene sus propios bloqueos. Da el PID de esa sesión, o ninguno. Cualquier rol puede leer `pg_locks`;
@@ -458,7 +458,7 @@ La hora de la observación se toma una vez, al terminar de leer: así el cierre 
 | Lo que se lee | Lo observado | Regla de ADR-0015 §8 |
 |---|---|---|
 | en `production`, no hay ningún log activo: ninguno existe, todos vencieron, o los que quedan todavía se preparan (ver «Logs sucesivos de producción (F2.2)»); con `--log`, el log pedido no existe o todavía no se puede leer | `log_not_prepared` | 2: `failed` |
-| al esquema le faltan migraciones, o una tabla no existe (`42P01`) en cualquier lectura | `migrations_pending` | 2: `failed` |
+| al esquema le faltan migraciones, o una tabla no existe (`42P01`) en cualquier lectura, también una de `buoh_datasets` con el esquema creado | `migrations_pending` | 2: `failed` |
 | el contenido del log no pasa sus comprobaciones (`LogIntegrityError`): un objeto alterado, que falta o mayor que su fila, un hash o unos conteos que no cuadran, entre otras | `log_not_derivable` | 2 |
 | la clave del esquema de fuente tiene otros bytes: más de 10 485 760, o con otro SHA-256. Da igual que el log esté vacío, porque `ingest` ya no arranca con ese bucket | `source_schema_mismatch` | 2 |
 | la clave del esquema de fuente no tiene ningún objeto | el perfil falta: con el log no vacío, la evaluación da `source_schema_missing` (regla 2), y con el log vacío no hace falta | — |

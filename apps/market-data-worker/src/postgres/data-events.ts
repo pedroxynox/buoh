@@ -353,7 +353,9 @@ export interface ReadLastActiveDatasetInput {
  * de publicación más tardía, y a la misma hora, el de `publication_id` mayor, como
  * `PostgresMetadataStore.lastActiveDatasetId` en las tablas de publicación de un esquema. Lo lee
  * `data:health` en `production` (ADR-0015 §8, «Entradas»), donde los datasets viven en
- * `buoh_datasets` y no en el log observado. Sin el esquema, `null`; con el esquema y sin una de sus
+ * `buoh_datasets` y no en el log observado. Un dataset sin fila de rango no es de ninguna secuencia y
+ * no cuenta: la publicación guarda la fila con su record en el mismo commit (ADR-0020 §5), y quien
+ * comprueba esa integridad es `readPublishedDatasets`. Sin el esquema, `null`; con el esquema y sin una de sus
  * tablas, rechaza con el error de PostgreSQL, como sin privilegios (`42501`). No escribe nada, y
  * nombra el esquema en cada tabla, para un pool con el log en el `search_path`.
  */

@@ -175,6 +175,13 @@ function datasetPart(view: HealthView): ReactNode {
   if (view.report === null) {
     return <p className="b-secondary w-small">{noReportText(view)}</p>;
   }
+  if (view.unobserved) {
+    return (
+      <p className="b-secondary w-small">
+        Sin dato: la última observación no pudo leer los datos, tampoco el último dataset.
+      </p>
+    );
+  }
   const id = view.report.last_published_dataset_id;
   return id === null ? (
     <p className="b-secondary w-small">

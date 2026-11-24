@@ -169,6 +169,33 @@ describe('Observatorio con la salud real (F2-UI-001)', () => {
     }
   });
 
+  it('el último dataset de un informe sin observación no se da por vacío: sus campos van en null aunque haya datasets', () => {
+    const unobserved = (alerts: { event: string; reason: string | null }[]) =>
+      textOf(
+        observatorio({
+          kind: 'ready',
+          health: {
+            log: 2,
+            observation: {
+              status: 'completed',
+              observed_at_utc: OBSERVED,
+              report: report({ connection_state: 'disconnected', service_health: 'paused' }),
+              alerts,
+            },
+          },
+          receivedAtMs: OBSERVED_MS + 60_000,
+          checkedAtMs: OBSERVED_MS + 60_000,
+          refreshFailure: null,
+        }),
+      );
+    const text = unobserved([{ event: 'data_health_storage_unavailable', reason: 'ECONNREFUSED' }]);
+    expect(text).toContain('Sin dato: la última observación no pudo leer los datos');
+    expect(text).not.toContain('Todavía no hay ninguno publicado');
+    // Un aviso que no cambia la salud no la hace una observación fallida.
+    const warned = unobserved([{ event: 'checkpoint_rejected', reason: 'versions_mismatch' }]);
+    expect(warned).toContain('Todavía no hay ninguno publicado');
+  });
+
   it('los avisos de la observación van aparte de la causa', () => {
     const health: DataHealth = {
       log: 2,

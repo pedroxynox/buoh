@@ -95,6 +95,12 @@ export interface HealthView {
   readonly log: number | null;
   readonly observation: HealthObservationView | null;
   readonly report: HealthReport | null;
+  /**
+   * Si el informe es uno sin observación (ADR-0015 §8, reglas 2 y 3): lo acompaña una alerta que
+   * impone la salud (`alertHealth`), y sus campos observados, como el último dataset, van en `null`
+   * aunque haya datos.
+   */
+  readonly unobserved: boolean;
   readonly loading: boolean;
   /** El texto de un fallo de la API cuando no hay ningún dato que mostrar. */
   readonly error: string | null;
@@ -436,6 +442,7 @@ const EMPTY: Omit<HealthView, 'badge' | 'summary'> = {
   log: null,
   observation: null,
   report: null,
+  unobserved: false,
   loading: false,
   error: null,
   unauthenticated: false,
@@ -534,5 +541,6 @@ function readyView(state: Extract<DataHealthState, { kind: 'ready' }>): HealthVi
     notes,
     observation,
     report: observed.report,
+    unobserved: observed.alerts.some((alert) => alertHealth(alert.event) !== null),
   };
 }
