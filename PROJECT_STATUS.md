@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 99
-updated_at_utc: "2026-11-24T05:10:00.000Z"
+status_version: 100
+updated_at_utc: "2026-11-24T11:30:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -46,7 +46,6 @@ Quedan abiertos de las entregas hechas:
 
 - mostrar una por una las incidencias de cada dataset: Datos las cuenta por tipo y gravedad, y ninguna pantalla las lista todavía, tampoco la Auditoría ([concepto de interfaz](docs/diseno/concepto-de-interfaz.md) §14);
 - la primera rotación de la credencial dueña de PostgreSQL, que el propietario aplazó el 2026-11-17 y es una precondición de la Fase 3B del roadmap (decisiones vigentes, «Rotación de la credencial dueña de PostgreSQL»);
-- el menor 8 de la revisión del PR #121: si lanzar un proceso falla con `EMFILE`, `runNodeScript` puede terminar `buoh-operaciones` sin el paso `memory`; ya pasaba antes de ese PR y va en uno posterior (PR #121, «Relevo»);
 - los pendientes técnicos registrados de la Fase 1, en la [especificación de pendientes](docs/plan/especificacion-de-pendientes.md) (P-F1-07).
 
 ## Trabajo en paralelo autorizado
