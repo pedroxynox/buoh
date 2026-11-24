@@ -352,7 +352,7 @@ La evaluación sigue el protocolo de validación, con las reglas medibles que fi
 
 ### `F2-SIGNAL-001` — Registro de señales
 
-Cada señal es un `SignalEvent` con estrategia y versión, símbolo, instante, vencimiento, condición, calidad de los datos, modo y enlace a su evidencia ([seguridad y rigor](../gobierno/seguridad-y-rigor-cuantitativo.md) §7).
+Cada señal es un `SignalEvent` con estrategia y versión, símbolo, instante, vencimiento, condición, calidad de los datos, modo y enlace a su evidencia ([seguridad y rigor](../gobierno/seguridad-y-rigor-cuantitativo.md) §7). (Precisión de [ADR-0026](../arquitectura/adr/0026-motor-de-senales-shadow.md) §6: las señales omitidas seguidas con la misma causa van en un solo `SignalEvent`, con cuántas agrupa y su primer y su último instante.)
 
 **Aceptación:**
 
