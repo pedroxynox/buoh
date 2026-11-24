@@ -3570,6 +3570,40 @@ describe('el paso 1 con los datasets vivos (ADR-0020 §5)', () => {
       failures: [{ action: 'datasets_grant', reason: 'XX000' }],
     });
   });
+
+  it('un db:migrate que no arranca, como con EMFILE, es el fallo de su acción: el paso 1 sigue con las demás y pone las contraseñas (revisión del PR #131)', async () => {
+    const db = datasetsDatabase();
+    const children = datasetsChildren({});
+    const emfile = () =>
+      Promise.reject(Object.assign(new Error('spawn sintético'), { code: 'EMFILE' }));
+    let logMigrations = 0;
+    const runChild: RunChild = (child, args, env, options) => {
+      if (child === 'datasets_migrate') {
+        return emfile();
+      }
+      if (child === 'migrate' && (logMigrations += 1) === 1) {
+        return emfile();
+      }
+      return children.runChild(child, args, env, options);
+    };
+    const { lines } = await run(
+      db,
+      { ...children, runChild },
+      { config: DATASETS_CONFIG, nextId: growing },
+    );
+    const report = stepLine(lines, 'roles_and_logs')?.['report'] as Record<string, unknown>;
+    expect(report['failures']).toEqual([
+      { action: 'migrate', log: 1, reason: 'EMFILE', sequence: 'R_100' },
+      { action: 'datasets_migrate', reason: 'EMFILE' },
+    ]);
+    // Las demás acciones siguieron: el log 2 se migró y recibió sus privilegios, y la contraseña de
+    // buoh_publicacion se comprobó, sin privilegios de buoh_datasets.
+    expect(db.calls).not.toContain('grant:1');
+    expect(db.calls).toContain('grant:2');
+    expect(db.calls).toContain('login:buoh_publicacion');
+    expect(db.calls).not.toContain('datasets_grant');
+    expect(stepLine(lines, 'memory')).toMatchObject({ status: 'completed' });
+  });
 });
 
 describe('el paso 6, publication (ADR-0020 §8)', () => {

@@ -22,7 +22,7 @@ import {
   type LogLocation,
   type LogSequence,
 } from '../successive-logs.js';
-import type { RunChild } from './child.js';
+import type { ChildResult, RunChild } from './child.js';
 import {
   apiMigrateEnvironment,
   healthEnvironment,
@@ -188,7 +188,14 @@ async function runMigrate(
   child: 'api_migrate' | 'datasets_migrate' | 'migrate',
   env: Readonly<Record<string, string>>,
 ): Promise<{ readonly applied: string[] } | { readonly reason: string }> {
-  const result = await input.runChild(child, [], env);
+  let result: ChildResult;
+  try {
+    result = await input.runChild(child, [], env);
+  } catch (error) {
+    // Un proceso que no arranca, como con `EAGAIN` o `EMFILE`, es un fallo de esa migración: el
+    // paso 1 lo anota con su acción y sigue con las demás.
+    return { reason: failureReason(error) };
+  }
   if (result.stderr.length > 0) {
     input.forwardChildStderr(result.stderr);
   }

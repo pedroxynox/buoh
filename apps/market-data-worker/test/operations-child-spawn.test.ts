@@ -21,16 +21,22 @@ vi.mock('node:child_process', async (importOriginal) => {
       if (code === null) {
         return original.spawn(...args);
       }
+      // Como Node: el `error`, con `syscall` «spawn <archivo>», y después `exit` y `close` con el
+      // errno y sin señal.
       const child = new original.ChildProcess();
+      const errno = code === 'EMFILE' ? -24 : -23;
       process.nextTick(() => {
         child.emit(
           'error',
           Object.assign(new Error(`spawn ${args[0]} ${code}`), {
             code,
-            errno: code === 'EMFILE' ? -24 : -23,
-            syscall: 'spawn',
+            errno,
+            path: args[0],
+            syscall: `spawn ${args[0]}`,
           }),
         );
+        child.emit('exit', errno, null);
+        child.emit('close', errno, null);
       });
       return child;
     },
@@ -62,7 +68,7 @@ describe('runNodeScript cuando Node no puede lanzar el proceso (menor 8 del PR #
         script: '/no/importa.mjs',
         timeoutMs: 30_000,
       });
-      await expect(launched).rejects.toMatchObject({ code, syscall: 'spawn' });
+      await expect(launched).rejects.toMatchObject({ code, syscall: `spawn ${process.execPath}` });
       expect(vi.getTimerCount()).toBe(0);
     },
   );
