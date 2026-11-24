@@ -224,6 +224,21 @@ export const derivMessages = {
       msg_type: msgType,
       req_id: id,
     }),
+  /**
+   * El rechazo de la suscripción `ticks` de un mercado cerrado, con la forma medida el 2026-11-23
+   * (ADR-0021 §2): `msg_type` `ticks`, el código `MarketIsClosed` y la hora de apertura, en UTC, en
+   * el mensaje. Por defecto abre a las 12:00 del día de `START`.
+   */
+  marketClosed: (
+    id: number,
+    message = 'This market is presently closed. Market will open at 2026-03-02 12:00:00.',
+  ) =>
+    JSON.stringify({
+      echo_req: { req_id: id, subscribe: 1, ticks: 'SYNTH_100' },
+      error: { code: 'MarketIsClosed', message },
+      msg_type: 'ticks',
+      req_id: id,
+    }),
   forgetAll: (id: number) =>
     JSON.stringify({
       echo_req: { forget_all: 'ticks', req_id: id },

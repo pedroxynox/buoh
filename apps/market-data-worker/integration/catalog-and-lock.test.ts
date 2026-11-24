@@ -25,6 +25,7 @@ import {
   buildRawSourceFrame,
   contentKey,
   createPool,
+  GOLD_SEQUENCE,
   loadConfig,
   lockedSourceLogStore,
   migrate,
@@ -33,6 +34,7 @@ import {
   SOURCE_LOCK_HEARTBEAT_MS,
   SOURCE_LOCK_LOST,
   SOURCE_LOCK_QUERY_TIMEOUT_MS,
+  R_100_SEQUENCE,
   SourceLock,
   type ObjectStore,
   type WorkerConfig,
@@ -434,6 +436,36 @@ describe('SourceLock (ADR-0012 §9)', () => {
     const second = await SourceLock.acquire({ postgres: config.postgres, source: DERIV_SOURCE });
     expect(second?.held).toBe(true);
     await second?.release();
+  });
+
+  it('cada secuencia de logs tiene su bloqueo: el de R_100 es el de la fuente, y el del oro no lo bloquea (ADR-0021 §1)', async () => {
+    const r100 = await SourceLock.acquire({
+      postgres: config.postgres,
+      sequence: R_100_SEQUENCE,
+      source: DERIV_SOURCE,
+    });
+    expect(r100?.held).toBe(true);
+    // El de R_100 es el de siempre: sin secuencia, otro proceso no lo toma.
+    expect(
+      await SourceLock.acquire({ postgres: config.postgres, source: DERIV_SOURCE }),
+    ).toBeNull();
+    const gold = await SourceLock.acquire({
+      postgres: config.postgres,
+      sequence: GOLD_SEQUENCE,
+      source: DERIV_SOURCE,
+    });
+    expect(gold?.held).toBe(true);
+    expect(
+      await SourceLock.acquire({
+        postgres: config.postgres,
+        sequence: GOLD_SEQUENCE,
+        source: DERIV_SOURCE,
+      }),
+    ).toBeNull();
+    expect(await sourceLockHolder(admin, DERIV_SOURCE, GOLD_SEQUENCE)).toBe(gold?.backendPid);
+    expect(await holder(DERIV_SOURCE)).toBe(r100?.backendPid);
+    await gold?.release();
+    await r100?.release();
   });
 
   it('si su sesión se pierde, el log deja de escribir y otro proceso puede tomarlo', async () => {

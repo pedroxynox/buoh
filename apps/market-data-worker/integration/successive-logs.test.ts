@@ -9,6 +9,7 @@ import {
   contentKey,
   createPool,
   findActiveLog,
+  GOLD_SEQUENCE,
   healthCommand,
   listCaptureLogs,
   loadConfig,
@@ -19,6 +20,7 @@ import {
   ObjectReadError,
   openHealthStores,
   openLockedSourceLog,
+  openStartupReads,
   openStores,
   PostgresIngestionStatusStore,
   PostgresSessionLockProvider,
@@ -292,6 +294,27 @@ describe('la búsqueda del log activo (ADR-0018 §6)', () => {
       { lastWriteUtc: null, location: logAt(2), readable: true },
       { lastWriteUtc: null, location: logAt(3), readable: false },
     ]);
+  });
+
+  it('las lecturas del arranque de ingest buscan en la secuencia que se les pide: sin logs del oro, ninguno, y el log 3 de R_100 no es un log del oro (ADR-0021 §1)', async () => {
+    const config = loadConfig(environment);
+    const r100 = openStartupReads(config, { now: () => START, source: DERIV_SOURCE });
+    const gold = openStartupReads(config, {
+      now: () => START,
+      sequence: GOLD_SEQUENCE,
+      source: DERIV_SOURCE,
+    });
+    try {
+      expect(await r100.locateLog()).toEqual(logAt(1));
+      expect(await r100.readiness(logAt(2))).toBe('ready');
+      expect(await gold.locateLog()).toBeNull();
+      expect(await gold.readiness(logLocation(logAt(2).number, GOLD_SEQUENCE))).toBe(
+        'not_prepared',
+      );
+    } finally {
+      await r100.close();
+      await gold.close();
+    }
   });
 
   it('con un rol que no puede leer el log 4 (42501), la búsqueda no falla y lo cuenta sin escrituras', async () => {

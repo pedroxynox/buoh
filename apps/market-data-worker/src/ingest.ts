@@ -15,7 +15,12 @@ import {
   type SessionLockProvider,
 } from './deriv/session.js';
 import type { SocketFactory } from './deriv/socket.js';
-import { checkIngestConfig, IngestConfigError, parseIngestArgs } from './ingest-args.js';
+import {
+  checkIngestConfig,
+  IngestConfigError,
+  ingestSequences,
+  parseIngestArgs,
+} from './ingest-args.js';
 import {
   locateCaptureLog,
   LockRetention,
@@ -44,10 +49,19 @@ import {
   type OpenSourceEventLogInput,
   type SourceEventLog,
 } from './source-log/source-event-log.js';
-import { withLog } from './successive-logs.js';
+import { R_100_SEQUENCE, withLog, type LogSequence } from './successive-logs.js';
 
 /** La retención de la captura viva: 23 horas, una antes del borrado a las 24 (ADR-0015 §7). */
 export const INGEST_RETENTION_MS = 23 * 3_600_000;
+
+/**
+ * Con varios símbolos, la espera antes de volver a empezar la captura de uno cuya sesión terminó
+ * `failed` (ADR-0021 §1): la primera, el doble cada vez seguida, hasta la máxima. Una captura que
+ * duró `INGEST_RESTART_STEADY_MS` o más vuelve a la primera.
+ */
+export const INGEST_RESTART_FIRST_WAIT_MS = 5_000;
+export const INGEST_RESTART_MAX_WAIT_MS = 300_000;
+export const INGEST_RESTART_STEADY_MS = 600_000;
 
 /**
  * Los almacenes de la captura, abiertos con su configuración: PostgreSQL y el almacenamiento de
@@ -283,20 +297,28 @@ export interface IngestDependencies extends Omit<
   IngestInput,
   'lock' | 'openLog' | 'retentionMs' | 'stores' | 'symbol'
 > {
-  /** El bloqueo de la fuente con esa configuración: `PostgresSessionLockProvider`. */
-  readonly lockProvider: (config: WorkerConfig) => SessionLockProvider;
+  /**
+   * El bloqueo de la fuente con esa configuración, en la secuencia de logs del símbolo (ADR-0021
+   * §1; fuera de `production`, la de R_100): `PostgresSessionLockProvider`.
+   */
+  readonly lockProvider: (config: WorkerConfig, sequence: LogSequence) => SessionLockProvider;
   /** Abre el log con el almacén protegido por el bloqueo: `openLockedSourceLog`. */
   readonly openLog: (lock: SessionLock, input: OpenSourceEventLogInput) => Promise<SourceEventLog>;
   /**
    * En `production`, abre las lecturas de la espera del arranque con esa configuración, ya
-   * comprobada (ADR-0018 §4): `openStartupReads`. Fuera de `production` no se llama.
+   * comprobada (ADR-0018 §4), en la secuencia de logs del símbolo (ADR-0021 §1), con la alerta de
+   * la captura: `openStartupReads`. Fuera de `production` no se llama.
    */
-  readonly openStartupReads: (config: WorkerConfig) => StartupReads;
+  readonly openStartupReads: (
+    config: WorkerConfig,
+    sequence: LogSequence,
+    alert: OperationalAlert,
+  ) => StartupReads;
   /**
-   * Abre los almacenes con esa configuración, ya comprobada: `openStores` y sus migraciones. En
-   * `production`, con el esquema y el prefijo del log activo (`withLog`).
+   * Abre los almacenes con esa configuración, ya comprobada, y la alerta de la captura: `openStores`
+   * y sus migraciones. En `production`, con el esquema y el prefijo del log activo (`withLog`).
    */
-  readonly openStores: (config: WorkerConfig) => IngestStores;
+  readonly openStores: (config: WorkerConfig, alert: OperationalAlert) => IngestStores;
   /** Versión de zlib del writer gzip de segmentos. */
   readonly zlibVersion: string;
 }
@@ -310,30 +332,45 @@ export const WAIT_STOPPED = 'WAIT_STOPPED';
 /**
  * Las señales de parada de todo el comando, escuchadas desde el principio (ADR-0015 §3,
  * «Parada»): quien escucha después, la espera del arranque y la sesión, recibe enseguida una señal
- * que llegó antes, así que una que llega entre la espera y la sesión no se pierde. `close` deja de
- * escucharlas.
+ * que llegó antes, así que una que llega entre la espera y la sesión no se pierde. Con varios
+ * símbolos escuchan a la vez las esperas y las sesiones de todos, y cada señal llega a cada uno
+ * (ADR-0021 §1). `raised` dice si ya llegó una. `close` deja de escucharlas.
  */
 function commandSignals(signals: IngestInput['signals']) {
   let raised = false;
-  let listener: (() => void) | null = null;
+  const listeners = new Set<{ readonly onSignal: () => void }>();
   const stopListening = signals(() => {
     raised = true;
-    listener?.();
+    for (const listener of [...listeners]) {
+      listener.onSignal();
+    }
   });
   return {
     close: stopListening,
+    raised: () => raised,
     signals: (onSignal: () => void) => {
-      listener = onSignal;
+      const listener = { onSignal };
+      listeners.add(listener);
       if (raised) {
         onSignal();
       }
       return () => {
-        if (listener === onSignal) {
-          listener = null;
-        }
+        listeners.delete(listener);
       };
     },
   };
+}
+
+/** La espera antes de volver a empezar la captura de un símbolo tras su fallo número `failures`. */
+export function ingestRestartDelay(failures: number): number {
+  return Math.min(INGEST_RESTART_MAX_WAIT_MS, INGEST_RESTART_FIRST_WAIT_MS * 2 ** (failures - 1));
+}
+
+/** El motivo saneado de la línea de una captura: el de su fin o su código, si lo tiene. */
+function captureReason(line: string): string | null {
+  const parsed = JSON.parse(line) as { code?: unknown; end?: { reason?: unknown } };
+  const reason = parsed.end?.reason ?? parsed.code;
+  return typeof reason === 'string' ? reason : null;
 }
 
 /**
@@ -355,7 +392,13 @@ function commandSignals(signals: IngestInput['signals']) {
  *   los almacenes con el esquema y el prefijo de ese log (`withLog`) y corre la captura sin
  *   retención, con el bloqueo que tomó la espera (`HandedOverLockProvider`) y la vigilancia de su
  *   corte (`LogCutWatch`, ADR-0018 §6). Tras un corte sigue igual con el log siguiente, con el mismo
- *   bloqueo, y la línea es la de la última sesión.
+ *   bloqueo, y la línea es la de la última sesión. Los logs, el bloqueo y el corte son los de la
+ *   secuencia del símbolo (ADR-0021 §1; `ingestSequences`).
+ * - En `production`, con varios `--symbol`, captura cada uno así, a la vez y por separado. Una
+ *   captura que termina con salida 1 vuelve a empezar dentro del proceso tras su espera
+ *   (`restarting`), y las demás siguen; sus alertas llevan `symbol`. La línea lleva `captures`,
+ *   con `symbol`, `exit_code` y `result`, la línea de la última captura de cada uno, y `status`; la
+ *   salida es la peor de todas. Con uno solo, todo es como antes de las secuencias.
  * - Si no, el resultado de la captura con su código (`ingestExitCode`). Un error inesperado da
  *   `code: UNEXPECTED` y salida 1.
  */
@@ -364,12 +407,14 @@ export async function ingestCommand(
   env: Readonly<Record<string, string | undefined>>,
   dependencies: IngestDependencies,
 ): Promise<{ readonly exitCode: 0 | 1 | 2; readonly line: string }> {
-  let symbol: string;
+  let symbols: readonly string[];
+  let sequences: readonly LogSequence[] | null;
   let config: WorkerConfig;
   try {
-    ({ symbol } = parseIngestArgs(argv));
+    ({ symbols } = parseIngestArgs(argv));
     config = loadConfig(env);
     checkIngestConfig(config, env);
+    sequences = ingestSequences(symbols, config.environment);
   } catch (error) {
     if (
       error instanceof UsageError ||
@@ -392,9 +437,10 @@ export async function ingestCommand(
     target: WorkerConfig,
     lock: SessionLockProvider,
     production: { readonly profile: LogQualityProfileRow | null } | null,
+    of: { readonly alert?: OperationalAlert; readonly symbol: string },
     cut?: Pick<IngestInput, 'releaseLock' | 'watchSession'>,
   ): Promise<{ readonly exitCode: 0 | 1 | 2; readonly line: string }> => {
-    const stores = openStores(target);
+    const stores = openStores(target, of.alert ?? ports.alert ?? stderrAlert);
     try {
       // En `production`, el perfil lo leyó la espera del arranque; fuera, se lee aquí (ADR-0020 §4).
       let logProfile = production?.profile ?? null;
@@ -438,6 +484,7 @@ export async function ingestCommand(
       }
       const report = await runIngest({
         ...ports,
+        ...(of.alert === undefined ? {} : { alert: of.alert }),
         lock,
         logProfile,
         openLog: (held) =>
@@ -451,7 +498,7 @@ export async function ingestCommand(
         retentionMs: production === null ? INGEST_RETENTION_MS : null,
         signals: stop.signals,
         stores,
-        symbol,
+        symbol: of.symbol,
         ...cut,
       });
       return { exitCode: ingestExitCode(report), line: JSON.stringify(report) };
@@ -465,13 +512,19 @@ export async function ingestCommand(
    * el log que toca (`locateCaptureLog`) y vigila su corte (`LogCutWatch`). Tras un corte, vuelve a la
    * espera con el bloqueo que retuvo (`LockRetention`), para el log siguiente, hasta que una sesión
    * termina sin corte o llega la parada. Si al arrancar se salta el log activo porque su hora de
-   * corte pasó hace 24 horas o más, deja la alerta `log_cut_forced`.
+   * corte pasó hace 24 horas o más, deja la alerta `log_cut_forced`. Los logs son los de la
+   * secuencia del símbolo (ADR-0021 §1).
    */
   const captureProduction = async (
     provider: SessionLockProvider,
     reads: StartupReads,
+    of: {
+      readonly alert: OperationalAlert;
+      readonly sequence: LogSequence;
+      readonly symbol: string;
+    },
   ): Promise<{ readonly exitCode: 0 | 1 | 2; readonly line: string }> => {
-    const alert = ports.alert ?? stderrAlert;
+    const { alert, sequence } = of;
     let after: number | null = null;
     let retained: SessionLock | null = null;
     for (;;) {
@@ -486,7 +539,11 @@ export async function ingestCommand(
           now: ports.now,
           reads: {
             locateLog: async () => {
-              located.target = await locateCaptureLog(reads, { after: cutFrom, now: ports.now });
+              located.target = await locateCaptureLog(reads, {
+                after: cutFrom,
+                now: ports.now,
+                sequence,
+              });
               return located.target?.log ?? null;
             },
             logProfile: (log) => reads.logProfile(log),
@@ -529,6 +586,7 @@ export async function ingestCommand(
           withLog(config, log),
           handedOver,
           { profile },
+          { alert, symbol: of.symbol },
           {
             releaseLock: retention.release,
             watchSession: (session) => {
@@ -541,6 +599,7 @@ export async function ingestCommand(
                 },
                 reads,
                 scheduler: ports.scheduler,
+                sequence,
                 session,
               });
               watches.push(watch);
@@ -569,17 +628,131 @@ export async function ingestCommand(
     }
   };
 
-  try {
-    const provider = lockProvider(config);
-    if (config.environment !== 'production') {
-      return await capture(config, provider, null);
-    }
-    const reads = openStartupReads(config);
+  /** La captura en `production` de un símbolo, con su secuencia, sus lecturas y su bloqueo. */
+  const captureSequence = async (
+    symbol: string,
+    sequence: LogSequence,
+    alert: OperationalAlert,
+  ): Promise<{ readonly exitCode: 0 | 1 | 2; readonly line: string }> => {
+    const provider = lockProvider(config, sequence);
+    const reads = openStartupReads(config, sequence, alert);
     try {
-      return await captureProduction(provider, reads);
+      return await captureProduction(provider, reads, { alert, sequence, symbol });
     } finally {
       await reads.close();
     }
+  };
+
+  /** `true` tras `ms` milisegundos, o `false` en cuanto llega la parada, antes o durante la espera. */
+  const waitOrStop = (ms: number): Promise<boolean> =>
+    new Promise((resolve) => {
+      // Lo cambian las funciones de abajo: un objeto, para que el compilador no lo dé por fijo.
+      const state: { settled: boolean } = { settled: false };
+      let unlisten: (() => void) | null = null;
+      const finish = (value: boolean) => {
+        if (!state.settled) {
+          state.settled = true;
+          unlisten?.();
+          resolve(value);
+        }
+      };
+      const cancel = ports.scheduler.schedule(ms, () => {
+        finish(true);
+      });
+      unlisten = stop.signals(() => {
+        cancel();
+        finish(false);
+      });
+      // Con la parada ya llegada, `signals` llamó a la función antes de devolver `unlisten`.
+      if (state.settled) {
+        unlisten();
+      }
+    });
+
+  /**
+   * Con varios símbolos (ADR-0021 §1), la captura de uno: si su sesión termina `failed`, o con un
+   * error inesperado, deja la alerta `ingest_capture_restart`, espera (`ingestRestartDelay`) y
+   * vuelve a empezar, desde la espera del arranque, mientras las demás siguen. Termina con la
+   * parada, con la línea de su última captura, o con una salida 2, que volver a empezar no cambia,
+   * con la alerta `ingest_capture_ended`.
+   */
+  const restarting = async (
+    symbol: string,
+    sequence: LogSequence,
+  ): Promise<{ readonly exitCode: 0 | 1 | 2; readonly line: string; readonly symbol: string }> => {
+    const base = ports.alert ?? stderrAlert;
+    const alert: OperationalAlert = (payload) => {
+      base({ ...payload, symbol });
+    };
+    let failures = 0;
+    for (;;) {
+      const startedMs = Date.parse(ports.now());
+      let result: { readonly exitCode: 0 | 1 | 2; readonly line: string };
+      try {
+        result = await captureSequence(symbol, sequence, alert);
+      } catch (error) {
+        result = {
+          exitCode: 1,
+          line: failureLine({
+            code: 'UNEXPECTED',
+            message: error instanceof Error ? error.name : 'Error',
+          }),
+        };
+      }
+      if (result.exitCode === 2) {
+        // Volver a empezar no cambia un error de uso o de configuración: esa captura termina.
+        alert({
+          event: 'ingest_capture_ended',
+          exit_code: '2',
+          reason: captureReason(result.line),
+        });
+      }
+      if (result.exitCode !== 1 || stop.raised()) {
+        return { ...result, symbol };
+      }
+      failures = Date.parse(ports.now()) - startedMs >= INGEST_RESTART_STEADY_MS ? 1 : failures + 1;
+      const delay = ingestRestartDelay(failures);
+      alert({
+        event: 'ingest_capture_restart',
+        reason: captureReason(result.line),
+        wait_ms: String(delay),
+      });
+      if (!(await waitOrStop(delay))) {
+        return { ...result, symbol };
+      }
+    }
+  };
+
+  try {
+    const [first] = symbols;
+    if (first === undefined) {
+      throw new TypeError('ingest sin símbolos.');
+    }
+    if (sequences === null) {
+      return await capture(config, lockProvider(config, R_100_SEQUENCE), null, { symbol: first });
+    }
+    const [only] = sequences;
+    if (sequences.length === 1 && only !== undefined) {
+      // Con un solo símbolo, una sesión que falla termina el proceso, como antes de las secuencias, y
+      // Render lo reinicia: no hay otra captura que deba seguir.
+      return await captureSequence(first, only, ports.alert ?? stderrAlert);
+    }
+    const results = await Promise.all(
+      sequences.map((sequence, index) => restarting(symbols[index] ?? first, sequence)),
+    );
+    const worst = (code: 0 | 1 | 2) => results.some((result) => result.exitCode === code);
+    const exitCode = worst(2) ? 2 : worst(1) ? 1 : 0;
+    return {
+      exitCode,
+      line: JSON.stringify({
+        captures: results.map((result) => ({
+          exit_code: result.exitCode,
+          result: JSON.parse(result.line) as unknown,
+          symbol: result.symbol,
+        })),
+        status: exitCode === 0 ? 'completed' : 'failed',
+      }),
+    };
   } catch (error) {
     return {
       exitCode: 1,

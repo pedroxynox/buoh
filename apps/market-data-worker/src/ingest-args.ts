@@ -3,34 +3,41 @@ import { parseArgs } from 'node:util';
 import { DEFAULT_POSTGRES_SCHEMA, DEFAULT_S3_BUCKET, type WorkerConfig } from './config.js';
 import { UsageError } from './replay-args.js';
 import { symbolOption } from './smoke-args.js';
-import { productionLogConfigErrors } from './successive-logs.js';
+import {
+  LOG_SEQUENCES,
+  liveSequenceOf,
+  productionLogConfigErrors,
+  type LogSequence,
+} from './successive-logs.js';
 
 // Los argumentos y la configuración de `ingest`, la captura viva continua (ADR-0015 §7; en
 // `production`, ADR-0018 §4). Los dos se comprueban antes de abrir ningún almacén o conexión.
 
 export const INGEST_USAGE =
-  'Uso: pnpm --filter @buoh/market-data-worker run ingest -- --live [--symbol R_100]';
+  'Uso: pnpm --filter @buoh/market-data-worker run ingest -- --live [--symbol R_100 [--symbol frxXAUUSD]]';
 
 export interface IngestOptions {
-  readonly symbol: string;
+  /** Los símbolos de `--symbol`, en orden y sin repetir; sin la opción, `R_100`. */
+  readonly symbols: readonly string[];
 }
 
 /**
  * Interpreta `--live [--symbol <código>]`; tolera el separador `--` que reenvía pnpm. Sin `--live`
  * no se lee la configuración ni se abre ninguna conexión: es un error de uso (salida 2), para que
- * ningún `verify` ni CI capture datos reales. Ingiere un solo símbolo, con la regla del smoke
- * (`R_100` por defecto). Cualquier otra opción o un argumento suelto también es un error de uso.
+ * ningún `verify` ni CI capture datos reales. `--symbol` se puede repetir, una vez por símbolo
+ * (ADR-0021 §1), cada uno con la regla del smoke; sin él, `R_100`. Un símbolo repetido, cualquier
+ * otra opción o un argumento suelto también es un error de uso.
  */
 export function parseIngestArgs(argv: readonly string[]): IngestOptions {
   const args = argv[0] === '--' ? argv.slice(1) : [...argv];
-  let values: { live?: boolean; symbol?: string };
+  let values: { live?: boolean; symbol?: string[] };
   try {
     ({ values } = parseArgs({
       allowPositionals: false,
       args,
       options: {
         live: { type: 'boolean' },
-        symbol: { type: 'string' },
+        symbol: { multiple: true, type: 'string' },
       },
       strict: true,
     }));
@@ -44,7 +51,41 @@ export function parseIngestArgs(argv: readonly string[]): IngestOptions {
       `ingest se conecta a Deriv y guarda lo que recibe: pasa --live para confirmarlo. ${INGEST_USAGE}`,
     );
   }
-  return { symbol: symbolOption(values.symbol, INGEST_USAGE) };
+  const symbols = (values.symbol ?? [undefined]).map((value) => symbolOption(value, INGEST_USAGE));
+  if (new Set(symbols).size !== symbols.length) {
+    throw new UsageError(`--symbol repite un símbolo. ${INGEST_USAGE}`);
+  }
+  return { symbols };
+}
+
+/**
+ * Las secuencias de logs de los símbolos en `production` (ADR-0021 §1): cada símbolo tiene la suya en
+ * `LOG_SEQUENCES`, con su log, su bloqueo y su corte; uno sin secuencia es un error de uso. Fuera de
+ * `production`, un log es el esquema de `BUOH_POSTGRES_SCHEMA`, así que `ingest` captura un solo
+ * símbolo, y da `null`.
+ */
+export function ingestSequences(
+  symbols: readonly string[],
+  environment: WorkerConfig['environment'],
+): readonly LogSequence[] | null {
+  if (environment !== 'production') {
+    if (symbols.length > 1) {
+      throw new UsageError(
+        `Fuera de production, ingest captura un solo símbolo: el log es el esquema de BUOH_POSTGRES_SCHEMA. ${INGEST_USAGE}`,
+      );
+    }
+    return null;
+  }
+  return symbols.map((symbol) => {
+    const sequence = liveSequenceOf(symbol);
+    if (sequence === null) {
+      const names = LOG_SEQUENCES.map((item) => item.name).join(', ');
+      throw new UsageError(
+        `En production, cada --symbol es el de una secuencia de logs: ${names}. ${INGEST_USAGE}`,
+      );
+    }
+    return sequence;
+  });
 }
 
 /**

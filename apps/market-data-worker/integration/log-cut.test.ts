@@ -26,6 +26,7 @@ import {
 } from '../src/index.js';
 import { START, uuid } from '../test/support/connection-harness.js';
 import {
+  catalogEntry,
   derivMessages,
   FakeDerivSocket,
   ManualClock,
@@ -49,7 +50,8 @@ import { waitForNoSessions } from '../test/support/databases.js';
 const DATABASE = 'buoh_integration_log_cut';
 const FIRST = logLocation(201);
 const NEXT = logLocation(202);
-const SYMBOL = 'SYNTH_100';
+/** En `production`, el símbolo de una secuencia de logs (ADR-0021 §1): la de estos nombres. */
+const SYMBOL = 'R_100';
 const TEST_BUCKET = process.env['BUOH_S3_BUCKET'] ?? 'buoh-local';
 /** La hora de corte de un log escrito por primera vez en `START`, un lunes: el lunes siguiente. */
 const CUT_TIME = '2026-03-09T00:00:00.000Z';
@@ -175,9 +177,9 @@ async function socketNumber(sockets: FakeDerivSocket[], number: number): Promise
 async function subscribe(socket: FakeDerivSocket, log: ReturnType<typeof logLocation>) {
   socket.open();
   await eventually(() => socket.requests().some((request) => 'active_symbols' in request));
-  socket.text(derivMessages.catalog(1));
+  socket.text(derivMessages.catalog(1, [catalogEntry(SYMBOL, 'Volatility 100 Index')]));
   await eventually(() => socket.requests().some((request) => 'ticks' in request));
-  socket.text(derivMessages.tick(2, Math.floor(Date.parse(clock.now()) / 1000), '100.25'));
+  socket.text(derivMessages.tick(2, Math.floor(Date.parse(clock.now()) / 1000), '100.25', SYMBOL));
   await eventually(async () => (await indexOf(log)).length >= 3);
 }
 
@@ -242,15 +244,20 @@ describe('el corte de un log al siguiente (ADR-0018 §6)', () => {
       },
       expected: fixture.expected,
       fetch: () => Promise.resolve(new Response(fixture.archive, { status: 200 })),
-      lockProvider: (config) =>
-        new PostgresSessionLockProvider({ postgres: local(config).postgres, source: DERIV_SOURCE }),
+      lockProvider: (config, logSequence) =>
+        new PostgresSessionLockProvider({
+          postgres: local(config).postgres,
+          sequence: logSequence,
+          source: DERIV_SOURCE,
+        }),
       nextId: () => uuid((sequence += 1)),
       now: clock.now,
       openLog: openLockedSourceLog,
-      openStartupReads: (config) =>
+      openStartupReads: (config, logSequence) =>
         openStartupReads(local(config), {
           alert: (payload) => alerts.push(payload),
           now: clock.now,
+          sequence: logSequence,
           source: DERIV_SOURCE,
         }),
       openStores: (config) => {

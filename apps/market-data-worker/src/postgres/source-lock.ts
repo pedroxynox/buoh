@@ -104,12 +104,16 @@ export class SourceLock {
     this.#backendPid = backendPid;
   }
 
-  /** Toma el bloqueo, o devuelve `null` sin esperar si otro proceso ya lo tiene. */
+  /**
+   * Toma el bloqueo de la fuente en `sequence` (`sequenceLockKey`; sin ella, el de R_100, que es el
+   * de la fuente), o devuelve `null` sin esperar si otro proceso ya lo tiene.
+   */
   static async acquire(input: {
     readonly postgres: WorkerConfig['postgres'];
+    readonly sequence?: LogSequence;
     readonly source: string;
   }): Promise<SourceLock | null> {
-    const key = sourceLockKey(input.source);
+    const key = sequenceLockKey(input.source, input.sequence ?? R_100_SEQUENCE);
     const client = new pg.Client({
       ...postgresSslOption(input.postgres.sslMode),
       connectionTimeoutMillis: SOURCE_LOCK_QUERY_TIMEOUT_MS,

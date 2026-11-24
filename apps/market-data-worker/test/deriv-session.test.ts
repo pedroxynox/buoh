@@ -8,6 +8,7 @@ import {
 } from '@buoh/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { MARKET_CLOSED_FIRST_WAIT_MS, MARKET_CLOSED_MAX_WAIT_MS } from '../src/deriv/session.js';
 import { contentKey } from '../src/object-keys.js';
 import { LogIntegrityError, SourceEventLog } from '../src/source-log/source-event-log.js';
 import { settle, START_EPOCH, uuid } from './support/connection-harness.js';
@@ -1282,4 +1283,101 @@ describe('startDerivSession: errores', () => {
       expect(run.timeline).toEqual(['acquire:1', 'connect:1', 'release:1']);
     },
   );
+});
+
+describe('startDerivSession: el mercado cerrado (ADR-0021 §2)', () => {
+  /** La conexión `number` abre, recibe el catálogo y el rechazo `MarketIsClosed`. */
+  const closedAt = async (
+    run: Awaited<ReturnType<typeof sessionHarness>>,
+    number: number,
+    message?: string,
+  ) => {
+    run.socket(number).open();
+    await settle();
+    run.socket(number).text(derivMessages.catalog(1));
+    await settle();
+    run.socket(number).text(derivMessages.marketClosed(2, message));
+    await settle();
+    await settle();
+  };
+  const HOURS_2 = 2 * 3_600_000;
+
+  it('no falla: espera a la hora de apertura; si a esa hora sigue cerrado, o sin la hora, espera de 1 minuto en adelante, el doble cada vez; no cuenta como intento, y un tick vuelve a esperar a la apertura', async () => {
+    const run = await sessionHarness();
+    // START es las 10:00 UTC; el mercado abre a las 12:00.
+    await closedAt(run, 1);
+    expect(run.clock.pendingDelays()).toEqual([HOURS_2]);
+    expect(run.alerts).toContainEqual({
+      event: 'market_closed',
+      opens_at_utc: '2026-03-02T12:00:00.000Z',
+      wait_ms: String(HOURS_2),
+    });
+    await run.clock.advance(HOURS_2 - 1);
+    expect(run.sockets).toHaveLength(1);
+    await run.clock.advance(1);
+    // A las 12:00 sigue cerrado, y dice que abre mañana: no espera a esa hora, sino la creciente.
+    await closedAt(
+      run,
+      2,
+      'This market is presently closed. Market will open at 2026-03-03 00:00:00.',
+    );
+    expect(run.clock.pendingDelays()).toEqual([MARKET_CLOSED_FIRST_WAIT_MS]);
+    await run.clock.advance(MARKET_CLOSED_FIRST_WAIT_MS);
+    await closedAt(run, 3, 'This market is presently closed.');
+    expect(run.clock.pendingDelays()).toEqual([2 * MARKET_CLOSED_FIRST_WAIT_MS]);
+    await run.clock.advance(2 * MARKET_CLOSED_FIRST_WAIT_MS);
+    // Abre: un tick y un corte remoto. La espera es la del intento 1, no la del mercado cerrado.
+    await run.subscribe(run.socket(4), Math.floor(Date.parse(run.clock.now()) / 1000));
+    run.socket(4).emit({ code: 1001, kind: 'closed' });
+    await settle();
+    await settle();
+    expect(run.clock.pendingDelays()).toEqual([500]);
+    await run.clock.advance(500);
+    // Cierra otra vez: después del tick, se espera de nuevo a la hora de apertura.
+    await closedAt(
+      run,
+      5,
+      'This market is presently closed. Market will open at 2026-03-03 00:00:00.',
+    );
+    const left = Date.parse('2026-03-03T00:00:00.000Z') - Date.parse(run.clock.now());
+    expect(run.clock.pendingDelays()).toEqual([left]);
+    run.session.stop();
+
+    const result = await run.done;
+    expect(result.end).toEqual({ status: 'completed' });
+    expect(result.waits_ms).toEqual([HOURS_2, 60_000, 120_000, 500, left]);
+    expect(result.connections.map((item) => [item.closure?.closure_type, item.end])).toEqual([
+      [
+        'requested',
+        { detail: '2026-03-02T12:00:00.000Z', reason: 'market_closed', status: 'disconnected' },
+      ],
+      [
+        'requested',
+        { detail: '2026-03-03T00:00:00.000Z', reason: 'market_closed', status: 'disconnected' },
+      ],
+      ['requested', { detail: null, reason: 'market_closed', status: 'disconnected' }],
+      ['remote', { detail: '1001', reason: 'remote_closed', status: 'disconnected' }],
+      [
+        'requested',
+        { detail: '2026-03-03T00:00:00.000Z', reason: 'market_closed', status: 'disconnected' },
+      ],
+    ]);
+  });
+
+  it('la espera creciente llega a 1 hora y no pasa de ahí', async () => {
+    const run = await sessionHarness();
+    const waits: number[] = [];
+    for (let number = 1; number <= 8; number += 1) {
+      await closedAt(run, number, 'This market is presently closed.');
+      const [wait] = run.clock.pendingDelays();
+      waits.push(wait ?? -1);
+      await run.clock.advance(wait ?? 0);
+    }
+    expect(waits).toEqual([
+      60_000, 120_000, 240_000, 480_000, 960_000, 1_920_000, 3_600_000, 3_600_000,
+    ]);
+    expect(MARKET_CLOSED_MAX_WAIT_MS).toBe(3_600_000);
+    run.session.stop();
+    await run.done;
+  });
 });

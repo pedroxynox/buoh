@@ -10,8 +10,10 @@ import {
   LOG_CUT_CHECK_MS,
   LOG_CUT_FORCE_AFTER_MS,
   LogCutWatch,
+  GOLD_SEQUENCE,
   logLocation,
   type LogCutDecision,
+  type LogSequence,
   type LogCutReads,
   type LogLocation,
   type OperationalAlert,
@@ -133,6 +135,23 @@ function fakeReads(
 describe('locateCaptureLog: el log en el que captura ingest en production (ADR-0018 §6, «Al arrancar»)', () => {
   const at = (iso: string) => () => iso;
 
+  it('en la secuencia del oro, el log siguiente es el de su secuencia, también tras un corte (ADR-0021 §1)', async () => {
+    const gold = (number: number) => logLocation(number, GOLD_SEQUENCE);
+    const cut = fakeReads({ active: gold(2), prepared: new Set([3]) });
+    expect(
+      await locateCaptureLog(cut.reads, { after: 2, now: at(MONDAY), sequence: GOLD_SEQUENCE }),
+    ).toEqual({ log: gold(3), skipped: null });
+    const late = fakeReads({
+      active: gold(2),
+      firstWrites: new Map([[2, MONDAY]]),
+      prepared: new Set([3]),
+    });
+    const forced = new Date(CUT_MS + LOG_CUT_FORCE_AFTER_MS).toISOString();
+    expect(
+      await locateCaptureLog(late.reads, { after: null, now: at(forced), sequence: GOLD_SEQUENCE }),
+    ).toEqual({ log: gold(3), skipped: gold(2) });
+  });
+
   it('sin log activo, ninguno', async () => {
     const { reads } = fakeReads({ active: null });
     expect(await locateCaptureLog(reads, { after: null, now: at(MONDAY) })).toBeNull();
@@ -216,6 +235,7 @@ function watchHarness(
   options: {
     firstWrite?: string | null;
     prepared?: boolean;
+    sequence?: LogSequence;
     start?: string;
     view?: LiveDerivationView | null | Error;
   } = {},
@@ -239,11 +259,12 @@ function watchHarness(
   });
   const watch = new LogCutWatch({
     alert: (payload) => alerts.push(payload),
-    log: logLocation(2),
+    log: logLocation(2, options.sequence),
     now: clock.now,
     onCut: (decision) => decisions.push(decision),
     reads: fake.reads,
     scheduler: clock.scheduler,
+    ...(options.sequence === undefined ? {} : { sequence: options.sequence }),
     session: {
       liveView: () => {
         session.reads += 1;
@@ -297,6 +318,17 @@ describe('LogCutWatch: la vigilancia del corte mientras la sesión captura (ADR-
     expect(run.fake.calls).toEqual(['first:2', 'prepared:3']);
     expect(run.alerts).toEqual([{ event: 'log_cut', forced: 'false', log: '2', next: '3' }]);
     expect(run.clock.pendingDelays()).toEqual([]);
+  });
+
+  it('en la secuencia del oro, el log siguiente del corte es el de su secuencia (ADR-0021 §1)', async () => {
+    const run = watchHarness({ sequence: GOLD_SEQUENCE, start: CUT });
+    run.watch.start();
+    await run.clock.advance(0);
+    expect(run.watch.decision).toEqual({
+      forced: false,
+      log: logLocation(2, GOLD_SEQUENCE),
+      next: logLocation(3, GOLD_SEQUENCE),
+    });
   });
 
   it('con una continuidad pendiente no corta; vuelve a mirar a los 30 s y corta en cuanto está limpio', async () => {

@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 97
-updated_at_utc: "2026-11-23T04:50:00.000Z"
+status_version: 98
+updated_at_utc: "2026-11-23T14:00:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -38,7 +38,7 @@ Transformar una hipótesis en una estrategia viva, explicable y no ejecutora, pa
 | F2.3 API, cuentas y auditoría | Hecha, con el PR 7c de ADR-0019 | [Evidencia de F2.3](docs/operacion/evidencia-api-f2-3.md) |
 | F2.4 Datos reales en pantalla | Hecha, con el 7b | [Evidencia de F2.4](docs/operacion/evidencia-datos-f2-4.md) |
 | F2.5 Datasets vivos | Hecha, con el PR 6 de ADR-0020 | [Evidencia de los datasets vivos](docs/operacion/evidencia-datasets-f2-5.md) |
-| F2.5b Mercados reales | En curso: el PR 2a de ADR-0021 trajo las secuencias de logs y `buoh_datasets` por secuencia, y el 2b, `buoh-operaciones` y `data:health` por secuencia; siguen el 2c y los PR 3 a 8 (ADR-0021 §9; «Siguiente tarea autorizada») | — |
+| F2.5b Mercados reales | En curso: el PR 2a de ADR-0021 trajo las secuencias de logs y `buoh_datasets` por secuencia, el 2b, `buoh-operaciones` y `data:health` por secuencia, y el 2c, `ingest` con varios símbolos y el mercado cerrado; siguen el 2d (la medición de memoria de dos sesiones, la prueba de integración de ADR-0021 §8 con dos sesiones de `ingest` en un proceso y la comprobación con el oro cerrado, de 22:00 a 23:00 UTC entre semana o el fin de semana) y los PR 3 a 8 (ADR-0021 §9; «Siguiente tarea autorizada») | — |
 | F2.6, F2.6b y F2.7 a F2.10 | ADR-0022 a ADR-0025 fusionadas; falta la del motor *shadow* | — |
 | F2.11 Puerta de salida | Sin empezar | — |
 
