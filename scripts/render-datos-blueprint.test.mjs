@@ -277,7 +277,7 @@ test('define la base, buoh-ingesta, buoh-operaciones y buoh-api, y nada más (AD
   );
 });
 
-test('la base: Basic-256mb con 1 GB, PostgreSQL 18, sin autoescalado, en virginia y abierta a internet (§1, §2 y §9)', () => {
+test('la base: Basic-256mb con 5 GB, PostgreSQL 18, sin autoescalado, en virginia y abierta a internet (§1, §2 y §9; ADR-0021 §6)', () => {
   const [database] = blueprint.databases;
   // Lista cerrada: réplicas, alta disponibilidad o un pool cambiarían el costo o el acceso.
   assert.deepEqual(Object.keys(database).sort(), [
@@ -292,7 +292,9 @@ test('la base: Basic-256mb con 1 GB, PostgreSQL 18, sin autoescalado, en virgini
     'user',
   ]);
   assert.equal(database.plan, '0.1c-256mb');
-  assert.equal(database.diskSizeGB, 1);
+  // 5 GB desde el PR 3 de ADR-0021 §9, antes de capturar el oro (ADR-0021 §6). Render no reduce un
+  // disco, así que este valor no vuelve a 1 GB.
+  assert.equal(database.diskSizeGB, 5);
   assert.equal(database.storageAutoscalingEnabled, false);
   assert.equal(database.region, 'virginia');
   assert.equal(database.postgresMajorVersion, '18');
@@ -366,7 +368,10 @@ test('arrancan con Node directamente y sus tamaños de V8 delante, sin pnpm (ADR
   assert.deepEqual(workerFlags, ['--max-semi-space-size=1', '--max-old-space-size=256']);
   const worker = (cli, args = '') =>
     `node ${workerFlags.join(' ')} apps/market-data-worker/dist/cli/${cli}.js${args}`;
-  assert.equal(service('buoh-ingesta').startCommand, worker('ingest', ' --live --symbol R_100'));
+  assert.equal(
+    service('buoh-ingesta').startCommand,
+    worker('ingest', ' --live --symbol R_100 --symbol frxXAUUSD'),
+  );
   assert.equal(service('buoh-operaciones').startCommand, worker('operations'));
   const apiFlags = apiNodeFlags();
   assert.deepEqual(apiFlags, ['--max-semi-space-size=1', '--max-old-space-size=256']);
@@ -378,6 +383,22 @@ test('arrancan con Node directamente y sus tamaños de V8 delante, sin pnpm (ADR
     assert.ok(existsSync(join(root, `apps/market-data-worker/src/cli/${cli}.ts`)), cli);
   }
   assert.ok(existsSync(join(root, 'apps/api/src/cli/serve.ts')));
+});
+
+test('los símbolos en vivo: ingest captura los mismos que buoh-operaciones prepara, R_100 y el oro, cada uno con su secuencia (ADR-0021 §1 y §9, PR 3)', () => {
+  const ingestArgs = service('buoh-ingesta').startCommand.split(' ');
+  const captured = ingestArgs.flatMap((arg, index) =>
+    ingestArgs[index - 1] === '--symbol' ? [arg] : [],
+  );
+  const prepared = variables('buoh-operaciones').get('BUOH_OPERACIONES_SIMBOLOS').value.split(',');
+  // En el orden de LOG_SEQUENCES, con R_100 primero, el que guarda los informes que no son de un log.
+  assert.deepEqual(captured, ['R_100', 'frxXAUUSD']);
+  assert.deepEqual(prepared, captured);
+  // En production, cada --symbol tiene que tener su secuencia (precisión del PR 2c de ADR-0021 §9).
+  const sequences = read('apps/market-data-worker/src/successive-logs.ts');
+  for (const symbol of captured) {
+    assert.match(sequences, new RegExp(`^  name: '${symbol}',$`, 'm'), symbol);
+  }
 });
 
 test('cada servicio recompila cuando cambian sus apps o un paquete del que dependen', () => {
