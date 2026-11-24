@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 100
-updated_at_utc: "2026-11-24T11:30:00.000Z"
+status_version: 101
+updated_at_utc: "2026-11-24T17:30:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -39,7 +39,7 @@ Transformar una hipótesis en una estrategia viva, explicable y no ejecutora, pa
 | F2.4 Datos reales en pantalla | Hecha, con el 7b | [Evidencia de F2.4](docs/operacion/evidencia-datos-f2-4.md) |
 | F2.5 Datasets vivos | Hecha, con el PR 6 de ADR-0020 | [Evidencia de los datasets vivos](docs/operacion/evidencia-datasets-f2-5.md) |
 | F2.5b Mercados reales | En curso: el PR 2a de ADR-0021 trajo las secuencias de logs y `buoh_datasets` por secuencia, el 2b, `buoh-operaciones` y `data:health` por secuencia, y el 2c, `ingest` con varios símbolos y el mercado cerrado; siguen el 2d (la medición de memoria de dos sesiones, la prueba de integración de ADR-0021 §8 con dos sesiones de `ingest` en un proceso y la comprobación con el oro cerrado, de 22:00 a 23:00 UTC entre semana o el fin de semana) y los PR 3 a 8 (ADR-0021 §9; «Siguiente tarea autorizada») | — |
-| F2.6, F2.6b y F2.7 a F2.10 | ADR-0022 a ADR-0025 fusionadas; falta la del motor *shadow* | — |
+| F2.6, F2.6b y F2.7 a F2.10 | Sin empezar: las cinco ADR del laboratorio, de ADR-0022 a ADR-0026, están fusionadas | — |
 | F2.11 Puerta de salida | Sin empezar | — |
 
 Quedan abiertos de las entregas hechas:
@@ -56,11 +56,12 @@ Cerrar V1 no autoriza la app real de Windows: la decisión 6 de ADR-0001 la deja
 
 ## Siguiente tarea autorizada
 
-**Próximos pasos, en orden** (el 2026-11-23, con el orden que dio el propietario al empezar la sesión en otra cuenta de Kiro: `.kiro/steering/sandbox-ocasional.md`, «Cambio de sesión»; el paso 3 lo pone el plan de Fase 2, §9). El detalle de cada incremento está en su ADR y en el [historial de entregas](docs/plan/historial-de-entregas.md).
+**Próximos pasos, en orden** (el 2026-11-23, con el orden que dio el propietario al empezar la sesión en otra cuenta de Kiro: `.kiro/steering/sandbox-ocasional.md`, «Cambio de sesión»; el paso 2 lo pone el plan de Fase 2, §9). El detalle de cada incremento está en su ADR y en el [historial de entregas](docs/plan/historial-de-entregas.md).
 
 1. **2026-12-02 a las 00:00:03 UTC:** vence el log 1, y el agente comprueba su borrado (runbook de ingesta, «Operaciones (`buoh-operaciones`)», «El primer borrado»). Vuelve a contar los objetos de `logs/000002/`, que tienen que ser los 317 068 de la [evidencia de producción de F2.2](docs/operacion/evidencia-produccion-f2-2.md). Ese día, el agente le pide además al propietario el uso de `buoh-operaciones` en la facturación de Render, para saber si el cron job pasa del mínimo de 1 USD al mes con lo que suman los datasets vivos ([evidencia de los datasets vivos](docs/operacion/evidencia-datasets-f2-5.md), «El costo»).
-2. **La ADR del motor *shadow*** (plan de Fase 2, §8, punto 8), la última del laboratorio. Iba después del corte del 2026-11-23, que ya pasó, con la salud `healthy` en los primeros informes del log 5 ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Orden del trabajo»; evidencia de los datasets vivos, «El cambio de perfil en el corte»). Esa decisión la hacía depender de cómo se comporta la salud con el log 5, y esos primeros informes no tienen ninguna reconexión: la ADR lee antes varios días de la salud del log 5. Las otras cuatro están fusionadas: la del modelo de estrategia, [ADR-0022](docs/arquitectura/adr/0022-modelo-de-estrategia.md); la del motor de investigación y su VPS, [ADR-0023](docs/arquitectura/adr/0023-motor-de-investigacion.md); la de la semántica del backtest, [ADR-0024](docs/arquitectura/adr/0024-semantica-del-backtest.md); y la del protocolo estadístico, [ADR-0025](docs/arquitectura/adr/0025-protocolo-estadistico.md). Un hallazgo de F2.2 para esa ADR: el 2026-11-12, Deriv no mandó ticks de R_100 durante 6 min 26 s con la conexión abierta, y la salud siguió `healthy` ([evidencia de producción de F2.2](docs/operacion/evidencia-produccion-f2-2.md)). La mayoría de las decisiones del propietario que necesita se tomaron el 2026-11-16 (decisiones vigentes, «Motor de investigación»). El mismo día decidió también el disco de 5 GB, quién administra el VPS y cómo se reanuda una estrategia detenida (decisiones vigentes, «Disco, VPS y reanudación»), y el VPS, que lo demás siga en Render y el sistema del VPS (decisiones vigentes, «VPS del motor de investigación»).
-3. **El código de F2.5b**, los mercados reales, con los PR 2 a 8 de [ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §9. Esperaba el PR 6 de ADR-0020, y va antes que los demás incrementos nuevos, para que la captura del oro empiece pronto (plan de Fase 2, §9).
+2. **El código de F2.5b**, los mercados reales, con los PR 2 a 8 de [ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §9. Esperaba el PR 6 de ADR-0020, y va antes que los demás incrementos nuevos, para que la captura del oro empiece pronto (plan de Fase 2, §9).
+
+Con la del motor *shadow*, [ADR-0026](docs/arquitectura/adr/0026-motor-de-senales-shadow.md), las cinco ADR del laboratorio están fusionadas (plan de Fase 2, §8): el código de F2.6 a F2.10 ya no espera ninguna ADR y sigue las dependencias del plan (§9), detrás de F2.5b.
 
 Cada vez que lee producción, el agente mira también la memoria de `buoh-operaciones` que guarda el paso `memory`, y cuándo tiene que volver a presentársela al propietario lo dicen las decisiones vigentes («Memoria medida de `buoh-operaciones`»).
 
