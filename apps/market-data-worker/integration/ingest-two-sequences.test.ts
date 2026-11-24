@@ -463,9 +463,10 @@ describe('dos sesiones de ingest en un proceso (ADR-0021 §1 y §8)', () => {
     ]);
     // El oro siguió con el mismo bloqueo: los latidos de sus dos logs llevan el mismo PID, que no es
     // el de R_100. R_100 no escribió en ningún log de la secuencia del oro, ni el oro en el de R_100.
-    const goldPids = new Set([...(await heartbeatPids(gold)), ...(await heartbeatPids(goldNext))]);
+    const goldPids = await heartbeatPids(gold);
     const r100Pids = await heartbeatPids(r100);
     expect(goldPids.size).toBe(1);
+    expect([...(await heartbeatPids(goldNext))]).toEqual([...goldPids]);
     expect(r100Pids.size).toBe(1);
     expect([...goldPids][0]).not.toBe([...r100Pids][0]);
     expect(await hasSourceSchema(goldNext)).toBe(true);

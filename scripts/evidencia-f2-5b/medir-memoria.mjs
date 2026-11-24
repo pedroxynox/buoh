@@ -16,8 +16,9 @@
 // mide, en procesos aparte con los tamaños de V8 de `ingest` (`WORKER_NODE_FLAGS`), las dos sesiones
 // en un proceso (`dos-sesiones.mjs`): primero `reconstruyendo`, las dos reconstruyendo a la vez sus
 // puntos de control, y después `con-punto-de-control`, `--repeticiones` veces. Comprueba el criterio
-// de ADR-0021 §1: el máximo del proceso entero, en cada medición, por debajo de 256 MB (10⁶ bytes), y
-// cada sesión `completed`, sin alertas. Al terminar borra los esquemas y los buckets.
+// de ADR-0021 §1: el máximo del proceso entero, en cada medición, por debajo de 256 MB, en MB de
+// 1 048 576 bytes, como en ADR-0016 («Medición»), y cada sesión `completed`, sin alertas. Al terminar
+// borra los esquemas y los buckets.
 //
 // Con `--minutos`, deja de escribir pasado ese tiempo y sale con 3: otra ejecución con el mismo
 // `--estado` sigue donde quedó. El archivo de estado guarda los nombres, las horas y lo ya medido,
@@ -63,8 +64,11 @@ const {
 const SESSIONS = fileURLToPath(new URL('dos-sesiones.mjs', import.meta.url));
 const DAY_MS = 86_400_000;
 const CHILD_TIMEOUT_MS = 25 * 60_000;
-/** El techo de ADR-0021 §1, en bytes: 256 MB, la mitad de los 512 MB del Starter. */
-const CEILING_BYTES = 256_000_000;
+/**
+ * El techo de ADR-0021 §1, en bytes: 256 MiB, la mitad de los 512 MiB del Starter. ADR-0016
+ * («Medición») cuenta los MB de 1 048 576 bytes.
+ */
+const CEILING_BYTES = 256 * 1_048_576;
 
 const log = (message) => {
   console.error(`${new Date().toISOString()} ${message}`);

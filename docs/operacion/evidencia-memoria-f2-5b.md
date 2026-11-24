@@ -4,7 +4,7 @@ Evidencia de las tres partes que [ADR-0021](../arquitectura/adr/0021-mercados-re
 
 ## La memoria de dos sesiones
 
-Se midió el 2026-11-24, de 03:25 a 04:48 UTC. Un solo proceso con dos sesiones de ingesta, R_100 y el oro (`frxXAUUSD`), cada una con un log sintético de 7 días, reconstruyendo a la vez sus puntos de control. Su máximo de memoria residente fue de 142,2 MB, por debajo de los 256 MB de §1: el oro cabe en `buoh-ingesta`, sin un servidor propio.
+Se midió el 2026-11-24, de 03:25 a 04:48 UTC. Un solo proceso con dos sesiones de ingesta, R_100 y el oro (`frxXAUUSD`), cada una con un log sintético de 7 días, reconstruyendo a la vez sus puntos de control. Su máximo de memoria residente fue de 135,6 MiB, por debajo de los 256 MB de §1, que son MiB (ADR-0016, «Medición»): el oro cabe en `buoh-ingesta`, sin un servidor propio.
 
 La medición no usa datos de mercado: los logs son sintéticos, con precios inventados, y ningún proceso de la medición se conecta a Deriv. Este documento solo trae memoria, tiempos, conteos, estados y, del oro cerrado, el horario y la respuesta de Deriv, sin ningún precio. Las salidas crudas quedaron fuera de Git.
 
@@ -25,7 +25,7 @@ La medición no usa datos de mercado: los logs son sintéticos, con precios inve
 | R_100, 7 días | cada 2 s | 315 842 | 2016 | 36,2 min |
 | Oro, 7 días | cada segundo | 618 240 | 2016 | 72,0 min |
 
-Después mide, en un proceso aparte cada vez, con `scripts/evidencia-f2-5b/dos-sesiones.mjs`, las dos sesiones en un solo proceso, como `ingest` con dos `--symbol` (ADR-0021 §1). Cada una tiene sus almacenes, su registro operativo, el bloqueo de su secuencia, su log, su cursor y su latido, y escribe los puntos de control que faltan antes de conectar (`writeLiveCheckpoints`):
+Después mide, en un proceso aparte cada vez, con `scripts/evidencia-f2-5b/dos-sesiones.mjs`, las dos sesiones en un solo proceso, como las corre `ingest` con dos `--symbol` (ADR-0021 §1), sin lo que `ingest` añade en `production` («Límites»). Cada una tiene sus almacenes, su registro operativo, el bloqueo de su secuencia, su log, su cursor y su latido, y escribe los puntos de control que faltan antes de conectar (`writeLiveCheckpoints`):
 
 1. **`reconstruyendo`**, una vez: los dos logs sin ningún punto de control, así que las dos sesiones los reconstruyen a la vez al arrancar;
 2. **`con-punto-de-control`**, tres veces: los dos logs ya con sus puntos de control.
@@ -34,24 +34,27 @@ Cada sesión conecta a un canal falso de Deriv en el proceso, recibe 3 ticks y p
 
 ### Resultado
 
+Las cifras van en MiB de 1 048 576 bytes, como las cuenta `/proc` y como cuenta los MB ADR-0016 («Medición»), a la que remiten ADR-0017 §9 y ADR-0021 §1.
+
 | Medición | `arranque` | `conexion` | Hasta conectar las dos |
 |---|---:|---:|---:|
-| `reconstruyendo` | 142,2 MB (135,6 MiB) | 139,4 MB (133,0 MiB) | 80,7 s |
-| `con-punto-de-control`, la mayor de 3 | 114,3 MB (109,0 MiB) | 115,8 MB (110,4 MiB) | 0,41 s |
+| `reconstruyendo` | 135,6 MiB | 133,0 MiB | 80,7 s |
+| `con-punto-de-control`, la mayor de 3 | 109,0 MiB | 110,4 MiB | 0,41 s |
 
-- **El criterio de §1 se cumple:** el máximo, 142,2 MB, queda 113,8 MB por debajo de 256 MB.
+- **El criterio de §1 se cumple:** el máximo, 135,6 MiB, queda 120,4 MiB por debajo de 256 MiB. La ejecución del 2026-11-24 lo comparó con 256 000 000 bytes (244,1 MiB), un techo más estricto que el de §1; después, el script pasó a 256 MiB. El máximo queda por debajo de los dos.
 - **Todas las sesiones** terminaron `completed`, sin alertas.
 - **La reconstrucción** dejó un punto de control por segmento cerrado en los dos logs: 2017 en cada uno, con los 2016 segmentos de la escritura más el de la propia sesión.
 
 ### Límites
 
 - **Es el sandbox, no Render.** La memoria de `buoh-ingesta` en Render se lee en su panel **Metrics** después del PR 3, que añade el oro.
-- **El ritmo del oro** es el de un minuto del 2026-11-16, durante 7 días seguidos y sin sus cierres. Un log real del oro tiene menos ticks.
+- **El ritmo del oro** es el de los 120 s medidos el 2026-11-16, durante 7 días seguidos y sin sus cierres. Un log real del oro tiene menos ticks.
+- **No es `ingestCommand`.** `dos-sesiones.mjs` arranca las dos sesiones con `startDerivSession`, fuera de `production`, como `sesion.mjs` en F2.1. Deja fuera lo que `ingest` añade en `production`: la espera del arranque (`waitForProductionStart`), con las lecturas de cada secuencia (`openStartupReads`, con su pool y su cliente S3), y la vigilancia del corte (`LogCutWatch`). La lectura de Render del punto anterior lo incluye.
 - **No mide** la reconexión con hueco de las dos sesiones a la vez, que F2.1 midió con una sola, ni `data:health`, que corre en su propio proceso con su propio log.
 
 ## La prueba de dos sesiones
 
-`apps/market-data-worker/integration/ingest-two-sequences.test.ts` corre `ingestCommand` en `production` con `--symbol R_100 --symbol frxXAUUSD`, contra PostgreSQL y almacenamiento S3 locales, como `pnpm run test:integration` en CI. Cada símbolo captura en el log de su secuencia, con su bloqueo, en dos sesiones de PostgreSQL distintas, y R_100 con la clave de siempre. Una sesión del oro que termina `failed` vuelve a empezar tras su espera, y R_100 sigue con su conexión. A la hora de corte, el oro corta a su log siguiente con el mismo bloqueo, y R_100, sin el suyo, sigue en su log con `log_cut_blocked`. Las dos pruebas pasaron, y dos mutaciones de `src/ingest.ts` las hicieron fallar: sin volver a empezar una captura, y con el bloqueo de R_100 para todas las secuencias.
+`apps/market-data-worker/integration/ingest-two-sequences.test.ts` corre `ingestCommand` en `production` con `--symbol R_100 --symbol frxXAUUSD`, contra PostgreSQL y almacenamiento S3 locales, como `pnpm run test:integration` en CI. Cada símbolo captura en el log de su secuencia, con su bloqueo, en dos sesiones de PostgreSQL distintas, y R_100 con la clave de siempre. Una sesión del oro que termina `failed` vuelve a empezar tras su espera, y R_100 sigue con su conexión. A la hora de corte, el oro corta a su log siguiente con el mismo bloqueo, y R_100, sin el suyo, sigue en su log con `log_cut_blocked`. Las dos pruebas pasaron. Dos mutaciones de `src/ingest.ts`, una a una, hicieron fallar la primera, que cubre las dos: sin volver a empezar una captura, y con el bloqueo de R_100 para todas las secuencias. Con cada una falló también la segunda, pero eso no cuenta como detección: el comando de la primera, que no terminó, siguió vivo con sus bloqueos.
 
 ## El oro con el mercado cerrado
 
