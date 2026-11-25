@@ -14,6 +14,28 @@ export const SEGMENT_POLICY = {
   window_ms: 300_000,
 } as const;
 
+/** Los umbrales de una política de segmentos: bytes, frames raw y ventana. */
+export interface SegmentPolicy {
+  readonly maximum_bytes: number;
+  readonly maximum_raw_frames: number;
+  readonly version: string;
+  readonly window_ms: number;
+}
+
+/**
+ * Política de segmentos de los lotes, `segment_policy_version = 2.0.0` (ADR-0021 §3; contratos de
+ * dominio, «Semántica ejecutable de las reglas de los lotes 4.0.0»). La de las secuencias en vivo,
+ * con el segmento cerrado además a las 15 respuestas: una página de historia o de velas trae hasta
+ * unos 1000 elementos, así que ningún segmento de los lotes pasa de unos 15 000. Cada respuesta es
+ * un frame raw, así que el motivo de ese cierre es `raw_frames`.
+ */
+export const BATCH_SEGMENT_POLICY = {
+  maximum_bytes: SEGMENT_POLICY.maximum_bytes,
+  maximum_raw_frames: 15,
+  version: '2.0.0',
+  window_ms: SEGMENT_POLICY.window_ms,
+} as const satisfies SegmentPolicy;
+
 /** Motivo de cierre de un segmento. `requested`: drenaje, apagado o rotación del harness. */
 export type SegmentCloseReason = 'bytes' | 'raw_frames' | 'requested' | 'window';
 
@@ -45,32 +67,31 @@ export function sourceEventLine(event: SourceEvent): Uint8Array {
 
 /**
  * Decide, antes de añadir `event`, si el segmento actual debe cerrarse. Un segmento vacío nunca rota.
- * Si varios umbrales se cumplen a la vez, el motivo sigue el orden bytes, frames, ventana.
+ * Si varios umbrales se cumplen a la vez, el motivo sigue el orden bytes, frames, ventana. Sin
+ * `policy`, la de las secuencias en vivo (`SEGMENT_POLICY`).
  */
 export function evaluateSegmentRotation(
   stats: SegmentStats,
   event: SourceEvent,
+  policy: SegmentPolicy = SEGMENT_POLICY,
 ): Exclude<SegmentCloseReason, 'requested'> | null {
   const lineBytes = sourceEventLine(event).byteLength + 1;
   if (stats.event_count === 0) {
-    if (lineBytes > SEGMENT_POLICY.maximum_bytes) {
+    if (lineBytes > policy.maximum_bytes) {
       throw new TypeError('Un source event no cabe en un segmento vacío.');
     }
     return null;
   }
-  if (stats.byte_count + lineBytes > SEGMENT_POLICY.maximum_bytes) {
+  if (stats.byte_count + lineBytes > policy.maximum_bytes) {
     return 'bytes';
   }
-  if (
-    event.kind === 'raw_source_frame' &&
-    stats.raw_frame_count >= SEGMENT_POLICY.maximum_raw_frames
-  ) {
+  if (event.kind === 'raw_source_frame' && stats.raw_frame_count >= policy.maximum_raw_frames) {
     return 'raw_frames';
   }
   const first = stats.first_event_time_utc;
   if (
     first !== null &&
-    Date.parse(sourceEventTime(event)) - Date.parse(first) >= SEGMENT_POLICY.window_ms
+    Date.parse(sourceEventTime(event)) - Date.parse(first) >= policy.window_ms
   ) {
     return 'window';
   }

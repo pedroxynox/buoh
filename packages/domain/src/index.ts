@@ -5,6 +5,17 @@
  * El worker (apps/market-data-worker) le pasa los datos y guarda lo que devuelve.
  */
 export {
+  BATCH_RULE_SET,
+  compareBatchRecords,
+  deriveBatchInvalidIncident,
+  deriveContractOffer,
+  deriveContractQuote,
+  deriveTradingSessions,
+  type BatchConversion,
+  type BatchInvalidReason,
+  type BatchResponseSchema,
+} from './batch-rules.js';
+export {
   CATALOG_FIELDS_NO_LONGER_SENT,
   createCatalogResponseSchema,
   deriveCatalogSnapshot,
@@ -84,12 +95,14 @@ export {
 } from './live-derivation.js';
 export {
   appendSegmentStats,
+  BATCH_SEGMENT_POLICY,
   EMPTY_SEGMENT_STATS,
   evaluateSegmentRotation,
   SEGMENT_POLICY,
   sourceEventLine,
   sourceEventTime,
   type SegmentCloseReason,
+  type SegmentPolicy,
   type SegmentStats,
 } from './segment-policy.js';
 export {

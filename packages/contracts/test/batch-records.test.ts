@@ -9,6 +9,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { Ajv2020 } from 'ajv/dist/2020.js';
+import canonicalizeJson from 'canonicalize';
 import type { FormatsPlugin } from 'ajv-formats';
 import { describe, expect, it } from 'vitest';
 
@@ -504,5 +505,74 @@ describe('JSON Schema de los registros de los lotes', () => {
       expect(validate(runtimeOnly), name).toBe(true);
       expect(runtime(runtimeOnly), name).toBe(false);
     }
+  });
+});
+
+describe('DataQualityIncident 3.0.0 y contract_rejected', () => {
+  const rejectedBody = {
+    evidence: {
+      contract_type: 'MULTUP',
+      error_code: 'ContractBuyValidationError',
+      multiplier_decimal: '200',
+      raw_payload_sha256: RAW,
+    },
+    incident_type: 'contract_rejected',
+    observed_at_utc: '2026-11-25T12:00:00.250Z',
+    observed_ref: OBSERVATION,
+    quality_rule_version: '4.0.0',
+    related_refs: [],
+    schema_version: '3.0.0',
+    severity: 'info',
+    source: 'deriv_options',
+    symbol: 'SYNTH_GOLD',
+  };
+  const withId = (body: Record<string, unknown>) => ({
+    ...body,
+    incident_id: `sha256:${sha256(canonicalizeJson(body) ?? '')}`,
+  });
+
+  it('acepta un rechazo de multiplicador con su ID y solo con el esquema 3.0.0', () => {
+    expect(publicContracts.dataQualityIncidentSchema.safeParse(withId(rejectedBody)).success).toBe(
+      true,
+    );
+    for (const version of ['1.0.0', '2.0.0']) {
+      const body = { ...rejectedBody, schema_version: version };
+      expect(publicContracts.dataQualityIncidentSchema.safeParse(withId(body)).success).toBe(false);
+    }
+  });
+
+  it('exige un multiplicador mayor que cero y un multiplicador, no un sube/baja', () => {
+    for (const evidence of [
+      { ...rejectedBody.evidence, multiplier_decimal: '0' },
+      { ...rejectedBody.evidence, multiplier_decimal: '-100' },
+      { ...rejectedBody.evidence, contract_type: 'CALL' },
+    ]) {
+      const body = { ...rejectedBody, evidence };
+      expect(publicContracts.dataQualityIncidentSchema.safeParse(withId(body)).success).toBe(false);
+    }
+  });
+
+  it('admite invalid_source_frame sin símbolo con 2.0.0 y 3.0.0, y no con 1.0.0', () => {
+    const invalid = {
+      evidence: { raw_payload_sha256: RAW, reason: 'source_error_response' },
+      incident_type: 'invalid_source_frame',
+      observed_at_utc: '2026-11-25T12:00:00.250Z',
+      observed_ref: OBSERVATION,
+      quality_rule_version: '4.0.0',
+      related_refs: [],
+      severity: 'error',
+      source: 'deriv_options',
+      symbol: null,
+    };
+    const accepts = (version: string) =>
+      publicContracts.dataQualityIncidentSchema.safeParse(
+        withId({ ...invalid, schema_version: version }),
+      ).success;
+    expect([accepts('1.0.0'), accepts('2.0.0'), accepts('3.0.0'), accepts('4.0.0')]).toEqual([
+      false,
+      true,
+      true,
+      false,
+    ]);
   });
 });

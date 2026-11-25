@@ -10,6 +10,7 @@ import {
 } from './enums.js';
 import { deriveEventId, type JsonValue } from './identity.js';
 import {
+  decimalStringSchema,
   eventRefSchema,
   isSortedUnique,
   nonEmptyStringSchema,
@@ -22,9 +23,11 @@ import {
 
 /**
  * Versiones de `DataQualityIncident` con lector. 2.0.0 solo difiere de 1.0.0 en que admite
- * `symbol = null` en `invalid_source_frame` (reglas de calidad 2.0.0). Otra versión se rechaza.
+ * `symbol = null` en `invalid_source_frame` (reglas de calidad 2.0.0). 3.0.0, la de las reglas de
+ * los lotes (4.0.0), suma `contract_rejected` y también admite `symbol = null` en
+ * `invalid_source_frame`. Otra versión se rechaza.
  */
-export const INCIDENT_SCHEMA_VERSIONS = ['1.0.0', '2.0.0'] as const;
+export const INCIDENT_SCHEMA_VERSIONS = ['1.0.0', '2.0.0', '3.0.0'] as const;
 
 const incidentBase = {
   schema_version: z.enum(INCIDENT_SCHEMA_VERSIONS),
@@ -109,6 +112,22 @@ const persistenceUnavailableSchema = z.strictObject({
     reason: nonEmptyStringSchema,
   }),
 });
+/**
+ * Un rechazo de `proposal` a un multiplicador: Deriv no acepta ese multiplicador en ese mercado
+ * (contratos de dominio, «Semántica ejecutable de las reglas de los lotes 4.0.0»; ADR-0024 §4). El
+ * contrato pedido sale de `echo_req`. Solo con el esquema de incidencias 3.0.0.
+ */
+const contractRejectedSchema = z.strictObject({
+  ...incidentBase,
+  incident_type: z.literal('contract_rejected'),
+  symbol: symbolSchema,
+  evidence: z.strictObject({
+    raw_payload_sha256: sha256HexSchema,
+    error_code: nonEmptyStringSchema,
+    contract_type: z.enum(['MULTUP', 'MULTDOWN']),
+    multiplier_decimal: decimalStringSchema,
+  }),
+});
 const sourceLimitExceededSchema = z.strictObject({
   ...incidentBase,
   incident_type: z.literal('source_limit_exceeded'),
@@ -132,6 +151,7 @@ export const dataQualityIncidentStructuralSchema = z
     eventGapUnresolvedSchema,
     persistenceUnavailableSchema,
     sourceLimitExceededSchema,
+    contractRejectedSchema,
   ])
   .meta({ id: 'DataQualityIncident', title: 'DataQualityIncident' });
 
@@ -230,11 +250,31 @@ export const dataQualityIncidentSchema = dataQualityIncidentStructuralSchema.sup
         }
         break;
       case 'invalid_source_frame':
-        if (value.symbol === null && value.schema_version !== '2.0.0') {
+        if (value.symbol === null && value.schema_version === '1.0.0') {
           context.addIssue({
             code: 'custom',
-            message: 'invalid_source_frame sin símbolo requiere el esquema de incidencias 2.0.0.',
+            message:
+              'invalid_source_frame sin símbolo requiere el esquema de incidencias 2.0.0 o 3.0.0.',
             path: ['symbol'],
+          });
+        }
+        break;
+      case 'contract_rejected':
+        if (value.schema_version !== '3.0.0') {
+          context.addIssue({
+            code: 'custom',
+            message: 'contract_rejected requiere el esquema de incidencias 3.0.0.',
+            path: ['schema_version'],
+          });
+        }
+        if (
+          value.evidence.multiplier_decimal.startsWith('-') ||
+          !/[1-9]/u.test(value.evidence.multiplier_decimal)
+        ) {
+          context.addIssue({
+            code: 'custom',
+            message: 'multiplier_decimal debe ser mayor que cero.',
+            path: ['evidence', 'multiplier_decimal'],
           });
         }
         break;
