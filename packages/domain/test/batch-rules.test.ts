@@ -14,11 +14,14 @@ import {
   BATCH_RULE_SET,
   BATCH_SEGMENT_POLICY,
   compareBatchRecords,
+  compileSourceSchema,
+  CONTRACTS_FOR_FIELDS_NOT_IN_RELEASE,
   deriveContractOffer,
   deriveContractQuote,
   deriveTradingSessions,
   EMPTY_SEGMENT_STATS,
   evaluateSegmentRotation,
+  relaxContractsForResponseSchema,
   SEGMENT_POLICY,
   type SegmentStats,
 } from '../src/index.js';
@@ -766,5 +769,76 @@ describe('determinismo', () => {
     expect(canonicalJson(deriveTradingSessions(source, accept, ['SYNTH_GOLD']) as never)).toBe(
       first,
     );
+  });
+});
+
+describe('esquema de contracts_for con los campos que la release no describe', () => {
+  // Un documento draft-04 con la forma del de `production_v20260901_0`: cada entrada de
+  // `available` no admite campos ajenos y describe `growth_rate_range`, pero no
+  // `growth_rate_barrier_offsets`, que Deriv mandaba el 2026-11-25 en el `ACCU` de R_100.
+  const release = {
+    $schema: 'http://json-schema.org/draft-04/schema#',
+    properties: {
+      contracts_for: {
+        properties: {
+          available: {
+            items: {
+              additionalProperties: false,
+              properties: {
+                contract_type: { type: 'string' },
+                growth_rate_range: { type: 'array' },
+                underlying_symbol: { type: 'string' },
+              },
+              required: ['contract_type', 'underlying_symbol'],
+              type: 'object',
+            },
+            type: 'array',
+          },
+        },
+        required: ['available'],
+        type: 'object',
+      },
+    },
+    type: 'object',
+  };
+  const response = (entry: Record<string, unknown>) => ({
+    contracts_for: {
+      available: [{ contract_type: 'ACCU', underlying_symbol: 'SYNTH_100', ...entry }],
+    },
+  });
+
+  it('describe solo growth_rate_barrier_offsets, como lista', () => {
+    expect(CONTRACTS_FOR_FIELDS_NOT_IN_RELEASE).toEqual({
+      growth_rate_barrier_offsets: { type: 'array' },
+    });
+  });
+
+  it('con el campo, la release rechaza la respuesta y el esquema ajustado la acepta', () => {
+    const accu = response({ growth_rate_barrier_offsets: [0.1, 0.2] });
+    expect(compileSourceSchema(release)(accu)).toBe(false);
+    const relaxed = relaxContractsForResponseSchema(release);
+    expect(compileSourceSchema(relaxed)(accu)).toBe(true);
+    expect(compileSourceSchema(relaxed)(response({}))).toBe(true);
+  });
+
+  it('sigue rechazando el campo con otro tipo, otro campo ajeno y una entrada sin sus requeridos', () => {
+    const validate = compileSourceSchema(relaxContractsForResponseSchema(release));
+    expect(validate(response({ growth_rate_barrier_offsets: '0.1' }))).toBe(false);
+    expect(validate(response({ otro_campo: 1 }))).toBe(false);
+    expect(validate({ contracts_for: { available: [{ contract_type: 'ACCU' }] } })).toBe(false);
+  });
+
+  it('no cambia el documento recibido, y uno ya ajustado o sin esa ruta queda igual', () => {
+    const before = JSON.stringify(release);
+    const relaxed = relaxContractsForResponseSchema(release);
+    expect(JSON.stringify(release)).toBe(before);
+    expect(relaxed).not.toBe(release);
+    expect(relaxContractsForResponseSchema(relaxed)).toBe(relaxed);
+    const other = { $schema: release.$schema, type: 'object' };
+    expect(relaxContractsForResponseSchema(other)).toBe(other);
+    const notObject = {
+      properties: { contracts_for: { properties: { available: { items: { properties: [] } } } } },
+    };
+    expect(relaxContractsForResponseSchema(notObject)).toBe(notObject);
   });
 });
