@@ -316,7 +316,7 @@ export function deriveTradingSessions(
  * tipo. El 2026-11-25 a las 21:22 UTC, el `contracts_for` de R_100 traía en su entrada de
  * acumuladores (`ACCU`) `growth_rate_barrier_offsets`, una lista de números, y el esquema de
  * `production_v20260901_0`, que no admite campos ajenos en una entrada, la rechazaba entera: R_100
- * se quedaba sin `ContractOffer`. Los demás mercados no la traían (ADR-0021 §3, precisión del PR 5a).
+ * se quedaba sin `ContractOffer`. Los demás mercados no la traían (ADR-0012 §2 y ADR-0021 §9, precisiones del PR 5a).
  */
 export const CONTRACTS_FOR_FIELDS_NOT_IN_RELEASE = {
   growth_rate_barrier_offsets: { type: 'array' },

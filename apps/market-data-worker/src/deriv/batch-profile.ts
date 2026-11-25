@@ -64,8 +64,9 @@ const minutes = (duration: number): ContractDuration => ({ duration, duration_un
 /**
  * Los mercados de las cotizaciones (ADR-0021 §3): los siete de `F2-MARKET-001` y R_100, por
  * símbolo en unidades UTF-16. Los multiplicadores son los que aceptó `proposal` en `MULTUP`, sin
- * cuenta y con 10 USD, de 17 candidatos de 10 a 1000, el 2026-11-25 de 14:40 a 14:55 UTC (PR 4b), y
- * otra vez de 20:53 a 21:05 UTC (PR 5a), entonces también en `MULTDOWN`, con los mismos. Las duraciones son
+ * cuenta y con 10 USD, el 2026-11-25 de 14:40 a 14:55 UTC (PR 4b; de 17 candidatos de 10 a 1000 en
+ * R_100 y el oro, y de 8, de 50 a 800, en los demás), y otra vez de 20:53 a 21:05 UTC (PR 5a), con
+ * los 17 en los ocho mercados, entonces también en `MULTDOWN`, con los mismos. Las duraciones son
  * las de la lista fija de §3 (5 ticks, 15 s y 1, 5, 15, 60 y 240 minutos) que caben en la duración
  * mínima y máxima que publica `contracts_for` para cada mercado. Bitcoin y Ethereum no ofrecen
  * sube/baja.

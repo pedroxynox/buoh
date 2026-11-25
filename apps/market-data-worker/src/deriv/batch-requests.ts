@@ -45,7 +45,7 @@ export type BatchRequest =
 
 /**
  * `msg_type` de la respuesta que espera cada petición. Una página de velas responde con `candles`;
- * un error a `ticks_history`, con `ticks_history` y un objeto `error` (reglas 4.0.0, «Un log»).
+ * un error a `ticks_history`, con `ticks_history` y un objeto `error` (reglas 4.0.0, «Un log»). Las páginas de ticks de la historia, del PR 6, responden con `history`: serán otra petición.
  */
 export const EXPECTED_BATCH_MSG_TYPE = {
   active_symbols: 'active_symbols',
@@ -185,6 +185,9 @@ export function quoteRequests(profile: QuotesProfile): BatchRequest[] {
  * día en tramos contiguos de `page_seconds`, cada uno con su primer y su último segundo incluidos.
  */
 export function candleRequests(profile: CandlesProfile, date: string): BatchRequest[] {
+  if (profile.granularity_seconds !== 60) {
+    throw new TypeError('Las reglas de los lotes 4.0.0 solo reconocen velas de 60 s.');
+  }
   if (
     profile.page_seconds <= 0 ||
     DAY_SECONDS % profile.page_seconds !== 0 ||

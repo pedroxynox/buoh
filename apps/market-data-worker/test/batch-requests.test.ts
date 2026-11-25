@@ -273,6 +273,15 @@ describe('peticiones de los lotes', () => {
     ).toEqual(REAL_MARKETS.flatMap((symbol) => [symbol, symbol]));
   });
 
+  it('rechaza velas que no son de 60 s, que las reglas 4.0.0 no reconocen', () => {
+    const profile = derivCandlesProfile();
+    for (const granularity_seconds of [120, 300]) {
+      expect(() => candleRequests({ ...profile, granularity_seconds }, '2026-11-25')).toThrow(
+        TypeError,
+      );
+    }
+  });
+
   it('rechaza páginas que no parten el día en velas enteras o que no caben en una página', () => {
     const profile = derivCandlesProfile();
     // Cada una rompe una sola condición: no es positiva, no parte el día, no es de velas enteras o
@@ -384,6 +393,75 @@ describe('las respuestas a estas peticiones dan sus registros con las reglas 4.0
       expect(result.records).toHaveLength(1);
       expect(result.records[0]).toMatchObject({ stake_decimal: '10', symbol: 'R_100' });
     }
+  });
+
+  it('cada una de las 151 peticiones de un día da su registro, sin incidencias', () => {
+    let records = 0;
+    for (const request of quoteRequests(derivQuotesProfile())) {
+      if (request.operation !== 'proposal') {
+        throw new TypeError('se esperaba proposal');
+      }
+      const echo = JSON.stringify(batchRequestBody(request, 3));
+      const body =
+        'multiplier' in request
+          ? `"ask_price":10.00,"commission":0.20,"date_start":${SPOT},"id":"x","longcode":"x","multiplier":${String(request.multiplier)},"payout":0,"spot":1.25,"spot_time":${SPOT}`
+          : `"ask_price":10.00,"date_expiry":1795694700,"date_start":${SPOT},"id":"x","longcode":"x","payout":18.50,"spot":1.25,"spot_time":${SPOT}`;
+      const result = deriveContractQuote(
+        frame(`{"echo_req":${echo},"msg_type":"proposal","proposal":{${body}},"req_id":3}`),
+        accept,
+      );
+      expect(result.incidents, echo).toEqual([]);
+      expect(result.records, echo).toMatchObject([{ stake_decimal: '10', symbol: request.symbol }]);
+      records += result.records.length;
+    }
+    for (const page of candleRequests(derivCandlesProfile(), '2026-11-24')) {
+      if (page.operation !== 'ticks_history') {
+        throw new TypeError('se esperaba ticks_history');
+      }
+      const echo = JSON.stringify(batchRequestBody(page, 7));
+      const candles = [page.start, page.end - 59]
+        .map(
+          (epoch) => `{"close":2.50,"epoch":${String(epoch)},"high":2.75,"low":2.25,"open":2.40}`,
+        )
+        .join(',');
+      const result = deriveMarketCandles(
+        frame(
+          `{"candles":[${candles}],"echo_req":${echo},"msg_type":"candles","pip_size":2,"req_id":7}`,
+        ),
+        accept,
+      );
+      expect(result.incidents, echo).toEqual([]);
+      expect(result.records, echo).toHaveLength(2);
+      records += 1;
+    }
+    for (const request of scheduleRequests(derivSchedulesProfile(), '2026-11-25')) {
+      const echo = JSON.stringify(batchRequestBody(request, 1));
+      if (request.operation === 'trading_times') {
+        const result = deriveTradingSessions(
+          frame(
+            `{"echo_req":${echo},"msg_type":"trading_times","req_id":1,"trading_times":{"markets":[{"name":"x","submarkets":[{"name":"x","symbols":[{"name":"x","times":{"close":["21:00:00"],"open":["01:00:00"]},"underlying_symbol":"frxXAUUSD"}]}]}]}}`,
+          ),
+          accept,
+          derivSchedulesProfile().symbols,
+        );
+        expect(result.incidents, echo).toEqual([]);
+        expect(result.records, echo).toMatchObject([{ trading_date: request.date }]);
+      } else if (request.operation === 'contracts_for') {
+        const result = deriveContractOffer(
+          frame(
+            `{"contracts_for":{"available":[{"contract_category":"multiplier","contract_type":"MULTUP","expiry_type":"no_expiry","underlying_symbol":"${request.symbol}"}]},"echo_req":${echo},"msg_type":"contracts_for","req_id":1}`,
+          ),
+          accept,
+        );
+        expect(result.incidents, echo).toEqual([]);
+        expect(result.records, echo).toMatchObject([{ symbol: request.symbol }]);
+      } else {
+        // `active_symbols`, el catálogo de los lotes, no da registro (reglas 4.0.0, «Un log»).
+        expect(request).toEqual({ operation: 'active_symbols' });
+      }
+      records += 1;
+    }
+    expect(records).toBe(151);
   });
 
   it('el rechazo de un multiplicador pedido es contract_rejected', () => {
