@@ -27,7 +27,7 @@ import { epochSecondsToUtc, isEpochSecondsLexeme } from './normalizer.js';
  * lotes 4.0.0»; ADR-0021 §3 y §4). Son un conjunto propio, no la versión siguiente de las reglas en
  * vivo: el número sigue la serie para que una `quality_rule_version` nombre un solo conjunto. Sus
  * incidencias usan el esquema 3.0.0. Este módulo convierte una respuesta de `trading_times`,
- * `contracts_for` o `proposal`; las velas y los ticks de la historia llegan con el PR 4d.
+ * `contracts_for` o `proposal`; las velas, los ticks de la historia y un log, `batch-series.ts`.
  */
 export const BATCH_RULE_SET = {
   incident_schema_version: '3.0.0',

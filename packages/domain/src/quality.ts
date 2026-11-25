@@ -96,7 +96,8 @@ function compareStrings(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function compareTicks(left: MarketTick, right: MarketTick): number {
+/** Orden de los ticks de un dataset; lo reutilizan las reglas de los lotes (`batch-series.ts`). */
+export function compareTicks(left: MarketTick, right: MarketTick): number {
   return (
     compareStrings(left.event_time_utc, right.event_time_utc) ||
     compareStrings(left.tick_fingerprint_sha256, right.tick_fingerprint_sha256) ||
@@ -104,7 +105,8 @@ function compareTicks(left: MarketTick, right: MarketTick): number {
   );
 }
 
-function compareIncidents(left: DataQualityIncident, right: DataQualityIncident): number {
+/** Orden de las incidencias de un dataset; lo reutilizan las reglas de los lotes. */
+export function compareIncidents(left: DataQualityIncident, right: DataQualityIncident): number {
   return (
     compareStrings(left.observed_at_utc, right.observed_at_utc) ||
     compareStrings(left.incident_type, right.incident_type) ||

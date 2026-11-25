@@ -30,6 +30,7 @@ import {
 } from './batch-rules.js';
 import { deriveCatalogSnapshot, type CatalogResponseSchema } from './catalog.js';
 import { readHistoryTicks } from './history-ticks.js';
+import { compareIncidents, compareTicks } from './quality.js';
 import { getMember, parseJsonPreservingNumbers, type JsonNode } from './json-lexeme.js';
 import {
   canonicalQuoteDecimal,
@@ -279,24 +280,6 @@ const compareText = (left: string, right: string) => (left < right ? -1 : left >
 function compareCandles(left: MarketCandle, right: MarketCandle): number {
   return (
     compareText(left.open_time_utc, right.open_time_utc) || compareText(left.symbol, right.symbol)
-  );
-}
-
-/** Ticks: el orden de los datasets en vivo, `event_time_utc`, huella y observación. */
-function compareTicks(left: MarketTick, right: MarketTick): number {
-  return (
-    compareText(left.event_time_utc, right.event_time_utc) ||
-    compareText(left.tick_fingerprint_sha256, right.tick_fingerprint_sha256) ||
-    compareText(left.observation_id, right.observation_id)
-  );
-}
-
-/** Incidencias: el orden de los datasets en vivo, `observed_at_utc`, tipo e `incident_id`. */
-function compareIncidents(left: DataQualityIncident, right: DataQualityIncident): number {
-  return (
-    compareText(left.observed_at_utc, right.observed_at_utc) ||
-    compareText(left.incident_type, right.incident_type) ||
-    compareText(left.incident_id, right.incident_id)
   );
 }
 

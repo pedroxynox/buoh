@@ -179,6 +179,22 @@ describe('velas', () => {
     expect(deriveMarketCandles(finished, accept).records).toHaveLength(2);
   });
 
+  it('acepta la vela del principio del minuto de un start a mitad de minuto, y no la anterior', () => {
+    const fromMinute = frame(
+      candlesText(candleEcho(T + 30, T + 60), candle(T, '1', '1', '1', '1')),
+    );
+    const before = frame(
+      candlesText(candleEcho(T + 30, T + 60), candle(T - 60, '1', '1', '1', '1')),
+    );
+    forbidAmbientEffects();
+    expect(deriveMarketCandles(fromMinute, accept).records).toEqual([
+      expectedCandle(fromMinute, T, ['1.00', '1.00', '1.00', '1.00']),
+    ]);
+    expect(deriveMarketCandles(before, accept).incidents).toEqual([
+      invalidOf(before, 'candles_inconsistent', 'SYNTH_GOLD'),
+    ]);
+  });
+
   it('no da velas ni incidencia con el mercado cerrado', () => {
     const source = frame(candlesText(candleEcho(T, T + 600), ''));
     forbidAmbientEffects();
@@ -316,6 +332,7 @@ describe('ticks de la historia', () => {
       `{"end":"latest","start":${String(T)},"ticks_history":"SYNTH_100"}`,
       `{"end":"${String(T + 10)}","ticks_history":"SYNTH_100"}`,
       ticksEcho(T, T + 10, ',"adjust_start_time":1'),
+      ticksEcho(T, T + 10, ',"granularity":60'),
       `{"end":"${String(T + 10)}","start":${String(T)},"style":"candles","ticks_history":"SYNTH_100"}`,
     ].map((echo) => frame(historyText(echo, [T], ['1'])));
     forbidAmbientEffects();
@@ -408,13 +425,28 @@ describe('un log de los lotes', () => {
       at(12),
     );
     const noError = frame(`{"echo_req":${ticksEcho(T, T + 2)},"msg_type":"ticks_history"}`, at(13));
+    // Mismo instante que la vela repetida de pageC: las dos incidencias se ordenan por su tipo.
+    const lateError = frame('{"echo_req":{"time":1},"msg_type":"time","time":1}', at(3));
+    // Una tercera copia del tick de ticksB, que no contó: otro conflicto contra el de ticksA.
+    const ticksE = frame(historyText(ticksEcho(T + 4, T + 4), [T + 4], ['9']), at(6));
+    const offerText = (symbol: string) =>
+      `{"contracts_for":{"available":[{"barriers":0,"contract_category":"multiplier","contract_type":"MULTUP","expiry_type":"no_expiry","market":"x","max_contract_duration":"0","min_contract_duration":"0","sentiment":"up","submarket":"x","underlying_symbol":"${symbol}"}],"hit_count":1},"echo_req":{"contracts_for":"${symbol}","req_id":2},"msg_type":"contracts_for","req_id":2}`;
+    const quoteText = (symbol: string) =>
+      `{"echo_req":{"amount":10,"basis":"stake","contract_type":"MULTUP","currency":"USD","multiplier":100,"proposal":1,"req_id":4,"underlying_symbol":"${symbol}"},"msg_type":"proposal","proposal":{"ask_price":10.00,"commission":0.20,"date_start":${String(T)},"id":"x","longcode":"x","multiplier":100,"payout":0,"spot":1,"spot_time":${String(T)}},"req_id":4}`;
+    const offerGold = frame(offerText('SYNTH_GOLD'), at(14));
+    const quoteGold = frame(quoteText('SYNTH_GOLD'), at(15));
+    // Recibidos antes, aunque van después en el log.
+    const offerEarly = frame(offerText('SYNTH_100'), at(0));
+    const quoteEarly = frame(quoteText('SYNTH_100'), at(0));
     const events = [
       opened,
       pageA,
       pageB,
+      lateError,
       pageC,
       ticksA,
       ticksB,
+      ticksE,
       ticksC,
       pageD,
       ticksD,
@@ -425,6 +457,10 @@ describe('un log de los lotes', () => {
       ping,
       historyError,
       noError,
+      offerGold,
+      quoteGold,
+      offerEarly,
+      quoteEarly,
     ];
     forbidAmbientEffects();
     const derived = deriveBatchLog(events, config);
@@ -446,8 +482,16 @@ describe('un log de los lotes', () => {
     expect(derived.sessions.map((record) => [record.symbol, record.observation_id])).toEqual([
       ['SYNTH_GOLD', sessions.observation_id],
     ]);
-    expect(derived.offers).toEqual([]);
-    expect(derived.quotes).toEqual([]);
+    expect(derived.offers.map((record) => [record.symbol, record.observation_id])).toEqual([
+      ['SYNTH_100', offerEarly.observation_id],
+      ['SYNTH_GOLD', offerGold.observation_id],
+    ]);
+    expect(
+      derived.quotes.map((record) => [record.symbol, record.observation_id, record.contract_type]),
+    ).toEqual([
+      ['SYNTH_100', quoteEarly.observation_id, 'MULTUP'],
+      ['SYNTH_GOLD', quoteGold.observation_id, 'MULTUP'],
+    ]);
 
     const repeatedCandle = expectedCandle(pageA, T + 60, [
       '2.00',
@@ -494,6 +538,7 @@ describe('un log de los lotes', () => {
         severity: 'error',
         symbol: 'SYNTH_GOLD',
       }),
+      invalidOf(lateError, 'unexpected_msg_type', null),
       expected(ticksB, {
         evidence: { event_time_utc: iso(T + 4), tick_fingerprints: [tickThree, tickNine].sort() },
         incident_type: 'source_time_conflict',
@@ -506,6 +551,13 @@ describe('un log de los lotes', () => {
         incident_type: 'duplicate_exact',
         related_refs: [ticksA.observation_id],
         severity: 'warning',
+        symbol: 'SYNTH_100',
+      }),
+      expected(ticksE, {
+        evidence: { event_time_utc: iso(T + 4), tick_fingerprints: [tickThree, tickNine].sort() },
+        incident_type: 'source_time_conflict',
+        related_refs: [ticksA.observation_id],
+        severity: 'error',
         symbol: 'SYNTH_100',
       }),
       invalidOf(notJson, 'payload_not_json', null),
