@@ -7,6 +7,7 @@ import {
   downloadSchemaArchive,
   loadDerivSchemas,
   openSchemaArchive,
+  type DerivSchemaSet,
   type SchemaLoadResult,
 } from '../src/deriv/schema-archive.js';
 import {
@@ -15,6 +16,7 @@ import {
   DERIV_PINNED_OPERATIONS,
   DERIV_SCHEMA_RELEASE,
   schemaEntryName,
+  type DerivOperation,
   type ExpectedSchemaArchive,
   type SchemaEntryName,
 } from '../src/deriv/schema-release.js';
@@ -209,7 +211,7 @@ function withZip64Locator(archive: Uint8Array): Uint8Array {
   return bytes;
 }
 
-function failure(result: SchemaLoadResult) {
+function failure(result: SchemaLoadResult<DerivOperation>) {
   if (result.status !== 'failed') {
     throw new TypeError('Se esperaba una carga fallida.');
   }
@@ -435,12 +437,17 @@ describe('openSchemaArchive', () => {
       if (result.status !== 'loaded') {
         throw new TypeError(`Carga fallida: ${result.reason}`);
       }
+      // En sus tipos, el conjunto de la captura en vivo no admite una operación de los lotes; si
+      // se fuerza, lanza.
+      // @ts-expect-error: `proposal` no es una operación de la captura en vivo.
+      expect(() => result.schemas.schema('proposal', 'request')).toThrow(/no cargado/u);
+      const forced = result.schemas as DerivSchemaSet<DerivOperation>;
       for (const name of BATCH_ONLY) {
         const [operation, kind] = name.replace('.schema.json', '').split(/_(?=[a-z]+$)/u) as [
-          (typeof BATCH_OPERATIONS)[number],
+          DerivOperation,
           'request' | 'response',
         ];
-        expect(() => result.schemas.schema(operation, kind), name).toThrow(/no cargado/u);
+        expect(() => forced.schema(operation, kind), name).toThrow(/no cargado/u);
       }
     }
   });
@@ -461,8 +468,19 @@ describe('openSchemaArchive', () => {
         );
       }
     }
+    // @ts-expect-error: `ping` no es una operación de los lotes.
     expect(() => result.schemas.schema('ping', 'response')).toThrow(/no cargado/u);
-    expect(() => result.schemas.schema('ticks', 'request')).toThrow(/no cargado/u);
+    const forced = result.schemas as DerivSchemaSet<DerivOperation>;
+    expect(() => forced.schema('ticks', 'request')).toThrow(/no cargado/u);
+  });
+
+  it('una lista de operaciones vacía es un error de quien llama, no una carga vacía', () => {
+    const archive = zip(allEntries());
+    const empty = [] as unknown as readonly ['ping'];
+
+    expect(() => openSchemaArchive(archive, expectedFor(archive, allEntries()), empty)).toThrow(
+      /al menos una operación/u,
+    );
   });
 
   it('con las operaciones de los lotes, falla si falta una de sus entradas o no es la fijada', () => {
@@ -664,7 +682,6 @@ describe('loadDerivSchemas', () => {
     response: () => Response,
     expected?: ExpectedSchemaArchive,
     related: readonly string[] = [],
-    operations?: typeof DERIV_BATCH_OPERATIONS,
   ) {
     const store = new MemoryOperationalStore();
     const registry = await OperationalRegistry.open({
@@ -674,7 +691,6 @@ describe('loadDerivSchemas', () => {
     });
     const result = await loadDerivSchemas({
       ...(expected === undefined ? {} : { expected }),
-      ...(operations === undefined ? {} : { operations }),
       fetch: fakeFetch(response),
       nextId: () => ATTEMPT,
       now: () => NOW,
@@ -699,12 +715,21 @@ describe('loadDerivSchemas', () => {
   it('carga las operaciones que se le piden: las de los lotes, sin las de la captura en vivo', async () => {
     const files = entries(BATCH_WANTED);
     const archive = zip(files);
-    const { result } = await load(
-      () => new Response(archive, { status: 200 }),
-      expectedFor(archive, files),
-      [],
-      DERIV_BATCH_OPERATIONS,
-    );
+    const registry = await OperationalRegistry.open({
+      alert: () => undefined,
+      source: 'deriv_options',
+      store: new MemoryOperationalStore(),
+    });
+    const result = await loadDerivSchemas({
+      expected: expectedFor(archive, files),
+      fetch: fakeFetch(() => new Response(archive, { status: 200 })),
+      nextId: () => ATTEMPT,
+      now: () => NOW,
+      operations: DERIV_BATCH_OPERATIONS,
+      registry,
+      related_refs: [],
+      signal: new AbortController().signal,
+    });
 
     if (result.status !== 'loaded') {
       throw new TypeError(`Carga fallida: ${result.reason}`);

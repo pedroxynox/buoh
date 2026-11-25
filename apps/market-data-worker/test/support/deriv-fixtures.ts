@@ -4,6 +4,7 @@ import { strToU8, zipSync } from 'fflate';
 
 import type { Scheduler } from '../../src/deriv/ports.js';
 import {
+  DERIV_OPERATIONS,
   DERIV_PINNED_OPERATIONS,
   schemaEntryName,
   type DerivOperation,
@@ -203,12 +204,15 @@ const SCHEMAS: Record<DerivOperation, { request: unknown; response: unknown }> =
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
 /**
- * `schemas.zip` sintético con las 20 entradas fijadas, las 14 de la captura en vivo y las 6 que solo
- * usan los lotes, y lo que se espera de él. `overrides` cambia el esquema de algunas entradas, para
- * probar una release que rechaza algo.
+ * `schemas.zip` sintético y lo que se espera de él. El archivo lleva solo las entradas de
+ * `operations`, por defecto las 14 de la captura en vivo, para que una captura que pidiera también
+ * las de los lotes falle con `schema_entry_missing`. `entries` y `expected` cubren las 20 entradas
+ * fijadas. `overrides` cambia el esquema de algunas entradas, para probar una release que rechaza
+ * algo.
  */
 export function syntheticSchemaArchive(
   overrides: Readonly<Partial<Record<SchemaEntryName, unknown>>> = {},
+  operations: readonly DerivOperation[] = DERIV_OPERATIONS,
 ): {
   readonly archive: Uint8Array;
   readonly entries: Readonly<Record<SchemaEntryName, Uint8Array>>;
@@ -221,7 +225,16 @@ export function syntheticSchemaArchive(
       entries[name] = strToU8(JSON.stringify(overrides[name] ?? SCHEMAS[operation][kind]));
     }
   }
-  const archive = zipSync(entries, { level: 9, mtime: new Date('2026-01-01T00:00:00.000Z') });
+  const wanted = new Set<string>(
+    operations.flatMap((operation) => [
+      schemaEntryName(operation, 'request'),
+      schemaEntryName(operation, 'response'),
+    ]),
+  );
+  const archive = zipSync(
+    Object.fromEntries(Object.entries(entries).filter(([name]) => wanted.has(name))),
+    { level: 9, mtime: new Date('2026-01-01T00:00:00.000Z') },
+  );
   return {
     archive,
     entries,

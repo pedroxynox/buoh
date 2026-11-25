@@ -40,11 +40,13 @@ export const DERIV_OPERATIONS = [
   'time',
 ] as const satisfies readonly DerivOperation[];
 
+export type LiveOperation = (typeof DERIV_OPERATIONS)[number];
+
 /**
- * Operaciones de los lotes (ADR-0021 §3), las de su conector propio: `active_symbols` como catálogo
- * de los lotes, `contracts_for`, `proposal`, `ticks_history` para la historia y las velas, y
- * `trading_times`. Las carga solo ese conector, así que la captura en vivo no extrae ni compila
- * `contracts_for`, `proposal` ni `trading_times`.
+ * Operaciones de los lotes (ADR-0021 §3): `active_symbols` como catálogo de los lotes,
+ * `contracts_for`, `proposal`, `ticks_history` para la historia y las velas, y `trading_times`.
+ * Desde el PR 5 de ADR-0021 §9, el conector de los lotes cargará estas. La captura en vivo no extrae
+ * ni compila `contracts_for`, `proposal` ni `trading_times`.
  */
 export const DERIV_BATCH_OPERATIONS = [
   'active_symbols',
@@ -53,6 +55,8 @@ export const DERIV_BATCH_OPERATIONS = [
   'ticks_history',
   'trading_times',
 ] as const satisfies readonly DerivOperation[];
+
+export type BatchOperation = (typeof DERIV_BATCH_OPERATIONS)[number];
 
 export type SchemaKind = 'request' | 'response';
 export type SchemaEntryName = `${DerivOperation}_${SchemaKind}.schema.json`;
