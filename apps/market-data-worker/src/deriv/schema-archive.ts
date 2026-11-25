@@ -20,11 +20,17 @@ import {
  */
 export const SCHEMA_DOWNLOAD_TIMEOUT_MS = 30_000;
 
-const WANTED_ENTRY_NAMES: readonly SchemaEntryName[] = DERIV_OPERATIONS.flatMap((operation) => [
-  schemaEntryName(operation, 'request'),
-  schemaEntryName(operation, 'response'),
-]).sort();
-const WANTED_ENTRIES: ReadonlySet<string> = new Set(WANTED_ENTRY_NAMES);
+/** Las entradas de petición y de respuesta de `operations`, ordenadas y sin repetir. */
+function wantedEntryNames(operations: readonly DerivOperation[]): readonly SchemaEntryName[] {
+  return [
+    ...new Set(
+      operations.flatMap((operation) => [
+        schemaEntryName(operation, 'request'),
+        schemaEntryName(operation, 'response'),
+      ]),
+    ),
+  ].sort();
+}
 
 export interface DerivSchema {
   /** Bytes exactos de la entrada, tal como vienen en el archivo. */
@@ -102,13 +108,19 @@ function usesZip64(bytes: Uint8Array): boolean | null {
 /**
  * Abre el archivo ya descargado. Es pura y va en este orden: tamaño del archivo, SHA-256, rechazo de
  * ZIP64, lectura del directorio sin descomprimir, límites de entradas (cantidad, la mayor y el total
- * expandido), presencia de las 14 entradas que usa buoh, extracción solo de esas, tamaño y SHA-256
- * fijado de cada una y, por último, compilación con su validador estricto.
+ * expandido), presencia de las entradas de `operations`, extracción solo de esas, tamaño y SHA-256
+ * fijado de cada una y, por último, compilación con su validador estricto. `operations` son, por
+ * defecto, las de la captura en vivo, sus 14 entradas; las de los lotes son `DERIV_BATCH_OPERATIONS`
+ * (ADR-0021 §3). Una entrada fijada que no está en `operations` no se exige, no se descomprime y no
+ * se puede pedir.
  */
 export function openSchemaArchive(
   bytes: Uint8Array,
   expected: ExpectedSchemaArchive,
+  operations: readonly DerivOperation[] = DERIV_OPERATIONS,
 ): SchemaLoadResult {
+  const wantedNames = wantedEntryNames(operations);
+  const wanted: ReadonlySet<string> = new Set(wantedNames);
   const archiveLimit = evaluateSourceLimit('schema_archive', bytes.length);
   if (archiveLimit !== null) {
     return failed('source_limit_exceeded', 'schema_archive', archiveLimit);
@@ -151,7 +163,7 @@ export function openSchemaArchive(
       return failed('source_limit_exceeded', resource, violation);
     }
   }
-  const missing = WANTED_ENTRY_NAMES.filter((name) => !declared.has(name));
+  const missing = wantedNames.filter((name) => !declared.has(name));
   if (missing.length > 0) {
     return failed('schema_entry_missing', missing.join(','));
   }
@@ -159,12 +171,12 @@ export function openSchemaArchive(
   // Segunda pasada: solo las entradas que usa buoh, ya acotadas por los límites.
   let extracted: Record<string, Uint8Array>;
   try {
-    extracted = unzipSync(bytes, { filter: (file) => WANTED_ENTRIES.has(file.name) });
+    extracted = unzipSync(bytes, { filter: (file) => wanted.has(file.name) });
   } catch {
     return failed('archive_invalid');
   }
   const schemas = new Map<string, DerivSchema>();
-  for (const name of WANTED_ENTRY_NAMES) {
+  for (const name of wantedNames) {
     const content = extracted[name];
     // Las dos comprobaciones cubren lo que fflate no hace: no valida el CRC-32 y corta una entrada
     // más larga de lo que declara. Así nunca se compila una entrada que no sea la fijada.
@@ -290,6 +302,8 @@ export async function downloadSchemaArchive(input: {
 export async function loadDerivSchemas(input: {
   /** Archivo esperado; por defecto, la release fijada. */
   readonly expected?: ExpectedSchemaArchive;
+  /** Operaciones que se cargan; por defecto, las de la captura en vivo (`openSchemaArchive`). */
+  readonly operations?: readonly DerivOperation[];
   readonly fetch: typeof fetch;
   readonly nextId: () => string;
   readonly now: () => string;
@@ -306,7 +320,9 @@ export async function loadDerivSchemas(input: {
     signal: input.signal,
     url: input.url ?? DERIV_SCHEMA_RELEASE.archive_url,
   });
-  const result = download.ok ? openSchemaArchive(download.bytes, expected) : download.failure;
+  const result = download.ok
+    ? openSchemaArchive(download.bytes, expected, input.operations)
+    : download.failure;
   if (result.status === 'failed' && result.violation !== null) {
     await input.registry.recordSourceLimitExceeded({
       observed_at_utc: input.now(),

@@ -10,7 +10,10 @@ import {
   type SchemaLoadResult,
 } from '../src/deriv/schema-archive.js';
 import {
+  DERIV_BATCH_OPERATIONS,
   DERIV_OPERATIONS,
+  DERIV_PINNED_OPERATIONS,
+  DERIV_SCHEMA_RELEASE,
   schemaEntryName,
   type ExpectedSchemaArchive,
   type SchemaEntryName,
@@ -26,7 +29,7 @@ const DRAFT_04 = 'http://json-schema.org/draft-04/schema#';
 const MTIME = new Date('2026-01-01T00:00:00.000Z');
 const MIB = 1024 * 1024;
 
-/** Operaciones que usa buoh (ADR-0012 §1 y §2), escritas aquí como oráculo. */
+/** Operaciones de la captura en vivo (ADR-0012 §1 y §2), escritas aquí como oráculo. */
 const OPERATIONS = [
   'active_symbols',
   'forget',
@@ -36,10 +39,44 @@ const OPERATIONS = [
   'ticks_history',
   'time',
 ] as const;
-const WANTED = OPERATIONS.flatMap((operation) => [
-  `${operation}_request.schema.json`,
-  `${operation}_response.schema.json`,
-]) as SchemaEntryName[];
+/** Operaciones de los lotes (ADR-0021 §3), también como oráculo. */
+const BATCH_OPERATIONS = [
+  'active_symbols',
+  'contracts_for',
+  'proposal',
+  'ticks_history',
+  'trading_times',
+] as const;
+const namesOf = (operations: readonly string[]) =>
+  operations.flatMap((operation) => [
+    `${operation}_request.schema.json`,
+    `${operation}_response.schema.json`,
+  ]) as SchemaEntryName[];
+const WANTED = namesOf(OPERATIONS);
+const BATCH_WANTED = namesOf(BATCH_OPERATIONS);
+/** Las 6 entradas que fija el PR 4a de ADR-0021 §9, las que solo usan los lotes. */
+const BATCH_ONLY = BATCH_WANTED.filter((name) => !WANTED.includes(name));
+
+/**
+ * Los SHA-256 de las 6 entradas nuevas de la release fijada, calculados el 2026-11-25 fuera del
+ * código, con `zipfile` de Python (`read()` comprueba el CRC-32), sobre el `schemas.zip` de
+ * `production_v20260901_0`, cuyo SHA-256 es el fijado. El archivo no está en el repositorio, porque
+ * el de Deriv no tiene licencia (ADR-0012 §2).
+ */
+const PINNED_BATCH_ONLY_SHA256 = {
+  'contracts_for_request.schema.json':
+    '544e1f971d87ab606b2432724bec1ea5bb1a97d5c5a2446722a6ff9c72e978f9',
+  'contracts_for_response.schema.json':
+    'cebbf1b1de0deae297e597c820a8bf32c4c9a30fbc8daca892edabdb5fc5e199',
+  'proposal_request.schema.json':
+    '21163dbe0ac64a04d14187c7c332aae5ce9702649f68874315b63f505b4d7c62',
+  'proposal_response.schema.json':
+    '295c704a8885c31042f5be513ba989981e365f7d0d93f3432f8282e1d03b8640',
+  'trading_times_request.schema.json':
+    '37d39686111396918f0529034e9816f45ab734aa3a374082ae8126f8a916b85a',
+  'trading_times_response.schema.json':
+    '247d5eeb61e3f3619e095d049b14ec24f29895b5bbc2ac9b1c60e6906305f233',
+};
 
 /** Esquema draft-04 sintético, con una regla propia de draft-04 (`exclusiveMinimum` booleano). */
 function schemaText(title: string, extra: Record<string, unknown> = {}): string {
@@ -52,17 +89,20 @@ function schemaText(title: string, extra: Record<string, unknown> = {}): string 
   });
 }
 
-/** Las 14 entradas que usa buoh, más dos que no usa. */
-function entries(): Record<string, Uint8Array> {
+/** Las 14 entradas de la captura en vivo, más dos que no usa buoh; o las de `names`. */
+function entries(names: readonly SchemaEntryName[] = WANTED): Record<string, Uint8Array> {
   const files: Record<string, Uint8Array> = {
     'README.md': strToU8('sintético'),
     'unused_request.schema.json': strToU8(schemaText('unused')),
   };
-  for (const name of WANTED) {
+  for (const name of names) {
     files[name] = strToU8(schemaText(name));
   }
   return files;
 }
+
+/** Las 20 entradas fijadas: las de la captura en vivo y las de los lotes. */
+const allEntries = () => entries([...new Set([...WANTED, ...BATCH_WANTED])]);
 
 function zip(files: Record<string, Uint8Array>): Uint8Array {
   return zipSync(files, { level: 9, mtime: MTIME });
@@ -78,7 +118,10 @@ function expectedFor(
   return {
     archive_sha256: sha256(archive),
     entries_sha256: Object.fromEntries(
-      WANTED.map((name) => [name, sha256(files[name] ?? new Uint8Array())]),
+      [...new Set([...WANTED, ...BATCH_WANTED])].map((name) => [
+        name,
+        sha256(files[name] ?? new Uint8Array()),
+      ]),
     ) as Record<SchemaEntryName, string>,
     release: 'synthetic',
   };
@@ -367,6 +410,86 @@ describe('openSchemaArchive', () => {
     });
   });
 
+  it('la release fija 20 entradas: las 14 de la captura en vivo y 6 que solo usan los lotes', () => {
+    expect(DERIV_BATCH_OPERATIONS).toEqual(BATCH_OPERATIONS);
+    expect(DERIV_PINNED_OPERATIONS).toEqual(
+      [...new Set([...OPERATIONS, ...BATCH_OPERATIONS])].sort(),
+    );
+    expect(Object.keys(DERIV_SCHEMA_RELEASE.entries_sha256).sort()).toEqual(
+      [...new Set([...WANTED, ...BATCH_WANTED])].sort(),
+    );
+    expect(BATCH_ONLY.sort()).toEqual(Object.keys(PINNED_BATCH_ONLY_SHA256).sort());
+    for (const [name, pinned] of Object.entries(PINNED_BATCH_ONLY_SHA256)) {
+      expect(DERIV_SCHEMA_RELEASE.entries_sha256[name as SchemaEntryName], name).toBe(pinned);
+    }
+  });
+
+  it('la captura en vivo no exige ni descomprime las entradas que solo usan los lotes', () => {
+    // Sin ellas, o con una rota, la carga de la captura en vivo es la de antes.
+    const files = allEntries();
+    const corrupt = withCorruptData(zip(files), 'proposal_response.schema.json');
+    const withoutBatch = zip(entries());
+
+    for (const archive of [corrupt, withoutBatch]) {
+      const result = openSchemaArchive(archive, expectedFor(archive, files));
+      if (result.status !== 'loaded') {
+        throw new TypeError(`Carga fallida: ${result.reason}`);
+      }
+      for (const name of BATCH_ONLY) {
+        const [operation, kind] = name.replace('.schema.json', '').split(/_(?=[a-z]+$)/u) as [
+          (typeof BATCH_OPERATIONS)[number],
+          'request' | 'response',
+        ];
+        expect(() => result.schemas.schema(operation, kind), name).toThrow(/no cargado/u);
+      }
+    }
+  });
+
+  it('con las operaciones de los lotes extrae y compila sus 10 entradas, y no las demás', () => {
+    const files = allEntries();
+    // `ping` es de la captura en vivo y no de los lotes: rota, no cambia la carga de los lotes.
+    const archive = withCorruptData(zip(files), 'ping_response.schema.json');
+    const result = openSchemaArchive(archive, expectedFor(archive, files), DERIV_BATCH_OPERATIONS);
+
+    if (result.status !== 'loaded') {
+      throw new TypeError(`Carga fallida: ${result.reason}`);
+    }
+    for (const operation of BATCH_OPERATIONS) {
+      for (const kind of ['request', 'response'] as const) {
+        expect(result.schemas.schema(operation, kind).bytes).toEqual(
+          files[schemaEntryName(operation, kind)],
+        );
+      }
+    }
+    expect(() => result.schemas.schema('ping', 'response')).toThrow(/no cargado/u);
+    expect(() => result.schemas.schema('ticks', 'request')).toThrow(/no cargado/u);
+  });
+
+  it('con las operaciones de los lotes, falla si falta una de sus entradas o no es la fijada', () => {
+    const withoutTimes = allEntries();
+    delete withoutTimes['trading_times_response.schema.json'];
+    const missing = zip(withoutTimes);
+    const files = allEntries();
+    const archive = zip(files);
+    const otherPin = expectedFor(archive, {
+      ...files,
+      'contracts_for_request.schema.json': strToU8(schemaText('otro contenido')),
+    });
+
+    expect(
+      failure(
+        openSchemaArchive(missing, expectedFor(missing, withoutTimes), DERIV_BATCH_OPERATIONS),
+      ),
+    ).toMatchObject({
+      detail: 'trading_times_response.schema.json',
+      reason: 'schema_entry_missing',
+    });
+    expect(failure(openSchemaArchive(archive, otherPin, DERIV_BATCH_OPERATIONS))).toMatchObject({
+      detail: 'contracts_for_request.schema.json',
+      reason: 'archive_invalid',
+    });
+  });
+
   it('rechaza una entrada cuyo contenido no es el fijado, aunque el archivo sí lo sea', () => {
     const archive = zip(entries());
     const otherPin = expectedFor(archive, {
@@ -541,6 +664,7 @@ describe('loadDerivSchemas', () => {
     response: () => Response,
     expected?: ExpectedSchemaArchive,
     related: readonly string[] = [],
+    operations?: typeof DERIV_BATCH_OPERATIONS,
   ) {
     const store = new MemoryOperationalStore();
     const registry = await OperationalRegistry.open({
@@ -550,6 +674,7 @@ describe('loadDerivSchemas', () => {
     });
     const result = await loadDerivSchemas({
       ...(expected === undefined ? {} : { expected }),
+      ...(operations === undefined ? {} : { operations }),
       fetch: fakeFetch(response),
       nextId: () => ATTEMPT,
       now: () => NOW,
@@ -569,6 +694,30 @@ describe('loadDerivSchemas', () => {
 
     expect(result.status).toBe('loaded');
     expect(store.incidents).toEqual([]);
+  });
+
+  it('carga las operaciones que se le piden: las de los lotes, sin las de la captura en vivo', async () => {
+    const files = entries(BATCH_WANTED);
+    const archive = zip(files);
+    const { result } = await load(
+      () => new Response(archive, { status: 200 }),
+      expectedFor(archive, files),
+      [],
+      DERIV_BATCH_OPERATIONS,
+    );
+
+    if (result.status !== 'loaded') {
+      throw new TypeError(`Carga fallida: ${result.reason}`);
+    }
+    expect(result.schemas.schema('trading_times', 'response').bytes).toEqual(
+      files['trading_times_response.schema.json'],
+    );
+    // Sin `operations`, el mismo archivo no basta: le faltan las de la captura en vivo.
+    const live = await load(
+      () => new Response(archive, { status: 200 }),
+      expectedFor(archive, files),
+    );
+    expect(failure(live.result).reason).toBe('schema_entry_missing');
   });
 
   it('registra un límite superado como `source_limit_exceeded` crítico, con la condición abierta', async () => {
