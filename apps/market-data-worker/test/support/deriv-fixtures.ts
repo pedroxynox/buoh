@@ -5,6 +5,7 @@ import { strToU8, zipSync } from 'fflate';
 import type { Scheduler } from '../../src/deriv/ports.js';
 import {
   DERIV_OPERATIONS,
+  DERIV_PINNED_OPERATIONS,
   schemaEntryName,
   type DerivOperation,
   type ExpectedSchemaArchive,
@@ -78,6 +79,17 @@ const SCHEMAS: Record<DerivOperation, { request: unknown; response: unknown }> =
       },
     }),
   },
+  // Los tres de los lotes (ADR-0021 §3), con solo los campos que exige la release fijada.
+  contracts_for: {
+    request: request('contracts_for', { pattern: '^\\w{2,30}$', type: 'string' }),
+    response: response('contracts_for', {
+      contracts_for: {
+        properties: { available: { type: 'array' } },
+        required: ['available'],
+        type: 'object',
+      },
+    }),
+  },
   forget: {
     request: request('forget', { type: 'string' }),
     response: response('forget', { forget: { enum: [0, 1], type: 'integer' } }),
@@ -89,6 +101,32 @@ const SCHEMAS: Record<DerivOperation, { request: unknown; response: unknown }> =
   ping: {
     request: request('ping', { enum: [1], type: 'integer' }),
     response: response('ping', { ping: { enum: ['pong'], type: 'string' } }),
+  },
+  proposal: {
+    request: {
+      ...request(
+        'proposal',
+        { enum: [1], type: 'integer' },
+        {
+          amount: { type: 'number' },
+          basis: { enum: ['payout', 'stake'], type: 'string' },
+          contract_type: { type: 'string' },
+          currency: { type: 'string' },
+          duration: { type: 'integer' },
+          duration_unit: { enum: ['d', 'm', 's', 'h', 't'], type: 'string' },
+          multiplier: { type: 'number' },
+          underlying_symbol: { pattern: '^\\w{2,30}$', type: 'string' },
+        },
+      ),
+      required: ['contract_type', 'currency', 'proposal', 'underlying_symbol'],
+    },
+    response: response('proposal', {
+      proposal: {
+        properties: { ask_price: { type: 'number' }, id: { type: 'string' } },
+        required: ['ask_price', 'id'],
+        type: 'object',
+      },
+    }),
   },
   ticks: {
     request: request(
@@ -148,29 +186,55 @@ const SCHEMAS: Record<DerivOperation, { request: unknown; response: unknown }> =
     request: request('time', { enum: [1], type: 'integer' }),
     response: response('time', { time: { type: 'integer' } }),
   },
+  trading_times: {
+    request: request('trading_times', {
+      pattern: '^([0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|today)$',
+      type: 'string',
+    }),
+    response: response('trading_times', {
+      trading_times: {
+        properties: { markets: { type: 'array' } },
+        required: ['markets'],
+        type: 'object',
+      },
+    }),
+  },
 };
 
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
 /**
- * `schemas.zip` sintético con las 14 entradas, y lo que se espera de él. `overrides` cambia el
- * esquema de algunas entradas, para probar una release que rechaza algo.
+ * `schemas.zip` sintético y lo que se espera de él. El archivo lleva solo las entradas de
+ * `operations`, por defecto las 14 de la captura en vivo, para que una captura que pidiera también
+ * las de los lotes falle con `schema_entry_missing`. `entries` y `expected` cubren las 20 entradas
+ * fijadas. `overrides` cambia el esquema de algunas entradas, para probar una release que rechaza
+ * algo.
  */
 export function syntheticSchemaArchive(
   overrides: Readonly<Partial<Record<SchemaEntryName, unknown>>> = {},
+  operations: readonly DerivOperation[] = DERIV_OPERATIONS,
 ): {
   readonly archive: Uint8Array;
   readonly entries: Readonly<Record<SchemaEntryName, Uint8Array>>;
   readonly expected: ExpectedSchemaArchive;
 } {
   const entries = {} as Record<SchemaEntryName, Uint8Array>;
-  for (const operation of DERIV_OPERATIONS) {
+  for (const operation of DERIV_PINNED_OPERATIONS) {
     for (const kind of ['request', 'response'] as const) {
       const name = schemaEntryName(operation, kind);
       entries[name] = strToU8(JSON.stringify(overrides[name] ?? SCHEMAS[operation][kind]));
     }
   }
-  const archive = zipSync(entries, { level: 9, mtime: new Date('2026-01-01T00:00:00.000Z') });
+  const wanted = new Set<string>(
+    operations.flatMap((operation) => [
+      schemaEntryName(operation, 'request'),
+      schemaEntryName(operation, 'response'),
+    ]),
+  );
+  const archive = zipSync(
+    Object.fromEntries(Object.entries(entries).filter(([name]) => wanted.has(name))),
+    { level: 9, mtime: new Date('2026-01-01T00:00:00.000Z') },
+  );
   return {
     archive,
     entries,

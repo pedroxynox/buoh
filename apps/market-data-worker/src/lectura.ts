@@ -120,7 +120,9 @@ export {
   DERIV_SOURCE,
 } from './deriv/profile.js';
 export {
+  DERIV_BATCH_OPERATIONS,
   DERIV_OPERATIONS,
+  DERIV_PINNED_OPERATIONS,
   DERIV_SCHEMA_RELEASE,
   schemaEntryName,
   SOURCE_SCHEMA_ENTRY,

@@ -79,7 +79,7 @@ En algún momento del 2026-11-24, entre las 13:18:04 y las 14:12:44 UTC, Deriv e
 ### 2. Esquemas de Deriv: descarga, límites y validador
 
 - El adaptador descarga `schemas.zip` de la release fijada en tiempo de ejecución, con los límites de ADR-0004 §7: 5 242 880 bytes y 30 000 ms. Comprueba el SHA-256 antes de abrirlo.
-- Con `fflate` cuenta las entradas y suma sus tamaños declarados antes de descomprimir. Solo extrae las 14 que usa. Superar cualquier límite, un hash distinto o una entrada que falte abortan la carga: se registra `source_limit_exceeded` (`schema_archive`, `schema_entry`, `schema_entries` o `schema_expanded`) cuando corresponde, y la salud pasa a `failed`.
+- Con `fflate` cuenta las entradas y suma sus tamaños declarados antes de descomprimir. Solo extrae las 14 que usa. (Precisión del PR 4a de [ADR-0021](0021-mercados-reales-y-fuentes-de-investigacion.md) §9: la release fija también las 6 entradas de `contracts_for`, `proposal` y `trading_times`, que solo cargan los lotes, con su conector, ADR-0021 §3. La captura en vivo sigue extrayendo solo sus 14.) Superar cualquier límite, un hash distinto o una entrada que falte abortan la carga: se registra `source_limit_exceeded` (`schema_archive`, `schema_entry`, `schema_entries` o `schema_expanded`) cuando corresponde, y la salud pasa a `failed`.
 - buoh no copia los esquemas de Deriv en Git, porque su repositorio no tiene licencia. Las pruebas usan esquemas draft-04 sintéticos propios con los campos que buoh lee, y archivos ZIP sintéticos.
 - **Validador por dialecto (ADR-0007 §2).** El validador se elige por el `$schema` del documento de esquema:
   - 2020-12: `Ajv2020`, como hoy en los vectores;

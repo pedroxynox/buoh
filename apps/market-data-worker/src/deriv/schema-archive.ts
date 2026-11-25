@@ -10,6 +10,7 @@ import {
   schemaEntryName,
   type DerivOperation,
   type ExpectedSchemaArchive,
+  type LiveOperation,
   type SchemaEntryName,
   type SchemaKind,
 } from './schema-release.js';
@@ -20,11 +21,17 @@ import {
  */
 export const SCHEMA_DOWNLOAD_TIMEOUT_MS = 30_000;
 
-const WANTED_ENTRY_NAMES: readonly SchemaEntryName[] = DERIV_OPERATIONS.flatMap((operation) => [
-  schemaEntryName(operation, 'request'),
-  schemaEntryName(operation, 'response'),
-]).sort();
-const WANTED_ENTRIES: ReadonlySet<string> = new Set(WANTED_ENTRY_NAMES);
+/** Las entradas de petición y de respuesta de `operations`, ordenadas y sin repetir. */
+function wantedEntryNames(operations: readonly DerivOperation[]): readonly SchemaEntryName[] {
+  return [
+    ...new Set(
+      operations.flatMap((operation) => [
+        schemaEntryName(operation, 'request'),
+        schemaEntryName(operation, 'response'),
+      ]),
+    ),
+  ].sort();
+}
 
 export interface DerivSchema {
   /** Bytes exactos de la entrada, tal como vienen en el archivo. */
@@ -33,10 +40,14 @@ export interface DerivSchema {
   readonly validate: (value: unknown) => boolean;
 }
 
-export interface DerivSchemaSet {
+/**
+ * Los esquemas cargados de las operaciones `O`: por defecto, las de la captura en vivo. Pedir otra
+ * operación no compila, y si se fuerza, `schema` lanza un `TypeError`.
+ */
+export interface DerivSchemaSet<O extends DerivOperation = LiveOperation> {
   readonly archive_sha256: string;
   readonly release: string;
-  schema(operation: DerivOperation, kind: SchemaKind): DerivSchema;
+  schema(operation: O, kind: SchemaKind): DerivSchema;
 }
 
 /** Motivo de una carga fallida. Todos dejan la salud en `failed` (ADR-0004 §12). */
@@ -50,26 +61,28 @@ export type SchemaLoadFailure =
   | 'schema_entry_missing'
   | 'source_limit_exceeded';
 
-export type SchemaLoadResult =
-  | { readonly schemas: DerivSchemaSet; readonly status: 'loaded' }
-  | {
-      /**
-       * Dato saneado para diagnosticar: un código HTTP, un recurso, un nombre de entrada, `zip64` o
-       * el hash recibido. Nunca contenido del archivo.
-       */
-      readonly detail: string | null;
-      readonly reason: SchemaLoadFailure;
-      readonly service_health: 'failed';
-      readonly status: 'failed';
-      /** Solo con `source_limit_exceeded`: la evidencia que va al registro operativo. */
-      readonly violation: SourceLimitViolation | null;
-    };
+/** Una carga fallida: igual para cualquier lista de operaciones. */
+export interface SchemaLoadFailedResult {
+  /**
+   * Dato saneado para diagnosticar: un código HTTP, un recurso, un nombre de entrada, `zip64` o el
+   * hash recibido. Nunca contenido del archivo.
+   */
+  readonly detail: string | null;
+  readonly reason: SchemaLoadFailure;
+  readonly service_health: 'failed';
+  readonly status: 'failed';
+  /** Solo con `source_limit_exceeded`: la evidencia que va al registro operativo. */
+  readonly violation: SourceLimitViolation | null;
+}
+
+export type SchemaLoadResult<O extends DerivOperation = LiveOperation> =
+  { readonly schemas: DerivSchemaSet<O>; readonly status: 'loaded' } | SchemaLoadFailedResult;
 
 function failed(
   reason: SchemaLoadFailure,
   detail: string | null = null,
   violation: SourceLimitViolation | null = null,
-): SchemaLoadResult {
+): SchemaLoadFailedResult {
   return { detail, reason, service_health: 'failed', status: 'failed', violation };
 }
 
@@ -102,13 +115,40 @@ function usesZip64(bytes: Uint8Array): boolean | null {
 /**
  * Abre el archivo ya descargado. Es pura y va en este orden: tamaño del archivo, SHA-256, rechazo de
  * ZIP64, lectura del directorio sin descomprimir, límites de entradas (cantidad, la mayor y el total
- * expandido), presencia de las 14 entradas que usa buoh, extracción solo de esas, tamaño y SHA-256
- * fijado de cada una y, por último, compilación con su validador estricto.
+ * expandido), presencia de las entradas de `operations`, extracción solo de esas, tamaño y SHA-256
+ * fijado de cada una y, por último, compilación con su validador estricto. `operations` son, por
+ * defecto, las de la captura en vivo, sus 14 entradas; las de los lotes son `DERIV_BATCH_OPERATIONS`
+ * (ADR-0021 §3). Una entrada fijada que no está en `operations` no se exige, no se descomprime y no
+ * se puede pedir: el conjunto cargado solo admite, en sus tipos, las operaciones de la lista.
  */
 export function openSchemaArchive(
   bytes: Uint8Array,
   expected: ExpectedSchemaArchive,
-): SchemaLoadResult {
+): SchemaLoadResult;
+export function openSchemaArchive<O extends DerivOperation>(
+  bytes: Uint8Array,
+  expected: ExpectedSchemaArchive,
+  operations: readonly [O, ...O[]],
+): SchemaLoadResult<O>;
+export function openSchemaArchive(
+  bytes: Uint8Array,
+  expected: ExpectedSchemaArchive,
+  operations: readonly DerivOperation[] = DERIV_OPERATIONS,
+): SchemaLoadResult<DerivOperation> {
+  return openArchive(bytes, expected, operations);
+}
+
+function openArchive(
+  bytes: Uint8Array,
+  expected: ExpectedSchemaArchive,
+  operations: readonly DerivOperation[],
+): SchemaLoadResult<DerivOperation> {
+  if (operations.length === 0) {
+    // Una lista vacía cargaría un conjunto vacío como si todo fuera bien: es un error de quien llama.
+    throw new TypeError('openSchemaArchive necesita al menos una operación.');
+  }
+  const wantedNames = wantedEntryNames(operations);
+  const wanted: ReadonlySet<string> = new Set(wantedNames);
   const archiveLimit = evaluateSourceLimit('schema_archive', bytes.length);
   if (archiveLimit !== null) {
     return failed('source_limit_exceeded', 'schema_archive', archiveLimit);
@@ -151,7 +191,7 @@ export function openSchemaArchive(
       return failed('source_limit_exceeded', resource, violation);
     }
   }
-  const missing = WANTED_ENTRY_NAMES.filter((name) => !declared.has(name));
+  const missing = wantedNames.filter((name) => !declared.has(name));
   if (missing.length > 0) {
     return failed('schema_entry_missing', missing.join(','));
   }
@@ -159,12 +199,12 @@ export function openSchemaArchive(
   // Segunda pasada: solo las entradas que usa buoh, ya acotadas por los límites.
   let extracted: Record<string, Uint8Array>;
   try {
-    extracted = unzipSync(bytes, { filter: (file) => WANTED_ENTRIES.has(file.name) });
+    extracted = unzipSync(bytes, { filter: (file) => wanted.has(file.name) });
   } catch {
     return failed('archive_invalid');
   }
   const schemas = new Map<string, DerivSchema>();
-  for (const name of WANTED_ENTRY_NAMES) {
+  for (const name of wantedNames) {
     const content = extracted[name];
     // Las dos comprobaciones cubren lo que fflate no hace: no valida el CRC-32 y corta una entrada
     // más larga de lo que declara. Así nunca se compila una entrada que no sea la fijada.
@@ -202,7 +242,7 @@ export function openSchemaArchive(
 
 export type ArchiveDownload =
   | { readonly bytes: Uint8Array; readonly ok: true }
-  | { readonly failure: SchemaLoadResult; readonly ok: false };
+  | { readonly failure: SchemaLoadFailedResult; readonly ok: false };
 
 function isAbort(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
@@ -282,12 +322,7 @@ export async function downloadSchemaArchive(input: {
   return { bytes, ok: true };
 }
 
-/**
- * Descarga y abre la release fijada. Si un límite se supera, lo registra como `source_limit_exceeded`
- * en el registro operativo (severidad `critical`, porque impone `failed`), con un UUIDv7 nuevo como
- * `observed_ref`: no hay frame. Cualquier otro fallo solo deja la salud en `failed`.
- */
-export async function loadDerivSchemas(input: {
+export interface LoadDerivSchemasInput {
   /** Archivo esperado; por defecto, la release fijada. */
   readonly expected?: ExpectedSchemaArchive;
   readonly fetch: typeof fetch;
@@ -299,14 +334,30 @@ export async function loadDerivSchemas(input: {
   /** Vence a los `SCHEMA_DOWNLOAD_TIMEOUT_MS` del reloj inyectado de quien llama. */
   readonly signal: AbortSignal;
   readonly url?: string;
-}): Promise<SchemaLoadResult> {
+}
+
+/**
+ * Descarga y abre la release fijada. Si un límite se supera, lo registra como `source_limit_exceeded`
+ * en el registro operativo (severidad `critical`, porque impone `failed`), con un UUIDv7 nuevo como
+ * `observed_ref`: no hay frame. Cualquier otro fallo solo deja la salud en `failed`. Carga las
+ * operaciones de `operations` o, sin ellas, las de la captura en vivo (`openSchemaArchive`).
+ */
+export function loadDerivSchemas(input: LoadDerivSchemasInput): Promise<SchemaLoadResult>;
+export function loadDerivSchemas<O extends DerivOperation>(
+  input: LoadDerivSchemasInput & { readonly operations: readonly [O, ...O[]] },
+): Promise<SchemaLoadResult<O>>;
+export async function loadDerivSchemas(
+  input: LoadDerivSchemasInput & { readonly operations?: readonly DerivOperation[] },
+): Promise<SchemaLoadResult<DerivOperation>> {
   const expected = input.expected ?? DERIV_SCHEMA_RELEASE;
   const download = await downloadSchemaArchive({
     fetch: input.fetch,
     signal: input.signal,
     url: input.url ?? DERIV_SCHEMA_RELEASE.archive_url,
   });
-  const result = download.ok ? openSchemaArchive(download.bytes, expected) : download.failure;
+  const result = download.ok
+    ? openArchive(download.bytes, expected, input.operations ?? DERIV_OPERATIONS)
+    : download.failure;
   if (result.status === 'failed' && result.violation !== null) {
     await input.registry.recordSourceLimitExceeded({
       observed_at_utc: input.now(),
