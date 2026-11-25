@@ -576,3 +576,35 @@ describe('DataQualityIncident 3.0.0 y contract_rejected', () => {
     ]);
   });
 });
+
+describe('candle_repeated', () => {
+  const body = (severity: string, second: string, version = '3.0.0') => ({
+    evidence: {
+      candle_fingerprint_sha256: second,
+      first_candle_fingerprint_sha256: RAW,
+      open_time_utc: '2026-11-24T12:00:00.000Z',
+    },
+    incident_type: 'candle_repeated',
+    observed_at_utc: '2026-11-25T12:00:00.250Z',
+    observed_ref: OBSERVATION,
+    quality_rule_version: '4.0.0',
+    related_refs: [OTHER_OBSERVATION],
+    schema_version: version,
+    severity,
+    source: 'deriv_options',
+    symbol: 'SYNTH_GOLD',
+  });
+  const accepts = (value: Record<string, unknown>) =>
+    publicContracts.dataQualityIncidentSchema.safeParse({
+      ...value,
+      incident_id: `sha256:${sha256(canonicalizeJson(value) ?? '')}`,
+    }).success;
+
+  it('es warning si se repite igual y error si llega con otros precios, solo con 3.0.0', () => {
+    expect(accepts(body('warning', RAW))).toBe(true);
+    expect(accepts(body('error', 'b'.repeat(64)))).toBe(true);
+    expect(accepts(body('error', RAW))).toBe(false);
+    expect(accepts(body('warning', 'b'.repeat(64)))).toBe(false);
+    expect(accepts(body('warning', RAW, '2.0.0'))).toBe(false);
+  });
+});

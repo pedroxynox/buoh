@@ -25,7 +25,7 @@ import {
  * Versiones de `DataQualityIncident` con lector. 2.0.0 solo difiere de 1.0.0 en que admite
  * `symbol = null` en `invalid_source_frame` (reglas de calidad 2.0.0). 3.0.0, la de las reglas de
  * los lotes (4.0.0), suma `contract_rejected` y también admite `symbol = null` en
- * `invalid_source_frame`. Otra versión se rechaza.
+ * `invalid_source_frame`; desde el PR 4d de ADR-0021, también `candle_repeated`. Otra versión se rechaza.
  */
 export const INCIDENT_SCHEMA_VERSIONS = ['1.0.0', '2.0.0', '3.0.0'] as const;
 
@@ -128,6 +128,21 @@ const contractRejectedSchema = z.strictObject({
     multiplier_decimal: decimalStringSchema,
   }),
 });
+/**
+ * Una vela de Deriv que llega otra vez, en otra página, para el mismo símbolo y minuto. Cuenta la
+ * primera; la repetida no es un registro. Las dos huellas son iguales si la repetición es exacta
+ * (`warning`) y distintas si Deriv mandó otros precios (`error`). Solo con el esquema 3.0.0.
+ */
+const candleRepeatedSchema = z.strictObject({
+  ...incidentBase,
+  incident_type: z.literal('candle_repeated'),
+  symbol: symbolSchema,
+  evidence: z.strictObject({
+    open_time_utc: utcTimestampMsSchema,
+    first_candle_fingerprint_sha256: sha256HexSchema,
+    candle_fingerprint_sha256: sha256HexSchema,
+  }),
+});
 const sourceLimitExceededSchema = z.strictObject({
   ...incidentBase,
   incident_type: z.literal('source_limit_exceeded'),
@@ -152,6 +167,7 @@ export const dataQualityIncidentStructuralSchema = z
     persistenceUnavailableSchema,
     sourceLimitExceededSchema,
     contractRejectedSchema,
+    candleRepeatedSchema,
   ])
   .meta({ id: 'DataQualityIncident', title: 'DataQualityIncident' });
 
@@ -278,6 +294,26 @@ export const dataQualityIncidentSchema = dataQualityIncidentStructuralSchema.sup
           });
         }
         break;
+      case 'candle_repeated': {
+        if (value.schema_version !== '3.0.0') {
+          context.addIssue({
+            code: 'custom',
+            message: 'candle_repeated requiere el esquema de incidencias 3.0.0.',
+            path: ['schema_version'],
+          });
+        }
+        const exact =
+          value.evidence.first_candle_fingerprint_sha256 ===
+          value.evidence.candle_fingerprint_sha256;
+        if (value.severity !== (exact ? 'warning' : 'error')) {
+          context.addIssue({
+            code: 'custom',
+            message: 'candle_repeated es warning si la repetición es exacta y error si no.',
+            path: ['severity'],
+          });
+        }
+        break;
+      }
       case 'duplicate_exact':
       case 'persistence_unavailable':
         break;
