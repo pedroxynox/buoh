@@ -53,6 +53,7 @@ Fase 1 usa `execution_mode = disabled`. Un servicio pausado no cambia de entorno
 - Incidencias se ordenan por `observed_at_utc`, `incident_type`, `incident_id`.
 - Implementación: `packages/domain/src/quality.ts` produce este orden y `packages/contracts/src/dataset-consistency.ts` lo valida, cada uno con sus propios comparadores por unidades UTF-16. Deben cambiar a la vez ([estado del código](estado-del-codigo.md) D-06).
 - Las entradas de `SourceCatalogSnapshot` se ordenan por `underlying_symbol` en unidades UTF-16: `deriveCatalogSnapshot` (`packages/domain/src/catalog.ts`) las ordena y `isSortedUnique` (`packages/contracts`) lo valida, los dos con el operador `<` de JavaScript.
+- Las `offers` de `ContractOffer` se ordenan por `contract_type` y `expiry_type` en unidades UTF-16, con el operador `<`, y los `intervals` de `TradingSession`, por su hora, sin solaparse ni tocarse. Los valida `packages/contracts`; quien los ordena llega con las reglas del PR 4c de ADR-0021 §9, igual que el orden de los registros de los lotes dentro de un dataset.
 - El orden de las condiciones operativas (`occurred_at_utc`, `condition_event_id`; ver `OperationalConditionEvent`) está implementado tres veces: `compareConditions` en `packages/domain/src/quality.ts`, por unidades UTF-16, y `validateConditionCausality` y `reduceOpenConditions` en `packages/contracts/src/conditions.ts`, con `localeCompare`. Coinciden porque los dos campos tienen formato fijo ([estado del código](estado-del-codigo.md) D-13).
 - IDs de source events se obtienen de un generador UUIDv7 inyectable y se reutilizan en replay.
 - `incident_id` y `condition_event_id` son `DerivedEventId`: se calculan después de ordenar referencias sobre todos los campos del evento excepto el propio ID; luego se inserta el ID sin recalcularlo.
@@ -199,7 +200,7 @@ state: LiveDerivationState
 Proyección regenerable de un raw válido:
 
 ```text
-schema_version: SchemaVersion              # "1.0.0" o, con history_download, "1.1.0"
+schema_version: SchemaVersion              # "1.0.0" o "1.1.0"; history_download, solo en la 1.1.0
 observation_id: UuidV7
 source: string
 connector_version: string
@@ -511,10 +512,10 @@ is_trading_suspended: 0 | 1
 
 Los fija [ADR-0021](adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §4, con la precisión de [ADR-0024](adr/0024-semantica-del-backtest.md) §4, y están en `packages/contracts` desde el PR 4b de ADR-0021 §9: `MarketCandle`, `TradingSession`, `ContractOffer` y `ContractQuote`, todos 1.0.0. Salen de las respuestas que piden los lotes con el conector `deriv-options-lotes-1.0.0` (ADR-0021 §3). Todavía nadie los produce: las reglas que los derivan llegan con el PR 4c, y el paso que pide las respuestas, con el PR 5.
 
-- **Procedencia.** Los cuatro llevan la de `MarketTick`: `observation_id`, `source`, `connector_version`, `received_at_utc` y `raw_payload_sha256` son los del `RawSourceFrame` de la respuesta, así que los registros de un mismo frame comparten su `observation_id`. Un backtest usa cada registro desde su `received_at_utc` (ADR-0024 §4).
+- **Procedencia.** Los cuatro llevan la de `MarketTick`: `observation_id`, `source`, `connector_version`, `received_at_utc` y `raw_payload_sha256` son los del `RawSourceFrame` de la respuesta, así que los registros de un mismo frame comparten su `observation_id`. Desde cuándo vale cada uno en un backtest, también antes del paso de los lotes, lo fija ADR-0024 §4, y en `shadow`, ADR-0026 §3: una vela, desde su fin, y los otros tres, desde su `received_at_utc`.
 - **Importes y precios.** Son `DecimalString`, del lexema recibido o en decimal exacto, nunca con la aritmética binaria de `JSON.parse`, como `quote_decimal`. Ninguno entra en Git (ADR-0021 §7).
 - **Lo medido.** La forma de las respuestas se midió el 2026-11-25 en el canal público de Deriv, sin cuenta y sin guardar precios, con los esquemas de la release fijada (`DERIV_BATCH_OPERATIONS`). Las horas y los tipos de contrato de abajo salen de esa medición.
-- **Sin validar la forma.** El JSON Schema generado de cada uno describe su forma. Solo el esquema runtime comprueba los decimales, el orden, las huellas y las relaciones entre campos.
+- **JSON Schema y runtime.** El JSON Schema generado de cada uno describe su forma. Solo el esquema runtime comprueba los decimales, el orden, las huellas y las relaciones entre campos.
 
 ### `MarketCandle`
 
@@ -539,7 +540,7 @@ quality_flags: QualityIncidentType[]
 
 - **Qué es.** Una vela de 1 minuto que calcula Deriv, de `ticks_history` con `style: "candles"` y `granularity: 60`. Nunca se mezcla con las que buoh arma con sus ticks, y una estrategia declara cuáles usa (ADR-0021 §4; ADR-0022 §2).
 - **Su intervalo** va de `open_time_utc`, incluido, a `open_time_utc` más `granularity_seconds`, sin incluir. Ese fin es su instante en el backtest (ADR-0024 §4). El 2026-11-25, el `epoch` de cada vela fue un múltiplo de 60 s y el principio de su minuto. Deriv no da velas sin ticks: el oro no tuvo ninguna de 22:00 a 23:00 UTC del 2026-11-24, su cierre diario, ni el sábado 2026-11-21.
-- **Solo velas cerradas.** Con `end: "latest"`, Deriv da también la vela del minuto en curso. El contrato la rechaza: su fin no puede ser posterior a `received_at_utc`. Qué hacen con ella las reglas de los lotes lo fija el PR 4c.
+- **Solo velas terminadas al recibirse.** Con `end: "latest"`, Deriv da también la vela del minuto en curso. El contrato rechaza una vela cuyo fin es posterior a su `received_at_utc`, que según el reloj de buoh todavía no había terminado. No protege de una diferencia entre el reloj de Deriv y el de buoh: qué hacen las reglas de los lotes con la última vela de una respuesta lo fija el PR 4c.
 - **Granularidad.** Solo 60 s, la que piden los lotes (ADR-0021 §3). Otra es otra versión.
 - **Decimales.** Cada precio lleva exactamente `pip_size` decimales, el `pip_size` de la respuesta, como `quote_decimal`. El máximo no es menor que la apertura ni que el cierre, y el mínimo no es mayor que ninguno de los dos.
 - **Huella.** `candle_fingerprint_sha256` es el SHA-256 del JCS de `close_decimal`, `granularity_seconds`, `high_decimal`, `low_decimal`, `open_decimal`, `open_time_utc`, `pip_size`, `source` y `symbol`. No incluye la observación ni la recepción, así que la misma vela en dos páginas tiene la misma huella, como un tick repetido.
@@ -607,8 +608,8 @@ duration_unit: "t" | "s" | "m" | "h" | "d"
 
 - **Qué es.** De una respuesta de `contracts_for` de un símbolo, cuáles de los cuatro tipos que usa buoh ofrece ese mercado (ADR-0022 §5) y, en sube/baja, la duración mínima y la máxima de cada vencimiento. Los demás tipos y las barreras no entran; los conserva el raw.
 - **Duraciones.** Deriv las da como texto, como `5m`, `1d` o `10t`, y el contrato las guarda con su número y su unidad. El vencimiento `tick` va en ticks (`t`), y `intraday` y `daily`, en tiempo. La mínima no pasa de la máxima.
-- **Sin multiplicadores.** `contracts_for` publica `multiplier_range`, pero el 2026-11-25, sin cuenta, `proposal` aceptó otros en seis de los ocho mercados de ADR-0021 (ADR-0021 §3). El contrato no los guarda, para que nadie los tome por los que se aceptan. Qué multiplicadores se ofrecen lo dicen las cotizaciones (ADR-0024 §4). Las duraciones de sube/baja sí coincidieron con las que aceptó `proposal`.
-- **Orden.** `offers` va ordenada por `contract_type` y `expiry_type`, en unidades UTF-16, sin repetir la pareja.
+- **Sin multiplicadores.** `contracts_for` publica `multiplier_range`, pero el 2026-11-25, sin cuenta, `proposal` aceptó otros en los siete mercados reales, y solo en R_100 coincidieron (ADR-0021 §3). El contrato no los guarda, para que nadie los tome por los que se aceptan. Qué multiplicadores se ofrecen lo dicen las cotizaciones (ADR-0024 §4). Las duraciones de sube/baja sí coincidieron con las que aceptó `proposal`.
+- **Orden.** `offers` va ordenada por `contract_type` y `expiry_type`, en unidades UTF-16, sin repetir la pareja. El 2026-11-25, `contracts_for` trajo como mucho una entrada de `CALL` y una de `PUT` por vencimiento en los ocho mercados: la de `tick` y la de `intraday`, con la barrera relativa del sube/baja, y la de `daily`, con una absoluta. Qué hacen las reglas con una respuesta que traiga más lo fija el PR 4c.
 
 ### `ContractQuote`
 
@@ -639,7 +640,7 @@ commission_decimal: DecimalString
 - **Qué es.** Lo que Deriv ofrecía por un contrato en un instante, de una respuesta de `proposal` sin cuenta y sin suscripción: un registro por respuesta. El contrato pedido (el símbolo, el tipo, la apuesta, la moneda y la duración o el multiplicador) sale de `echo_req`, que Deriv devuelve en la misma respuesta, y lo cotizado, de `proposal`.
 - **Sin cotización.** Una respuesta con `error`, como un multiplicador que no acepta (`ContractBuyValidationError`) o una duración que no ofrece (`TradingDurationNotAllowed`), no da registro. Las reglas de los lotes del PR 4c la registran como incidencia, con el contrato pedido.
 - **La hora.** `quoted_at_utc` es `spot_time`, la del tick con que Deriv cotizó. `date_start` no entra: el 2026-11-25 coincidió con `spot_time` en ocho de las nueve respuestas medidas, y la otra fue un sube/baja de 5 ticks de R_100.
-- **Lo que usa el backtest** (ADR-0022 §5 y ADR-0024 §6). En un sube/baja, `payout_decimal`. En un multiplicador, `commission_decimal`, que dividida por la apuesta por el multiplicador da la comisión como fracción de la exposición. `ask_price_decimal` es el precio del contrato, y con `basis: "stake"` fue la apuesta en las cuatro respuestas medidas. Deriv manda también `payout` en un multiplicador, sin sentido sin vencimiento, y no entra; tampoco `spot`, `longcode`, `id`, los límites ni las barreras, que conserva el raw.
+- **Lo que usa el backtest** (ADR-0022 §5 y ADR-0024 §6). En un sube/baja, `payout_decimal`. En un multiplicador, `commission_decimal`, que dividida por la apuesta por el multiplicador da la comisión como fracción de la exposición. Es un importe en la moneda, aunque el esquema de la release describa `commission` como un porcentaje: el 2026-11-25, en R_100 y en el oro, salió de 2 a 2,03 veces mayor al doblar la apuesta, y en la proporción del multiplicador al pasarlo de 100 a 200 en R_100 (2,03 veces) y de 100 a 500 en el oro (5 veces). `ask_price_decimal` es el precio del contrato, y con `basis: "stake"` fue la apuesta en las cuatro respuestas medidas. Deriv manda también `payout` en un multiplicador, sin sentido sin vencimiento, y no entra; tampoco `spot`, `longcode`, `id`, los límites ni las barreras, que conserva el raw.
 - **Importes.** Sin signo; la apuesta y el multiplicador, mayores que cero. El esquema de Deriv admite `commission: null`, y el contrato no: qué hacen las reglas con una respuesta así lo fija el PR 4c.
 
 ## Replay de dataset

@@ -29,8 +29,9 @@ export const callputContractTypeSchema = z.enum(['CALL', 'PUT']);
 export const multiplierContractTypeSchema = z.enum(['MULTUP', 'MULTDOWN']);
 
 /**
- * Duración de un contrato con los nombres de `proposal` (`duration` y `duration_unit`) y sus
- * límites en el esquema de la release fijada: ticks (`t`) o tiempo (`s`, `m`, `h` y `d`).
+ * Duración de un contrato con los nombres de `proposal` (`duration` y `duration_unit`): ticks (`t`)
+ * o tiempo (`s`, `m`, `h` y `d`). El máximo es el del esquema de la release fijada; el mínimo, 1 y
+ * no el 0 que admite ese esquema, porque un contrato sin duración no es un sube/baja.
  */
 export const contractDurationSchema = z.strictObject({
   duration: z.number().int().min(1).max(99_999_999),
