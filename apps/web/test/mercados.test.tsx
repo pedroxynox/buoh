@@ -142,6 +142,12 @@ const CATALOG: DataCatalog = {
         exchange_is_open: 0,
         market: 'forex',
       },
+      {
+        ...ENTRY,
+        underlying_symbol: 'frxXAUUSD',
+        underlying_symbol_name: 'Gold/USD',
+        market: 'commodities',
+      },
     ],
   },
 };
@@ -753,13 +759,18 @@ describe('la vista de Mercados', () => {
     expect(plain).toContain('Lo que ves es de la lectura de las 12:00:03 UTC.');
   });
 
-  it('el catálogo: su versión, su fecha, sus instrumentos y el que se captura', () => {
+  it('el catálogo: su versión, su fecha, sus instrumentos y los que se capturan, R_100 y el oro (ADR-0021 §9, PR 3)', () => {
     const html = render(LOADING, ready(CATALOG));
     const plain = text(html);
     expect(plain).toContain('Versión 3, del log 2');
     expect(plain).toContain(`Recibida ${formatUtc('2026-11-08T00:00:02.500Z')}`);
-    expect(plain).toContain('Instrumentos 3');
+    expect(plain).toContain('Instrumentos 4');
     expect(plain).toContain('R_100 Se captura');
+    expect(plain).toContain('frxXAUUSD Se captura');
+    expect(plain).not.toContain('frxEURUSD Se captura');
+    expect(plain).not.toContain('1HZ100V Se captura');
+    expect(plain).toContain('En la Fase 2, buoh captura R_100 y el oro (frxXAUUSD) de Deriv');
+    expect(plain).not.toContain('solo captura R_100');
     expect(plain).toContain('EUR/USD');
     expect(plain).toContain('Cerrado');
     expect(text(render(LOADING, ready({ log: 2, catalog: null })))).toContain(

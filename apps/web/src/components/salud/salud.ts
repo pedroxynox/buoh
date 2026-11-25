@@ -47,7 +47,10 @@ export const STALE_AFTER_MS = 15 * 60_000;
  */
 export const QUEUE_LIMITS = { events: 1000, bytes: 33_554_432 } as const;
 
-/** El símbolo que observa la salud: el de `data:health` por defecto, el único de la Fase 2. */
+/**
+ * El símbolo que observa la salud: el de `data:health` por defecto. Desde el PR 3 de ADR-0021 §9 se
+ * captura también el oro, y la web sigue mostrando la salud de R_100 (ADR-0021 §5).
+ */
 export const HEALTH_SYMBOL = 'R_100';
 
 /** La gravedad de cada estado: gana la más severa (`SEVERITY_RANK` de `healthReportOf`). */

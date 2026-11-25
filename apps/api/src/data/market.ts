@@ -63,7 +63,10 @@ export interface MarketDataReaderDeps {
   readonly schemaRelease?: ExpectedSchemaArchive;
 }
 
-/** El único símbolo de la Fase 2, el que captura `ingest` (plan de Fase 2, «Alcance ya decidido»). */
+/**
+ * El símbolo del gráfico, R_100. Desde el PR 3 de ADR-0021 §9, `ingest` captura también el oro, que
+ * la API no muestra todavía (ADR-0021 §5; ADR-0019 §8).
+ */
 export const CHART_SYMBOL = 'R_100';
 
 /**

@@ -11,7 +11,9 @@
 databases:
   - name: buoh-postgres
     plan: 0.1c-256mb
-    diskSizeGB: 1
+    # 5 GB desde el PR 3 de ADR-0021 §9, antes de capturar el oro, como aprobó el propietario el
+    # 2026-11-16 (ADR-0021 §6). Render amplía un disco sin parar la base y no lo reduce nunca.
+    diskSizeGB: 5
     # Apagado: subiría el presupuesto sin el visto bueno del propietario (ADR-0018 §2).
     storageAutoscalingEnabled: false
     region: virginia
@@ -39,7 +41,9 @@ services:
       npx --yes pnpm@12.14.0 --filter "@buoh/market-data-worker..." run build
     # Node directamente, sin pnpm de por medio, para que el SIGTERM de Render llegue a ingest, con
     # los tamaños de V8 de WORKER_NODE_FLAGS delante (ADR-0018 §3).
-    startCommand: node --max-semi-space-size=1 --max-old-space-size=256 apps/market-data-worker/dist/cli/ingest.js --live --symbol R_100
+    # R_100 y el oro, cada uno en su secuencia de logs, en un solo proceso (ADR-0021 §1): los mismos
+    # símbolos que BUOH_OPERACIONES_SIMBOLOS de buoh-operaciones.
+    startCommand: node --max-semi-space-size=1 --max-old-space-size=256 apps/market-data-worker/dist/cli/ingest.js --live --symbol R_100 --symbol frxXAUUSD
     # El minuto que el runbook da a la parada antes de SIGKILL.
     maxShutdownDelaySeconds: 60
     # Solo despliega un commit de main cuyos checks de CI pasaron.
@@ -211,9 +215,10 @@ services:
       - key: BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY
         sync: false
       # Los símbolos capturados en vivo, cada uno con su secuencia de logs: los pasos trabajan con
-      # los logs de cada uno (ADR-0021 §1). El PR 3 de ADR-0021 §9 añade frxXAUUSD.
+      # los logs de cada uno (ADR-0021 §1). Los mismos del --symbol de buoh-ingesta; el oro, desde el
+      # PR 3 de ADR-0021 §9.
       - key: BUOH_OPERACIONES_SIMBOLOS
-        value: R_100
+        value: R_100,frxXAUUSD
 
   - type: web
     name: buoh-api

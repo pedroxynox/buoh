@@ -32,8 +32,11 @@ import { sourceLabel } from './salud/salud';
 /** Cómo se dibuja el gráfico: sus ticks o sus velas (concepto de interfaz §9 y §11). */
 export type ChartKind = 'ticks' | 'candles';
 
-/** El símbolo que se captura en la Fase 2: su fila del catálogo lo dice. */
-const CAPTURED_SYMBOL = 'R_100';
+/**
+ * Los símbolos que se capturan en la Fase 2, R_100 y, desde el PR 3 de ADR-0021 §9, el oro: sus
+ * filas del catálogo lo dicen. El gráfico sigue siendo el de R_100 (ADR-0021 §5).
+ */
+const CAPTURED_SYMBOLS: ReadonlySet<string> = new Set(['R_100', 'frxXAUUSD']);
 
 const iso = (timeMs: number) => new Date(timeMs).toISOString();
 
@@ -316,7 +319,7 @@ function CatalogReady({
               <tr key={entry.underlying_symbol}>
                 <td className="b-num">
                   {entry.underlying_symbol}
-                  {entry.underlying_symbol === CAPTURED_SYMBOL ? (
+                  {CAPTURED_SYMBOLS.has(entry.underlying_symbol) ? (
                     <>
                       {' '}
                       <Badge icon="database">Se captura</Badge>
@@ -415,7 +418,8 @@ export function MercadosView({
       </Card>
 
       <p className="b-muted w-small">
-        En la Fase 2, buoh solo captura R_100 de Deriv. Las demás fuentes llegan en su fase.
+        En la Fase 2, buoh captura R_100 y el oro (frxXAUUSD) de Deriv, y esta página muestra R_100.
+        Las demás fuentes llegan en su fase.
       </p>
     </>
   );
