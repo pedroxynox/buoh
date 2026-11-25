@@ -9,6 +9,7 @@ import {
   type ContractQuote,
   type ContractTypeOffer,
   type DataQualityIncident,
+  type JsonValue,
   type RawSourceFrame,
   type TradingInterval,
   type TradingSession,
@@ -309,6 +310,61 @@ export function deriveTradingSessions(
 }
 
 // --- contracts_for -----------------------------------------------------------------------------
+
+/**
+ * Campos de cada entrada de `available` que Deriv manda y la release fijada no describe, con su
+ * tipo. El 2026-11-25 a las 21:22 UTC, el `contracts_for` de R_100 traía en su entrada de
+ * acumuladores (`ACCU`) `growth_rate_barrier_offsets`, una lista de números, y el esquema de
+ * `production_v20260901_0`, que no admite campos ajenos en una entrada, la rechazaba entera: R_100
+ * se quedaba sin `ContractOffer`. Los demás mercados no la traían (ADR-0021 §3, precisión del PR 5a).
+ */
+export const CONTRACTS_FOR_FIELDS_NOT_IN_RELEASE = {
+  growth_rate_barrier_offsets: { type: 'array' },
+} as const;
+
+/**
+ * El documento de esquema de la respuesta `contracts_for` con `CONTRACTS_FOR_FIELDS_NOT_IN_RELEASE`
+ * descritos en cada entrada (`properties.contracts_for.properties.available.items.properties`), si
+ * no lo estaban. No cambia nada más: una entrada sigue sin admitir otros campos ajenos y sigue
+ * exigiendo los suyos. Sin esa ruta, o con esos campos ya descritos, el documento queda igual. No
+ * modifica el documento recibido. La aplican quien compila el esquema para las reglas de los lotes
+ * y el replay de sus datasets, como `relaxCatalogResponseSchema` en el catálogo.
+ */
+export function relaxContractsForResponseSchema(document: JsonValue): JsonValue {
+  const path = ['properties', 'contracts_for', 'properties', 'available', 'items', 'properties'];
+  const properties = path.reduce<JsonValue | undefined>(
+    (node, key) => objectMemberOf(node, key),
+    document,
+  );
+  if (typeof properties !== 'object' || properties === null || Array.isArray(properties)) {
+    return document;
+  }
+  const missing = Object.keys(CONTRACTS_FOR_FIELDS_NOT_IN_RELEASE).filter(
+    (field) => !Object.hasOwn(properties, field),
+  );
+  if (missing.length === 0) {
+    return document;
+  }
+  const relaxed = structuredClone(document);
+  const target = path.reduce<JsonValue | undefined>(
+    (node, key) => objectMemberOf(node, key),
+    relaxed,
+  ) as Record<string, JsonValue>;
+  for (const field of missing) {
+    target[field] = {
+      ...CONTRACTS_FOR_FIELDS_NOT_IN_RELEASE[
+        field as keyof typeof CONTRACTS_FOR_FIELDS_NOT_IN_RELEASE
+      ],
+    };
+  }
+  return relaxed;
+}
+
+function objectMemberOf(value: JsonValue | undefined, key: string): JsonValue | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value[key]
+    : undefined;
+}
 
 const DURATION_PATTERN = /^([1-9]\d{0,7})([dhmst])$/u;
 

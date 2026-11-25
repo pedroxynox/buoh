@@ -7,10 +7,12 @@
 export {
   BATCH_RULE_SET,
   compareBatchRecords,
+  CONTRACTS_FOR_FIELDS_NOT_IN_RELEASE,
   deriveBatchInvalidIncident,
   deriveContractOffer,
   deriveContractQuote,
   deriveTradingSessions,
+  relaxContractsForResponseSchema,
   type BatchConversion,
   type BatchInvalidReason,
   type BatchResponseSchema,

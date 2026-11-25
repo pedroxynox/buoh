@@ -165,6 +165,11 @@ const SCHEMAS: Record<DerivOperation, { request: unknown; response: unknown }> =
         {
           count: { type: 'integer' },
           end: { pattern: '^(latest|[0-9]{1,10})$', type: 'string' },
+          // Las velas de los lotes (ADR-0021 §3), con los valores de la release fijada.
+          granularity: {
+            enum: [60, 120, 180, 300, 600, 900, 1800, 3600, 7200, 14400, 28800, 86400],
+            type: 'integer',
+          },
           start: { maximum: 9_999_999_999, minimum: 0, type: 'integer' },
           style: { enum: ['candles', 'ticks'], type: 'string' },
         },
