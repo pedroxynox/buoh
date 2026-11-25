@@ -1,6 +1,6 @@
 /**
  * La forma de las respuestas de `GET /api/v1/datos/grafico` (`DataChart`) y `GET
- * /api/v1/datos/catalogo` (`DataCatalog`), comprobada en el navegador antes de dibujarlas (ADR-0019
+ * /api/v2/datos/catalogo` (`DataCatalog`), comprobada en el navegador antes de dibujarlas (ADR-0019
  * §8; CONTRIBUTING, «Reglas de implementación»). Como la de la salud (`salud/respuesta.ts`), no usa
  * los esquemas de `@buoh/contracts`, cuya entrada principal carga módulos de Node, y repite sus
  * reglas: objetos estrictos, los valores y formatos de cada campo, y las reglas entre campos (las
@@ -79,7 +79,6 @@ const ENTRY_KEYS = [
   'submarket',
   'underlying_symbol',
   'underlying_symbol_name',
-  'underlying_symbol_type',
 ] as const satisfies readonly (keyof NonNullable<DataCatalog['catalog']>['entries'][number])[];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -227,7 +226,6 @@ function isEntry(value: unknown): boolean {
     hasExactly(value, ENTRY_KEYS) &&
     isNonEmpty(value.underlying_symbol) &&
     typeof value.underlying_symbol_name === 'string' &&
-    typeof value.underlying_symbol_type === 'string' &&
     typeof value.market === 'string' &&
     typeof value.submarket === 'string' &&
     typeof value.subgroup === 'string' &&

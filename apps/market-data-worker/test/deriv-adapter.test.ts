@@ -4,10 +4,14 @@ import {
   canonicalJson,
   connectionClosedSchema,
   connectionOpenedSchema,
+  deriveCatalogContentSha256,
+  deriveCatalogSnapshotId,
   sha256Hex,
+  sourceCatalogSnapshotSchema,
   sourceEventSchema,
   type ConnectionClosed,
   type RawSourceFrame,
+  type SourceCatalogSnapshot,
   type SourceEvent,
 } from '@buoh/contracts';
 import {
@@ -652,6 +656,13 @@ describe('runDerivAdapter: respuestas pedidas (ADR-0012 §5 y §6)', () => {
 });
 
 describe('runDerivAdapter: catálogo (F1-CATALOG-001, ADR-0012 §7)', () => {
+  /** Una entrada sintética sin `underlying_symbol_type`, como las manda Deriv desde el 2026-11-24. */
+  const withoutType = (entry: typeof SYNTH_100): Record<string, unknown> => {
+    const copy: Record<string, unknown> = { ...entry };
+    delete copy['underlying_symbol_type'];
+    return copy;
+  };
+
   it('sin snapshot válido no se suscribe: incidencia, ninguna versión y salud failed', async () => {
     const run = await harness();
     await run.openAndListCatalog([]);
@@ -678,6 +689,47 @@ describe('runDerivAdapter: catálogo (F1-CATALOG-001, ADR-0012 §7)', () => {
       closure_type: 'requested',
       reason: 'catalog_invalid',
     });
+  });
+
+  it('sin `underlying_symbol_type`, como desde el 2026-11-24, crea su versión y se suscribe, sin versión anterior', async () => {
+    // Lo que pasó el 2026-11-25 con el log 1 del oro: un log nuevo, sin ninguna versión, y el
+    // catálogo sin el campo, que la release fijada exige (ADR-0012 §7).
+    const run = await harness();
+    const socket = run.socket();
+    socket.open();
+    await settle();
+    socket.text(derivMessages.catalog(1, [withoutType(SYNTH_100), withoutType(SYNTH_50)]));
+    await settle();
+
+    expect(run.requested.incidents).toEqual([]);
+    expect(run.catalog.versions).toHaveLength(1);
+    expect(socket.requests()[1]).toEqual({ req_id: 2, subscribe: 1, ticks: 'SYNTH_100' });
+    socket.emit({ code: 1000, kind: 'closed' });
+    const result = await run.run;
+    expect(result.catalog).toMatchObject({ status: 'created', version: 1 });
+    expect(result.catalog?.snapshot.schema_version).toBe('2.0.0');
+    expect(result.catalog?.snapshot.entries.map((entry) => Object.keys(entry).sort())).toEqual([
+      [
+        'exchange_is_open',
+        'is_trading_suspended',
+        'market',
+        'pip_size',
+        'subgroup',
+        'submarket',
+        'underlying_symbol',
+        'underlying_symbol_name',
+      ],
+      [
+        'exchange_is_open',
+        'is_trading_suspended',
+        'market',
+        'pip_size',
+        'subgroup',
+        'submarket',
+        'underlying_symbol',
+        'underlying_symbol_name',
+      ],
+    ]);
   });
 
   it('un catálogo inválido no reemplaza la última versión válida, que sigue vigente', async () => {
@@ -717,6 +769,91 @@ describe('runDerivAdapter: catálogo (F1-CATALOG-001, ADR-0012 §7)', () => {
     run.socket().emit({ code: 1000, kind: 'closed' });
     const result = await run.run;
     expect(result.catalog).toEqual({ snapshot: previous.snapshot, status: 'previous', version: 1 });
+  });
+
+  /**
+   * Un snapshot 1.0.0 de `entries`, como los que guardan los logs de producción hasta el
+   * 2026-11-24: con `underlying_symbol_type` en cada entrada y sus hashes (ADR-0012 §7).
+   */
+  function storedV1(entries: readonly (typeof SYNTH_100)[]): SourceCatalogSnapshot {
+    const derived = entries
+      .map((entry) => ({
+        exchange_is_open: entry.exchange_is_open as 0 | 1,
+        is_trading_suspended: entry.is_trading_suspended as 0 | 1,
+        market: entry.market,
+        pip_size: String(entry.pip_size),
+        subgroup: entry.subgroup,
+        submarket: entry.submarket,
+        underlying_symbol: entry.underlying_symbol,
+        underlying_symbol_name: entry.underlying_symbol_name,
+        underlying_symbol_type: entry.underlying_symbol_type,
+      }))
+      .sort((left, right) => (left.underlying_symbol < right.underlying_symbol ? -1 : 1));
+    const body = {
+      catalog_format: 'deriv_active_symbols' as const,
+      catalog_normalizer_version: '1.0.0' as const,
+      connector_version: DERIV_CONNECTOR_VERSION,
+      content_sha256: deriveCatalogContentSha256(derived),
+      entries: derived,
+      entry_count: derived.length,
+      observation_id: uuid(901),
+      raw_payload_sha256: sha256Hex('catálogo 1.0.0 guardado'),
+      received_at_utc: '2026-03-01T00:00:00.000Z',
+      schema_version: '1.0.0' as const,
+      source: DERIV_SOURCE,
+      source_schema_release: 'synthetic-1.0.0',
+      source_schema_sha256: sha256Hex('esquema 1.0.0'),
+    };
+    return sourceCatalogSnapshotSchema.parse({
+      ...body,
+      snapshot_id: deriveCatalogSnapshotId(body),
+    });
+  }
+
+  it('con una 1.0.0 como última versión, el mismo catálogo crea la siguiente, una 2.0.0', async () => {
+    // El log 5 de R_100 de producción al desplegar la precisión del 2026-11-25: su última versión
+    // es una 1.0.0, y Deriv manda el mismo catálogo, ahora sin `underlying_symbol_type`.
+    const stored = storedV1([SYNTH_100, SYNTH_50]);
+    const catalog = new MemoryCatalogStore();
+    await catalog.record(stored);
+
+    const run = await harness({ catalog });
+    const socket = run.socket();
+    socket.open();
+    await settle();
+    socket.text(derivMessages.catalog(1, [withoutType(SYNTH_100), withoutType(SYNTH_50)]));
+    await settle();
+
+    expect(run.requested.incidents).toEqual([]);
+    expect(run.catalog.versions.map((item) => item.snapshot.schema_version)).toEqual([
+      '1.0.0',
+      '2.0.0',
+    ]);
+    expect(socket.requests()[1]).toEqual({ req_id: 2, subscribe: 1, ticks: 'SYNTH_100' });
+    socket.emit({ code: 1000, kind: 'closed' });
+    const result = await run.run;
+    expect(result.catalog).toMatchObject({ status: 'created', version: 2 });
+    expect(result.catalog?.snapshot.entries.map((entry) => entry.underlying_symbol)).toEqual(
+      stored.entries.map((entry) => entry.underlying_symbol),
+    );
+  });
+
+  it('un catálogo inválido deja vigente la última versión aunque sea una 1.0.0', async () => {
+    const stored = storedV1([SYNTH_100]);
+    const catalog = new MemoryCatalogStore();
+    await catalog.record(stored);
+
+    const run = await harness({ catalog });
+    run.socket().open();
+    await settle();
+    run.socket().text(derivMessages.error(1, 'active_symbols', { active_symbols: 'brief' }));
+    await settle();
+
+    expect(run.catalog.versions).toHaveLength(1);
+    expect(run.socket().requests()[1]).toEqual({ req_id: 2, subscribe: 1, ticks: 'SYNTH_100' });
+    run.socket().emit({ code: 1000, kind: 'closed' });
+    const result = await run.run;
+    expect(result.catalog).toEqual({ snapshot: stored, status: 'previous', version: 1 });
   });
 
   it('un contenido distinto crea versión nueva; trade_count no cuenta como cambio', async () => {

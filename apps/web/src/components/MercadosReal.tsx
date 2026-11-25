@@ -306,7 +306,6 @@ function CatalogReady({
             <tr>
               <th scope="col">Símbolo oficial</th>
               <th scope="col">Nombre</th>
-              <th scope="col">Tipo</th>
               <th scope="col">Mercado</th>
               <th scope="col">Submercado</th>
               <th scope="col">Grupo</th>
@@ -327,7 +326,6 @@ function CatalogReady({
                   ) : null}
                 </td>
                 <td>{entry.underlying_symbol_name}</td>
-                <td>{entry.underlying_symbol_type}</td>
                 <td>{entry.market}</td>
                 <td>{entry.submarket}</td>
                 <td>{entry.subgroup}</td>

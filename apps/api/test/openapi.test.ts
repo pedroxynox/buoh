@@ -128,7 +128,7 @@ describe('buildOpenApiDocument', () => {
     expect(statuses('/api/v1/datos/eventos', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/datos/datasets', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/datos/grafico', 'get')).toEqual(['200', '400', '401', '500', '503']);
-    expect(statuses('/api/v1/datos/catalogo', 'get')).toEqual(['200', '400', '401', '500', '503']);
+    expect(statuses('/api/v2/datos/catalogo', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/enlace', 'post')).toEqual([
       '200',
       '400',
@@ -274,7 +274,6 @@ describe('buildOpenApiDocument', () => {
     const entry = {
       underlying_symbol: 'R_100',
       underlying_symbol_name: 'Volatility 100 Index',
-      underlying_symbol_type: 'stockindex',
       market: 'synthetic_index',
       submarket: 'random_index',
       subgroup: 'synthetics',
@@ -294,6 +293,13 @@ describe('buildOpenApiDocument', () => {
     expect(catalog({ log: null, catalog: null })).toBe(true);
     expect(catalog({ log: 2, catalog: { ...version, entries: [] } })).toBe(false);
     expect(catalog({ log: 2, catalog: { ...version, entries: [{ ...entry, x: 1 }] } })).toBe(false);
+    // `/api/v2/`: las entradas ya no llevan el campo que Deriv dejó de mandar (ADR-0019 §6).
+    expect(
+      catalog({
+        log: 2,
+        catalog: { ...version, entries: [{ ...entry, underlying_symbol_type: 'stockindex' }] },
+      }),
+    ).toBe(false);
 
     const events = validatorFor('DataEvents');
     const incident = {
@@ -344,7 +350,7 @@ describe('buildOpenApiDocument', () => {
         schema: { type: 'string', pattern: '^(?:[1-9]|1[0-9]|2[0-4])$' },
       },
     ]);
-    const catalog = operation('/api/v1/datos/catalogo', 'get') as OpenApiOperation & {
+    const catalog = operation('/api/v2/datos/catalogo', 'get') as OpenApiOperation & {
       readonly parameters: readonly unknown[];
     };
     expect(catalog.parameters).toEqual([]);

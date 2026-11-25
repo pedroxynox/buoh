@@ -447,14 +447,16 @@ Desde el PR 6 de ADR-0015 §13, como decide su §8, `pnpm run data:health -- --j
 
 Definido para F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §7, `F1-CATALOG-001`) e implementado en `packages/contracts` (`sourceCatalogSnapshotSchema`, con `deriveCatalogContentSha256` y `deriveCatalogSnapshotId`). Es una versión del catálogo oficial de una fuente, derivada de un `RawSourceFrame` durable que trae la respuesta completa. Es inmutable: un catálogo distinto crea otro snapshot.
 
+Hay dos versiones. Desde la precisión del 2026-11-25 de ADR-0012 §7, buoh deriva la 2.0.0, sin `underlying_symbol_type`, que Deriv dejó de mandar el 2026-11-24 (ADR-0012, «Hechos verificados el 2026-11-25»). La 1.0.0, la de antes, lleva ese campo en cada entrada y su normalizador es el 1.0.0; sigue teniendo lector, porque los logs guardan sus documentos hasta que vencen (ADR-0018 §7). El esquema runtime acepta las dos, cada una con sus entradas, y nada vuelve a escribir una 1.0.0.
+
 El JSON Schema generado (`source-catalog-snapshot`) describe la forma. Solo el esquema runtime comprueba el orden y la unicidad de `entries`, que `entry_count` sea su longitud y los dos hashes.
 
 ```text
-schema_version: "1.0.0"
+schema_version: "2.0.0"                     # "1.0.0" en los guardados hasta el 2026-11-24
 snapshot_id: DerivedEventId
 source: string
 catalog_format: "deriv_active_symbols"
-catalog_normalizer_version: "1.0.0"
+catalog_normalizer_version: "2.0.0"         # "1.0.0" con schema_version "1.0.0"
 connector_version: string
 source_schema_release: string
 source_schema_sha256: Sha256Hex
@@ -471,7 +473,7 @@ entries: DerivActiveSymbolEntry[]   # no vacía
 ```text
 underlying_symbol: Symbol
 underlying_symbol_name: string
-underlying_symbol_type: string
+underlying_symbol_type: string     # solo en la 1.0.0, y ahí obligatorio
 market: string
 submarket: string
 subgroup: string
@@ -480,27 +482,27 @@ exchange_is_open: 0 | 1
 is_trading_suspended: 0 | 1
 ```
 
-- **Procedencia.** `source`, `connector_version`, `observation_id`, `raw_payload_sha256` y `received_at_utc` son los del frame. `source_schema_release` es la release fijada, y `source_schema_sha256`, el SHA-256 del JCS del esquema de respuesta con que se validó (`active_symbols_response.schema.json`).
+- **Procedencia.** `source`, `connector_version`, `observation_id`, `raw_payload_sha256` y `received_at_utc` son los del frame. `source_schema_release` es la release fijada, y `source_schema_sha256`, el SHA-256 del JCS del esquema de respuesta con que se validó: en la 2.0.0, `active_symbols_response.schema.json` sin `underlying_symbol_type` en la lista `required` de las entradas (`relaxCatalogResponseSchema`, ADR-0012 §2), y en la 1.0.0, ese archivo tal cual.
 - **Identidad.** `snapshot_id` es `sha256:` + SHA-256 del JCS del snapshot sin `snapshot_id`. `content_sha256` es el hash de secuencia de `entries` (JCS por línea, unidas por `\n`, con newline final), y `entry_count`, su longitud.
 - **Orden.** `entries` va ordenada por `underlying_symbol` en unidades UTF-16 y no repite códigos.
-- **Campos fuera.** `trade_count` no entra: es un contador que cambió en todas las entradas entre dos consultas separadas por 8 s (ADR-0012), y con él cada consulta sería una versión. El raw lo conserva.
+- **Campos fuera.** `trade_count` no entra: es un contador que cambió en todas las entradas entre dos consultas separadas por 8 s (ADR-0012), y con él cada consulta sería una versión. En la 2.0.0, `underlying_symbol_type` tampoco, aunque llegue: así, que Deriv lo mande o no, no crea versiones. El raw lo conserva.
 - **Dos `pip_size`.** El `pip_size` del catálogo es la variación mínima que publica Deriv (por ejemplo `0.01`). No es el de `MarketTick`, que cuenta decimales.
 - **Versiones.**
   - Un índice PostgreSQL append-only asigna versiones contiguas desde 1 por `source + catalog_format`.
-  - Un snapshot se guarda solo si su `content_sha256` difiere del de la última versión; volver a un contenido anterior también crea versión.
+  - Un snapshot se guarda solo si su `content_sha256` difiere del de la última versión; volver a un contenido anterior también crea versión. En un log cuya última versión es una 1.0.0, el primer snapshot 2.0.0 crea versión aunque Deriv mande el mismo catálogo, porque sus entradas ya no llevan `underlying_symbol_type`.
   - La versión la pone el índice y no forma parte del snapshot.
   - El documento es el JCS del snapshot, sin newline, en el almacenamiento de objetos con clave por contenido.
   - Implementado desde el PR 6 de F1.4b en la tabla `source_catalog_versions` (migración `0003`, `PostgresCatalogStore` en el worker).
 - **Respuesta inválida.** Una respuesta que falla una de estas comprobaciones no crea versión, y el último snapshot válido sigue vigente. Se comprueban en este orden, y la primera que falla da el motivo:
   1. trae un objeto `error`, como en las reglas 2.0.0: `source_error_response`;
-  2. no cumple el esquema fijado: `schema_validation_failed`;
+  2. no cumple el esquema fijado, en la 2.0.0 sin exigir `underlying_symbol_type`: `schema_validation_failed`;
   3. la lista falta, no es una lista o está vacía: `catalog_empty`;
   4. un `pip_size` trae exponente: `catalog_exponent_not_supported`;
   5. una entrada no cumple este contrato, por ejemplo un código vacío: `catalog_entry_invalid`;
   6. un código se repite: `catalog_duplicate_symbol`.
 
   Quien pidió el catálogo registra la incidencia de [respuestas pedidas](#incidencias-de-respuestas-pedidas) con ese motivo.
-- **Conversión.** `deriveCatalogSnapshot` (`packages/domain`) aplica las seis comprobaciones a un frame durable y, si pasan, arma el snapshot: proyecta los nueve campos, ordena las entradas y calcula los hashes con las funciones del contrato. Es pura, así que el snapshot o la incidencia se pueden volver a derivar del frame. El frame tiene que ser JSON: quien lo correlaciona tiene que leerlo con el mismo lector estricto (`parseJsonPreservingNumbers`), así que un frame que no lo es, o que repite una clave, nunca llega a la conversión, y ya deja la incidencia `payload_not_json` de las reglas 2.0.0. Si llegara, la conversión lanza un error.
+- **Conversión.** `deriveCatalogSnapshot` (`packages/domain`) aplica las seis comprobaciones a un frame durable y, si pasan, arma el snapshot 2.0.0: proyecta los ocho campos de la 2.0.0, ordena las entradas y calcula los hashes con las funciones del contrato. Es pura, así que el snapshot o la incidencia se pueden volver a derivar del frame. El frame tiene que ser JSON: quien lo correlaciona tiene que leerlo con el mismo lector estricto (`parseJsonPreservingNumbers`), así que un frame que no lo es, o que repite una clave, nunca llega a la conversión, y ya deja la incidencia `payload_not_json` de las reglas 2.0.0. Si llegara, la conversión lanza un error.
 - **Estado de mercado.** `exchange_is_open` e `is_trading_suspended` siguen el horario de cada mercado, así que habrá una versión nueva cuando un mercado abra, cierre o se suspenda.
 
 ## Replay de dataset
@@ -659,7 +661,7 @@ Desde el PR 3b de [ADR-0020](adr/0020-datasets-vivos.md) §13, la publicación d
 
 ### Incidencias de respuestas pedidas
 
-Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §6). Las reglas 2.0.0 no comprueban las respuestas declaradas en `non_tick_msg_types`. Quien pidió una respuesta declarada la compara con el esquema de respuesta de su operación en la release fijada. Si la respuesta trae `error`, no cumple ese esquema o, en el catálogo, no puede convertirse en snapshot, quien la pidió registra un `DataQualityIncident`:
+Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §6). Las reglas 2.0.0 no comprueban las respuestas declaradas en `non_tick_msg_types`. Quien pidió una respuesta declarada la compara con el esquema de respuesta de su operación en la release fijada; la del catálogo, desde la precisión del 2026-11-25 de ADR-0012 §2, sin exigir `underlying_symbol_type` ([«SourceCatalogSnapshot»](#sourcecatalogsnapshot)). Si la respuesta trae `error`, no cumple ese esquema o, en el catálogo, no puede convertirse en snapshot, quien la pidió registra un `DataQualityIncident`:
 
 | Campo | Valor |
 |---|---|
@@ -683,7 +685,7 @@ Desde el PR 3 de [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §
 
 ## Mensajes de la API
 
-Los mensajes de la API de buoh (`apps/api`, [ADR-0019](adr/0019-api-cuentas-y-auditoria.md) §6) están en `packages/contracts/src/api.ts`. Las rutas van bajo `/api/v1/`, y la versión de un mensaje es la de su ruta: estos mensajes no llevan `schema_version`, y un cambio incompatible crea `/api/v2/`. La API valida con ellos cada entrada y cada salida. Su descripción OpenAPI 3.1 sale de ellos y de la tabla de rutas de la API, en `apps/api/generated/openapi.json`, y no se edita a mano (`pnpm run openapi:generate`; `pnpm run openapi:check` lo comprueba). No tienen JSON Schema propio en `generated/`: lo lleva ese OpenAPI.
+Los mensajes de la API de buoh (`apps/api`, [ADR-0019](adr/0019-api-cuentas-y-auditoria.md) §6) están en `packages/contracts/src/api.ts`. Las rutas van bajo `/api/v1/`, y la versión de un mensaje es la de su ruta: estos mensajes no llevan `schema_version`, y un cambio incompatible crea `/api/v2/`. El primero fue el del catálogo, `GET /api/v2/datos/catalogo` (`DataCatalog`, más abajo; ADR-0019 §6, precisión del 2026-11-25). La API valida con ellos cada entrada y cada salida. Su descripción OpenAPI 3.1 sale de ellos y de la tabla de rutas de la API, en `apps/api/generated/openapi.json`, y no se edita a mano (`pnpm run openapi:generate`; `pnpm run openapi:check` lo comprueba). No tienen JSON Schema propio en `generated/`: lo lleva ese OpenAPI.
 
 ```text
 ApiError {
@@ -743,11 +745,11 @@ DataChart {
     reason: Código | null, recovered_ticks: entero ≥ 0 | null
   }[]                                            # los que tocan la ventana, en orden de inicio
 }
-DataCatalog {                                    # GET /api/v1/datos/catalogo (F2.4)
+DataCatalog {                                    # GET /api/v2/datos/catalogo (F2.4)
   log: 1..999999 | null,
   catalog: { source: texto, version: entero ≥ 1, received_at_utc: UtcTimestampMs,
              source_schema_release: texto, content_sha256: Sha256Hex,
-             entries: DerivActiveSymbolEntry [] } | null   # siempre null si log es null
+             entries: DerivActiveSymbolEntry [] } | null   # las de la 2.0.0; null si log es null
 }
 DataEvents {                                     # GET /api/v1/datos/eventos (F2.4)
   logs: 1..999999 [],                            # los leídos, de mayor a menor, sin repetir
@@ -807,7 +809,7 @@ LinkToken = 32 bytes en base64url sin relleno: 43 caracteres, con una sola escri
 - `AccountPreferences` es la respuesta de `GET /api/v1/preferencias` y de `POST /api/v1/preferencias` (F2.4, [ADR-0019](adr/0019-api-cuentas-y-auditoria.md) §7), con sesión: las preferencias de la cuenta de la sesión. En la Fase 2 solo el tema de la web, `night` o `day`, que la web pone como `data-theme="noche"` o `"dia"`; sin ninguno guardado, `night`. `PreferencesRequest`, el cuerpo de `POST`, lleva el tema que se guarda (`THEMES`).
 - `DataHealth` es la respuesta de `GET /api/v1/datos/salud` (F2.4, [ADR-0019](adr/0019-api-cuentas-y-auditoria.md) §8), con sesión: la salud de los datos, la última observación que guardó `buoh-operaciones` en el log activo, con la hora en que la guardó (`observed_at_utc`), para que se vea su frescura. La API no ejecuta `data:health`. `log` es el número del log activo, o `null` si no hay ninguno, y entonces tampoco hay observación: el esquema runtime lo comprueba, el JSON Schema del OpenAPI no. `observation` es `null` si el log activo todavía no tiene ninguna, como justo después del corte semanal, y si la última falló, una anterior que terminó no la sustituye. `completed` lleva el `HealthReport`, con sus reglas, que puede no ser `healthy`, y las alertas que dejó `data:health` en stderr, con su evento y su motivo saneados, como las guarda `buoh-operaciones`: son la causa de un `paused` o un `failed` cuando no pudo observar el log, como `data_health_storage_unavailable`. `failed` lleva el motivo saneado por el que no se pudo observar, como `child_timeout`, `health_command_failed` o un SQLSTATE, y `code`, con `health_command_failed`, el código de la línea de error de `data:health`, como `ConfigError`, o `null`. Nunca un mensaje.
 - `DataChart` es la respuesta de `GET /api/v1/datos/grafico` (F2.4, [ADR-0019](adr/0019-api-cuentas-y-auditoria.md) §8), con sesión: el gráfico de R_100 en las últimas `hours` horas del log activo, de `from_utc` a `to_utc`, la hora de la lectura. `DataChartQuery` admite solo `hours`, de 1 a 24 escrito sin ceros delante, la ventana máxima (`DATA_CHART_MAX_HOURS`). Cada tick es su distancia en milisegundos a `from_utc` (`offsets_ms`) y su cotización en decimal canónico (`quotes`), en la misma posición: uno por instante, en orden, dentro de la ventana. Si llegó más de uno en el mismo instante, cuenta el de menor `tick_fingerprint_sha256`. `log_started_at_utc` es la hora del primer evento del log: antes, la ventana no tiene datos de ese log, como justo después del corte semanal. Un hueco es un período sin ticks que el log registra, nunca la distancia entre dos ticks, del high-watermark + 1 ms al primer tick posterior − 1 ms, o sin fin (`to_utc` `null`) mientras no llega ninguno. `connection_lost` sigue a un cierre no pedido, y `history` dice qué trajo la historia: `recovered`, con los ticks que faltaban en `recovered_ticks`, que el gráfico no dibuja; `partial` o `unavailable`, sin resolver, con el motivo de su `event_gap_unresolved` en `reason`, y `partial` con los ticks que trajo; o `pending`, sin resultado todavía. `capture_stopped` sigue a un cierre pedido, como el de un despliegue, y su `history` es `not_requested`, porque no se recupera. Van los que tocan la ventana, aunque empiecen antes, en orden de inicio. Las reglas entre campos (las horas enteras de la ventana, los ticks en orden y dentro de ella, lo que lleva cada clase de hueco y que sin log no hay datos) las comprueba el esquema runtime; el JSON Schema del OpenAPI, no.
-- `DataCatalog` es la respuesta de `GET /api/v1/datos/catalogo` (F2.4, ADR-0019 §8), con sesión: la última versión del catálogo de Deriv en el log activo (ADR-0012 §7), con su número, la hora en que llegó, la release de esquemas con que se derivó, su `content_sha256` y sus entradas, las `DerivActiveSymbolEntry` de `SourceCatalogSnapshot`, en orden de símbolo y con los nombres y valores oficiales. El número cuenta desde 1 en cada log. `catalog` es `null` si el log activo todavía no tiene ninguna versión, sin mirar la del log anterior, y siempre que `log` es `null`.
+- `DataCatalog` es la respuesta de `GET /api/v2/datos/catalogo` (F2.4, ADR-0019 §8), con sesión: la última versión del catálogo de Deriv en el log activo (ADR-0012 §7), con su número, la hora en que llegó, la release de esquemas con que se derivó, su `content_sha256` y sus entradas, las `DerivActiveSymbolEntry` de `SourceCatalogSnapshot` 2.0.0, en orden de símbolo y con los nombres y valores oficiales. De una versión 1.0.0 guardada, la API da sus entradas sin `underlying_symbol_type`, y su `content_sha256`, el de la versión guardada. Antes de esa precisión era `GET /api/v1/datos/catalogo`, con el campo: quitarlo es un cambio incompatible, que lleva el mensaje a `/api/v2/`, y la ruta de `/api/v1/` ya no existe. El número cuenta desde 1 en cada log. `catalog` es `null` si el log activo todavía no tiene ninguna versión, sin mirar la del log anterior, y siempre que `log` es `null`.
 - `DataDatasets` es la respuesta de `GET /api/v1/datos/datasets` (F2.4, segunda parte del 6b; [ADR-0020](adr/0020-datasets-vivos.md) §10), con sesión: los datasets publicados del entorno de la API en `buoh_datasets`, para la sección Datos, cada uno por su publicación activa, los `DATA_DATASETS_LIMIT` (200) más recientes, del más nuevo al más viejo, y `truncated` dice si quedaron fuera otros más viejos. De cada uno, su identificador y su publicación; su fuente, sus símbolos, su período y sus conteos, los de su `DatasetManifestCore`, con sus reglas y su perfil; su log y sus segmentos, y cómo terminó, de `dataset_log_ranges` (`clean`: sin continuidad pendiente ni `connection_lost` abierta); sus incidencias por tipo y gravedad, que suman `incident_count`; y la última verificación de cada modo de esa publicación (`verify_only` y `recompute`, ADR-0020 §8), o `null`. Una verificación `passed` no lleva código, una `failed` lo lleva, y una `incomplete` lleva el de su última ejecución, si lo tiene. El período es `null` exactamente cuando no hay ticks. Las reglas entre campos las comprueba el esquema runtime; el JSON Schema del OpenAPI, no. Los datasets no vencen (ADR-0020 §6).
 - `DataEvents` es la respuesta de `GET /api/v1/datos/eventos` (F2.4, ADR-0019 §5 y §8), con sesión: los eventos de datos que guardan los logs que no han vencido y, desde el 6b de F2.4, las publicaciones de `buoh_datasets`, para la sección Auditoría. Son las versiones del catálogo, las publicaciones del entorno de la API, las incidencias del registro operativo (`persistence_unavailable` y `source_limit_exceeded`) y de las respuestas pedidas (`invalid_source_frame`), y las aperturas y resoluciones de las condiciones del registro operativo. Cada uno lleva el log donde está (una publicación, el de su dataset), su hora (`at_utc`: la de llegada del catálogo, la de la publicación, la de observación de la incidencia o la de la condición) y su fuente; cada incidencia, la evidencia de su `DataQualityIncident`, y cada condición, los campos de su `OperationalConditionEvent` salvo `cause_refs`. Son los `DATA_EVENTS_LIMIT` (200) más recientes como mucho, del más nuevo al más viejo, y `truncated` dice si quedaron fuera otros más viejos, así que solo puede ser `true` con la lista llena. `logs` son los logs leídos, de mayor a menor: cada evento que no es una publicación es de uno de ellos. Desde el 6b de F2.4, las publicaciones salen de `buoh_datasets` ([ADR-0020](adr/0020-datasets-vivos.md) §10), con el log de su dataset (`dataset_log_ranges`), que puede ser uno que ya no se lee. Una resolución lleva su motivo, una apertura no, y la clave de una condición empieza por su tipo. Los motivos son códigos saneados, nunca un mensaje. Las reglas entre campos las comprueba el esquema runtime; el JSON Schema del OpenAPI, no. Los eventos siguen en su log y se borran con él a los 30 días de su última escritura (ADR-0018 §7), salvo las publicaciones, que no vencen (ADR-0020 §6).
 
@@ -862,7 +864,7 @@ AuditObject = { kind: "account" | "credential" | "link" | "session", id: UuidV7 
 - Cambio aditivo compatible incrementa minor; cambio de semántica, tipo, requiredness, orden o canonicalización incrementa major.
 - Contratos internos son estrictos y productores/consumidores se actualizan coordinadamente.
 - Payload externo se preserva completo como raw; el adaptador extrae campos validados y tolera extras solo si el esquema fijado lo permite.
-- Toda versión mayor conserva lector/replay mientras exista un dataset que la referencie, o documenta migración explícita sin sobrescribir originales. Así conviven hoy las incidencias 1.0.0 y 2.0.0 y los conjuntos de reglas 1.0.0, 2.0.0 y 3.0.0.
+- Toda versión mayor conserva lector/replay mientras exista un dataset que la referencie, o documenta migración explícita sin sobrescribir originales. Así conviven hoy las incidencias 1.0.0 y 2.0.0, los conjuntos de reglas 1.0.0, 2.0.0 y 3.0.0, y los snapshots de catálogo 1.0.0 y 2.0.0.
 - TypeScript y futuro Python comparten JSON Schema generado y vectores.
 
 ## Oráculo inicial

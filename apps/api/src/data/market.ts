@@ -424,7 +424,18 @@ export function createMarketDataReader(deps: MarketDataReaderDeps): MarketDataRe
           received_at_utc: snapshot.received_at_utc,
           source_schema_release: snapshot.source_schema_release,
           content_sha256: snapshot.content_sha256,
-          entries: snapshot.entries,
+          // Las entradas de `SourceCatalogSnapshot` 2.0.0: de una versión 1.0.0 guardada, sin
+          // `underlying_symbol_type`, que Deriv ya no manda (ADR-0012 §7).
+          entries: snapshot.entries.map((entry) => ({
+            underlying_symbol: entry.underlying_symbol,
+            underlying_symbol_name: entry.underlying_symbol_name,
+            market: entry.market,
+            submarket: entry.submarket,
+            subgroup: entry.subgroup,
+            pip_size: entry.pip_size,
+            exchange_is_open: entry.exchange_is_open,
+            is_trading_suspended: entry.is_trading_suspended,
+          })),
         },
       };
     },

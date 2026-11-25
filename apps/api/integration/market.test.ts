@@ -46,7 +46,7 @@ import { apiRoutes } from '../src/routes.js';
 
 /**
  * Las lecturas de R2 (ADR-0019 §8) contra el PostgreSQL y el S3-compatible locales, sin TLS:
- * `GET /api/v1/datos/grafico` y `GET /api/v1/datos/catalogo` con el pool de lectura de la API y el
+ * `GET /api/v1/datos/grafico` y `GET /api/v2/datos/catalogo` con el pool de lectura de la API y el
  * código del worker por la ruta `lectura`. El superusuario hace de `ingest` y de `buoh-operaciones`:
  * crea el log con las migraciones del worker, le da a un rol de prueba lo que tiene `buoh_lectura`
  * y escribe una captura sintética de R_100, con la forma de los mensajes de Deriv y precios
@@ -282,6 +282,8 @@ async function writeCapture(schema: string, log: number): Promise<void> {
       }
     }
 
+    // Un snapshot 1.0.0, con `underlying_symbol_type`, como los que guardó producción hasta el
+    // 2026-11-24: la API los sigue leyendo (ADR-0012 §7).
     const entries = [
       {
         exchange_is_open: 1 as const,
@@ -402,7 +404,7 @@ afterAll(async () => {
   }
 });
 
-describe('GET /api/v1/datos/grafico y /api/v1/datos/catalogo contra PostgreSQL y S3 (ADR-0019 §8)', () => {
+describe('GET /api/v1/datos/grafico y /api/v2/datos/catalogo contra PostgreSQL y S3 (ADR-0019 §8)', () => {
   it('sin ningún log, ni gráfico ni catálogo', async () => {
     const { get } = apiWith();
     expect(await get('/api/v1/datos/grafico?hours=6')).toEqual({
@@ -418,7 +420,7 @@ describe('GET /api/v1/datos/grafico y /api/v1/datos/catalogo contra PostgreSQL y
       },
       status: 200,
     });
-    expect(await get('/api/v1/datos/catalogo')).toEqual({
+    expect(await get('/api/v2/datos/catalogo')).toEqual({
       body: { log: null, catalog: null },
       status: 200,
     });
@@ -431,7 +433,7 @@ describe('GET /api/v1/datos/grafico y /api/v1/datos/catalogo contra PostgreSQL y
       body: { log: 1, log_started_at_utc: null, ticks: { offsets_ms: [] }, gaps: [] },
       status: 200,
     });
-    expect(await get('/api/v1/datos/catalogo')).toEqual({
+    expect(await get('/api/v2/datos/catalogo')).toEqual({
       body: { log: 1, catalog: null },
       status: 200,
     });
@@ -469,7 +471,7 @@ describe('GET /api/v1/datos/grafico y /api/v1/datos/catalogo contra PostgreSQL y
     expect(longer.ticks.quotes).toEqual(chart.ticks.quotes);
     expect(longer.gaps).toEqual(chart.gaps);
 
-    const catalog = await get('/api/v1/datos/catalogo');
+    const catalog = await get('/api/v2/datos/catalogo');
     expect(catalog.status).toBe(200);
     expect(dataCatalogSchema.parse(catalog.body)).toMatchObject({
       log: 1,
@@ -478,15 +480,28 @@ describe('GET /api/v1/datos/grafico y /api/v1/datos/catalogo contra PostgreSQL y
         version: 1,
         received_at_utc: '2026-11-08T11:19:59.500Z',
         source_schema_release: 'synthetic-deriv-1',
-        entries: [{ underlying_symbol: 'R_100', pip_size: '0.01' }],
       },
     });
+    // La versión guardada es una 1.0.0, como las de producción hasta el 2026-11-24, y la API da sus
+    // entradas sin `underlying_symbol_type` (ADR-0012 §7; ADR-0019 §8).
+    expect(dataCatalogSchema.parse(catalog.body).catalog?.entries).toEqual([
+      {
+        underlying_symbol: 'R_100',
+        underlying_symbol_name: 'Volatility 100 Index',
+        market: 'synthetic_index',
+        submarket: 'random_index',
+        subgroup: 'synthetics',
+        pip_size: '0.01',
+        exchange_is_open: 1,
+        is_trading_suspended: 0,
+      },
+    ]);
     expect(lines.filter((line) => line.event === 'api_error')).toEqual([]);
   });
 
   it('con un token que R2 rechaza, storage_unavailable con el motivo saneado y sin la clave', async () => {
     const { get, lines } = apiWith(badS3);
-    for (const url of ['/api/v1/datos/grafico?hours=1', '/api/v1/datos/catalogo']) {
+    for (const url of ['/api/v1/datos/grafico?hours=1', '/api/v2/datos/catalogo']) {
       const response = await get(url);
       expect(response, url).toMatchObject({
         body: { error: { code: 'storage_unavailable' } },

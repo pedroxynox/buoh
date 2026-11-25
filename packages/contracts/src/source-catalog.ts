@@ -12,46 +12,69 @@ import {
   uuidV7Schema,
 } from './scalars.js';
 
-/**
- * Entrada del catálogo `active_symbols` de Deriv (contratos de dominio, «SourceCatalogSnapshot»;
- * ADR-0012 §7). Conserva los nombres y valores oficiales sin traducirlos. `pip_size` es el lexema
- * decimal recibido, sin exponente: la variación mínima que publica Deriv (por ejemplo `0.01`), no
- * los decimales de `MarketTick`. `trade_count` no entra, porque cambia en cada consulta.
- */
-export const derivActiveSymbolEntrySchema = z.strictObject({
+const entryFields = {
   underlying_symbol: symbolSchema,
   underlying_symbol_name: z.string(),
-  underlying_symbol_type: z.string(),
   market: z.string(),
   submarket: z.string(),
   subgroup: z.string(),
   pip_size: decimalStringSchema,
   exchange_is_open: z.literal([0, 1]),
   is_trading_suspended: z.literal([0, 1]),
-});
+};
 
 /**
- * `SourceCatalogSnapshot` 1.0.0: una versión inmutable del catálogo oficial de una fuente,
- * derivada de un `RawSourceFrame` durable con la respuesta completa. El esquema `…Structural`
- * describe la forma y se publica como JSON Schema; el refinado añade orden, conteo y hashes.
+ * Entrada del catálogo `active_symbols` de Deriv en `SourceCatalogSnapshot` 2.0.0 (contratos de
+ * dominio, «SourceCatalogSnapshot»; ADR-0012 §7). Conserva los nombres y valores oficiales sin
+ * traducirlos. `pip_size` es el lexema decimal recibido, sin exponente: la variación mínima que
+ * publica Deriv (por ejemplo `0.01`), no los decimales de `MarketTick`. `trade_count` no entra,
+ * porque cambia en cada consulta, y `underlying_symbol_type` tampoco: Deriv dejó de mandarlo el
+ * 2026-11-24, aunque su esquema publicado lo sigue exigiendo.
+ */
+export const derivActiveSymbolEntrySchema = z.strictObject(entryFields);
+
+/** Entrada de `SourceCatalogSnapshot` 1.0.0, con `underlying_symbol_type`: la de los ya guardados. */
+export const derivActiveSymbolEntryV1Schema = z.strictObject({
+  ...entryFields,
+  underlying_symbol_type: z.string(),
+});
+
+const snapshotFields = {
+  snapshot_id: derivedEventIdSchema,
+  source: nonEmptyStringSchema,
+  catalog_format: z.literal('deriv_active_symbols'),
+  connector_version: nonEmptyStringSchema,
+  source_schema_release: nonEmptyStringSchema,
+  source_schema_sha256: sha256HexSchema,
+  observation_id: uuidV7Schema,
+  raw_payload_sha256: sha256HexSchema,
+  received_at_utc: utcTimestampMsSchema,
+  entry_count: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  content_sha256: sha256HexSchema,
+};
+
+/**
+ * `SourceCatalogSnapshot`: una versión inmutable del catálogo oficial de una fuente, derivada de un
+ * `RawSourceFrame` durable con la respuesta completa. La 2.0.0 es la que deriva buoh desde la
+ * precisión del 2026-11-25 de ADR-0012 §7, sin `underlying_symbol_type`; la 1.0.0, con él, sigue teniendo lector, porque los logs
+ * guardan sus documentos hasta que vencen. El esquema `…Structural` describe la forma y se publica
+ * como JSON Schema; el refinado añade orden, conteo y hashes.
  */
 export const sourceCatalogSnapshotStructuralSchema = z
-  .strictObject({
-    schema_version: z.literal('1.0.0'),
-    snapshot_id: derivedEventIdSchema,
-    source: nonEmptyStringSchema,
-    catalog_format: z.literal('deriv_active_symbols'),
-    catalog_normalizer_version: z.literal('1.0.0'),
-    connector_version: nonEmptyStringSchema,
-    source_schema_release: nonEmptyStringSchema,
-    source_schema_sha256: sha256HexSchema,
-    observation_id: uuidV7Schema,
-    raw_payload_sha256: sha256HexSchema,
-    received_at_utc: utcTimestampMsSchema,
-    entry_count: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-    content_sha256: sha256HexSchema,
-    entries: z.array(derivActiveSymbolEntrySchema).min(1),
-  })
+  .discriminatedUnion('schema_version', [
+    z.strictObject({
+      schema_version: z.literal('2.0.0'),
+      ...snapshotFields,
+      catalog_normalizer_version: z.literal('2.0.0'),
+      entries: z.array(derivActiveSymbolEntrySchema).min(1),
+    }),
+    z.strictObject({
+      schema_version: z.literal('1.0.0'),
+      ...snapshotFields,
+      catalog_normalizer_version: z.literal('1.0.0'),
+      entries: z.array(derivActiveSymbolEntryV1Schema).min(1),
+    }),
+  ])
   .meta({ id: 'SourceCatalogSnapshot', title: 'SourceCatalogSnapshot' });
 
 type StructuralSnapshot = z.infer<typeof sourceCatalogSnapshotStructuralSchema>;
@@ -88,9 +111,15 @@ export function deriveCatalogSnapshotId(
     source: snapshot.source,
     source_schema_release: snapshot.source_schema_release,
     source_schema_sha256: snapshot.source_schema_sha256,
-  } satisfies Record<Exclude<keyof StructuralSnapshot, 'snapshot_id'>, JsonValue>;
+  } satisfies Record<Exclude<KeysOfEach<StructuralSnapshot>, 'snapshot_id'>, JsonValue>;
   return deriveEventId(body);
 }
+
+/**
+ * Las claves de cada miembro de una unión, no solo las comunes (`keyof` de una unión): así
+ * `satisfies` pide también un campo que tuviera una sola de las versiones del snapshot.
+ */
+type KeysOfEach<T> = T extends unknown ? keyof T : never;
 
 export const sourceCatalogSnapshotSchema = sourceCatalogSnapshotStructuralSchema.superRefine(
   (value, context) => {
@@ -129,4 +158,5 @@ export const sourceCatalogSnapshotSchema = sourceCatalogSnapshotStructuralSchema
 );
 
 export type DerivActiveSymbolEntry = z.infer<typeof derivActiveSymbolEntrySchema>;
+export type DerivActiveSymbolEntryV1 = z.infer<typeof derivActiveSymbolEntryV1Schema>;
 export type SourceCatalogSnapshot = z.infer<typeof sourceCatalogSnapshotSchema>;

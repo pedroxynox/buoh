@@ -659,7 +659,6 @@ describe('DataCatalog', () => {
   const entry = {
     underlying_symbol: 'R_100',
     underlying_symbol_name: 'Volatility 100 Index',
-    underlying_symbol_type: 'stockindex',
     market: 'synthetic_index',
     submarket: 'random_index',
     subgroup: 'synthetics',
@@ -684,6 +683,15 @@ describe('DataCatalog', () => {
     ]) {
       expect(dataCatalogSchema.parse(value)).toEqual(value);
     }
+  });
+
+  it('sus entradas son las de SourceCatalogSnapshot 2.0.0, sin `underlying_symbol_type`', () => {
+    expect(
+      accepts(dataCatalogSchema, {
+        log: 2,
+        catalog: { ...catalog, entries: [{ ...entry, underlying_symbol_type: 'stockindex' }] },
+      }),
+    ).toBe(false);
   });
 
   it('sin log activo no hay catálogo, y sus entradas van en orden de símbolo, sin repetir', () => {

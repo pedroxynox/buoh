@@ -5,8 +5,10 @@
  * El worker (apps/market-data-worker) le pasa los datos y guarda lo que devuelve.
  */
 export {
+  CATALOG_FIELDS_NO_LONGER_SENT,
   createCatalogResponseSchema,
   deriveCatalogSnapshot,
+  relaxCatalogResponseSchema,
   type CatalogConversionResult,
   type CatalogResponseSchema,
 } from './catalog.js';

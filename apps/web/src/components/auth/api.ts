@@ -200,7 +200,7 @@ export const api = {
   },
   /** El catálogo de Deriv del log activo (ADR-0019 §8), sin el token CSRF, como la salud. */
   dataCatalog: async (): Promise<DataCatalog> => {
-    const catalog = readDataCatalog(await request<unknown>('GET', '/api/v1/datos/catalogo'));
+    const catalog = readDataCatalog(await request<unknown>('GET', '/api/v2/datos/catalogo'));
     if (catalog === null) {
       throw new ApiCallError({ code: 'unexpected' });
     }

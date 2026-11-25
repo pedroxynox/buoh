@@ -47,7 +47,7 @@ El PR de las lecturas de R2 de F2.4 (el 5a) suma el token `api`, de solo lectura
    Nunca los pegues en el chat ni en Git. `BUOH_API_S3_BUCKET` y `BUOH_API_S3_REGION` los pone el Blueprint. El código que corre hoy no lee estas variables, así que guardarlas no cambia nada hasta el paso 3.
 3. **Fusiona el PR.** Si su comentario de listo dice que cambia `render-datos.yaml` y después fusionaste otro PR, pídele antes al agente que lo actualice (arriba, «Desplegar»). Render despliega `buoh-api` con las variables nuevas y, como el PR cambia el worker, también `buoh-ingesta` y `buoh-operaciones`.
 4. **Mira si el Blueprint dejó algo pendiente**, como en el paso 2 de «Desplegar».
-5. **Comprueba el token.** Cuando termine el despliegue, con tu sesión abierta (abajo, «Para ver una ruta de datos en el navegador»), abre `https://<dirección>/api/v1/datos/catalogo` y `https://<dirección>/api/v1/datos/grafico?hours=1`, y pásale al agente lo que ves, que no lleva ningún secreto. Con el token bien puesto, la primera trae el catálogo de Deriv y la segunda, los ticks de la última hora.
+5. **Comprueba el token.** Cuando termine el despliegue, con tu sesión abierta (abajo, «Para ver una ruta de datos en el navegador»), abre `https://<dirección>/api/v2/datos/catalogo` y `https://<dirección>/api/v1/datos/grafico?hours=1`, y pásale al agente lo que ves, que no lleva ningún secreto. Con el token bien puesto, la primera trae el catálogo de Deriv y la segunda, los ticks de la última hora.
    - `503 not_ready`: la API que corre no tiene ninguna de las tres variables, porque no se guardaron o porque se guardaron después del despliegue. Comprueba que están las tres y pulsa **Manual Deploy** y después **Deploy latest commit**.
    - `404 not_found`: todavía responde la versión anterior, que no tiene estas rutas. O el despliegue no terminó, y basta con esperar, o falló: con una o dos de las tres variables, o con una que no vale, la versión nueva no arranca (abajo).
    - `503 storage_unavailable`: R2 rechazó el token o no respondió. Revisa en Cloudflare que el token `api` tiene **Object Read only** sobre `buoh-captura`, y en Render que las dos claves son las suyas.
@@ -140,13 +140,13 @@ curl -s https://<dirección>/api/v1/datos/eventos
 curl -s https://<dirección>/api/v1/datos/datasets
 curl -s https://<dirección>/api/v1/preferencias
 curl -s 'https://<dirección>/api/v1/datos/grafico?hours=1'
-curl -s https://<dirección>/api/v1/datos/catalogo
+curl -s https://<dirección>/api/v2/datos/catalogo
 ```
 
 - `/api/salud` responde `200` cuando la API responde y tiene sus migraciones; si le faltan, `503 not_ready`.
 - Toda respuesta lleva las cabeceras de seguridad de §9 (`Strict-Transport-Security`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `X-Frame-Options`, `X-Robots-Tag`); el HTML, su política de contenido con los hashes de sus scripts en línea; el JSON y los demás archivos de la web, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`; y el JSON, `Cache-Control: no-store` (`F2-API-001`).
 - Una ruta `/api/` que no existe responde `404 not_found` en JSON; cualquier otra ruta desconocida, el `404.html` de la web.
-- `GET /api/v1/datos/salud`, `GET /api/v1/datos/eventos`, `GET /api/v1/datos/datasets` (desde la segunda parte del 6b de F2.4), `GET /api/v1/datos/grafico?hours=1`, `GET /api/v1/datos/catalogo` y `GET /api/v1/preferencias` sin sesión responden `401 unauthenticated`: las rutas existen y no dan nada sin sesión.
+- `GET /api/v1/datos/salud`, `GET /api/v1/datos/eventos`, `GET /api/v1/datos/datasets` (desde la segunda parte del 6b de F2.4), `GET /api/v1/datos/grafico?hours=1`, `GET /api/v2/datos/catalogo` y `GET /api/v1/preferencias` sin sesión responden `401 unauthenticated`: las rutas existen y no dan nada sin sesión. El catálogo está en `/api/v2/` desde la precisión del 2026-11-25 de ADR-0019 §6, y `GET /api/v1/datos/catalogo` responde `404 not_found`.
 - La comprobación completa de §13 incluye que ninguna respuesta ni ningún registro lleva la contraseña, el secreto TOTP, los códigos, el identificador de la sesión, el token CSRF, el del enlace ni las tres claves, cada uno solo en su canal (`F2-API-001`, `F2-AUTH-001`).
 
 ### El límite por dirección

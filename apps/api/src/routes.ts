@@ -297,7 +297,8 @@ const DATOS_GRAFICO = {
 
 const DATOS_CATALOGO = {
   method: 'GET',
-  url: '/api/v1/datos/catalogo',
+  // En `/api/v2/` desde que sus entradas no llevan `underlying_symbol_type` (ADR-0019 §6 y §8).
+  url: '/api/v2/datos/catalogo',
   operationId: 'getDatosCatalogo',
   summary:
     'La última versión del catálogo de Deriv en el log activo, con su número, su hora y sus entradas, leída de R2 (ADR-0019 §8).',

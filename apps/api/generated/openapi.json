@@ -115,65 +115,6 @@
         }
       }
     },
-    "/api/v1/datos/catalogo": {
-      "get": {
-        "operationId": "getDatosCatalogo",
-        "summary": "La última versión del catálogo de Deriv en el log activo, con su número, su hora y sus entradas, leída de R2 (ADR-0019 §8).",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "Respuesta correcta.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataCatalog"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "La petición no cumple su contrato, también si trae parámetros de consulta que la ruta no admite.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "La petición necesita una sesión y no la trae o no vale (unauthenticated).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Un fallo del servidor, también una respuesta que no cumple su contrato.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Faltan las migraciones de la API, la credencial de lectura de los datos o el token api de R2 (not_ready), o no responden PostgreSQL (postgres_unavailable) o R2 (storage_unavailable).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/datos/datasets": {
       "get": {
         "operationId": "getDatosDatasets",
@@ -1075,6 +1016,65 @@
           },
           "503": {
             "description": "Faltan las migraciones de la API (not_ready), o PostgreSQL no responde (postgres_unavailable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/datos/catalogo": {
+      "get": {
+        "operationId": "getDatosCatalogo",
+        "summary": "La última versión del catálogo de Deriv en el log activo, con su número, su hora y sus entradas, leída de R2 (ADR-0019 §8).",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataCatalog"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "La petición no cumple su contrato, también si trae parámetros de consulta que la ruta no admite.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "La petición necesita una sesión y no la trae o no vale (unauthenticated).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Un fallo del servidor, también una respuesta que no cumple su contrato.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Faltan las migraciones de la API, la credencial de lectura de los datos o el token api de R2 (not_ready), o no responden PostgreSQL (postgres_unavailable) o R2 (storage_unavailable).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2132,9 +2132,6 @@
                         "underlying_symbol_name": {
                           "type": "string"
                         },
-                        "underlying_symbol_type": {
-                          "type": "string"
-                        },
                         "market": {
                           "type": "string"
                         },
@@ -2166,7 +2163,6 @@
                       "required": [
                         "underlying_symbol",
                         "underlying_symbol_name",
-                        "underlying_symbol_type",
                         "market",
                         "submarket",
                         "subgroup",

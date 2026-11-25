@@ -114,7 +114,7 @@ describe('la tabla de rutas', () => {
       'GET /api/v1/datos/eventos',
       'GET /api/v1/datos/datasets',
       'GET /api/v1/datos/grafico',
-      'GET /api/v1/datos/catalogo',
+      'GET /api/v2/datos/catalogo',
     ]);
   });
 });

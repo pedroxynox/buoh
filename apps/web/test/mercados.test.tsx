@@ -111,7 +111,6 @@ const EMPTY: DataChart = {
 const ENTRY = {
   underlying_symbol: 'R_100',
   underlying_symbol_name: 'Volatility 100 Index',
-  underlying_symbol_type: 'stockindex',
   market: 'synthetic_index',
   submarket: 'random_index',
   subgroup: 'synthetics',
@@ -285,6 +284,11 @@ describe('la forma de las respuestas, como los esquemas de @buoh/contracts', () 
       { log: 2, catalog: { ...catalog, entries: [{ ...ENTRY, pip_size: 0.01 }] } },
       { log: 2, catalog: { ...catalog, entries: [{ ...ENTRY, exchange_is_open: 2 }] } },
       { log: 2, catalog: { ...catalog, entries: [{ ...ENTRY, underlying_symbol: '' }] } },
+      // Una entrada de `/api/v1/`, con el campo que Deriv dejó de mandar: `/api/v2/` no lo lleva.
+      {
+        log: 2,
+        catalog: { ...catalog, entries: [{ ...ENTRY, underlying_symbol_type: 'stockindex' }] },
+      },
       { log: 2, catalog: { ...catalog, extra: 1 } },
       { log: 2, catalog: null, extra: 1 },
     ];
@@ -1030,7 +1034,7 @@ describe('las lecturas de la API, sin el token CSRF', () => {
   it('el catálogo: GET sin token, y un error con su código', async () => {
     const requests = stubFetch(200, CATALOG);
     await expect(api.dataCatalog()).resolves.toEqual(CATALOG);
-    expect(requests[0]?.path).toBe('/api/v1/datos/catalogo');
+    expect(requests[0]?.path).toBe('/api/v2/datos/catalogo');
     expect(JSON.stringify(requests[0]?.init?.headers ?? {})).not.toMatch(/csrf/iu);
     stubFetch(503, {
       error: { code: 'storage_unavailable', request_id: '7c2a4f9e-1f5b-4c3d-9a8e-2b6d0f1e3a5c' },

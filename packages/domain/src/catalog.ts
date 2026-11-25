@@ -6,6 +6,7 @@ import {
   sha256Hex,
   sourceCatalogSnapshotSchema,
   type DerivActiveSymbolEntry,
+  type JsonValue,
   type RawSourceFrame,
   type SourceCatalogSnapshot,
 } from '@buoh/contracts';
@@ -18,13 +19,55 @@ import {
 import { compileSourceSchema, parseJsonDocument } from './source-schema.js';
 
 /**
- * Esquema de respuesta de `active_symbols` en la release fijada, con su identidad. El SHA-256 del
- * JCS del documento es el `source_schema_sha256` del snapshot.
+ * Esquema de respuesta de `active_symbols` con que se valida el catálogo, con su identidad: el de la
+ * release fijada sin exigir `underlying_symbol_type` (`relaxCatalogResponseSchema`). El SHA-256 del
+ * JCS de ese documento es el `source_schema_sha256` del snapshot.
  */
 export interface CatalogResponseSchema {
   readonly release: string;
   readonly sha256: string;
   readonly validate: (value: unknown) => boolean;
+}
+
+/**
+ * Campos de cada entrada que la release fijada exige y Deriv ya no manda. En algún momento del
+ * 2026-11-24, entre las 13:18 y las 14:12 UTC, `active_symbols` empezó a llegar sin
+ * `underlying_symbol_type`, aunque el esquema publicado de `production_v20260901_0` lo sigue
+ * exigiendo, igual que el de `production_v20261119_0`, la última release ese día (ADR-0012 §2 y §7).
+ */
+export const CATALOG_FIELDS_NO_LONGER_SENT = ['underlying_symbol_type'] as const;
+
+/**
+ * El documento de esquema con `CATALOG_FIELDS_NO_LONGER_SENT` fuera de la lista `required` de cada
+ * entrada (`properties.active_symbols.items.required`). No cambia nada más: el campo sigue descrito,
+ * así que si llega tiene que ser texto, y una entrada sigue sin admitir campos ajenos. Sin esa ruta,
+ * o sin esos campos en ella, el documento queda igual. No modifica el documento recibido.
+ */
+export function relaxCatalogResponseSchema(document: JsonValue): JsonValue {
+  const items = memberOf(memberOf(memberOf(document, 'properties'), 'active_symbols'), 'items');
+  const required = memberOf(items, 'required');
+  if (
+    items === undefined ||
+    !Array.isArray(required) ||
+    !required.some((field) => (CATALOG_FIELDS_NO_LONGER_SENT as readonly unknown[]).includes(field))
+  ) {
+    return document;
+  }
+  const relaxed = structuredClone(document) as Record<string, JsonValue>;
+  const relaxedItems = memberOf(
+    memberOf(memberOf(relaxed, 'properties'), 'active_symbols'),
+    'items',
+  ) as Record<string, JsonValue>;
+  relaxedItems['required'] = required.filter(
+    (field) => !(CATALOG_FIELDS_NO_LONGER_SENT as readonly unknown[]).includes(field),
+  );
+  return relaxed;
+}
+
+function memberOf(value: JsonValue | undefined, key: string): JsonValue | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value[key]
+    : undefined;
 }
 
 export function createCatalogResponseSchema(input: {
@@ -34,7 +77,9 @@ export function createCatalogResponseSchema(input: {
   if (input.source_schema_release.length === 0) {
     throw new TypeError('source_schema_release es obligatorio.');
   }
-  const document = parseJsonDocument(input.source_schema_bytes, 'El esquema de catálogo');
+  const document = relaxCatalogResponseSchema(
+    parseJsonDocument(input.source_schema_bytes, 'El esquema de catálogo'),
+  );
   return {
     release: input.source_schema_release,
     sha256: sha256Hex(canonicalJson(document)),
@@ -49,7 +94,6 @@ export type CatalogConversionResult =
 const TEXT_FIELDS = [
   'underlying_symbol',
   'underlying_symbol_name',
-  'underlying_symbol_type',
   'market',
   'submarket',
   'subgroup',
@@ -57,9 +101,10 @@ const TEXT_FIELDS = [
 const FLAG_FIELDS = ['exchange_is_open', 'is_trading_suspended'] as const;
 
 /**
- * Proyecta los nueve campos del contrato desde el árbol que conserva los lexemas: los textos tal
- * cual, `pip_size` como el lexema recibido y los indicadores como número. `trade_count` y cualquier
- * otro campo quedan fuera. `null` si la entrada no cumple el contrato.
+ * Proyecta los ocho campos del contrato 2.0.0 desde el árbol que conserva los lexemas: los textos
+ * tal cual, `pip_size` como el lexema recibido y los indicadores como número. `trade_count`,
+ * `underlying_symbol_type`, aunque llegue, y cualquier otro campo quedan fuera. `null` si la entrada
+ * no cumple el contrato.
  */
 function projectEntry(node: JsonNode): DerivActiveSymbolEntry | null {
   if (node.type !== 'object') {
@@ -81,10 +126,10 @@ function projectEntry(node: JsonNode): DerivActiveSymbolEntry | null {
 }
 
 /**
- * Convierte un frame durable de respuesta a `active_symbols` en un `SourceCatalogSnapshot`
- * (contratos de dominio, «SourceCatalogSnapshot»; ADR-0012 §7). Es pura: el mismo frame y el mismo
- * esquema dan siempre el mismo resultado, así que el snapshot y la incidencia se pueden volver a
- * derivar del frame.
+ * Convierte un frame durable de respuesta a `active_symbols` en un `SourceCatalogSnapshot` 2.0.0,
+ * con el normalizador de catálogo 2.0.0 (contratos de dominio, «SourceCatalogSnapshot»; ADR-0012
+ * §7). Es pura: el mismo frame y el mismo esquema dan siempre el mismo resultado, así que el
+ * snapshot y la incidencia se pueden volver a derivar del frame.
  *
  * Las comprobaciones van en el orden del contrato, y la primera que falla da el motivo. El frame
  * tiene que ser JSON, porque quien lo correlacionó ya lo leyó con el mismo lector; si no lo es, es un
@@ -148,7 +193,7 @@ export function deriveCatalogSnapshot(
 
   const body = {
     catalog_format: 'deriv_active_symbols' as const,
-    catalog_normalizer_version: '1.0.0' as const,
+    catalog_normalizer_version: '2.0.0' as const,
     connector_version: frame.connector_version,
     content_sha256: deriveCatalogContentSha256(entries),
     entries,
@@ -156,7 +201,7 @@ export function deriveCatalogSnapshot(
     observation_id: frame.observation_id,
     raw_payload_sha256: frame.raw_payload_sha256,
     received_at_utc: frame.received_at_utc,
-    schema_version: '1.0.0' as const,
+    schema_version: '2.0.0' as const,
     source: frame.source,
     source_schema_release: schema.release,
     source_schema_sha256: schema.sha256,
