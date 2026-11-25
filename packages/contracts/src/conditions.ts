@@ -209,6 +209,7 @@ function getExpectedConditionKey(
       return derivePersistenceConditionKey(incident.source, incident.evidence.stage);
     case 'source_limit_exceeded':
       return deriveSourceLimitConditionKey(incident.source, incident.evidence.resource);
+    case 'contract_rejected':
     case 'delivery_delayed':
     case 'duplicate_exact':
     case 'invalid_source_frame':

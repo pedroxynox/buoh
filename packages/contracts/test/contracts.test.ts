@@ -137,7 +137,7 @@ describe('DataQualityIncident', () => {
     expect(dataQualityIncidentSchema.safeParse(invalid).success).toBe(false);
   });
 
-  it('admite invalid_source_frame sin símbolo solo con el esquema de incidencias 2.0.0', () => {
+  it('admite invalid_source_frame sin símbolo solo con los esquemas de incidencias 2.0.0 y 3.0.0', () => {
     const withVersion = (schemaVersion: string) => {
       const body = {
         evidence: { raw_payload_sha256: 'a'.repeat(64), reason: 'payload_not_json' },
@@ -155,8 +155,10 @@ describe('DataQualityIncident', () => {
     };
     expect(dataQualityIncidentSchema.safeParse(withVersion('1.0.0')).success).toBe(false);
     expect(dataQualityIncidentSchema.safeParse(withVersion('2.0.0')).success).toBe(true);
+    // 3.0.0, la de las reglas de los lotes 4.0.0, lo admite igual (PR 4c de ADR-0021).
+    expect(dataQualityIncidentSchema.safeParse(withVersion('3.0.0')).success).toBe(true);
     // Una versión sin lector se rechaza, en vez de heredar la regla de 2.0.0.
-    for (const unknown of ['2.1.0', '3.0.0', '99.0.0']) {
+    for (const unknown of ['2.1.0', '3.1.0', '4.0.0', '99.0.0']) {
       expect(dataQualityIncidentSchema.safeParse(withVersion(unknown)).success, unknown).toBe(
         false,
       );
