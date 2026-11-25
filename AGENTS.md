@@ -138,6 +138,12 @@ Se escriben cortos:
 - la descripción del PR: la plantilla, con lo que otro modelo necesita para revisar sin la conversación («Relevo entre modelos»);
 - el encargo al revisor: contrastar el diff con las fuentes canónicas y con los vectores independientes («Relevo entre modelos») y buscar errores. Repite pruebas, mide o prueba sondas cuando sospecha uno.
 
+Para gastar menos crédito, en cualquier cuenta de Kiro y con cualquier motor (decisión del propietario del 2026-11-25, [decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Reglas para gastar menos crédito»):
+
+- **Lo barato antes de `verify:pr`.** Antes de cada `verify:pr` en local, el agente pasa sobre lo que cambió las comprobaciones rápidas que más fallan: `pnpm exec prettier --check <archivos>`, `pnpm exec eslint <archivos .ts>`, las pruebas y el `typecheck` de cada paquete que cambió (`pnpm --filter <paquete> exec vitest run` y `pnpm --filter <paquete> run typecheck`) y, si cambió `packages/contracts/src`, `pnpm --filter @buoh/contracts run schemas:check`. Así `verify:pr` corre una sola vez antes de cada commit. No lo sustituye.
+- **Leer por partes.** Un documento o un archivo largo, como un runbook, una ADR, los contratos de dominio o un módulo grande, se lee por partes: primero sus títulos o sus funciones (`grep -n`), y después solo lo que toca la tarea. Lo ya leído en la sesión no se vuelve a leer entero, solo lo que cambió.
+- **Cada dato, con su fuente.** Antes de pedir la revisión semántica, el autor compara con su fuente cada cifra, fecha, conteo y nombre que escribió, en el diff y en la descripción del PR, además de buscar las referencias del primer punto de «Revisión semántica». Un dato mal escrito, como «seis de los ocho» por siete, es un bloqueante y cuesta otra revisión entera.
+
 Si ahorrar choca con la corrección, gana la corrección, y el PR dice por qué hizo falta lo que no es habitual.
 
 ## Desarrollo por fases
