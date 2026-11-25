@@ -40,8 +40,6 @@ F1.4b conecta buoh con el canal público de Deriv, solo para escuchar: el catál
 | `exchange_is_open` e `is_trading_suspended` | 0 o 1 |
 | `trade_count` | entero |
 
-(Precisión del 2026-11-25.) Desde el 2026-11-24, entre las 13:18:04 y las 14:12:44 UTC, Deriv manda cada entrada sin `underlying_symbol_type`, en `"brief"` y en `"full"`, aunque el esquema de la release fijada lo sigue exigiendo, y el de `production_v20261119_0`, la última release ese día, es el mismo archivo. Así lo muestran los frames de producción y una consulta al canal público del 2026-11-25: las 95 entradas traen los otros nueve campos. Lo que buoh hace con eso está en §2 y §7.
-
 El `pip_size` del catálogo no es el del tick: en `ticks_response` es el número de decimales, por ejemplo `2`. Los esquemas no describen el objeto `error`. Una respuesta con `error` cumple el esquema de `active_symbols`, `ping`, `time` y `forget_all`, porque su raíz admite campos extra; no cumple el de `ticks`, cuyo `msg_type` solo admite `tick`.
 
 **Prueba corta contra el canal público** (`wss://api.derivws.com/trading/v1/options/ws/public`), sin guardar datos ni precios:
@@ -65,6 +63,10 @@ El `pip_size` del catálogo no es el del tick: en `ticks_response` es el número
 - `ajv-draft-04` 1.0.0 (MIT, del equipo de Ajv, sin dependencias, requiere `ajv` ^8.5.0) compila las 14 entradas en modo estricto con el `ajv` 8.20.0 del repositorio, si `auth_required` y `examples` se registran como anotaciones.
 - `fflate` 0.8.3 (MIT, sin dependencias) lee el archivo fijado y da el tamaño declarado de cada entrada antes de descomprimirla.
 
+### Hechos verificados el 2026-11-25
+
+Un momento del 2026-11-24 entre las 13:18:04 y las 14:12:44 UTC, Deriv empezó a mandar cada entrada de `active_symbols` sin `underlying_symbol_type`, en `"brief"` y en `"full"`. El esquema de la release fijada lo sigue exigiendo, y el de `production_v20261119_0`, la última release ese día, es el mismo archivo. Así lo muestran los frames de producción y una consulta al canal público del 2026-11-25: las 95 entradas traen los otros nueve campos. Lo que buoh hace con eso está en §2 y §7 (precisiones del 2026-11-25).
+
 ## Decisión
 
 ### 1. Fuente, conector y operaciones
@@ -86,7 +88,7 @@ El `pip_size` del catálogo no es el del tick: en `ticks_response` es el número
 
   Ambos en modo estricto. En draft-04 solo se admiten como anotación `auth_required` y `examples`, que aparecen en la release fijada. El replay obtiene el mismo validador del esquema que el dataset ya publica, sin configuración externa.
 - El esquema de fuente de los ticks es `ticks_response.schema.json`, y el `source_schema_sha256` del manifiesto es el SHA-256 de su JCS. El del catálogo es el SHA-256 del JCS de `active_symbols_response.schema.json`.
-- (Precisión del 2026-11-25.) El catálogo se valida con `active_symbols_response.schema.json` sin `underlying_symbol_type` en la lista `required` de las entradas, porque Deriv dejó de mandarlo (ver «Hechos verificados»). Es el único cambio: el campo sigue descrito, así que si llega tiene que ser texto, las entradas siguen sin admitir campos ajenos, y los demás campos siguen exigidos. Lo hace `relaxCatalogResponseSchema` (`packages/domain`), sobre el documento ya comprobado con su SHA-256, y el `source_schema_sha256` del snapshot es el SHA-256 del JCS de ese documento, el que valida. Los ticks y las demás respuestas siguen con sus esquemas tal cual. Si Deriv deja de exigir el campo en una release, o vuelve a mandarlo, el cambio de release sigue siendo un PR con sus pruebas (runbook de ingesta, «Carga de los esquemas de Deriv»).
+- (Precisión del 2026-11-25.) El catálogo se valida con `active_symbols_response.schema.json` sin `underlying_symbol_type` en la lista `required` de las entradas, porque Deriv dejó de mandarlo (ver «Hechos verificados el 2026-11-25»). Es el único cambio: el campo sigue descrito, así que si llega tiene que ser texto, las entradas siguen sin admitir campos ajenos, y los demás campos siguen exigidos. Lo hace `relaxCatalogResponseSchema` (`packages/domain`), sobre el documento ya comprobado con su SHA-256, y el `source_schema_sha256` del snapshot es el SHA-256 del JCS de ese documento, el que valida. Los ticks y las demás respuestas siguen con sus esquemas tal cual. Si Deriv vuelve a mandar el campo, no cambia nada: se valida y no entra en el snapshot (§7). Una release que deje de exigirlo sigue llegando, como cualquier cambio de release, con un PR y sus pruebas (runbook de ingesta, «Carga de los esquemas de Deriv»), y con ella la relajación no cambia el documento.
 - El normalizador 2.0.0 ya lee las rutas de Deriv (`tick.symbol`, `tick.epoch`, `tick.quote`, `tick.pip_size` y `echo_req.ticks`), y sigue siendo uno por versión.
 - El adaptador valida cada petición propia contra su esquema de petición antes de enviarla.
 
@@ -142,7 +144,7 @@ Se descarta el `WebSocket` global de Node porque reúne el mensaje entero antes 
 
 ### 6. Errores en respuestas pedidas
 
-Las reglas 2.0.0 no miran las respuestas declaradas. Quien pidió una respuesta declarada la comprueba contra el esquema de respuesta de su operación en la release fijada. Si trae `error`, no cumple ese esquema o, en el catálogo, no se puede convertir en snapshot (§7), registra un `DataQualityIncident` con:
+Las reglas 2.0.0 no miran las respuestas declaradas. Quien pidió una respuesta declarada la comprueba contra el esquema de respuesta de su operación en la release fijada; el del catálogo, desde la precisión del 2026-11-25, sin exigir `underlying_symbol_type` (§2). Si trae `error`, no cumple ese esquema o, en el catálogo, no se puede convertir en snapshot (§7), registra un `DataQualityIncident` con:
 
 - `incident_type: invalid_source_frame`, esquema de incidencias 2.0.0, reglas 2.0.0 y severidad `error`;
 - `observed_ref`: el `observation_id` del frame; `observed_at_utc`: su `received_at_utc`; `related_refs: []`;

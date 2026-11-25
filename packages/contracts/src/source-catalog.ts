@@ -111,9 +111,15 @@ export function deriveCatalogSnapshotId(
     source: snapshot.source,
     source_schema_release: snapshot.source_schema_release,
     source_schema_sha256: snapshot.source_schema_sha256,
-  } satisfies Record<Exclude<keyof StructuralSnapshot, 'snapshot_id'>, JsonValue>;
+  } satisfies Record<Exclude<KeysOfEach<StructuralSnapshot>, 'snapshot_id'>, JsonValue>;
   return deriveEventId(body);
 }
+
+/**
+ * Las claves de cada miembro de una unión, no solo las comunes (`keyof` de una unión): así
+ * `satisfies` pide también un campo que tuviera una sola de las versiones del snapshot.
+ */
+type KeysOfEach<T> = T extends unknown ? keyof T : never;
 
 export const sourceCatalogSnapshotSchema = sourceCatalogSnapshotStructuralSchema.superRefine(
   (value, context) => {

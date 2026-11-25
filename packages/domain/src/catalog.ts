@@ -30,10 +30,10 @@ export interface CatalogResponseSchema {
 }
 
 /**
- * Campos de cada entrada que la release fijada exige y Deriv ya no manda. Desde el 2026-11-24, entre
- * las 13:18 y las 14:12 UTC, `active_symbols` llega sin `underlying_symbol_type`, aunque el esquema
- * publicado de `production_v20260901_0` lo sigue exigiendo, igual que el de `production_v20261119_0`,
- * la última release ese día (ADR-0012 §2 y §7).
+ * Campos de cada entrada que la release fijada exige y Deriv ya no manda. Un momento del 2026-11-24
+ * entre las 13:18 y las 14:12 UTC, `active_symbols` empezó a llegar sin `underlying_symbol_type`,
+ * aunque el esquema publicado de `production_v20260901_0` lo sigue exigiendo, igual que el de
+ * `production_v20261119_0`, la última release ese día (ADR-0012 §2 y §7).
  */
 export const CATALOG_FIELDS_NO_LONGER_SENT = ['underlying_symbol_type'] as const;
 

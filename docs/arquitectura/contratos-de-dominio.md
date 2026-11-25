@@ -447,7 +447,7 @@ Desde el PR 6 de ADR-0015 §13, como decide su §8, `pnpm run data:health -- --j
 
 Definido para F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §7, `F1-CATALOG-001`) e implementado en `packages/contracts` (`sourceCatalogSnapshotSchema`, con `deriveCatalogContentSha256` y `deriveCatalogSnapshotId`). Es una versión del catálogo oficial de una fuente, derivada de un `RawSourceFrame` durable que trae la respuesta completa. Es inmutable: un catálogo distinto crea otro snapshot.
 
-Hay dos versiones. Desde la precisión del 2026-11-25 de ADR-0012 §7, buoh deriva la 2.0.0, sin `underlying_symbol_type`, que Deriv dejó de mandar el 2026-11-24 (ADR-0012, «Hechos verificados»). La 1.0.0, la de antes, lleva ese campo en cada entrada y su normalizador es el 1.0.0; sigue teniendo lector, porque los logs guardan sus documentos hasta que vencen (ADR-0018 §7). El esquema runtime acepta las dos, cada una con sus entradas, y nada vuelve a escribir una 1.0.0.
+Hay dos versiones. Desde la precisión del 2026-11-25 de ADR-0012 §7, buoh deriva la 2.0.0, sin `underlying_symbol_type`, que Deriv dejó de mandar el 2026-11-24 (ADR-0012, «Hechos verificados el 2026-11-25»). La 1.0.0, la de antes, lleva ese campo en cada entrada y su normalizador es el 1.0.0; sigue teniendo lector, porque los logs guardan sus documentos hasta que vencen (ADR-0018 §7). El esquema runtime acepta las dos, cada una con sus entradas, y nada vuelve a escribir una 1.0.0.
 
 El JSON Schema generado (`source-catalog-snapshot`) describe la forma. Solo el esquema runtime comprueba el orden y la unicidad de `entries`, que `entry_count` sea su longitud y los dos hashes.
 
@@ -661,7 +661,7 @@ Desde el PR 3b de [ADR-0020](adr/0020-datasets-vivos.md) §13, la publicación d
 
 ### Incidencias de respuestas pedidas
 
-Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §6). Las reglas 2.0.0 no comprueban las respuestas declaradas en `non_tick_msg_types`. Quien pidió una respuesta declarada la compara con el esquema de respuesta de su operación en la release fijada. Si la respuesta trae `error`, no cumple ese esquema o, en el catálogo, no puede convertirse en snapshot, quien la pidió registra un `DataQualityIncident`:
+Desde F1.4b ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §6). Las reglas 2.0.0 no comprueban las respuestas declaradas en `non_tick_msg_types`. Quien pidió una respuesta declarada la compara con el esquema de respuesta de su operación en la release fijada; la del catálogo, desde la precisión del 2026-11-25 de ADR-0012 §2, sin exigir `underlying_symbol_type` ([«SourceCatalogSnapshot»](#sourcecatalogsnapshot)). Si la respuesta trae `error`, no cumple ese esquema o, en el catálogo, no puede convertirse en snapshot, quien la pidió registra un `DataQualityIncident`:
 
 | Campo | Valor |
 |---|---|
@@ -685,7 +685,7 @@ Desde el PR 3 de [ADR-0015](adr/0015-reconexion-recuperacion-y-salud-f1-5.md) §
 
 ## Mensajes de la API
 
-Los mensajes de la API de buoh (`apps/api`, [ADR-0019](adr/0019-api-cuentas-y-auditoria.md) §6) están en `packages/contracts/src/api.ts`. Las rutas van bajo `/api/v1/`, y la versión de un mensaje es la de su ruta: estos mensajes no llevan `schema_version`, y un cambio incompatible crea `/api/v2/`. La API valida con ellos cada entrada y cada salida. Su descripción OpenAPI 3.1 sale de ellos y de la tabla de rutas de la API, en `apps/api/generated/openapi.json`, y no se edita a mano (`pnpm run openapi:generate`; `pnpm run openapi:check` lo comprueba). No tienen JSON Schema propio en `generated/`: lo lleva ese OpenAPI.
+Los mensajes de la API de buoh (`apps/api`, [ADR-0019](adr/0019-api-cuentas-y-auditoria.md) §6) están en `packages/contracts/src/api.ts`. Las rutas van bajo `/api/v1/`, y la versión de un mensaje es la de su ruta: estos mensajes no llevan `schema_version`, y un cambio incompatible crea `/api/v2/`. El primero fue el del catálogo, `GET /api/v2/datos/catalogo` (`DataCatalog`, más abajo; ADR-0019 §6, precisión del 2026-11-25). La API valida con ellos cada entrada y cada salida. Su descripción OpenAPI 3.1 sale de ellos y de la tabla de rutas de la API, en `apps/api/generated/openapi.json`, y no se edita a mano (`pnpm run openapi:generate`; `pnpm run openapi:check` lo comprueba). No tienen JSON Schema propio en `generated/`: lo lleva ese OpenAPI.
 
 ```text
 ApiError {
