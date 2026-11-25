@@ -44,14 +44,23 @@ export interface BatchResponseSchema {
  * respuestas pedidas: un objeto `error` y el esquema de la release. Los demás, de cada operación.
  */
 export type BatchInvalidReason =
+  | 'candles_inconsistent'
+  | 'catalog_duplicate_symbol'
+  | 'catalog_empty'
+  | 'catalog_entry_invalid'
+  | 'catalog_exponent_not_supported'
   | 'contracts_for_duplicate_entry'
   | 'contracts_for_inconsistent'
+  | 'history_inconsistent'
+  | 'history_request_unsupported'
+  | 'payload_not_json'
   | 'proposal_inconsistent'
   | 'proposal_request_unsupported'
   | 'schema_validation_failed'
   | 'source_error_response'
   | 'trading_date_unknown'
-  | 'trading_times_inconsistent';
+  | 'trading_times_inconsistent'
+  | 'unexpected_msg_type';
 
 /** Lo que da una respuesta: sus registros, en orden canónico, y sus incidencias. */
 export interface BatchConversion<T> {
@@ -83,7 +92,9 @@ const PROPOSAL_REQUEST_KEYS = new Set([
   'underlying_symbol',
 ]);
 
-function stringOf(node: JsonNode | undefined): string | null {
+// Las funciones exportadas sin `index.ts` las comparte `batch-series.ts`; no son API del paquete.
+
+export function stringOf(node: JsonNode | undefined): string | null {
   return node?.type === 'string' && node.value.length > 0 ? node.value : null;
 }
 
@@ -105,7 +116,7 @@ function positiveIntegerOf(node: JsonNode | undefined): number | null {
   return value <= MAXIMUM_DURATION ? value : null;
 }
 
-function parseFrame(frame: RawSourceFrame, msgType: string): JsonNode {
+export function parseFrame(frame: RawSourceFrame, msgType: string): JsonNode {
   let root: JsonNode;
   try {
     root = parseJsonPreservingNumbers(frame.payload_utf8);
@@ -121,11 +132,12 @@ function parseFrame(frame: RawSourceFrame, msgType: string): JsonNode {
   return root;
 }
 
-function incidentOf(body: Record<string, unknown>): DataQualityIncident {
+export function incidentOf(body: Record<string, unknown>): DataQualityIncident {
+  // `related_refs` vacía salvo que la incidencia nombre otra observación, como una repetida.
   const full = {
+    related_refs: [],
     ...body,
     quality_rule_version: BATCH_RULE_SET.quality_rule_version,
-    related_refs: [],
     schema_version: BATCH_RULE_SET.incident_schema_version,
   };
   return dataQualityIncidentSchema.parse({
@@ -151,7 +163,7 @@ export function deriveBatchInvalidIncident(
   });
 }
 
-function invalid<T>(
+export function invalid<T>(
   frame: RawSourceFrame,
   reason: BatchInvalidReason,
   symbol: string | null,
@@ -160,14 +172,17 @@ function invalid<T>(
 }
 
 /** Las dos comprobaciones comunes: un objeto `error` y el esquema de la release. */
-function commonFailure(root: JsonNode, schema: BatchResponseSchema): BatchInvalidReason | null {
+export function commonFailure(
+  root: JsonNode,
+  schema: BatchResponseSchema,
+): BatchInvalidReason | null {
   if (getMember(root, 'error')?.type === 'object') {
     return 'source_error_response';
   }
   return schema.validate(toPlainJson(root)) ? null : 'schema_validation_failed';
 }
 
-const provenance = (frame: RawSourceFrame) =>
+export const provenance = (frame: RawSourceFrame) =>
   ({
     connector_version: frame.connector_version,
     observation_id: frame.observation_id,
