@@ -279,7 +279,7 @@ La sección Datos de F2.4 (6b) llega después del PR 4, cuando `buoh_datasets` e
 ## Condiciones de revisión
 
 - Si en un mes más del 0,1 % de los ticks llevan `delivery_delayed`, o el intervalo de R_100 deja de ser de 2 s, se vuelven a medir los umbrales.
-- Si R2 pasa de 8 GB o la base de 600 MB (§6); de 3 GB desde el PR 3 de [ADR-0021](0021-mercados-reales-y-fuentes-de-investigacion.md) (§6).
+- Si R2 pasa de 8 GB o la base de 600 MB, 3 GB desde el PR 3 de [ADR-0021](0021-mercados-reales-y-fuentes-de-investigacion.md) (§6).
 - Si un segundo símbolo entra en la captura: sus umbrales, su perfil y el techo de §7.
 - Si un backtest de F2.7 necesita leer por tiempo dentro de una parte.
 

@@ -3,7 +3,7 @@
  * no existe (`unknown_username`), los que llegan a una credencial deshabilitada (`disabled_credential`)
  * y los que rechaza un límite (`rate_limited`). Se cuentan en memoria y se escriben como una entrada
  * `login_failures` por cada ventana de 5 minutos y por clase (y, si la hay, por cuenta), para que un
- * ataque no llene el disco de 1 GB que comparte la captura.
+ * ataque no llene el disco que comparte la captura.
  */
 export const LOGIN_FAILURE_WINDOW_MS = 5 * 60_000;
 const MAX_WINDOWS = 1_000;
