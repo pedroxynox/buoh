@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
 status_version: 108
-updated_at_utc: "2026-11-25T17:00:00.000Z"
+updated_at_utc: "2026-11-25T17:15:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -38,7 +38,7 @@ Transformar una hipótesis en una estrategia viva, explicable y no ejecutora, pa
 | F2.3 API, cuentas y auditoría | Hecha, con el PR 7c de ADR-0019 | [Evidencia de F2.3](docs/operacion/evidencia-api-f2-3.md) |
 | F2.4 Datos reales en pantalla | Hecha, con el 7b | [Evidencia de F2.4](docs/operacion/evidencia-datos-f2-4.md) |
 | F2.5 Datasets vivos | Hecha, con el PR 6 de ADR-0020 | [Evidencia de los datasets vivos](docs/operacion/evidencia-datasets-f2-5.md) |
-| F2.5b Mercados reales | En curso: el PR 2 de ADR-0021 está hecho, en cuatro partes: el 2a trajo las secuencias de logs y `buoh_datasets` por secuencia, el 2b, `buoh-operaciones` y `data:health` por secuencia, el 2c, `ingest` con varios símbolos y el mercado cerrado, y el 2d, la memoria y la prueba de dos sesiones y la comprobación con el oro cerrado; el PR 3 trajo el oro a producción, con el disco de 5 GB, y su arranque necesitó el catálogo 2.0.0 de la precisión del 2026-11-25 de [ADR-0012](docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §7; el PR 4 llega en tres partes, el 4a, el PR #136, fijó los esquemas de `contracts_for`, `proposal` y `trading_times` para los lotes, el 4b, los contratos de §4: `MarketCandle`, `TradingSession`, `ContractOffer` y `ContractQuote`, y `MarketTick` 1.1.0, y el 4c, la política de segmentos y las reglas de los lotes de horarios, contratos y cotizaciones; siguen el 4d, con las de las velas y los ticks de la historia, y los PR 5 a 8 (ADR-0021 §9; «Siguiente tarea autorizada») | [Evidencia del PR 2d](docs/operacion/evidencia-memoria-f2-5b.md) |
+| F2.5b Mercados reales | En curso: el PR 2 de ADR-0021 está hecho, en cuatro partes: el 2a trajo las secuencias de logs y `buoh_datasets` por secuencia, el 2b, `buoh-operaciones` y `data:health` por secuencia, el 2c, `ingest` con varios símbolos y el mercado cerrado, y el 2d, la memoria y la prueba de dos sesiones y la comprobación con el oro cerrado; el PR 3 trajo el oro a producción, con el disco de 5 GB, y su arranque necesitó el catálogo 2.0.0 de la precisión del 2026-11-25 de [ADR-0012](docs/arquitectura/adr/0012-catalogo-y-adaptador-publico-de-deriv.md) §7; el PR 4 llega en cuatro partes: el 4a, el PR #136, fijó los esquemas de `contracts_for`, `proposal` y `trading_times` para los lotes, el 4b, los contratos de §4: `MarketCandle`, `TradingSession`, `ContractOffer` y `ContractQuote`, y `MarketTick` 1.1.0, y el 4c, la política de segmentos y las reglas de los lotes de horarios, contratos y cotizaciones; siguen el 4d, con las de las velas y los ticks de la historia, y los PR 5 a 8 (ADR-0021 §9; «Siguiente tarea autorizada») | [Evidencia del PR 2d](docs/operacion/evidencia-memoria-f2-5b.md) |
 | F2.6, F2.6b y F2.7 a F2.10 | Sin empezar: las cinco ADR del laboratorio, de ADR-0022 a ADR-0026, están fusionadas | — |
 | F2.11 Puerta de salida | Sin empezar | — |
 

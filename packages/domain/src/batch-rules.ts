@@ -196,6 +196,7 @@ function intervalsOf(times: JsonNode | undefined, date: string): TradingInterval
   if (
     open?.type !== 'array' ||
     close?.type !== 'array' ||
+    open.items.length === 0 ||
     open.items.length !== close.items.length
   ) {
     return null;

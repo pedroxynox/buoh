@@ -232,6 +232,9 @@ describe('trading_times', () => {
       ],
       ['SYNTH_EXTRA', symbolEntry('SYNTH_EXTRA', ['00:00:00'], ['22:00:00', '23:59:59'])],
       ['SYNTH_HALF', symbolEntry('SYNTH_HALF', ['--'], ['23:59:59'])],
+      ['SYNTH_DASHES', symbolEntry('SYNTH_DASHES', ['--', '--'], ['--', '--'])],
+      // Unas listas vacías no son un día cerrado: borrarían un horario bueno del mismo día.
+      ['SYNTH_NONE', symbolEntry('SYNTH_NONE', [], [])],
       ['SYNTH_NOTIMES', { name: 'x', underlying_symbol: 'SYNTH_NOTIMES' }],
     ];
     const good = symbolEntry('SYNTH_100', ['00:00:00'], ['23:59:59']);
@@ -261,6 +264,7 @@ describe('trading_times', () => {
       tradingTimes('today', [symbolEntry('SYNTH_100', ['00:00:00'], ['23:59:59'])]),
     );
     const shortDate = frame(tradingTimes('2026-1-5', []));
+    const impossible = frame(tradingTimes('2026-02-30', []));
     forbidAmbientEffects();
     expect(deriveTradingSessions(error, accept, ['SYNTH_100'])).toEqual({
       incidents: [invalidOf(error, 'source_error_response', null)],
@@ -274,6 +278,9 @@ describe('trading_times', () => {
     ]);
     expect(deriveTradingSessions(shortDate, accept, ['SYNTH_100']).incidents).toEqual([
       invalidOf(shortDate, 'trading_date_unknown', null),
+    ]);
+    expect(deriveTradingSessions(impossible, accept, ['SYNTH_100']).incidents).toEqual([
+      invalidOf(impossible, 'trading_date_unknown', null),
     ]);
   });
 
