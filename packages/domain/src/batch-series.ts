@@ -357,8 +357,9 @@ function convertFrame(
  * sus registros y sus incidencias, y los eventos de conexión no dan nada. Una vela o un tick que
  * llegan otra vez, en otra página, no son un registro, porque cuenta el primero: la vela deja
  * `candle_repeated`, y el tick, `duplicate_exact` si es igual o `source_time_conflict` si tiene el
- * mismo instante con otro precio, como en las reglas en vivo, con la observación del primero en
- * `related_refs`. Devuelve cada clase en su orden canónico. Pura.
+ * mismo instante con otro precio, con la observación del primero en `related_refs`. Se compara solo
+ * con el primero, el que cuenta; a diferencia de las reglas en vivo, el repetido no queda en la lista.
+ * Devuelve cada clase en su orden canónico. Pura.
  */
 export function deriveBatchLog(
   events: readonly SourceEvent[],

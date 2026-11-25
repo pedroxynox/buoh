@@ -567,6 +567,31 @@ describe('un log de los lotes', () => {
     ]);
   });
 
+  it('ordena por incident_id dos incidencias del mismo instante y tipo', () => {
+    const first = frame(
+      candlesText(
+        candleEcho(T, T + 60),
+        [candle(T, '1', '1', '1', '1'), candle(T + 60, '2', '2', '2', '2')].join(','),
+      ),
+      iso(T + 3600),
+    );
+    // Repite las dos velas, con otros precios: dos candle_repeated con el mismo observed_at_utc.
+    const again = frame(
+      candlesText(
+        candleEcho(T, T + 60),
+        [candle(T, '3', '3', '3', '3'), candle(T + 60, '4', '4', '4', '4')].join(','),
+      ),
+      iso(T + 3601),
+    );
+    forbidAmbientEffects();
+    const incidents = deriveBatchLog([first, again], config).incidents;
+    const ids = incidents.map((incident) => incident.incident_id);
+    expect(incidents).toHaveLength(2);
+    expect(incidents.every((incident) => incident.incident_type === 'candle_repeated')).toBe(true);
+    expect(ids).toEqual([...ids].sort());
+    expect(new Set(incidents.map((incident) => incident.observed_at_utc)).size).toBe(1);
+  });
+
   it('da lo mismo al repetirlo, y nada con un log sin respuestas', () => {
     const page = frame(candlesText(candleEcho(T, T + 60), candle(T, '1', '1', '1', '1')));
     forbidAmbientEffects();
