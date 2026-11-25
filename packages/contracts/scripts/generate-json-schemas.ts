@@ -6,6 +6,8 @@ import { z } from 'zod';
 
 import { auditEventStructuralSchema } from '../src/audit.js';
 import { operationalConditionEventStructuralSchema } from '../src/conditions.js';
+import { contractOfferStructuralSchema } from '../src/contract-offer.js';
+import { contractQuoteStructuralSchema } from '../src/contract-quote.js';
 import { dataQualityIncidentStructuralSchema } from '../src/data-quality.js';
 import {
   datasetManifestStructuralSchema,
@@ -13,9 +15,11 @@ import {
 } from '../src/dataset.js';
 import { healthReportStructuralSchema } from '../src/health.js';
 import { liveDerivationCheckpointStructuralSchema } from '../src/live-checkpoint.js';
+import { marketCandleStructuralSchema } from '../src/market-candle.js';
 import { marketTickStructuralSchema } from '../src/market-tick.js';
 import { sourceCatalogSnapshotStructuralSchema } from '../src/source-catalog.js';
 import { ingestionCursorSchema, sourceEventStructuralSchema } from '../src/source-events.js';
+import { tradingSessionStructuralSchema } from '../src/trading-session.js';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outputDirectory = resolve(packageRoot, 'generated/json-schema');
@@ -23,16 +27,20 @@ const checkOnly = process.argv.includes('--check');
 
 const schemas = [
   ['audit-event.schema.json', auditEventStructuralSchema],
+  ['contract-offer.schema.json', contractOfferStructuralSchema],
+  ['contract-quote.schema.json', contractQuoteStructuralSchema],
   ['data-quality-incident.schema.json', dataQualityIncidentStructuralSchema],
   ['dataset-manifest.schema.json', datasetManifestStructuralSchema],
   ['health-report.schema.json', healthReportStructuralSchema],
   ['ingestion-cursor.schema.json', ingestionCursorSchema],
   ['live-derivation-checkpoint.schema.json', liveDerivationCheckpointStructuralSchema],
+  ['market-candle.schema.json', marketCandleStructuralSchema],
   ['market-tick.schema.json', marketTickStructuralSchema],
   ['operational-condition-event.schema.json', operationalConditionEventStructuralSchema],
   ['published-manifest-record.schema.json', publishedManifestRecordStructuralSchema],
   ['source-catalog-snapshot.schema.json', sourceCatalogSnapshotStructuralSchema],
   ['source-event.schema.json', sourceEventStructuralSchema],
+  ['trading-session.schema.json', tradingSessionStructuralSchema],
 ] as const;
 
 let mismatch = false;

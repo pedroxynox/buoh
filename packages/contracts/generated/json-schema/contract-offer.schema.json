@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/ContractOffer",
+  "$defs": {
+    "ContractOffer": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "observation_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "connector_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "symbol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "offers": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "contract_category": {
+                    "type": "string",
+                    "const": "callput"
+                  },
+                  "contract_type": {
+                    "type": "string",
+                    "enum": [
+                      "CALL",
+                      "PUT"
+                    ]
+                  },
+                  "expiry_type": {
+                    "type": "string",
+                    "enum": [
+                      "tick",
+                      "intraday",
+                      "daily"
+                    ]
+                  },
+                  "min_contract_duration": {
+                    "type": "object",
+                    "properties": {
+                      "duration": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 99999999
+                      },
+                      "duration_unit": {
+                        "type": "string",
+                        "enum": [
+                          "t",
+                          "s",
+                          "m",
+                          "h",
+                          "d"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "duration",
+                      "duration_unit"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "max_contract_duration": {
+                    "type": "object",
+                    "properties": {
+                      "duration": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 99999999
+                      },
+                      "duration_unit": {
+                        "type": "string",
+                        "enum": [
+                          "t",
+                          "s",
+                          "m",
+                          "h",
+                          "d"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "duration",
+                      "duration_unit"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "contract_category",
+                  "contract_type",
+                  "expiry_type",
+                  "min_contract_duration",
+                  "max_contract_duration"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "contract_category": {
+                    "type": "string",
+                    "const": "multiplier"
+                  },
+                  "contract_type": {
+                    "type": "string",
+                    "enum": [
+                      "MULTUP",
+                      "MULTDOWN"
+                    ]
+                  },
+                  "expiry_type": {
+                    "type": "string",
+                    "const": "no_expiry"
+                  }
+                },
+                "required": [
+                  "contract_category",
+                  "contract_type",
+                  "expiry_type"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "received_at_utc": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+        },
+        "raw_payload_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "schema_version",
+        "observation_id",
+        "source",
+        "connector_version",
+        "symbol",
+        "offers",
+        "received_at_utc",
+        "raw_payload_sha256"
+      ],
+      "additionalProperties": false,
+      "title": "ContractOffer"
+    }
+  }
+}
