@@ -40,7 +40,7 @@ F1.4b conecta buoh con el canal público de Deriv, solo para escuchar: el catál
 | `exchange_is_open` e `is_trading_suspended` | 0 o 1 |
 | `trade_count` | entero |
 
-(Precisión del 2026-11-25.) Desde el 2026-11-24, entre las 13:18:04 y las 14:12:44 UTC, Deriv manda cada entrada sin `underlying_symbol_type`, en `"brief"` y en `"full"`, aunque el esquema de la release fijada lo sigue exigiendo, igual que el de las releases posteriores hasta `production_v20261119_0`, la última de ese día. Así lo muestran los frames de producción y una consulta al canal público del 2026-11-25: las 95 entradas traen los otros nueve campos. Lo que buoh hace con eso está en §2 y §7.
+(Precisión del 2026-11-25.) Desde el 2026-11-24, entre las 13:18:04 y las 14:12:44 UTC, Deriv manda cada entrada sin `underlying_symbol_type`, en `"brief"` y en `"full"`, aunque el esquema de la release fijada lo sigue exigiendo, y el de `production_v20261119_0`, la última release ese día, es el mismo archivo. Así lo muestran los frames de producción y una consulta al canal público del 2026-11-25: las 95 entradas traen los otros nueve campos. Lo que buoh hace con eso está en §2 y §7.
 
 El `pip_size` del catálogo no es el del tick: en `ticks_response` es el número de decimales, por ejemplo `2`. Los esquemas no describen el objeto `error`. Una respuesta con `error` cumple el esquema de `active_symbols`, `ping`, `time` y `forget_all`, porque su raíz admite campos extra; no cumple el de `ticks`, cuyo `msg_type` solo admite `tick`.
 
