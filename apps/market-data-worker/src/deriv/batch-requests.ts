@@ -45,7 +45,8 @@ export type BatchRequest =
 
 /**
  * `msg_type` de la respuesta que espera cada petición. Una página de velas responde con `candles`;
- * un error a `ticks_history`, con `ticks_history` y un objeto `error` (reglas 4.0.0, «Un log»). Las páginas de ticks de la historia, del PR 6, responden con `history`: serán otra petición.
+ * un error a `ticks_history`, con `ticks_history` y un objeto `error` (reglas 4.0.0, «Un log»).
+ * Las páginas de ticks de la historia, del PR 6, responden con `history`: serán otra petición.
  */
 export const EXPECTED_BATCH_MSG_TYPE = {
   active_symbols: 'active_symbols',

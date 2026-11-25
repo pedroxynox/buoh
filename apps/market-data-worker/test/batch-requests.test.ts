@@ -395,7 +395,7 @@ describe('las respuestas a estas peticiones dan sus registros con las reglas 4.0
     }
   });
 
-  it('cada una de las 151 peticiones de un día da su registro, sin incidencias', () => {
+  it('cada una de las 151 peticiones distintas de un día da su registro, salvo el catálogo, sin incidencias', () => {
     let records = 0;
     for (const request of quoteRequests(derivQuotesProfile())) {
       if (request.operation !== 'proposal') {
