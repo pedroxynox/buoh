@@ -1,0 +1,47 @@
+{
+  "schema_version": "2.0.0",
+  "snapshot_id": "sha256:daafa559cbc7ef82197d58bd3596445690eae25408cd1764e6325c2b7f76e63d",
+  "source": "synthetic",
+  "catalog_format": "deriv_active_symbols",
+  "catalog_normalizer_version": "2.0.0",
+  "connector_version": "fixture-v1",
+  "source_schema_release": "synthetic-v1",
+  "source_schema_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "observation_id": "019b76da-a800-7000-8000-000000000001",
+  "raw_payload_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+  "received_at_utc": "2026-01-01T00:00:00.100Z",
+  "entry_count": 3,
+  "content_sha256": "fb3de35f51ee2ebb1e2a20687289902a00f8f1124ec033e113a2b1a21c7a5406",
+  "entries": [
+    {
+      "underlying_symbol": "SYNTH_10",
+      "underlying_symbol_name": "Synthetic 10 Index",
+      "market": "synthetic_index",
+      "submarket": "random_index",
+      "subgroup": "synthetics",
+      "pip_size": "0.001",
+      "exchange_is_open": 1,
+      "is_trading_suspended": 0
+    },
+    {
+      "underlying_symbol": "SYNTH_100",
+      "underlying_symbol_name": "Synthetic 100 Index",
+      "market": "synthetic_index",
+      "submarket": "random_index",
+      "subgroup": "synthetics",
+      "pip_size": "0.01",
+      "exchange_is_open": 1,
+      "is_trading_suspended": 0
+    },
+    {
+      "underlying_symbol": "SYNTH_FX",
+      "underlying_symbol_name": "Synthetic FX Pair",
+      "market": "forex",
+      "submarket": "major_pairs",
+      "subgroup": "none",
+      "pip_size": "0.00001",
+      "exchange_is_open": 0,
+      "is_trading_suspended": 1
+    }
+  ]
+}

@@ -112,7 +112,7 @@ describe('variante servida por la API (out-api)', () => {
     expect(text).toContain('Cargando el gráfico de R_100');
     expect(text).toContain('Cargando el catálogo de Deriv');
     expect(text).not.toMatch(/ficticio|\(ejemplo\)|Vantage|Deriv MT5/u);
-    for (const route of ['/api/v1/datos/grafico', '/api/v1/datos/catalogo']) {
+    for (const route of ['/api/v1/datos/grafico', '/api/v2/datos/catalogo']) {
       const calling = files(OUT_API, '.js').filter((script) =>
         readFileSync(script, 'utf8').includes(route),
       );

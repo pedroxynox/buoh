@@ -487,9 +487,12 @@ export const dataChartSchema = z
   .meta({ id: 'DataChart', title: 'DataChart' });
 
 /**
- * La respuesta de `GET /api/v1/datos/catalogo` (ADR-0019 §8): la última versión del catálogo de
+ * La respuesta de `GET /api/v2/datos/catalogo` (ADR-0019 §8): la última versión del catálogo de
  * Deriv en el log activo (ADR-0012 §7), con su número, que cuenta desde 1 en cada log, la hora en
- * que llegó y sus entradas, en orden de símbolo y con los nombres y valores oficiales.
+ * que llegó y sus entradas, en orden de símbolo y con los nombres y valores oficiales. Las entradas
+ * son las de `SourceCatalogSnapshot` 2.0.0, sin `underlying_symbol_type`, también las de una
+ * versión 1.0.0 guardada, y `content_sha256` es el de la versión guardada. Quitar ese campo es un
+ * cambio incompatible, que llevó el mensaje de `/api/v1/` a `/api/v2/` (ADR-0019 §6).
  * - `log`: el número del log activo, o `null` si no hay ninguno; entonces tampoco hay catálogo.
  * - `catalog`: `null` si el log todavía no tiene ninguna versión, como justo después del corte
  *   semanal, sin mirar la del log anterior.

@@ -11,27 +11,38 @@ import {
 
 // Casos derivados de los contratos de dominio («SourceCatalogSnapshot») y ADR-0012 §7.
 //
-// El fixture es sintético: códigos y nombres inventados, no datos de Deriv. `source_schema_sha256`
-// y `raw_payload_sha256` son marcadores, porque el contrato solo comprueba su formato. Los hashes
-// de abajo se calcularon fuera del código, con Python, para no comprobar la implementación consigo
-// misma. Para este fixture (solo textos ASCII y los enteros 0, 1 y 3), JCS coincide con
+// Los fixtures son sintéticos: códigos y nombres inventados, no datos de Deriv. El de la versión
+// 2.0.0, la que deriva buoh desde la precisión del 2026-11-25 de ADR-0012 §7, tiene las mismas entradas que el de la 1.0.0 sin
+// `underlying_symbol_type`. `source_schema_sha256` y `raw_payload_sha256` son marcadores, porque el
+// contrato solo comprueba su formato. Los hashes de abajo se calcularon fuera del código, con
+// Python, para no comprobar la implementación consigo misma. Para estos fixtures (solo textos ASCII
+// y los enteros 0, 1 y 3), JCS coincide con
 //   jcs = lambda v: json.dumps(v, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
 // y los hashes son:
 //   content_sha256 = sha256(''.join(jcs(e) + '\n' for e in entries))
 //   snapshot_id    = 'sha256:' + sha256(jcs(snapshot sin snapshot_id))
-const CONTENT_SHA256 = '61998c161db0da302eb8cc7ecc7b758b1893307fbff3a113cb0d2886901f9a00';
-const SNAPSHOT_ID = 'sha256:798f2b62fe4b048789a9d3f51ee3099b49300dfb87e9d448bedb7b4bc81ab51e';
+const CONTENT_SHA256 = 'fb3de35f51ee2ebb1e2a20687289902a00f8f1124ec033e113a2b1a21c7a5406';
+const SNAPSHOT_ID = 'sha256:daafa559cbc7ef82197d58bd3596445690eae25408cd1764e6325c2b7f76e63d';
 // El mismo catálogo recibido en otra observación (otro `observation_id` y otra hora).
 const OTHER_OBSERVATION = {
   observation_id: '019b76da-a800-7000-8000-000000000002',
   received_at_utc: '2026-01-01T00:05:00.100Z',
 } as const;
 const SNAPSHOT_ID_OTHER_OBSERVATION =
-  'sha256:875fdae5670e84e2cfb9da88cc3df2cfeb0c6d263e43077b10b5a1eb2d8d55ee';
+  'sha256:83baee003ece8d7d8dc462594fa22f8279699f9a844741c812d7f9919cbe55a3';
+// El fixture 1.0.0, con `underlying_symbol_type`, como los snapshots que guardó producción hasta
+// el 2026-11-24.
+const CONTENT_SHA256_V1 = '61998c161db0da302eb8cc7ecc7b758b1893307fbff3a113cb0d2886901f9a00';
+const SNAPSHOT_ID_V1 = 'sha256:798f2b62fe4b048789a9d3f51ee3099b49300dfb87e9d448bedb7b4bc81ab51e';
 
-function fixture(): SourceCatalogSnapshot {
+const FIXTURES = {
+  '1.0.0': './fixtures/source-catalog-snapshot.json',
+  '2.0.0': './fixtures/source-catalog-snapshot-v2.json',
+} as const;
+
+function fixture(version: keyof typeof FIXTURES = '2.0.0'): SourceCatalogSnapshot {
   return JSON.parse(
-    readFileSync(new URL('./fixtures/source-catalog-snapshot.json', import.meta.url), 'utf8'),
+    readFileSync(new URL(FIXTURES[version], import.meta.url), 'utf8'),
   ) as SourceCatalogSnapshot;
 }
 
@@ -44,8 +55,14 @@ type Draft = Record<string, unknown> & { entries: Record<string, unknown>[] };
  * esta función, porque recalcular los hashes lo metería en ellos. Con `keepContentHash`,
  * `content_sha256` queda como lo dejó el cambio.
  */
-function variant(change: (draft: Draft) => void, { keepContentHash = false } = {}): unknown {
-  const draft = structuredClone(fixture()) as unknown as Draft;
+function variant(
+  change: (draft: Draft) => void,
+  {
+    keepContentHash = false,
+    version = '2.0.0',
+  }: { keepContentHash?: boolean; version?: keyof typeof FIXTURES } = {},
+): unknown {
+  const draft = structuredClone(fixture(version)) as unknown as Draft;
   change(draft);
   const snapshot = draft as unknown as SourceCatalogSnapshot;
   if (!keepContentHash) {
@@ -253,20 +270,90 @@ describe('SourceCatalogSnapshot', () => {
   });
 
   it('solo admite las versiones y el formato que tienen lector', () => {
-    for (const [field, value] of [
-      ['schema_version', '1.1.0'],
-      ['schema_version', '2.0.0'],
-      ['catalog_normalizer_version', '2.0.0'],
-      ['catalog_format', 'mt5_symbols'],
+    for (const [field, value, version] of [
+      ['schema_version', '1.1.0', '2.0.0'],
+      ['schema_version', '3.0.0', '2.0.0'],
+      ['catalog_normalizer_version', '1.0.0', '2.0.0'],
+      ['catalog_normalizer_version', '3.0.0', '2.0.0'],
+      ['catalog_normalizer_version', '2.0.0', '1.0.0'],
+      ['catalog_format', 'mt5_symbols', '2.0.0'],
+      ['catalog_format', 'mt5_symbols', '1.0.0'],
     ] as const) {
       expect(
         issuePaths(
-          variant((draft) => {
-            draft[field] = value;
-          }),
+          variant(
+            (draft) => {
+              draft[field] = value;
+            },
+            { version },
+          ),
         ),
-        `${field}=${value}`,
+        `${version}: ${field}=${value}`,
       ).toEqual([field]);
     }
+  });
+});
+
+describe('SourceCatalogSnapshot 1.0.0, el de los logs guardados', () => {
+  it('se sigue leyendo, con `underlying_symbol_type` y sus hashes', () => {
+    const snapshot = fixture('1.0.0');
+
+    expect(sourceCatalogSnapshotSchema.parse(snapshot)).toEqual(snapshot);
+    expect(snapshot.content_sha256).toBe(CONTENT_SHA256_V1);
+    expect(snapshot.snapshot_id).toBe(SNAPSHOT_ID_V1);
+    expect(deriveCatalogContentSha256(snapshot.entries)).toBe(CONTENT_SHA256_V1);
+    expect(deriveCatalogSnapshotId(snapshot)).toBe(SNAPSHOT_ID_V1);
+  });
+
+  it('cada versión con sus entradas: la 1.0.0 exige el tipo, y la 2.0.0 no lo admite', () => {
+    // Sin el campo, la 1.0.0 no se acepta; los hashes se recalculan, así que solo falla la forma.
+    expect(
+      issuePaths(
+        variant(
+          (draft) => {
+            const [first] = draft.entries;
+            if (first !== undefined) {
+              delete first['underlying_symbol_type'];
+            }
+          },
+          { version: '1.0.0' },
+        ),
+      ),
+    ).toEqual(['entries.0.underlying_symbol_type']);
+    // Con el campo, la 2.0.0 tampoco: es un campo ajeno, que se prueba sin recalcular los hashes,
+    // como `trade_count`, para que solo falle la forma.
+    const current = fixture();
+    const [first, ...rest] = current.entries;
+    if (first === undefined) {
+      throw new TypeError('Fixture sin entradas.');
+    }
+    expect(
+      issuePaths({
+        ...current,
+        entries: [{ ...first, underlying_symbol_type: 'stockindex' }, ...rest],
+      }),
+    ).toEqual(['entries.0']);
+    // Un 1.0.0 relabelado como 2.0.0 no pasa: su normalizador y sus entradas son los de la 1.0.0.
+    const relabeled = issuePaths(
+      variant(
+        (draft) => {
+          draft['schema_version'] = '2.0.0';
+        },
+        { version: '1.0.0' },
+      ),
+    );
+    expect(relabeled).toContain('catalog_normalizer_version');
+    expect(relabeled).toContain('entries.0');
+  });
+
+  it('el contenido de las dos versiones de un mismo catálogo es distinto', () => {
+    expect(CONTENT_SHA256).not.toBe(CONTENT_SHA256_V1);
+    expect(fixture('2.0.0').entries).toEqual(
+      fixture('1.0.0').entries.map((entry) => {
+        const copy: Record<string, unknown> = { ...entry };
+        delete copy['underlying_symbol_type'];
+        return copy;
+      }),
+    );
   });
 });

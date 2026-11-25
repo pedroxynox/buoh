@@ -226,7 +226,10 @@ function expectNoPrices(report: SmokeReport): void {
   }
 }
 
-/** Catálogo de las dos entradas sintéticas, sin `trade_count`, ordenado por código. */
+/**
+ * Catálogo de las dos entradas sintéticas, sin `trade_count` ni `underlying_symbol_type` (el de
+ * `SourceCatalogSnapshot` 2.0.0), ordenado por código.
+ */
 const CATALOG_CONTENT_SHA256 = deriveCatalogContentSha256(
   [SYNTH_100, SYNTH_50].map((entry) => ({
     exchange_is_open: 1 as const,
@@ -237,7 +240,6 @@ const CATALOG_CONTENT_SHA256 = deriveCatalogContentSha256(
     submarket: entry.submarket,
     underlying_symbol: entry.underlying_symbol,
     underlying_symbol_name: entry.underlying_symbol_name,
-    underlying_symbol_type: entry.underlying_symbol_type,
   })),
 );
 

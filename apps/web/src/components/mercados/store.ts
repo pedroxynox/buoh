@@ -1,7 +1,7 @@
 /**
  * La lectura de Mercados con datos reales (concepto de interfaz §11): el gráfico de R_100 de la
  * ventana elegida, `GET /api/v1/datos/grafico?hours=<n>`, y el catálogo de Deriv, `GET
- * /api/v1/datos/catalogo` (ADR-0019 §8). Como la salud, las lecturas van sin el token CSRF, así que no
+ * /api/v2/datos/catalogo` (ADR-0019 §8). Como la salud, las lecturas van sin el token CSRF, así que no
  * renuevan la inactividad de la sesión (ADR-0019 §2), y con la pestaña oculta no lee. Solo lo importan
  * componentes de `out-api` (`F2-UI-001`).
  */

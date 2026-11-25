@@ -21,7 +21,7 @@ import {
   useDeterminismGuards,
 } from './support.js';
 
-// Las lecturas de R2 (ADR-0019 §8): `GET /api/v1/datos/grafico` y `GET /api/v1/datos/catalogo`,
+// Las lecturas de R2 (ADR-0019 §8): `GET /api/v1/datos/grafico` y `GET /api/v2/datos/catalogo`,
 // con un lector y un servicio de sesiones falsos. Necesitan una sesión, renuevan su inactividad solo
 // con el token CSRF, responden `not_ready` sin el token `api` o sin la credencial de lectura, y
 // validan su salida con `DataChart` y `DataCatalog`. La lectura contra PostgreSQL y el almacenamiento
@@ -39,7 +39,7 @@ const SESSION: AuthenticatedSession = {
 };
 const COOKIE = { cookie: `${SESSION_COOKIE_NAME}=${SID}` };
 const CHART_URL = '/api/v1/datos/grafico';
-const CATALOG_URL = '/api/v1/datos/catalogo';
+const CATALOG_URL = '/api/v2/datos/catalogo';
 
 const CHART: DataChart = {
   log: 3,
@@ -73,7 +73,6 @@ const CATALOG: DataCatalog = {
       {
         underlying_symbol: 'R_100',
         underlying_symbol_name: 'Volatility 100 Index',
-        underlying_symbol_type: 'stockindex',
         market: 'synthetic_index',
         submarket: 'random_index',
         subgroup: 'synthetics',
@@ -346,7 +345,17 @@ describe('GET /api/v1/datos/grafico (ADR-0019 §8)', () => {
   });
 });
 
-describe('GET /api/v1/datos/catalogo (ADR-0019 §8)', () => {
+describe('GET /api/v2/datos/catalogo (ADR-0019 §8)', () => {
+  it('ya no responde en /api/v1/: el mensaje cambió y está en /api/v2/ (ADR-0019 §6)', async () => {
+    const { app, calls } = appWith({ catalog: () => Promise.resolve(CATALOG) });
+    expectError(
+      await app.inject({ method: 'GET', url: '/api/v1/datos/catalogo', headers: COOKIE }),
+      404,
+      'not_found',
+    );
+    expect(calls).not.toContain('catalog');
+  });
+
   it('con sesión da la última versión del catálogo del log activo, o ninguna', async () => {
     for (const catalog of [CATALOG, { log: 3, catalog: null }, { log: null, catalog: null }]) {
       const { app, calls, lines } = appWith({ catalog: () => Promise.resolve(catalog) });

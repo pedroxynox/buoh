@@ -680,6 +680,52 @@ describe('runDerivAdapter: catálogo (F1-CATALOG-001, ADR-0012 §7)', () => {
     });
   });
 
+  it('sin `underlying_symbol_type`, como desde el 2026-11-24, crea su versión y se suscribe, sin versión anterior', async () => {
+    // Lo que pasó el 2026-11-25 con el log 1 del oro: un log nuevo, sin ninguna versión, y el
+    // catálogo sin el campo, que la release fijada exige (ADR-0012 §7).
+    const withoutType = (entry: typeof SYNTH_100): Record<string, unknown> => {
+      const copy: Record<string, unknown> = { ...entry };
+      delete copy['underlying_symbol_type'];
+      return copy;
+    };
+    const run = await harness();
+    const socket = run.socket();
+    socket.open();
+    await settle();
+    socket.text(derivMessages.catalog(1, [withoutType(SYNTH_100), withoutType(SYNTH_50)]));
+    await settle();
+
+    expect(run.requested.incidents).toEqual([]);
+    expect(run.catalog.versions).toHaveLength(1);
+    expect(socket.requests()[1]).toEqual({ req_id: 2, subscribe: 1, ticks: 'SYNTH_100' });
+    socket.emit({ code: 1000, kind: 'closed' });
+    const result = await run.run;
+    expect(result.catalog).toMatchObject({ status: 'created', version: 1 });
+    expect(result.catalog?.snapshot.schema_version).toBe('2.0.0');
+    expect(result.catalog?.snapshot.entries.map((entry) => Object.keys(entry).sort())).toEqual([
+      [
+        'exchange_is_open',
+        'is_trading_suspended',
+        'market',
+        'pip_size',
+        'subgroup',
+        'submarket',
+        'underlying_symbol',
+        'underlying_symbol_name',
+      ],
+      [
+        'exchange_is_open',
+        'is_trading_suspended',
+        'market',
+        'pip_size',
+        'subgroup',
+        'submarket',
+        'underlying_symbol',
+        'underlying_symbol_name',
+      ],
+    ]);
+  });
+
   it('un catálogo inválido no reemplaza la última versión válida, que sigue vigente', async () => {
     const schemas = syntheticSchemas();
     const previous = deriveCatalogSnapshot(

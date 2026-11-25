@@ -51,7 +51,7 @@ Con una variable inválida, la API no arranca: escribe en stderr una línea `api
 | `GET /api/v1/datos/salud` | la salud de los datos: el log activo y la última observación que guardó `buoh-operaciones` en él, con su hora (`DataHealth`); necesita la cookie, y sin la credencial de lectura responde 503 `not_ready` |
 | `GET /api/v1/datos/eventos` | los eventos de datos de los logs que no han vencido, del más nuevo al más viejo, 200 como mucho: versiones del catálogo, publicaciones, incidencias y condiciones (`DataEvents`); como la salud, solo con PostgreSQL |
 | `GET /api/v1/datos/grafico?hours=<n>` | el gráfico de R_100 de las últimas `n` horas, de 1 a 24, en el log activo: sus ticks, en un formato compacto, y los huecos que marca el log, con su motivo (`DataChart`); necesita la cookie, y sin la credencial de lectura o sin el token `api` responde 503 `not_ready` |
-| `GET /api/v1/datos/catalogo` | la última versión del catálogo de Deriv en el log activo, o `null` si todavía no tiene ninguna (`DataCatalog`); como el gráfico |
+| `GET /api/v2/datos/catalogo` | la última versión del catálogo de Deriv en el log activo, o `null` si todavía no tiene ninguna (`DataCatalog`), con las entradas sin `underlying_symbol_type`, en `/api/v2/` desde la precisión del 2026-11-25 de ADR-0019 §6; como el gráfico |
 
 Las rutas que cambian algo (`POST` y `DELETE`) exigen el `Origin` de `BUOH_API_ORIGIN`, `Sec-Fetch-Site: same-origin` si llega y `Content-Type: application/json`, o responden 403 `csrf_rejected`; con una sesión abierta exigen además el `X-CSRF-Token` de esa sesión. Los errores y sus códigos están en el OpenAPI (`generated/openapi.json`) y en los [contratos de dominio](../../docs/arquitectura/contratos-de-dominio.md), «Mensajes de la API».
 

@@ -163,8 +163,10 @@ export {
   deriveCatalogContentSha256,
   deriveCatalogSnapshotId,
   derivActiveSymbolEntrySchema,
+  derivActiveSymbolEntryV1Schema,
   sourceCatalogSnapshotSchema,
   type DerivActiveSymbolEntry,
+  type DerivActiveSymbolEntryV1,
   type SourceCatalogSnapshot,
 } from './source-catalog.js';
 export {

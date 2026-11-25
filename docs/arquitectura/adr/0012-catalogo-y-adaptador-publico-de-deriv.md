@@ -40,6 +40,8 @@ F1.4b conecta buoh con el canal público de Deriv, solo para escuchar: el catál
 | `exchange_is_open` e `is_trading_suspended` | 0 o 1 |
 | `trade_count` | entero |
 
+(Precisión del 2026-11-25.) Desde el 2026-11-24, entre las 13:18:04 y las 14:12:44 UTC, Deriv manda cada entrada sin `underlying_symbol_type`, en `"brief"` y en `"full"`, aunque el esquema de la release fijada lo sigue exigiendo, igual que el de las releases posteriores hasta `production_v20261119_0`, la última de ese día. Así lo muestran los frames de producción y una consulta al canal público del 2026-11-25: las 95 entradas traen los otros nueve campos. Lo que buoh hace con eso está en §2 y §7.
+
 El `pip_size` del catálogo no es el del tick: en `ticks_response` es el número de decimales, por ejemplo `2`. Los esquemas no describen el objeto `error`. Una respuesta con `error` cumple el esquema de `active_symbols`, `ping`, `time` y `forget_all`, porque su raíz admite campos extra; no cumple el de `ticks`, cuyo `msg_type` solo admite `tick`.
 
 **Prueba corta contra el canal público** (`wss://api.derivws.com/trading/v1/options/ws/public`), sin guardar datos ni precios:
@@ -84,6 +86,7 @@ El `pip_size` del catálogo no es el del tick: en `ticks_response` es el número
 
   Ambos en modo estricto. En draft-04 solo se admiten como anotación `auth_required` y `examples`, que aparecen en la release fijada. El replay obtiene el mismo validador del esquema que el dataset ya publica, sin configuración externa.
 - El esquema de fuente de los ticks es `ticks_response.schema.json`, y el `source_schema_sha256` del manifiesto es el SHA-256 de su JCS. El del catálogo es el SHA-256 del JCS de `active_symbols_response.schema.json`.
+- (Precisión del 2026-11-25.) El catálogo se valida con `active_symbols_response.schema.json` sin `underlying_symbol_type` en la lista `required` de las entradas, porque Deriv dejó de mandarlo (ver «Hechos verificados»). Es el único cambio: el campo sigue descrito, así que si llega tiene que ser texto, las entradas siguen sin admitir campos ajenos, y los demás campos siguen exigidos. Lo hace `relaxCatalogResponseSchema` (`packages/domain`), sobre el documento ya comprobado con su SHA-256, y el `source_schema_sha256` del snapshot es el SHA-256 del JCS de ese documento, el que valida. Los ticks y las demás respuestas siguen con sus esquemas tal cual. Si Deriv deja de exigir el campo en una release, o vuelve a mandarlo, el cambio de release sigue siendo un PR con sus pruebas (runbook de ingesta, «Carga de los esquemas de Deriv»).
 - El normalizador 2.0.0 ya lee las rutas de Deriv (`tick.symbol`, `tick.epoch`, `tick.quote`, `tick.pip_size` y `echo_req.ticks`), y sigue siendo uno por versión.
 - El adaptador valida cada petición propia contra su esquema de petición antes de enviarla.
 
@@ -150,7 +153,7 @@ Así, la incidencia se puede volver a derivar del frame durable. Se guarda en un
 
 ### 7. Catálogo: forma del snapshot y versiones
 
-La forma exacta de `SourceCatalogSnapshot` 1.0.0 está en los [contratos de dominio](../contratos-de-dominio.md#sourcecatalogsnapshot) y se implementa en `packages/contracts`. En resumen:
+La forma exacta de `SourceCatalogSnapshot` está en los [contratos de dominio](../contratos-de-dominio.md#sourcecatalogsnapshot) y se implementa en `packages/contracts`. (Precisión del 2026-11-25.) Desde el PR de esta precisión, buoh deriva la versión 2.0.0, con el normalizador de catálogo 2.0.0: sus entradas no llevan `underlying_symbol_type`, aunque llegue, porque Deriv lo dejó de mandar el 2026-11-24, y quitar un campo exigido es un cambio de versión mayor (contratos de dominio, «Versionado y compatibilidad»). La 1.0.0, con el campo, sigue teniendo lector, porque los logs guardan sus versiones hasta que vencen. Sin esto, un log nuevo, sin una versión válida anterior, no se suscribía: le pasó al log 1 del oro desde su arranque, el 2026-11-25, y le iba a pasar a R_100 en su corte siguiente (runbook de ingesta, «Producción (F2.2)», «El oro (PR 3 de ADR-0021)»). En resumen:
 
 - se deriva de un frame durable de respuesta a `active_symbols`, con su procedencia (`observation_id`, `raw_payload_sha256`, `received_at_utc`, `connector_version`, release y hash del esquema) y su identidad derivada (`snapshot_id`);
 - conserva los nombres y valores oficiales sin traducirlos, con los números como lexema decimal;
