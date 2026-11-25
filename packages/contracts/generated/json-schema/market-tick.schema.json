@@ -48,7 +48,8 @@
           "type": "string",
           "enum": [
             "stream",
-            "history_recovery"
+            "history_recovery",
+            "history_download"
           ]
         },
         "raw_payload_sha256": {

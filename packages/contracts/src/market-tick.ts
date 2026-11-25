@@ -14,6 +14,13 @@ import {
 } from './scalars.js';
 
 /**
+ * Orígenes de un tick. `history_download`, el de la descarga de la historia de un año, llega con
+ * `MarketTick` 1.1.0 (ADR-0021 §4, PR 4b de su §9): la 1.0.0, la que siguen produciendo la captura y
+ * los datasets vivos, no lo admite.
+ */
+export const MARKET_TICK_ORIGINS = ['stream', 'history_recovery', 'history_download'] as const;
+
+/**
  * `MarketTick` (contratos de dominio, «MarketTick»). Patrón común del paquete: el esquema
  * `…Structural` describe la forma y se publica como JSON Schema; el esquema refinado añade las
  * invariantes que JSON Schema no expresa (decimales, orden, hash) y es el que se usa en runtime.
@@ -29,7 +36,7 @@ export const marketTickStructuralSchema = z
     received_at_utc: utcTimestampMsSchema,
     quote_decimal: decimalStringSchema,
     pip_size: z.number().int().min(0).max(18),
-    origin: z.enum(['stream', 'history_recovery']),
+    origin: z.enum(MARKET_TICK_ORIGINS),
     raw_payload_sha256: sha256HexSchema,
     tick_fingerprint_sha256: sha256HexSchema,
     quality_flags: z.array(qualityIncidentTypeSchema),
@@ -82,6 +89,25 @@ export const marketTickSchema = marketTickStructuralSchema.superRefine((value, c
       message: 'tick_fingerprint_sha256 no corresponde a la identidad canónica.',
       path: ['tick_fingerprint_sha256'],
     });
+  }
+
+  // `history_download` solo existe desde la 1.1.0, y esos ticks no tienen retraso de entrega: se
+  // reciben mucho después de su hora (ADR-0021 §4).
+  if (value.origin === 'history_download') {
+    if (value.schema_version !== '1.1.0') {
+      context.addIssue({
+        code: 'custom',
+        message: 'origin history_download requiere schema_version 1.1.0.',
+        path: ['origin'],
+      });
+    }
+    if (value.quality_flags.includes('delivery_delayed')) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Un tick history_download no tiene retraso de entrega.',
+        path: ['quality_flags'],
+      });
+    }
   }
 });
 

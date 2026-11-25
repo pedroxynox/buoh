@@ -6,13 +6,13 @@ Desde F1.1, [`packages/contracts`](../../packages/contracts/) es canónico para 
 
 Las validaciones que JSON Schema no expresa —hashes derivados, orden, cardinalidad entre artifacts y relaciones entre campos— permanecen en los esquemas runtime y sus pruebas. Un consumidor no debe sustituir la validación runtime por validar únicamente el JSON Schema. Las invariantes entre artefactos de un dataset (conteos, orden canónico, unión tick→raw, referencias de incidencias, procedencia y extremos temporales) están en `validateDatasetConsistency`, que usan el verificador de vectores y `data:replay` en ambos modos.
 
-Fase 1 implementa `SourceEvent`, `MarketTick`, `DataQualityIncident`, `OperationalConditionEvent`, `IngestionCursor`, `DatasetManifest`, `PublishedManifestRecord` y `HealthReport`. F1.4b añade `SourceCatalogSnapshot` ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md)); F2.1, `LiveDerivationCheckpoint` ([ADR-0017](adr/0017-punto-de-control-de-la-derivacion-en-vivo.md)); y F2.3, los mensajes de la API y `AuditEvent` ([ADR-0019](adr/0019-api-cuentas-y-auditoria.md)). Estrategias, señales y ejecución permanecen conceptuales.
+Fase 1 implementa `SourceEvent`, `MarketTick`, `DataQualityIncident`, `OperationalConditionEvent`, `IngestionCursor`, `DatasetManifest`, `PublishedManifestRecord` y `HealthReport`. F1.4b añade `SourceCatalogSnapshot` ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md)); F2.1, `LiveDerivationCheckpoint` ([ADR-0017](adr/0017-punto-de-control-de-la-derivacion-en-vivo.md)); F2.3, los mensajes de la API y `AuditEvent` ([ADR-0019](adr/0019-api-cuentas-y-auditoria.md)); y F2.5b, los [registros de los lotes](#registros-de-los-lotes) y `MarketTick` 1.1.0 ([ADR-0021](adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §4). Estrategias, señales y ejecución permanecen conceptuales.
 
 ## Evidencia de F1.1
 
 - Zod 4 mantiene contratos estrictos y uniones discriminadas.
 - `canonicalize` implementa RFC 8785 para IDs y hashes estructurados.
-- `pnpm run schemas:generate` produjo ocho JSON Schema en F1.1, nueve desde F1.4b con `SourceCatalogSnapshot`, diez desde F2.1 con `LiveDerivationCheckpoint` y once desde F2.3 con `AuditEvent`; `schemas:check` detecta deriva.
+- `pnpm run schemas:generate` produjo ocho JSON Schema en F1.1, nueve desde F1.4b con `SourceCatalogSnapshot`, diez desde F2.1 con `LiveDerivationCheckpoint`, once desde F2.3 con `AuditEvent` y quince desde el PR 4b de ADR-0021 con los registros de los lotes; `schemas:check` detecta deriva.
 - `pnpm run test:vectors` verifica manifiestos, raw hashes, IDs derivados, publicaciones y escenarios principal/cero-ticks sin red.
 - Desde F1.2, `test:vectors` además regenera con `packages/domain` todos los artefactos de ambos escenarios y los compara byte a byte.
 
@@ -199,7 +199,7 @@ state: LiveDerivationState
 Proyección regenerable de un raw válido:
 
 ```text
-schema_version: SchemaVersion
+schema_version: SchemaVersion              # "1.0.0" o, con history_download, "1.1.0"
 observation_id: UuidV7
 source: string
 connector_version: string
@@ -208,7 +208,7 @@ event_time_utc: UtcTimestampMs
 received_at_utc: UtcTimestampMs
 quote_decimal: DecimalString
 pip_size: entero 0..18
-origin: "stream" | "history_recovery"
+origin: "stream" | "history_recovery" | "history_download"   # el último, solo en la 1.1.0
 raw_payload_sha256: Sha256Hex
 tick_fingerprint_sha256: Sha256Hex
 quality_flags: QualityIncidentType[]
@@ -229,6 +229,8 @@ quality_flags: QualityIncidentType[]
 Dos observaciones pueden compartir fingerprint sin compartir `observation_id`. El adaptador conserva el lexema numérico del payload o usa decimal exacto para producir `quote_decimal`; no deriva la cotización mediante aritmética binaria de `JSON.parse`.
 
 Un tick del flujo (`origin: "stream"`) es el único de su observación. Desde las reglas 3.0.0, un tick que trae la historia (`origin: "history_recovery"`) lleva el `observation_id`, el `raw_payload_sha256`, el `received_at_utc`, la fuente y el conector del frame `history` que lo trajo, así que varios ticks comparten el `observation_id` de su frame y se distinguen por `event_time_utc` (ver «Semántica ejecutable de reglas 3.0.0»).
+
+Desde el PR 4b de [ADR-0021](adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §9 hay dos versiones. La 1.1.0 suma el origen `history_download`, el de los ticks de la descarga de la historia de un año (ADR-0021 §4); el esquema runtime solo lo admite con `schema_version` 1.1.0, y la 1.0.0 es la que siguen produciendo la captura y los datasets vivos. Qué versión admite cada dataset lo siguen comprobando `validateDatasetConsistency` y el replay, con la del manifiesto. Un tick `history_download` lleva la procedencia del frame `history` que lo trajo, como uno de `history_recovery`, y nunca la marca `delivery_delayed`: se recibe mucho después de su hora, así que no tiene retraso de entrega, y en el backtest su instante es su hora de la fuente ([ADR-0024](adr/0024-semantica-del-backtest.md) §4). Como la historia y la captura son de la misma fuente, un mismo tick tiene la misma huella en las dos.
 
 ## `DataQualityIncident`
 
@@ -504,6 +506,141 @@ is_trading_suspended: 0 | 1
   Quien pidió el catálogo registra la incidencia de [respuestas pedidas](#incidencias-de-respuestas-pedidas) con ese motivo.
 - **Conversión.** `deriveCatalogSnapshot` (`packages/domain`) aplica las seis comprobaciones a un frame durable y, si pasan, arma el snapshot 2.0.0: proyecta los ocho campos de la 2.0.0, ordena las entradas y calcula los hashes con las funciones del contrato. Es pura, así que el snapshot o la incidencia se pueden volver a derivar del frame. El frame tiene que ser JSON: quien lo correlaciona tiene que leerlo con el mismo lector estricto (`parseJsonPreservingNumbers`), así que un frame que no lo es, o que repite una clave, nunca llega a la conversión, y ya deja la incidencia `payload_not_json` de las reglas 2.0.0. Si llegara, la conversión lanza un error.
 - **Estado de mercado.** `exchange_is_open` e `is_trading_suspended` siguen el horario de cada mercado, así que habrá una versión nueva cuando un mercado abra, cierre o se suspenda.
+
+## Registros de los lotes
+
+Los fija [ADR-0021](adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §4, con la precisión de [ADR-0024](adr/0024-semantica-del-backtest.md) §4, y están en `packages/contracts` desde el PR 4b de ADR-0021 §9: `MarketCandle`, `TradingSession`, `ContractOffer` y `ContractQuote`, todos 1.0.0. Salen de las respuestas que piden los lotes con el conector `deriv-options-lotes-1.0.0` (ADR-0021 §3). Todavía nadie los produce: las reglas que los derivan llegan con el PR 4c, y el paso que pide las respuestas, con el PR 5.
+
+- **Procedencia.** Los cuatro llevan la de `MarketTick`: `observation_id`, `source`, `connector_version`, `received_at_utc` y `raw_payload_sha256` son los del `RawSourceFrame` de la respuesta, así que los registros de un mismo frame comparten su `observation_id`. Un backtest usa cada registro desde su `received_at_utc` (ADR-0024 §4).
+- **Importes y precios.** Son `DecimalString`, del lexema recibido o en decimal exacto, nunca con la aritmética binaria de `JSON.parse`, como `quote_decimal`. Ninguno entra en Git (ADR-0021 §7).
+- **Lo medido.** La forma de las respuestas se midió el 2026-11-25 en el canal público de Deriv, sin cuenta y sin guardar precios, con los esquemas de la release fijada (`DERIV_BATCH_OPERATIONS`). Las horas y los tipos de contrato de abajo salen de esa medición.
+- **Sin validar la forma.** El JSON Schema generado de cada uno describe su forma. Solo el esquema runtime comprueba los decimales, el orden, las huellas y las relaciones entre campos.
+
+### `MarketCandle`
+
+```text
+schema_version: "1.0.0"
+observation_id: UuidV7
+source: string
+connector_version: string
+symbol: Symbol
+open_time_utc: UtcTimestampMs              # `epoch` de Deriv: el principio del minuto
+granularity_seconds: 60
+open_decimal: DecimalString
+high_decimal: DecimalString
+low_decimal: DecimalString
+close_decimal: DecimalString
+pip_size: entero 0..18
+received_at_utc: UtcTimestampMs
+raw_payload_sha256: Sha256Hex
+candle_fingerprint_sha256: Sha256Hex
+quality_flags: QualityIncidentType[]
+```
+
+- **Qué es.** Una vela de 1 minuto que calcula Deriv, de `ticks_history` con `style: "candles"` y `granularity: 60`. Nunca se mezcla con las que buoh arma con sus ticks, y una estrategia declara cuáles usa (ADR-0021 §4; ADR-0022 §2).
+- **Su intervalo** va de `open_time_utc`, incluido, a `open_time_utc` más `granularity_seconds`, sin incluir. Ese fin es su instante en el backtest (ADR-0024 §4). El 2026-11-25, el `epoch` de cada vela fue un múltiplo de 60 s y el principio de su minuto. Deriv no da velas sin ticks: el oro no tuvo ninguna de 22:00 a 23:00 UTC del 2026-11-24, su cierre diario, ni el sábado 2026-11-21.
+- **Solo velas cerradas.** Con `end: "latest"`, Deriv da también la vela del minuto en curso. El contrato la rechaza: su fin no puede ser posterior a `received_at_utc`. Qué hacen con ella las reglas de los lotes lo fija el PR 4c.
+- **Granularidad.** Solo 60 s, la que piden los lotes (ADR-0021 §3). Otra es otra versión.
+- **Decimales.** Cada precio lleva exactamente `pip_size` decimales, el `pip_size` de la respuesta, como `quote_decimal`. El máximo no es menor que la apertura ni que el cierre, y el mínimo no es mayor que ninguno de los dos.
+- **Huella.** `candle_fingerprint_sha256` es el SHA-256 del JCS de `close_decimal`, `granularity_seconds`, `high_decimal`, `low_decimal`, `open_decimal`, `open_time_utc`, `pip_size`, `source` y `symbol`. No incluye la observación ni la recepción, así que la misma vela en dos páginas tiene la misma huella, como un tick repetido.
+- `quality_flags` es único y ordenado, como en `MarketTick`.
+
+### `TradingSession`
+
+```text
+schema_version: "1.0.0"
+observation_id: UuidV7
+source: string
+connector_version: string
+symbol: Symbol
+trading_date: "AAAA-MM-DD"                  # el día UTC pedido
+intervals: TradingInterval[]                # vacía: ese día no cotiza
+received_at_utc: UtcTimestampMs
+raw_payload_sha256: Sha256Hex
+```
+
+`TradingInterval`:
+
+```text
+opens_at_utc: UtcTimestampMs
+closes_at_utc: UtcTimestampMs
+```
+
+- **Qué es.** El horario de un símbolo en un día UTC, de una respuesta de `trading_times` para ese día. Un frame da un `TradingSession` por cada símbolo que pide el perfil. Un horario es de un día: vale el último recibido para ese día (ADR-0024 §4).
+- **Los intervalos.** Cada uno cotiza desde `opens_at_utc`, incluido, hasta `closes_at_utc`, sin incluir. Van en orden, sin solaparse ni tocarse, entre las 00:00 de `trading_date` y las 00:00 del día siguiente.
+- **Desde Deriv.** `times.open` y `times.close` son listas paralelas de horas `HH:MM:SS` en UTC, y un día sin cotización trae `--` en las dos. Un cierre `23:59:59` es el fin del día, y el contrato lo guarda como las 00:00:00.000 del día siguiente. El 2026-11-24, el oro dio ticks a las 23:59:59 y a las 00:00:00, y R_100 a las 23:59:58 y a las 00:00:00: la sesión sigue al día siguiente, y con un fin a las 23:59:59 el último segundo de cada día parecería cerrado. Los demás cierres son la hora misma: ese día, el último tick del oro antes de su cierre de las 22:00:00 fue de las 21:59:59, y el primero después de su apertura de las 23:00:00, de las 23:00:01. `settlement`, `trading_days` y los avisos de `events` no entran; los conserva el raw.
+- **Ejemplos del 2026-11-25.** El oro cotiza ese día de 00:00 a 22:00 y de 23:00 a 00:00; el 2026-11-26, de 00:00 a 16:30, por un cierre anticipado; y el sábado 2026-11-28, nada. R_100, Bitcoin y Ethereum, el día entero los siete días. El `trading_times` de un día de hace un año respondió con la misma forma.
+
+### `ContractOffer`
+
+```text
+schema_version: "1.0.0"
+observation_id: UuidV7
+source: string
+connector_version: string
+symbol: Symbol
+offers: ContractTypeOffer[]                 # vacía si no ofrece ninguno de los cuatro
+received_at_utc: UtcTimestampMs
+raw_payload_sha256: Sha256Hex
+```
+
+`ContractTypeOffer`, de una de dos formas, con los nombres de Deriv:
+
+```text
+contract_category: "callput"
+contract_type: "CALL" | "PUT"
+expiry_type: "tick" | "intraday" | "daily"
+min_contract_duration: ContractDuration
+max_contract_duration: ContractDuration
+
+contract_category: "multiplier"
+contract_type: "MULTUP" | "MULTDOWN"
+expiry_type: "no_expiry"
+```
+
+`ContractDuration`, con los nombres de `proposal`:
+
+```text
+duration: entero 1..99999999
+duration_unit: "t" | "s" | "m" | "h" | "d"
+```
+
+- **Qué es.** De una respuesta de `contracts_for` de un símbolo, cuáles de los cuatro tipos que usa buoh ofrece ese mercado (ADR-0022 §5) y, en sube/baja, la duración mínima y la máxima de cada vencimiento. Los demás tipos y las barreras no entran; los conserva el raw.
+- **Duraciones.** Deriv las da como texto, como `5m`, `1d` o `10t`, y el contrato las guarda con su número y su unidad. El vencimiento `tick` va en ticks (`t`), y `intraday` y `daily`, en tiempo. La mínima no pasa de la máxima.
+- **Sin multiplicadores.** `contracts_for` publica `multiplier_range`, pero el 2026-11-25, sin cuenta, `proposal` aceptó otros en seis de los ocho mercados de ADR-0021 (ADR-0021 §3). El contrato no los guarda, para que nadie los tome por los que se aceptan. Qué multiplicadores se ofrecen lo dicen las cotizaciones (ADR-0024 §4). Las duraciones de sube/baja sí coincidieron con las que aceptó `proposal`.
+- **Orden.** `offers` va ordenada por `contract_type` y `expiry_type`, en unidades UTF-16, sin repetir la pareja.
+
+### `ContractQuote`
+
+```text
+schema_version: "1.0.0"
+observation_id: UuidV7
+source: string
+connector_version: string
+symbol: Symbol
+currency: "USD"
+stake_decimal: DecimalString                # `amount`, con `basis: "stake"`
+quoted_at_utc: UtcTimestampMs               # `spot_time`
+ask_price_decimal: DecimalString
+received_at_utc: UtcTimestampMs
+raw_payload_sha256: Sha256Hex
+# y, según contract_category:
+contract_category: "callput"
+contract_type: "CALL" | "PUT"
+duration: ContractDuration
+payout_decimal: DecimalString
+
+contract_category: "multiplier"
+contract_type: "MULTUP" | "MULTDOWN"
+multiplier_decimal: DecimalString
+commission_decimal: DecimalString
+```
+
+- **Qué es.** Lo que Deriv ofrecía por un contrato en un instante, de una respuesta de `proposal` sin cuenta y sin suscripción: un registro por respuesta. El contrato pedido (el símbolo, el tipo, la apuesta, la moneda y la duración o el multiplicador) sale de `echo_req`, que Deriv devuelve en la misma respuesta, y lo cotizado, de `proposal`.
+- **Sin cotización.** Una respuesta con `error`, como un multiplicador que no acepta (`ContractBuyValidationError`) o una duración que no ofrece (`TradingDurationNotAllowed`), no da registro. Las reglas de los lotes del PR 4c la registran como incidencia, con el contrato pedido.
+- **La hora.** `quoted_at_utc` es `spot_time`, la del tick con que Deriv cotizó. `date_start` no entra: el 2026-11-25 coincidió con `spot_time` en ocho de las nueve respuestas medidas, y la otra fue un sube/baja de 5 ticks de R_100.
+- **Lo que usa el backtest** (ADR-0022 §5 y ADR-0024 §6). En un sube/baja, `payout_decimal`. En un multiplicador, `commission_decimal`, que dividida por la apuesta por el multiplicador da la comisión como fracción de la exposición. `ask_price_decimal` es el precio del contrato, y con `basis: "stake"` fue la apuesta en las cuatro respuestas medidas. Deriv manda también `payout` en un multiplicador, sin sentido sin vencimiento, y no entra; tampoco `spot`, `longcode`, `id`, los límites ni las barreras, que conserva el raw.
+- **Importes.** Sin signo; la apuesta y el multiplicador, mayores que cero. El esquema de Deriv admite `commission: null`, y el contrato no: qué hacen las reglas con una respuesta así lo fija el PR 4c.
 
 ## Replay de dataset
 
@@ -864,7 +1001,7 @@ AuditObject = { kind: "account" | "credential" | "link" | "session", id: UuidV7 
 - Cambio aditivo compatible incrementa minor; cambio de semántica, tipo, requiredness, orden o canonicalización incrementa major.
 - Contratos internos son estrictos y productores/consumidores se actualizan coordinadamente.
 - Payload externo se preserva completo como raw; el adaptador extrae campos validados y tolera extras solo si el esquema fijado lo permite.
-- Toda versión mayor conserva lector/replay mientras exista un dataset que la referencie, o documenta migración explícita sin sobrescribir originales. Así conviven hoy las incidencias 1.0.0 y 2.0.0, los conjuntos de reglas 1.0.0, 2.0.0 y 3.0.0, y los snapshots de catálogo 1.0.0 y 2.0.0.
+- Toda versión mayor conserva lector/replay mientras exista un dataset que la referencie, o documenta migración explícita sin sobrescribir originales. Así conviven hoy las incidencias 1.0.0 y 2.0.0, los conjuntos de reglas 1.0.0, 2.0.0 y 3.0.0, y los snapshots de catálogo 1.0.0 y 2.0.0. `MarketTick` 1.1.0, una versión menor, solo suma el origen `history_download`, y la 1.0.0 sigue siendo la de la captura.
 - TypeScript y futuro Python comparten JSON Schema generado y vectores.
 
 ## Oráculo inicial

@@ -93,6 +93,14 @@ export {
   type ContractContextErrorCode,
   type OperationalConditionEvent,
 } from './conditions.js';
+export { contractDurationSchema, type ContractDuration } from './batch-records.js';
+export {
+  contractOfferSchema,
+  contractTypeOfferSchema,
+  type ContractOffer,
+  type ContractTypeOffer,
+} from './contract-offer.js';
+export { contractQuoteSchema, type ContractQuote } from './contract-quote.js';
 export {
   dataQualityIncidentSchema,
   INCIDENT_SCHEMA_VERSIONS,
@@ -134,7 +142,13 @@ export {
   type LiveDerivationCheckpoint,
   type LiveDerivationState,
 } from './live-checkpoint.js';
-export { deriveTickFingerprint, marketTickSchema, type MarketTick } from './market-tick.js';
+export { deriveCandleFingerprint, marketCandleSchema, type MarketCandle } from './market-candle.js';
+export {
+  deriveTickFingerprint,
+  MARKET_TICK_ORIGINS,
+  marketTickSchema,
+  type MarketTick,
+} from './market-tick.js';
 export {
   absoluteUriSchema,
   compareUtc,
@@ -183,4 +197,11 @@ export {
   type RawSourceFrame,
   type SourceEvent,
 } from './source-events.js';
+export {
+  tradingDateSchema,
+  tradingIntervalSchema,
+  tradingSessionSchema,
+  type TradingInterval,
+  type TradingSession,
+} from './trading-session.js';
 export { validateMarketDataVectors, type VectorIntegritySummary } from './vector-integrity.js';
