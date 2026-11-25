@@ -656,6 +656,13 @@ describe('runDerivAdapter: respuestas pedidas (ADR-0012 §5 y §6)', () => {
 });
 
 describe('runDerivAdapter: catálogo (F1-CATALOG-001, ADR-0012 §7)', () => {
+  /** Una entrada sintética sin `underlying_symbol_type`, como las manda Deriv desde el 2026-11-24. */
+  const withoutType = (entry: typeof SYNTH_100): Record<string, unknown> => {
+    const copy: Record<string, unknown> = { ...entry };
+    delete copy['underlying_symbol_type'];
+    return copy;
+  };
+
   it('sin snapshot válido no se suscribe: incidencia, ninguna versión y salud failed', async () => {
     const run = await harness();
     await run.openAndListCatalog([]);
@@ -687,11 +694,6 @@ describe('runDerivAdapter: catálogo (F1-CATALOG-001, ADR-0012 §7)', () => {
   it('sin `underlying_symbol_type`, como desde el 2026-11-24, crea su versión y se suscribe, sin versión anterior', async () => {
     // Lo que pasó el 2026-11-25 con el log 1 del oro: un log nuevo, sin ninguna versión, y el
     // catálogo sin el campo, que la release fijada exige (ADR-0012 §7).
-    const withoutType = (entry: typeof SYNTH_100): Record<string, unknown> => {
-      const copy: Record<string, unknown> = { ...entry };
-      delete copy['underlying_symbol_type'];
-      return copy;
-    };
     const run = await harness();
     const socket = run.socket();
     socket.open();
@@ -819,7 +821,7 @@ describe('runDerivAdapter: catálogo (F1-CATALOG-001, ADR-0012 §7)', () => {
     const socket = run.socket();
     socket.open();
     await settle();
-    socket.text(derivMessages.catalog(1));
+    socket.text(derivMessages.catalog(1, [withoutType(SYNTH_100), withoutType(SYNTH_50)]));
     await settle();
 
     expect(run.requested.incidents).toEqual([]);

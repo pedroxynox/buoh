@@ -65,7 +65,7 @@ El `pip_size` del catálogo no es el del tick: en `ticks_response` es el número
 
 ### Hechos verificados el 2026-11-25
 
-Un momento del 2026-11-24 entre las 13:18:04 y las 14:12:44 UTC, Deriv empezó a mandar cada entrada de `active_symbols` sin `underlying_symbol_type`, en `"brief"` y en `"full"`. El esquema de la release fijada lo sigue exigiendo, y el de `production_v20261119_0`, la última release ese día, es el mismo archivo. Así lo muestran los frames de producción y una consulta al canal público del 2026-11-25: las 95 entradas traen los otros nueve campos. Lo que buoh hace con eso está en §2 y §7 (precisiones del 2026-11-25).
+En algún momento del 2026-11-24, entre las 13:18:04 y las 14:12:44 UTC, Deriv empezó a mandar cada entrada de `active_symbols` sin `underlying_symbol_type`, en `"brief"` y en `"full"`. El esquema de la release fijada lo sigue exigiendo, y el de `production_v20261119_0`, la última release ese día, es el mismo archivo. Así lo muestran los frames de producción y una consulta al canal público del 2026-11-25: las 95 entradas traen los otros nueve campos. Lo que buoh hace con eso está en §2 y §7 (precisiones del 2026-11-25).
 
 ## Decisión
 
@@ -173,7 +173,7 @@ La forma exacta de `SourceCatalogSnapshot` está en los [contratos de dominio](.
 
 - **Qué lo invalida.** Las comprobaciones van en este orden, y la primera que falla da el motivo, para que la incidencia se derive siempre igual:
   1. trae `error`: `source_error_response`;
-  2. no cumple el esquema fijado: `schema_validation_failed`;
+  2. no cumple el esquema fijado, desde la precisión del 2026-11-25 sin exigir `underlying_symbol_type` (§2): `schema_validation_failed`;
   3. la lista falta o está vacía: `catalog_empty`;
   4. un `pip_size` trae exponente: `catalog_exponent_not_supported`;
   5. una entrada no cumple el contrato del snapshot, por ejemplo un código vacío: `catalog_entry_invalid`;
