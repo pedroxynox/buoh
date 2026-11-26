@@ -189,7 +189,7 @@ const replayFailedSchema = z.object({
 });
 
 /** La única línea JSON de stdout de un proceso, o `null`. */
-function stdoutLine(stdout: string): unknown {
+export function stdoutLine(stdout: string): unknown {
   const lines = stdout.split('\n').filter((line) => line.trim().length > 0);
   if (lines.length !== 1) {
     return null;
@@ -215,10 +215,10 @@ const DEFERRED: StepOutcome = {
 
 /**
  * El estado que dejó el informe más reciente del paso, de cualquier log que se puede leer: el de
- * mayor `report_id`, un UUIDv7, que crece con el tiempo. Sin ninguno, el estado vacío. `invalid` si
+ * mayor `report_id`, un UUIDv7, que crece con el tiempo. Lo usan también los lotes (`batch-steps.ts`). Sin ninguno, el estado vacío. `invalid` si
  * el informe no tiene la forma que escribe el paso.
  */
-async function loadState<T>(
+export async function loadState<T>(
   input: OperationsInput,
   logs: readonly CaptureLog[],
   step: string,
@@ -248,7 +248,7 @@ async function loadState<T>(
 }
 
 /** Por qué un proceso no dio una línea concluyente: su plazo, una señal o su salida. */
-function childFailure(result: ChildResult, invalid: string): string {
+export function childFailure(result: ChildResult, invalid: string): string {
   if (result.timedOut) {
     return 'child_timeout';
   }

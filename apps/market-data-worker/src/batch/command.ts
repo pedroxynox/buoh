@@ -153,7 +153,15 @@ interface ResponseCounts {
   unexpected: number;
 }
 
-type SequenceStatus = 'completed' | 'failed' | 'idle' | 'skipped' | 'stopped';
+/** Cómo terminó el comando en una secuencia. */
+export const BATCH_SEQUENCE_STATUSES = [
+  'completed',
+  'failed',
+  'idle',
+  'skipped',
+  'stopped',
+] as const;
+type SequenceStatus = (typeof BATCH_SEQUENCE_STATUSES)[number];
 
 /** Lo que hizo el comando en una secuencia. */
 interface SequenceOutcome {
@@ -176,8 +184,11 @@ interface SequenceOutcome {
   readonly until: number;
 }
 
-/** El estado que recibe y que devuelve: el cursor de cada secuencia por lotes que ya pidió algo. */
-const stateSchema = z.partialRecord(
+/**
+ * El estado que recibe y que devuelve: el cursor de cada secuencia por lotes que ya pidió algo. Lo
+ * guarda `buoh-operaciones` (precisión del PR 5c2 de ADR-0021 §9).
+ */
+export const batchStateSchema = z.partialRecord(
   z.enum(BATCH_SEQUENCES.map((sequence) => sequence.name) as [string, ...string[]]),
   z.strictObject({
     next: z.number().int().min(0).max(100_000),
@@ -212,7 +223,7 @@ function parseBatchArgs(argv: readonly string[]): { readonly state: BatchState }
   } catch {
     throw new UsageError(`--state no es JSON. ${BATCH_USAGE}`);
   }
-  const state = stateSchema.safeParse(parsed);
+  const state = batchStateSchema.safeParse(parsed);
   if (!state.success) {
     throw new UsageError(`--state no es el estado de los lotes. ${BATCH_USAGE}`);
   }

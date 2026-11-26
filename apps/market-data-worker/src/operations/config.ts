@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { ConfigError, POSTGRES_SSL_MODES, type WorkerConfig } from '../config.js';
 import {
+  BATCH_ROLE,
   MIN_ROLE_PASSWORD_LENGTH,
   POSTGRES_ROLES,
   PUBLICATION_ROLE,
@@ -104,16 +105,31 @@ const operationsEnvironmentSchema = z.object({
 /**
  * Las variables que el servicio admite y que su Blueprint todavía no le da: la contraseña de
  * `buoh_lotes` (ADR-0021 §3), que Render generará en el propio servicio (`generateValue`) con el PR
- * 5f de su §9, el que pone en marcha los lotes. Es opcional, como la de `buoh_publicacion`: con ella,
- * el paso 1 crea el rol y prepara los logs de las secuencias por lotes; sin ella, no toca ninguno de
- * los dos. Va en otro objeto para que la prueba del Blueprint, que compara las variables de
- * `render-datos.yaml` con las del primero, no la pida antes; esa prueba exige que cada una sea
- * opcional y que el Blueprint no la tenga. El 5f la pasa al primero, como el PR 6 de ADR-0019 §14
- * hizo con la de `buoh_api`.
+ * 5f de su §9, el que pone en marcha los lotes, y, desde el PR 5c2, las del token `lotes`. Son
+ * opcionales, como la de `buoh_publicacion`: con la contraseña, el paso 1 crea el rol y prepara los
+ * logs de las secuencias por lotes; con ella y el token, corren los pasos de los lotes. Las del
+ * token van las cinco o ninguna. Van en otro objeto para que la prueba del Blueprint, que compara
+ * las variables de `render-datos.yaml` con las del primero, no las pida antes; esa prueba exige que
+ * cada una sea opcional y que el Blueprint no la tenga. El 5f las pasa al primero, como el PR 6 de
+ * ADR-0019 §14 hizo con la de `buoh_api`.
  */
 const pendingEnvironmentSchema = z.object({
   BUOH_LOTES_POSTGRES_PASSWORD: rolePassword.optional(),
+  BUOH_LOTES_S3_ACCESS_KEY_ID: nonEmpty.optional(),
+  BUOH_LOTES_S3_BUCKET: bucket.optional(),
+  BUOH_LOTES_S3_ENDPOINT: z.url().optional(),
+  BUOH_LOTES_S3_REGION: nonEmpty.optional(),
+  BUOH_LOTES_S3_SECRET_ACCESS_KEY: nonEmpty.optional(),
 });
+
+/** Las variables del token `lotes`, que van juntas. */
+const BATCH_OBJECT_VARIABLES = [
+  'BUOH_LOTES_S3_ACCESS_KEY_ID',
+  'BUOH_LOTES_S3_BUCKET',
+  'BUOH_LOTES_S3_ENDPOINT',
+  'BUOH_LOTES_S3_REGION',
+  'BUOH_LOTES_S3_SECRET_ACCESS_KEY',
+] as const;
 
 /** Las variables que el worker lee y que el servicio no tiene (ADR-0018 §11). */
 const WORKER_VARIABLES = /^BUOH_(?:POSTGRES|S3)_/u;
@@ -137,6 +153,11 @@ export interface OperationsConfig {
    * tiene: entonces el paso 1 no crea el rol ni prepara los logs de las secuencias por lotes.
    */
   readonly batchPassword: string | null;
+  /**
+   * El almacenamiento de objetos con el token `lotes` (ADR-0021 §3), sin prefijo, o `null` mientras
+   * el servicio no lo tiene: entonces no corren los pasos de los lotes.
+   */
+  readonly batchObjects: Omit<WorkerConfig['s3'], 'keyPrefix'> | null;
   /**
    * El commit del código que corre, el de `RENDER_GIT_COMMIT`, que Render pone en cada servicio, o
    * `null` sin él. Un log que la publicación detuvo sigue detenido mientras el código es el mismo
@@ -187,14 +208,37 @@ export function loadOperationsConfig(
       rejected.add(name);
     }
   }
+  const batchObjectsPresent = BATCH_OBJECT_VARIABLES.filter((name) => env[name] !== undefined);
+  if (batchObjectsPresent.length > 0) {
+    for (const name of BATCH_OBJECT_VARIABLES) {
+      if (env[name] === undefined) {
+        rejected.add(name);
+      }
+    }
+  }
   if (!parsed.success || !pending.success || rejected.size > 0) {
     throw new ConfigError([...rejected].sort());
   }
   const value = parsed.data;
+  const lotes = pending.data;
   return {
     apiPassword: value.BUOH_API_POSTGRES_PASSWORD ?? null,
     apiReaderPassword: value.BUOH_API_LECTURA_POSTGRES_PASSWORD ?? null,
-    batchPassword: pending.data.BUOH_LOTES_POSTGRES_PASSWORD ?? null,
+    batchObjects:
+      lotes.BUOH_LOTES_S3_ACCESS_KEY_ID === undefined ||
+      lotes.BUOH_LOTES_S3_BUCKET === undefined ||
+      lotes.BUOH_LOTES_S3_ENDPOINT === undefined ||
+      lotes.BUOH_LOTES_S3_REGION === undefined ||
+      lotes.BUOH_LOTES_S3_SECRET_ACCESS_KEY === undefined
+        ? null
+        : {
+            accessKeyId: lotes.BUOH_LOTES_S3_ACCESS_KEY_ID,
+            bucket: lotes.BUOH_LOTES_S3_BUCKET,
+            endpoint: lotes.BUOH_LOTES_S3_ENDPOINT,
+            region: lotes.BUOH_LOTES_S3_REGION,
+            secretAccessKey: lotes.BUOH_LOTES_S3_SECRET_ACCESS_KEY,
+          },
+    batchPassword: lotes.BUOH_LOTES_POSTGRES_PASSWORD ?? null,
     codeVersion: CODE_VERSION.test(env['RENDER_GIT_COMMIT'] ?? '')
       ? (env['RENDER_GIT_COMMIT'] ?? null)
       : null,
@@ -326,4 +370,30 @@ export function publishEnvironment(config: OperationsConfig): Record<string, str
  */
 export function replayEnvironment(config: OperationsConfig): Record<string, string> {
   return healthEnvironment(config);
+}
+
+/**
+ * El entorno explícito del proceso de `batch` (ADR-0021 §3; precisión del PR 5c1 de su §9): solo el
+ * rol `buoh_lotes` y el token `lotes`, con los nombres `BUOH_*` que lee el worker, sin esquema: en
+ * `production`, el comando escribe en el log de cada secuencia por lotes. No recibe la credencial
+ * dueña ni la de otros roles. Necesita la contraseña de `buoh_lotes` y el token.
+ */
+export function batchEnvironment(config: OperationsConfig): Record<string, string> {
+  if (config.batchPassword === null || config.batchObjects === null) {
+    throw new TypeError('Sin la contraseña de buoh_lotes y el token lotes no corren los lotes.');
+  }
+  return {
+    BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+    BUOH_POSTGRES_DB: config.owner.database,
+    BUOH_POSTGRES_HOST: config.owner.host,
+    BUOH_POSTGRES_PASSWORD: config.batchPassword,
+    BUOH_POSTGRES_PORT: String(config.owner.port),
+    BUOH_POSTGRES_SSLMODE: config.owner.sslMode,
+    BUOH_POSTGRES_USER: BATCH_ROLE,
+    BUOH_S3_ACCESS_KEY_ID: config.batchObjects.accessKeyId,
+    BUOH_S3_BUCKET: config.batchObjects.bucket,
+    BUOH_S3_ENDPOINT: config.batchObjects.endpoint,
+    BUOH_S3_REGION: config.batchObjects.region,
+    BUOH_S3_SECRET_ACCESS_KEY: config.batchObjects.secretAccessKey,
+  };
 }

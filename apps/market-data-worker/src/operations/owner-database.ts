@@ -136,6 +136,17 @@ export interface DatasetVerificationRow {
  * logs y las escrituras van como `buoh_dueno` (`SET ROLE`), el dueño de los esquemas: así no
  * dependen de que el usuario de Render herede sus privilegios.
  */
+/** Los conteos del informe final de un log de los lotes (`batchLogSummary`). */
+export interface BatchLogSummary {
+  readonly closed_segments: number;
+  /** Los eventos de la fuente en el índice, por clase (`kind`). */
+  readonly events: Readonly<Record<string, number>>;
+  readonly last_closed_segment: number | null;
+  /** Los eventos en un segmento que no está cerrado: 0 en un log que terminó bien. */
+  readonly open_events: number;
+  readonly operational_incidents: number;
+}
+
 export interface OwnerDatabase {
   /** Crea los roles que falten y fija sus atributos (`ensureRuntimeRoles`). */
   ensureRuntimeRoles(): Promise<void>;
@@ -209,6 +220,12 @@ export interface OwnerDatabase {
    * `null` si no hay ninguno.
    */
   lastCompletedReport(log: LogLocation, step: string): Promise<string | null>;
+  /**
+   * Los conteos de un log de una secuencia por lotes para su informe final (ADR-0021 §3, «Corte y
+   * log activo»): sus eventos por clase, los que están en un segmento sin cerrar, sus segmentos
+   * cerrados con el último y sus incidencias operativas.
+   */
+  batchLogSummary(log: LogLocation): Promise<BatchLogSummary>;
   /**
    * Los segmentos cerrados de la fuente en el log que tocan en la ejecución `slot` de la
    * verificación por partes: los de índice *i* con *i* mod 288 = `slot`, en orden (ADR-0018 §11).
@@ -405,6 +422,39 @@ export function openOwnerDatabase(
     grantDatasetsPrivileges: () => withClient((client) => grantDatasetsPrivileges(client)),
     grantLogPrivileges: (log, writer) =>
       withClient((client) => grantLogPrivileges(client, log.schema, writer)),
+    batchLogSummary: (log) =>
+      asOwner(async (client) => {
+        const schema = pg.escapeIdentifier(log.schema);
+        const kinds = await client.query<{ events: number; kind: string }>(
+          `SELECT kind, count(*)::integer AS events FROM ${schema}.source_event_index
+            WHERE source = $1 GROUP BY kind ORDER BY kind`,
+          [input.source],
+        );
+        const segments = await client.query<{ closed: number; last: number | null }>(
+          `SELECT count(*)::integer AS closed, max(segment_index) AS last
+             FROM ${schema}.closed_source_segments WHERE source = $1`,
+          [input.source],
+        );
+        const open = await client.query<{ events: number }>(
+          `SELECT count(*)::integer AS events FROM ${schema}.source_event_index AS e
+            WHERE e.source = $1 AND NOT EXISTS (
+              SELECT 1 FROM ${schema}.closed_source_segments AS s
+               WHERE s.source = e.source AND s.segment_index = e.segment_index)`,
+          [input.source],
+        );
+        const incidents = await client.query<{ incidents: number }>(
+          `SELECT count(*)::integer AS incidents FROM ${schema}.operational_incidents
+            WHERE source = $1`,
+          [input.source],
+        );
+        return {
+          closed_segments: segments.rows[0]?.closed ?? 0,
+          events: Object.fromEntries(kinds.rows.map((row) => [row.kind, row.events])),
+          last_closed_segment: segments.rows[0]?.last ?? null,
+          open_events: open.rows[0]?.events ?? 0,
+          operational_incidents: incidents.rows[0]?.incidents ?? 0,
+        };
+      }),
     lastCompletedReport: (log, step) =>
       asOwner(async (client) => {
         const { rows } = await client.query<{ last: string | null }>(

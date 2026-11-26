@@ -37,6 +37,7 @@ import { derivBatchLogProfileRow } from '../deriv/batch-profile.js';
 import { batchProfileKindOf } from '../deriv/batch-rounds.js';
 import { derivLogProfileRow, type LogQualityProfileRow } from '../deriv/log-profile.js';
 import { DERIV_PUBLICATION_THRESHOLDS } from '../deriv/profile.js';
+import { batchFinalStep, batchStep } from './batch-steps.js';
 import { datasetVerificationStep, publicationStep } from './datasets-steps.js';
 import type { OwnerDatabase, OperationsReportRow } from './owner-database.js';
 import {
@@ -63,14 +64,18 @@ import {
 // informe por secuencia, en su log; los demás informes van al log activo de R_100. Desde el PR 5b de
 // su §9, con la contraseña de `buoh_lotes`, el paso 1 prepara también los logs de las secuencias por
 // lotes (§3), y la retención y el espacio, que miran todas las de `LOG_SEQUENCES`, los incluyen; la
-// salud, el informe final y la verificación siguen siendo de las secuencias en vivo.
+// salud, el informe final y la verificación siguen siendo de las secuencias en vivo. Desde el PR
+// 5c2, con la contraseña de `buoh_lotes` y el token `lotes`, `batch` y `batch_final` corren los
+// lotes y guardan el informe final de cada log de los lotes que terminó (`batch-steps.ts`).
 
 /**
  * Los pasos de una ejecución, en orden. `final_health` es la segunda parte del paso 2 de §11: el
  * informe final de un log que terminó (§6, «Traspaso»). `retention` es el paso 3. `publication` y
  * `dataset_verification` son los pasos 6 y 7 de ADR-0020 §8, que solo corren con la contraseña de
- * `buoh_publicacion`. `memory` es el último, en todas las ejecuciones: la memoria residente máxima
- * del proceso principal y la de cada proceso que lanzó (precisión del PR 9 de ADR-0018 §13).
+ * `buoh_publicacion`. `batch` y `batch_final` son los de los lotes (ADR-0021 §3), que solo corren
+ * con la contraseña de `buoh_lotes` y el token `lotes`, después de la publicación, que tiene
+ * prioridad (§3, «Prioridad»). `memory` es el último, en todas las ejecuciones: la memoria residente
+ * máxima del proceso principal y la de cada proceso que lanzó (precisión del PR 9 de ADR-0018 §13).
  */
 export const OPERATIONS_STEPS = [
   'roles_and_logs',
@@ -81,6 +86,8 @@ export const OPERATIONS_STEPS = [
   'space',
   'publication',
   'dataset_verification',
+  'batch',
+  'batch_final',
   'memory',
 ] as const;
 export type OperationsStep = (typeof OPERATIONS_STEPS)[number];
@@ -1060,6 +1067,8 @@ export async function runOperations(input: OperationsInput): Promise<OperationsR
     runChild: recordedRunChild(input.runChild, launches),
   };
   const steps: Record<OperationsStep, () => Promise<StepOutcome | StepOutcome[]>> = {
+    batch: () => batchStep(measured),
+    batch_final: () => batchFinalStep(measured),
     final_health: () => finalHealth(measured),
     health: () => health(measured),
     retention: () => retention(measured),
@@ -1076,11 +1085,14 @@ export async function runOperations(input: OperationsInput): Promise<OperationsR
     space: () => space(measured),
     verification: () => verification(measured, startedAt),
   };
-  // Los pasos 6 y 7 solo existen con la contraseña de buoh_publicacion (ADR-0020 §13, PR 4).
+  // Los pasos 6 y 7 solo existen con la contraseña de buoh_publicacion (ADR-0020 §13, PR 4), y los
+  // de los lotes, con la de buoh_lotes y el token lotes (ADR-0021 §9, PR 5c2).
+  const batchEnabled = input.config.batchPassword !== null && input.config.batchObjects !== null;
   const enabled = OPERATIONS_STEPS.filter(
     (step) =>
-      input.config.publicationPassword !== null ||
-      (step !== 'publication' && step !== 'dataset_verification'),
+      (input.config.publicationPassword !== null ||
+        (step !== 'publication' && step !== 'dataset_verification')) &&
+      (batchEnabled || (step !== 'batch' && step !== 'batch_final')),
   );
   for (const step of enabled) {
     let outcomes: StepOutcome[];

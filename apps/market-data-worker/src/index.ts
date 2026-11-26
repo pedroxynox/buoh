@@ -344,6 +344,7 @@ export {
 } from './operations/child.js';
 export {
   apiMigrateEnvironment,
+  batchEnvironment,
   healthEnvironment,
   loadOperationsConfig,
   CODE_VERSION,
@@ -352,6 +353,12 @@ export {
   replayEnvironment,
   type OperationsConfig,
 } from './operations/config.js';
+export {
+  BATCH_FINAL_STEP,
+  BATCH_STEP,
+  batchFinalStep,
+  batchStep,
+} from './operations/batch-steps.js';
 export {
   DATASET_VERIFICATION_STEP,
   DATASETS_START_LIMIT_MS,
@@ -376,6 +383,7 @@ export {
   OPERATIONS_CONNECTION_TIMEOUT_MS,
   OPERATIONS_QUERY_TIMEOUT_MS,
   openOwnerDatabase,
+  type BatchLogSummary,
   type LoginCheck,
   type LogProfileAssignment,
   type LogSchemaDrop,

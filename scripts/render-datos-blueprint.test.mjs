@@ -497,15 +497,23 @@ test('buoh-ingesta: las variables de ingest en production, con buoh_ingesta y el
   }
 });
 
-test('buoh-operaciones: las variables que admite y que el Blueprint todavía no le da son opcionales y no están en él (precisión del PR 5b de ADR-0021 §9)', () => {
+test('buoh-operaciones: las variables que admite y que el Blueprint todavía no le da son opcionales y no están en él (precisiones de los PR 5b y 5c2 de ADR-0021 §9)', () => {
   const pending = schemaEntries(
     'apps/market-data-worker/src/operations/config.ts',
     'const pendingEnvironmentSchema',
   );
-  // La contraseña de buoh_lotes llega al Blueprint con el PR 5f, que la pasa al otro objeto.
+  // La contraseña de buoh_lotes y el token lotes llegan al Blueprint con el PR 5f, que los pasa al
+  // otro objeto.
   assert.deepEqual(
     pending.map(([key]) => key),
-    ['BUOH_LOTES_POSTGRES_PASSWORD'],
+    [
+      'BUOH_LOTES_POSTGRES_PASSWORD',
+      'BUOH_LOTES_S3_ACCESS_KEY_ID',
+      'BUOH_LOTES_S3_BUCKET',
+      'BUOH_LOTES_S3_ENDPOINT',
+      'BUOH_LOTES_S3_REGION',
+      'BUOH_LOTES_S3_SECRET_ACCESS_KEY',
+    ],
   );
   const vars = variables('buoh-operaciones');
   for (const [key, schema] of pending) {
