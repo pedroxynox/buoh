@@ -142,6 +142,9 @@ describe('DatasetManifestCore 1.1.0, el de los lotes', () => {
     };
     expect(valid(withCandles('2026-11-21T00:00:00.000Z', '2026-11-21T00:01:00.000Z'))).toBe(true);
     expect(valid(withCandles('2026-11-21T00:01:00.000Z', '2026-11-21T00:00:00.000Z'))).toBe(false);
+    // Con velas, los dos extremos; sin ellas, ninguno.
+    const halfOpen = { ...withCandles('2026-11-21T00:00:00.000Z', ''), candle_time_to_utc: null };
+    expect(valid(halfOpen)).toBe(false);
   });
 });
 

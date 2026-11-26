@@ -103,6 +103,9 @@ beforeEach(() => {
   vi.spyOn(Math, 'random').mockImplementation(() => {
     throw new Error('Math.random no está permitido en la publicación.');
   });
+  vi.spyOn(globalThis.crypto, 'randomUUID').mockImplementation(() => {
+    throw new Error('crypto.randomUUID no está permitido en la publicación.');
+  });
   vi.stubGlobal('fetch', () => {
     throw new Error('La red no está permitida en la publicación.');
   });

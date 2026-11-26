@@ -234,7 +234,7 @@ export const datasetManifestCoreSchema = datasetManifestCoreStructuralSchema.sup
       const hasNoCandles = value.market_candle_count === 0;
       const candleFrom = value.candle_time_from_utc ?? null;
       const candleTo = value.candle_time_to_utc ?? null;
-      if (hasNoCandles !== (candleFrom === null && candleTo === null)) {
+      if (hasNoCandles !== (candleFrom === null) || hasNoCandles !== (candleTo === null)) {
         context.addIssue({
           code: 'custom',
           message: 'El rango de velas debe ser null exactamente cuando no hay velas.',

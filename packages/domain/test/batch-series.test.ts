@@ -682,6 +682,22 @@ describe('las velas que faltan dentro del horario', () => {
     ]);
   });
 
+  it('pide desde el minuto de su start hasta el de su end, como da las velas Deriv', () => {
+    const session = frame(sessionText(GOLD_OPEN, GOLD_CLOSE), iso(T + 3000));
+    const next = T + 12 * 3600 + 60;
+    // Empieza a las 12:00:30 y acaba a las 12:02:30: pide las velas de las 12:00, 12:01 y 12:02.
+    const page = frame(
+      candlesText(candleEcho(T + 30, T + 150), candle(T + 60, '1', '1', '1', '1')),
+      iso(next),
+    );
+    forbidAmbientEffects();
+    expect(missing([session, page])).toEqual(
+      [missingOf(page, T, T, [session]), missingOf(page, T + 120, T + 120, [session])].sort(
+        (left, right) => (left.incident_id < right.incident_id ? -1 : 1),
+      ),
+    );
+  });
+
   it('no espera el minuto que no había terminado al recibir la página', () => {
     const session = frame(sessionText(GOLD_OPEN, GOLD_CLOSE), iso(T + 3000));
     // Recibida a las 12:02:30: la vela de las 12:02 está en curso y queda fuera, sin faltar.

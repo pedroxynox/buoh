@@ -382,9 +382,10 @@ const MINUTE_MS = CANDLE_SECONDS * 1000;
 
 /**
  * Los tramos sin velas dentro del horario (precisión del PR 5d1 de ADR-0021 §9; ADR-0024 §5). Un
- * minuto está pedido si una página de velas respondida, válida o no, lo pide entero: desde el
- * minuto de su `start` hasta su `end`, ya terminado al recibirse, y dentro de un intervalo del
- * horario de su símbolo y su día, el último `TradingSession` recibido para ese día en el mismo log.
+ * minuto está pedido si una página de velas respondida, válida o no, pide su vela, como las acepta
+ * `deriveMarketCandles`: desde el minuto de su `start` hasta el de su `end`; si ya había terminado
+ * al recibirse, y si cae entero dentro de un intervalo del horario de su símbolo y su día, el último
+ * `TradingSession` recibido para ese día en los mismos eventos, los del dataset.
  * Un minuto pedido sin vela falta, y cada tramo de minutos seguidos que faltan da un
  * `candle_missing`, con la última página que pidió su primer minuto en `observed_ref` y los horarios
  * que usó en `related_refs`. Sin horario de su día, un minuto no se comprueba.

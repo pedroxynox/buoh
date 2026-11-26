@@ -640,6 +640,18 @@ describe('F1-DATASET-001: data:replay (ADR-0004 §9)', () => {
     expect(error.details).toEqual({ fields: ['quality_rule_version'] });
   });
 
+  it('un core 1.0.0 no puede declarar las reglas de los lotes 4.0.0 (precisión del PR 5d1)', async () => {
+    const target = stores();
+    const base = await publish(target, 'principal');
+    const forged = forge(target, base, {
+      core: (core) => ({ ...core, quality_rule_version: '4.0.0' }),
+    });
+    for (const mode of ['verify-only', 'recompute'] as const) {
+      const error = await expectReplayError(replay(target, forged, mode), 'VERSION_UNSUPPORTED');
+      expect(error.details).toEqual({ fields: ['quality_rule_version'] });
+    }
+  });
+
   it('--verify-only aborta ante una versión de contrato no implementada', async () => {
     const target = stores();
     const base = await publish(target, 'principal');
