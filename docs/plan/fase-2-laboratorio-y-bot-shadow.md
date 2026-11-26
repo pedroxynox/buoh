@@ -430,14 +430,21 @@ F2.4 no tiene ADR: cambia el concepto de interfaz, que es su fuente canónica (P
 | **F2.5** Datasets vivos | `F2-THRESHOLD-001` y `F2-DATASET-001` | F2.2 con sus 7 días de captura |
 | **F2.5b** Mercados reales | `F2-MARKET-001` | su ADR (§8, punto 9) y el PR 6 de ADR-0020 |
 | **F2.6** Estrategias | `F2-STRATEGY-001`, `F2-AUDIT-001` (estrategias) y `F2-GOV-001` (`packages/strategy-sdk`) | F2.3 y las cinco ADR del laboratorio (§8, puntos 5 a 8 y 10) |
-| **F2.6b** Motor de investigación | `F2-RESEARCH-001`, `F2-SEARCH-001` (registro de las búsquedas y controles negativos), `F2-AUDIT-001` (búsquedas y la credencial del motor) y `F2-GOV-001` (`research/python`) | F2.5b y F2.6 |
+| **F2.6b** Motor de investigación | `F2-RESEARCH-001`, `F2-SEARCH-001` (registro de las búsquedas y controles negativos), `F2-AUDIT-001` (búsquedas y la credencial del motor) y `F2-GOV-001` (`research/python`) | F2.5b y F2.6; desde el 2026-11-26, sus PR 2 a 4 solo necesitan los PR que cita [ADR-0023](../arquitectura/adr/0023-motor-de-investigacion.md) §14 |
 | **F2.7** Backtest | `F2-BACKTEST-001`, `F2-AUDIT-001` (backtests) y `F2-GOV-001` (`apps/backtest`) | F2.5, F2.6 y F2.6b |
 | **F2.8** Evaluación | `F2-EVAL-001`, `F2-SEARCH-001` (correcciones por búsqueda y congelaciones) y `F2-AUDIT-001` (propuestas, registros previos, evaluaciones y aprobaciones; la congelación de las propuestas llega aquí, ADR-0023 §6) | F2.7 |
 | **F2.9** Motor shadow y registro de señales | `F2-SHADOW-001`, `F2-SIGNAL-001`, `F2-STOP-001`, `F2-AUDIT-001` (activaciones, detenciones y reanudaciones) y `F2-GOV-001` (`apps/signal-engine`) | F2.8 |
 | **F2.10** Posiciones, comparación y réplica | `F2-POSITION-001` y `F2-REPLAY-001` | F2.9 |
 | **F2.11** Puerta de salida | la evidencia de §13 | F2.10 |
 
-- La captura empieza en F2.2, lo antes posible, para que los datos se acumulen mientras avanza lo demás. Por lo mismo, F2.5b va antes que los demás incrementos nuevos: el motor `shadow` solo puede seguir el oro desde que buoh lo captura, y sus umbrales necesitan 7 días de esa captura.
+- La captura empieza en F2.2, lo antes posible, para que los datos se acumulen mientras avanza lo demás. Por lo mismo, F2.5b iba antes que los demás incrementos nuevos hasta que el oro empezó a capturar, el 2026-11-25. Desde el 2026-11-26 ([decisiones vigentes](../gobierno/decisiones-vigentes.md), «Orden del código desde el 2026-11-26»), el código va en este orden, con las dependencias que fija cada ADR:
+  1. el PR 5 de ADR-0021, porque las cotizaciones y los `contracts_for` de cada día solo se guardan desde que corre el paso de los lotes;
+  2. el PR 6 de ADR-0021, la descarga de la historia, que después corre sola;
+  3. mientras la historia se descarga y se publica (ADR-0021 §4), los PR 2 y 3 de ADR-0022, los PR 2 a 4 de ADR-0024 y los PR 2 a 4 de ADR-0023;
+  4. el PR 8 de ADR-0021, cuando la historia está publicada, y después el VPS, el PR 5 de ADR-0023;
+  5. los PR 4 y 5 de ADR-0022, antes del PR 6 de ADR-0023, que suma a la sección Laboratorio del PR 5, y del PR 3 de ADR-0026, que usa el registro de estrategias del PR 4. Se adelantan cuando los de los puntos 3 y 4 tienen que esperar, por ejemplo a la historia, así que no retrasan el motor de investigación.
+
+  El PR 7 de ADR-0021 va en su fecha, sin esperar a los demás (ADR-0021 §2; la fecha está en `PROJECT_STATUS.md`).
 - F2.2 se cierra con su evidencia de 7 días. F2.3 no la espera: empieza en cuanto la captura corre en producción. F2.5 sí espera esos 7 días.
 - F2.4 no espera el último PR de F2.3, el 7c, que solo reúne la memoria y el tráfico de salida de `buoh-api` de varios días (ADR-0019 §14). Para no mezclar su tráfico con esa medición, ninguna lectura de R2 de F2.4 llega a producción antes del 2026-11-08. Lo decidió el propietario el 2026-11-04. Los días que copia el 7c terminan antes del primer despliegue de F2.4 que lee R2.
 - La sección Datos de F2.4 (el 6b del [historial de entregas](historial-de-entregas.md)) va después de la ADR de datasets vivos de F2.5, que decide dónde viven los datasets de producción y cómo se guarda su verificación (ADR-0018 §7). Hasta entonces, su lector solo podría leer las tablas de publicación de cada log, donde producción no publica. Así, F2.4 termina después de esa ADR. Esa ADR es [ADR-0020](../arquitectura/adr/0020-datasets-vivos.md), y la sección Datos llega después de su PR 4, cuando el esquema de los datasets existe en producción (§13).
