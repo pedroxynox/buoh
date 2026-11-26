@@ -6,6 +6,7 @@ import {
   type BatchExchangeInput,
   type BatchExchangeRequest,
 } from '../src/deriv/batch-client.js';
+import { LogPersistenceError } from '../src/source-log/source-event-log.js';
 import { uuid } from './support/connection-harness.js';
 import { FakeDerivSocket, flush, ManualClock } from './support/deriv-fixtures.js';
 
@@ -22,6 +23,7 @@ function proposal(reqId: number): BatchExchangeRequest {
 /** Una ejecución del cliente con el socket falso; `writes` anota lo que se escribió, en orden. */
 function harness(
   options: {
+    readonly closedFails?: boolean;
     readonly deadlineMs?: number;
     readonly frame?: (payload: string) => Promise<void>;
     readonly previousSentUtc?: string | null;
@@ -35,6 +37,9 @@ function harness(
   const input: BatchExchangeInput = {
     closeTimeoutMs: 5_000,
     closed: (closure) => {
+      if (options.closedFails === true) {
+        return Promise.reject(new LogPersistenceError('source_event_index', 'source_lock_lost'));
+      }
       writes.push(`closed:${closure.closure_type}:${closure.reason}`);
       return Promise.resolve();
     },
@@ -105,6 +110,7 @@ describe('runBatchExchange: una petición a la vez, al ritmo de Deriv', () => {
       last_sent_utc: '2026-11-26T10:00:05.500Z',
       sent: 3,
       stopped: null,
+      write_failure: null,
     });
     expect(run.writes).toEqual([
       `opened:${uuid(1)}`,
@@ -179,6 +185,7 @@ describe('runBatchExchange: lo que la para, sin fallar', () => {
       last_sent_utc: '2026-11-26T10:00:01.500Z',
       sent: 2,
       stopped: { detail: 'proposal', reason: 'rate_limit' },
+      write_failure: null,
     });
     expect(run.sent()).toEqual([1, 2]);
     expect(run.writes.at(-2)).toContain('RateLimit');
@@ -290,6 +297,51 @@ describe('runBatchExchange: lo que la para, sin fallar', () => {
   });
 });
 
+describe('runBatchExchange: lo respondido es lo durable', () => {
+  it('una respuesta que se hace durable después de un corte cuenta: la ejecución siguiente no la vuelve a pedir', async () => {
+    let release: (() => void) | null = null;
+    const run = harness({
+      frame: (payload) =>
+        payload.includes('"req_id":1')
+          ? new Promise<void>((resolve) => {
+              release = resolve;
+            })
+          : Promise.resolve(),
+    });
+    run.socket().open();
+    await flush();
+    await run.answer(1);
+    run.socket().emit({ code: 1006, kind: 'closed' });
+    await flush();
+    (release as unknown as () => void)();
+    await expect(run.result).resolves.toMatchObject({
+      answered: 1,
+      sent: 1,
+      stopped: { detail: 'close_code_1006', reason: 'disconnected' },
+      write_failure: null,
+    });
+  });
+
+  it('un RateLimit que se hace durable después del plazo de la respuesta no cuenta', async () => {
+    let release: (() => void) | null = null;
+    const run = harness({
+      frame: () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    });
+    run.socket().open();
+    await flush();
+    await run.answer(1, { error: { code: 'RateLimit', message: 'x' } });
+    await run.clock.advance(15_000);
+    (release as unknown as () => void)();
+    await expect(run.result).resolves.toMatchObject({
+      answered: 0,
+      stopped: { reason: 'request_timeout' },
+    });
+  });
+});
+
 describe('runBatchExchange: un fallo al escribir o al conectar', () => {
   it('si un frame no se puede escribir, no escribe nada más, ni el cierre, y corta la conexión', async () => {
     const run = harness({
@@ -307,6 +359,20 @@ describe('runBatchExchange: un fallo al escribir o al conectar', () => {
     expect(run.socket().ended).toBe('terminate');
   });
 
+  it('un fallo de LogPersistenceError da su etapa y su motivo, y no borra la parada anterior', async () => {
+    const run = harness({ closedFails: true });
+    run.socket().open();
+    await flush();
+    await run.answer(1);
+    await run.clock.advance(1_500);
+    await run.answer(2, { error: { code: 'RateLimit', message: 'x' } });
+    await expect(run.result).resolves.toMatchObject({
+      answered: 1,
+      stopped: { detail: 'proposal', reason: 'rate_limit' },
+      write_failure: 'source_event_index:source_lock_lost',
+    });
+  });
+
   it('una conexión que no se abre no escribe nada: connect_timeout o connect_failed', async () => {
     const late = harness();
     await late.clock.advance(10_000);
@@ -316,6 +382,7 @@ describe('runBatchExchange: un fallo al escribir o al conectar', () => {
       last_sent_utc: null,
       sent: 0,
       stopped: { detail: null, reason: 'connect_timeout' },
+      write_failure: null,
     });
     expect(late.writes).toEqual([]);
     const refused = harness();

@@ -5,9 +5,37 @@ import { catalogEntry, FakeDerivSocket, syntheticSchemaArchive } from './deriv-f
 // Lo que necesitan las pruebas del comando de los lotes (ADR-0021 §3; precisión del PR 5c1 de su §9):
 // el archivo de esquemas sintético con las operaciones de los lotes y un socket que responde solo.
 
-/** Las velas responden con `candles`; el esquema sintético de `ticks_history` lo admite aquí. */
+/**
+ * Las velas responden con `candles`; el esquema sintético de `ticks_history` lo admite aquí. El de
+ * `contracts_for` describe sus entradas sin admitir campos ajenos y sin `growth_rate_barrier_offsets`,
+ * como la release fijada, para que se note `relaxContractsForResponseSchema`.
+ */
 export const BATCH_FIXTURE = syntheticSchemaArchive(
   {
+    'contracts_for_response.schema.json': {
+      $schema: 'http://json-schema.org/draft-04/schema#',
+      properties: {
+        contracts_for: {
+          properties: {
+            available: {
+              items: {
+                additionalProperties: false,
+                properties: { contract_type: { type: 'string' } },
+                type: 'object',
+              },
+              type: 'array',
+            },
+          },
+          required: ['available'],
+          type: 'object',
+        },
+        echo_req: { type: 'object' },
+        msg_type: { enum: ['contracts_for'], type: 'string' },
+        req_id: { type: 'integer' },
+      },
+      required: ['echo_req', 'msg_type'],
+      type: 'object',
+    },
     'ticks_history_response.schema.json': {
       $schema: 'http://json-schema.org/draft-04/schema#',
       properties: {

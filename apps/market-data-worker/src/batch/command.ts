@@ -13,6 +13,7 @@ import { ConfigError, loadConfig, type WorkerConfig } from '../config.js';
 import { DERIV_BATCH_CONNECTOR_VERSION, derivBatchLogProfileRow } from '../deriv/batch-profile.js';
 import {
   runBatchExchange,
+  writeFailureOf,
   type BatchExchangeRequest,
   type BatchStop,
 } from '../deriv/batch-client.js';
@@ -68,9 +69,10 @@ import {
  *    continua; si no lo está, sigue en el activo y lo dice (`cut_blocked`). El log en que escribe no
  *    puede tener migraciones pendientes (`migrations_pending`) y tiene que tener la fila del perfil
  *    de su secuencia (`log_not_derivable`; ADR-0020 §4);
- * 4. abre una conexión, escribe su apertura, pide lo que le toca y escribe su cierre
- *    (`runBatchExchange`), y cierra el segmento abierto (`requested`), para que nada quede abierto
- *    entre ejecuciones.
+ * 4. cierra el segmento que una ejecución anterior pudo dejar abierto, al fallar al escribir o al
+ *    cortarse, para que ningún segmento mezcle dos ejecuciones; abre una conexión, escribe su
+ *    apertura, pide lo que le toca y escribe su cierre (`runBatchExchange`), y cierra el segmento
+ *    abierto (`requested`), salvo si una escritura falló.
  *
  * Un límite de peticiones de Deriv (`rate_limit`) o el plazo (`deadline`) paran también las
  * secuencias siguientes (`skipped`); lo que no se pidió lo pide la ejecución siguiente.
@@ -351,6 +353,8 @@ interface RunContext {
   readonly config: WorkerConfig;
   readonly deadlineUtc: string;
   readonly deps: BatchDependencies;
+  /** `rate_limit` o `deadline` desde que una secuencia paró por uno de ellos: paran las siguientes. */
+  halt: string | null;
   lastSentUtc: string | null;
   readonly schemas: DerivSchemaSet<BatchOperation>;
   readonly validators: ResponseValidators;
@@ -452,6 +456,13 @@ async function runSequence(
       return outcome('failed', { detail: failureReason(error), reason: 'log_open_failed' });
     }
     const opened = handle.log;
+    try {
+      // Un segmento que dejó abierto una ejecución anterior, porque falló al escribir o la cortaron,
+      // se cierra antes de seguir: ningún segmento mezcla dos ejecuciones.
+      await opened.close('requested');
+    } catch (error) {
+      return outcome('failed', { detail: writeFailureOf(error), reason: 'persistence_failed' });
+    }
     const result = await runBatchExchange({
       closeTimeoutMs: BATCH_CLOSE_TIMEOUT_MS,
       closed: async (input) => {
@@ -495,17 +506,26 @@ async function runSequence(
       scheduler: deps.scheduler,
     });
     context.lastSentUtc = result.last_sent_utc;
+    const stopReason = result.stopped?.reason;
+    if (stopReason === 'rate_limit' || stopReason === 'deadline') {
+      // También si después falló una escritura: el paso para igual.
+      context.halt ??= stopReason;
+    }
     const done = { answered: result.answered, sent: result.sent };
-    if (result.stopped?.reason === 'persistence_failed') {
-      return outcome('failed', { ...done, ...stopFields(result.stopped) });
+    if (result.write_failure !== null) {
+      return outcome('failed', {
+        ...done,
+        detail: result.write_failure,
+        reason: 'persistence_failed',
+      });
     }
     try {
-      // Nada queda abierto entre ejecuciones: la siguiente no tiene que releer el segmento.
+      // Al terminar, el segmento se cierra: la ejecución siguiente no tiene que releerlo.
       await opened.close('requested');
     } catch (error) {
       return outcome('failed', {
         ...done,
-        detail: failureReason(error),
+        detail: writeFailureOf(error),
         reason: 'persistence_failed',
       });
     }
@@ -598,6 +618,7 @@ export async function batchCommand(
     config,
     deadlineUtc: new Date(startedMs + (deps.deadlineMs ?? BATCH_DEADLINE_MS)).toISOString(),
     deps,
+    halt: null,
     lastSentUtc: null,
     schemas: loaded.schemas,
     validators: responseValidators(loaded.schemas),
@@ -614,9 +635,7 @@ export async function batchCommand(
     // Lo respondido ya es durable, también si después algo falló; una vuelta nueva empieza en 0
     // aunque todavía no se pida nada, y la anterior queda en `abandoned`.
     next[sequence.name] = { next: done.next, round: done.round };
-    if (done.reason === 'rate_limit' || done.reason === 'deadline') {
-      skip ??= done.reason;
-    }
+    skip ??= context.halt;
   }
   const failed = sequences.some((item) => item.status === 'failed');
   return {

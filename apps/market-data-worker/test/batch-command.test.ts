@@ -5,6 +5,7 @@ import { BATCH_DEADLINE_MS, BATCH_PACING_MS, batchCommand } from '../src/batch/c
 import { derivBatchLogProfileRow } from '../src/deriv/batch-profile.js';
 import { batchProfileKindOf } from '../src/deriv/batch-rounds.js';
 import { DERIV_SOURCE } from '../src/deriv/profile.js';
+import { DERIV_BATCH_OPERATIONS } from '../src/deriv/schema-release.js';
 import {
   BATCH_CANDLES_SEQUENCE,
   BATCH_QUOTES_SEQUENCE,
@@ -17,7 +18,7 @@ import {
 import type { LogReadiness } from '../src/log-cut.js';
 import { answer, AnsweringSocket, BATCH_FIXTURE, type Respond } from './support/batch-fixtures.js';
 import { uuid } from './support/connection-harness.js';
-import { ManualClock } from './support/deriv-fixtures.js';
+import { catalogEntry, ManualClock, syntheticSchemaArchive } from './support/deriv-fixtures.js';
 import { MemoryObjectStore, MemorySourceLogStore } from './support/memory-stores.js';
 
 // El comando de los lotes (ADR-0021 §3; precisión del PR 5c1 de su §9) sin servicios: los almacenes
@@ -44,6 +45,7 @@ const ENV = {
 interface LogState {
   first: string | null;
   nextReadiness: LogReadiness;
+  pending: readonly string[];
   profile: { profile_id: string; quality_profile_sha256: string } | null;
 }
 
@@ -51,6 +53,9 @@ interface LogState {
 function world(
   options: {
     readonly busy?: readonly LogSequence[];
+    /** Las secuencias cuyo bloqueo no responde, o cuyo log no se abre. */
+    readonly broken?: Partial<Record<string, 'lock' | 'open'>>;
+    readonly fixture?: typeof BATCH_FIXTURE;
     readonly logs?: Partial<Record<string, Partial<LogState> | null>>;
     readonly respond?: Respond;
     readonly start?: string;
@@ -76,6 +81,7 @@ function world(
     return {
       first: null,
       nextReadiness: 'not_prepared',
+      pending: [],
       profile: derivBatchLogProfileRow(batchProfileKindOf(sequence)),
       ...given,
     };
@@ -84,27 +90,37 @@ function world(
   const clock = new ManualClock(options.start ?? '2026-11-26T00:01:00.000Z');
   const deps: Parameters<typeof batchCommand>[2] = {
     acquireLock: (_config, sequence) =>
-      Promise.resolve(
-        options.busy?.includes(sequence) === true
-          ? null
-          : {
-              held: true,
-              release: () => {
-                released.push(sequence.name);
-                return Promise.resolve();
-              },
-            },
-      ),
+      options.broken?.[sequence.name] === 'lock'
+        ? Promise.reject(Object.assign(new Error('secreto'), { code: 'ECONNREFUSED' }))
+        : Promise.resolve(
+            options.busy?.includes(sequence) === true
+              ? null
+              : {
+                  held: true,
+                  release: () => {
+                    released.push(sequence.name);
+                    return Promise.resolve();
+                  },
+                },
+          ),
     connect: (input) => {
       const socket = new AnsweringSocket(input, options.respond ?? answer, index);
       sockets.push(socket);
       return socket;
     },
-    expected: BATCH_FIXTURE.expected,
-    fetch: () => Promise.resolve(new Response(BATCH_FIXTURE.archive, { status: 200 })),
+    expected: (options.fixture ?? BATCH_FIXTURE).expected,
+    fetch: () =>
+      Promise.resolve(new Response((options.fixture ?? BATCH_FIXTURE).archive, { status: 200 })),
     nextId: () => uuid((id += 1)),
     now: clock.now,
     openLog: async (_config, _lock, log) => {
+      if (
+        Object.entries(options.broken ?? {}).some(
+          ([name, what]) => what === 'open' && log.schema.includes(name),
+        )
+      ) {
+        throw Object.assign(new Error('secreto'), { name: 'LogIntegrityError' });
+      }
       const { objects, store } = storesOf(log);
       return {
         close: () => Promise.resolve(),
@@ -124,7 +140,7 @@ function world(
         firstWrite: () => Promise.resolve(state?.first ?? null),
         locateLog: () => Promise.resolve(state === null ? null : logLocation(1, sequence)),
         logProfile: () => Promise.resolve(state?.profile ?? null),
-        pendingMigrations: () => Promise.resolve([]),
+        pendingMigrations: () => Promise.resolve(state?.pending ?? []),
         readiness: () => Promise.resolve(state?.nextReadiness ?? 'not_prepared'),
       };
     },
@@ -421,5 +437,175 @@ describe('batchCommand: el uso, la configuración y los esquemas', () => {
       status: 'failed',
     });
     expect(env.sockets).toEqual([]);
+  });
+});
+
+describe('batchCommand: lo que revisó la revisión semántica del PR #145', () => {
+  it('cuenta los fallos de esquema con los esquemas que usarán las reglas: active_symbols sin underlying_symbol_type y contracts_for con growth_rate_barrier_offsets valen', async () => {
+    const env = world({
+      respond: (request, index) => {
+        const valid = answer(request, index);
+        if (valid !== null && 'active_symbols' in request) {
+          const entry: Record<string, unknown> = { ...catalogEntry('R_100', 'Volatility 100') };
+          delete entry['underlying_symbol_type'];
+          return { ...valid, active_symbols: [entry] };
+        }
+        if (valid !== null && 'contracts_for' in request) {
+          const extra = request['contracts_for'] === 'cryBTCUSD' ? { otro: 1 } : {};
+          return {
+            ...valid,
+            contracts_for: {
+              available: [{ contract_type: 'ACCU', growth_rate_barrier_offsets: [], ...extra }],
+            },
+          };
+        }
+        return valid;
+      },
+    });
+    const { line } = await env.run();
+    // Solo la de Bitcoin, con un campo que la release no describe.
+    expect(sequencesOf(line)[0]?.['schema_failures']).toEqual({ contracts_for: 1 });
+  });
+
+  it('un RateLimit para las secuencias siguientes también si después falla una escritura, que da su etapa y su motivo', async () => {
+    const env = world({
+      respond: (request, index) =>
+        'proposal' in request && index === 13
+          ? {
+              echo_req: request,
+              error: { code: 'RateLimit', message: 'x' },
+              msg_type: 'proposal',
+              req_id: request['req_id'],
+            }
+          : answer(request, index),
+    });
+    env.storesOf(logLocation(1, BATCH_QUOTES_SEQUENCE)).store.failIndex = (row) =>
+      row.kind === 'connection_closed';
+    const { exitCode, line } = await env.run();
+    expect(exitCode).toBe(1);
+    expect(
+      sequencesOf(line).map((item) => [
+        item['status'],
+        item['reason'],
+        item['detail'],
+        item['next'],
+      ]),
+    ).toEqual([
+      ['completed', null, null, 11],
+      ['failed', 'persistence_failed', 'source_event_index:synthetic_index_failure', 2],
+      ['skipped', 'rate_limit', null, 0],
+    ]);
+  });
+
+  it('un segmento que dejó abierto una ejecución anterior se cierra antes de escribir, y no mezcla dos ejecuciones', async () => {
+    const env = world();
+    const location = logLocation(1, BATCH_SCHEDULES_SEQUENCE);
+    const { objects, store } = env.storesOf(location);
+    const previous = await SourceEventLog.open({
+      objects,
+      policy: BATCH_SEGMENT_POLICY,
+      source: DERIV_SOURCE,
+      store,
+      zlibVersion: process.versions.zlib,
+    });
+    await previous.append({
+      connection_id: uuid(900),
+      event_id: uuid(901),
+      kind: 'connection_opened',
+      occurred_at_utc: '2026-11-26T00:00:30.000Z',
+      schema_version: '1.0.0',
+      source: DERIV_SOURCE,
+      supersedes_connection_id: null,
+    });
+    await env.run();
+    expect(
+      store.closed.map((segment) => [
+        segment.segment_index,
+        segment.event_count,
+        segment.close_reason,
+      ]),
+    ).toEqual([
+      [0, 1, 'requested'],
+      [1, 13, 'requested'],
+    ]);
+  });
+
+  it('sin perfil, con migraciones pendientes, con el log siguiente sin migrar, sin bloqueo que responda o con un log que no se abre: cada uno con su motivo', async () => {
+    const env = world({
+      broken: { lotes_velas: 'open' },
+      logs: {
+        lotes_cotizaciones: { pending: ['0007_perfil_del_log.sql'] },
+        lotes_horarios: { profile: null },
+      },
+    });
+    const { line } = await env.run();
+    expect(
+      sequencesOf(line).map((item) => [item['status'], item['reason'], item['detail']]),
+    ).toEqual([
+      ['failed', 'log_not_derivable', 'profile_missing'],
+      ['failed', 'migrations_pending', null],
+      ['failed', 'log_open_failed', 'LogIntegrityError'],
+    ]);
+    const other = world({
+      broken: { lotes_horarios: 'lock' },
+      logs: {
+        lotes_cotizaciones: {
+          first: '2026-11-20T10:00:00.000Z',
+          nextReadiness: 'migrations_pending',
+        },
+      },
+    });
+    const second = await other.run();
+    expect(
+      sequencesOf(second.line).map((item) => [
+        item['status'],
+        item['reason'],
+        item['detail'],
+        item['cut_blocked'],
+      ]),
+    ).toEqual([
+      ['failed', 'lock_unavailable', 'ECONNREFUSED', null],
+      ['completed', null, null, 'next_log_migrations_pending'],
+      ['completed', null, null, null],
+    ]);
+    expect(second.stdout).not.toContain('secreto');
+    expect(line).not.toBeNull();
+    expect(JSON.stringify(line)).not.toContain('secreto');
+  });
+
+  it('una petición que no cumple su esquema de la release no abre nada: request_invalid', async () => {
+    const strict = syntheticSchemaArchive(
+      {
+        'trading_times_request.schema.json': {
+          $schema: 'http://json-schema.org/draft-04/schema#',
+          additionalProperties: false,
+          properties: {
+            req_id: { type: 'integer' },
+            trading_times: { pattern: '^today$', type: 'string' },
+          },
+          required: ['trading_times'],
+          type: 'object',
+        },
+      },
+      DERIV_BATCH_OPERATIONS,
+    );
+    const env = world({ fixture: strict, start: '2026-11-26T00:04:00.000Z' });
+    const { line } = await env.run([
+      '--json',
+      '--state',
+      JSON.stringify({
+        lotes_cotizaciones: { next: 21, round: '2026-11-26T00:00:00.000Z' },
+        lotes_velas: { next: 14, round: '2026-11-25' },
+      }),
+    ]);
+    expect(
+      sequencesOf(line).map((item) => [item['status'], item['reason'], item['detail']]),
+    ).toEqual([
+      ['failed', 'request_invalid', 'trading_times'],
+      ['idle', null, null],
+      ['idle', null, null],
+    ]);
+    expect(env.sockets).toEqual([]);
+    expect(env.released).toEqual([]);
   });
 });

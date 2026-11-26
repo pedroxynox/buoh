@@ -1,7 +1,7 @@
 import type { ConnectionClosed } from '@buoh/contracts';
 
 import type { FrameInput } from '../ingestion/raw-first-ingestor.js';
-import { failureReason } from '../source-log/source-event-log.js';
+import { failureReason, LogPersistenceError } from '../source-log/source-event-log.js';
 import type { Scheduler } from './ports.js';
 import type { BatchOperation } from './schema-release.js';
 import type { DerivSocket, SocketFactory, SocketSignal } from './socket.js';
@@ -20,8 +20,13 @@ import type { DerivSocket, SocketFactory, SocketSignal } from './socket.js';
  * envío; una respuesta que no llega en `requestTimeoutMs` (`request_timeout`); un cierre o un error
  * del socket (`disconnected`); un frame binario o mayor que el límite (`binary_frame` y
  * `frame_too_large`); demasiados frames esperando a escribirse (`queue_full`); o un fallo al
- * escribir (`persistence_failed`), después del cual no escribe nada más. Antes de abrirse, una
- * conexión que no se abre deja `connect_failed` o `connect_timeout`, sin escribir nada.
+ * escribir (`persistence_failed`), después del cual no escribe nada más, y que da también
+ * `write_failure`, aunque llegue después de otra parada. Antes de abrirse, una conexión que no se
+ * abre deja `connect_failed` o `connect_timeout`, sin escribir nada.
+ *
+ * Una respuesta cuenta en `answered` si su frame es durable, también si llega a escribirse después
+ * de parar por otro motivo, como un corte o el plazo de la respuesta: así la ejecución siguiente no
+ * la vuelve a pedir.
  */
 
 type ClosureType = ConnectionClosed['closure_type'];
@@ -92,6 +97,11 @@ export interface BatchExchangeResult {
   readonly last_sent_utc: string | null;
   readonly sent: number;
   readonly stopped: BatchStop | null;
+  /**
+   * El primer fallo al escribir, como `etapa:motivo` de `LogPersistenceError` o el código del error,
+   * o `null`: después de él el log no admite nada más.
+   */
+  readonly write_failure: string | null;
 }
 
 /** Frames que esperan a escribirse, como mucho: con una petición a la vez no debería haber más de uno. */
@@ -110,6 +120,13 @@ type ExchangeEvent =
   | { readonly kind: 'persistence_failed'; readonly reason: string }
   | { readonly kind: 'queue_full' }
   | { readonly id: number; readonly kind: 'timer' };
+
+/** El motivo saneado de un fallo al escribir: la etapa y el motivo de `LogPersistenceError`. */
+export function writeFailureOf(error: unknown): string {
+  return error instanceof LogPersistenceError
+    ? `${error.stage}:${error.reason}`
+    : failureReason(error);
+}
 
 /** `req_id` y `error.code` de una respuesta, sin depender de su forma; `null` si no es JSON. */
 function controlOf(text: string): { readonly errorCode: unknown; readonly reqId: unknown } | null {
@@ -146,6 +163,10 @@ class BatchExchange {
   #writeFailure: string | null = null;
   /** Las peticiones enviadas que esperan respuesta: como mucho una. */
   readonly #waiting = new Set<number>();
+  /** Las peticiones enviadas. */
+  readonly #sent = new Set<number>();
+  /** La primera respuesta durable de cada petición enviada: si era un `RateLimit`. */
+  readonly #outcomes = new Map<number, boolean>();
 
   constructor(input: BatchExchangeInput) {
     this.#input = input;
@@ -198,7 +219,7 @@ class BatchExchange {
       try {
         await work();
       } catch (error) {
-        this.#writeFailure = failureReason(error);
+        this.#writeFailure = writeFailureOf(error);
         this.#push({ kind: 'persistence_failed', reason: this.#writeFailure });
         return;
       }
@@ -263,9 +284,14 @@ class BatchExchange {
         // Solo un frame ya durable cuenta como respuesta (raw first).
         const control = controlOf(text);
         const reqId = control?.reqId;
-        if (typeof reqId === 'number' && this.#waiting.has(reqId)) {
+        if (typeof reqId !== 'number' || !this.#sent.has(reqId) || this.#outcomes.has(reqId)) {
+          return;
+        }
+        const rateLimited = control?.errorCode === RATE_LIMIT;
+        this.#outcomes.set(reqId, rateLimited);
+        if (this.#waiting.has(reqId)) {
           this.#waiting.delete(reqId);
-          this.#push({ kind: 'answer', rateLimited: control?.errorCode === RATE_LIMIT, reqId });
+          this.#push({ kind: 'answer', rateLimited, reqId });
         }
       },
     );
@@ -364,6 +390,7 @@ class BatchExchange {
         last_sent_utc: input.previousSentUtc,
         sent: 0,
         stopped: notOpened,
+        write_failure: this.#writeFailure,
       };
     }
 
@@ -376,6 +403,7 @@ class BatchExchange {
     let answered = 0;
     let sent = 0;
     let lastSentUtc = input.previousSentUtc;
+    let lastReqId: number | null = null;
     const deadlineMs = Date.parse(input.deadlineUtc);
     for (const request of input.requests) {
       if (stop !== null) {
@@ -401,6 +429,8 @@ class BatchExchange {
         break;
       }
       this.#waiting.add(request.reqId);
+      this.#sent.add(request.reqId);
+      lastReqId = request.reqId;
       socket.send(request.text);
       sent += 1;
       lastSentUtc = input.now();
@@ -432,9 +462,17 @@ class BatchExchange {
 
     const closure = this.#closureOf(stop);
     await this.#end(closure.terminate);
+    // La respuesta de la última petición pudo hacerse durable después de parar.
+    if (
+      stop !== null &&
+      lastReqId !== null &&
+      answered === sent - 1 &&
+      this.#outcomes.get(lastReqId) === false
+    ) {
+      answered += 1;
+    }
     const connectionId = this.#connectionId;
     if (this.#writeFailure === null && connectionId !== null) {
-      let failed: string | null = null;
       try {
         await input.closed({
           at_utc: input.now(),
@@ -443,14 +481,12 @@ class BatchExchange {
           reason: closure.reason,
         });
       } catch (error) {
-        failed = failureReason(error);
+        this.#writeFailure = writeFailureOf(error);
       }
-      if (failed !== null) {
-        this.#writeFailure = failed;
-        stop ??= { detail: failed, reason: 'persistence_failed' };
-      }
-    } else if (this.#writeFailure !== null && stop?.reason !== 'persistence_failed') {
-      stop = { detail: this.#writeFailure, reason: 'persistence_failed' };
+    }
+    // Una parada anterior se conserva; el fallo al escribir va además en `write_failure`.
+    if (this.#writeFailure !== null) {
+      stop ??= { detail: this.#writeFailure, reason: 'persistence_failed' };
     }
     return {
       answered,
@@ -458,6 +494,7 @@ class BatchExchange {
       last_sent_utc: lastSentUtc,
       sent,
       stopped: stop,
+      write_failure: this.#writeFailure,
     };
   }
 
