@@ -31,7 +31,7 @@ export async function openBatchLog(
       store: stores.sourceLog,
       zlibVersion: process.versions.zlib,
     });
-    return { close: stores.close, log: opened };
+    return { close: stores.close, log: opened, objects: stores.objects };
   } catch (error) {
     await stores.close();
     throw error;

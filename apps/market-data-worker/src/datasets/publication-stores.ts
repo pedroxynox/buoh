@@ -3,6 +3,7 @@ import { DERIV_SOURCE } from '../deriv/profile.js';
 import type { ExpectedSchemaArchive } from '../deriv/schema-release.js';
 import { stderrAlert, type OperationalAlert } from '../operational/registry.js';
 import { PostgresDatasetStore } from '../postgres/dataset-store.js';
+import { readLogQualityProfile } from '../postgres/log-profile.js';
 import { createPool } from '../postgres/metadata-store.js';
 import { PostgresOperationalStore } from '../postgres/operational-store.js';
 import { PostgresSourceLogStore } from '../postgres/source-log-store.js';
@@ -48,6 +49,7 @@ export function openPublicationStores(
     log: (location) =>
       logReader({
         objects: new S3ObjectStore(s3, config.s3.bucket, location.prefix),
+        profile: () => readLogQualityProfile(pool, location.schema),
         schemas: input.schemas,
         source: DERIV_SOURCE,
         store: new PostgresSourceLogStore(pool, { schema: location.schema }),

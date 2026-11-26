@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   apiMigrateEnvironment,
   batchEnvironment,
+  BATCH_PUBLICATION_TURN_MS,
   BATCH_START_LIMIT_MS,
   BATCH_CANDLES_SEQUENCE,
   BATCH_QUOTES_SEQUENCE,
@@ -4439,12 +4440,16 @@ describe('los pasos 6 y 7: casos que deciden (ADR-0020 §8)', () => {
 
   it('no lee los informes de un log que no se puede leer', async () => {
     const db = datasetsDatabase();
-    db.database.listLogs = () =>
-      Promise.resolve([
-        log(1, '2026-03-01T00:00:00.000Z'),
-        log(2, '2026-03-02T09:59:00.000Z'),
-        { ...log(3), readable: false },
-      ]);
+    db.database.listLogs = (sequence) =>
+      Promise.resolve(
+        sequence === R_100_SEQUENCE
+          ? [
+              log(1, '2026-03-01T00:00:00.000Z'),
+              log(2, '2026-03-02T09:59:00.000Z'),
+              { ...log(3), readable: false },
+            ]
+          : [],
+      );
     const latest = db.database.latestReportWithState.bind(db.database);
     db.database.latestReportWithState = (target, step) =>
       target.number === 3 ? Promise.reject(coded('42501')) : latest(target, step);
@@ -5814,5 +5819,243 @@ describe('los pasos de los lotes (ADR-0021 §3, precisión del PR 5c2 de su §9)
       { row: { status: 'failed' }, schema: schedules1 },
       { row: { status: 'completed' }, schema: schedules1 },
     ]);
+  });
+});
+
+describe('el paso 6 con los lotes (ADR-0021 §3, precisión del PR 5d2 de su §9)', () => {
+  const at = (sequence: LogSequence, number: number, lastWriteUtc: string | null): CaptureLog => ({
+    lastWriteUtc,
+    location: logLocation(number, sequence),
+    readable: true,
+  });
+  /** La línea de `datasets:publish` de otra secuencia. */
+  const as = (line: string, sequence: string) =>
+    JSON.stringify({ ...(JSON.parse(line) as Record<string, unknown>), sequence });
+  /** Las secuencias por lotes con un log activo cada una. */
+  const batchLogs = (sequences: readonly LogSequence[] = BATCH_SEQUENCES) =>
+    sequences.map((sequence) => at(sequence, 1, '2026-03-02T09:55:00.000Z'));
+  /** Una base con los logs de R_100 de `datasetsDatabase` y los de los lotes. */
+  const database = (batch: readonly CaptureLog[] = batchLogs()) =>
+    datasetsDatabase({
+      logs: [
+        log(1, '2026-03-01T00:00:00.000Z'),
+        log(2, '2026-03-02T09:59:00.000Z'),
+        log(3),
+        ...batch,
+      ],
+    });
+  /** La secuencia por lotes a la que le toca la ejecución que empieza a `nowUtc`, entre `among`. */
+  const turnAt = (nowUtc: string, among: readonly LogSequence[] = BATCH_SEQUENCES) =>
+    among[Math.floor(Date.parse(nowUtc) / BATCH_PUBLICATION_TURN_MS) % among.length]?.name ?? '';
+  const publishes = (children: ReturnType<typeof fakeChildren>) =>
+    children.runs.filter((item) => item.child === 'publish');
+
+  it('con R_100 sin nada pendiente, publica un dataset de la secuencia a la que le toca, con lo que queda de los 60 s, y lo guarda en batch', async () => {
+    let clock = Date.parse(NOW);
+    const turn = turnAt(NOW);
+    const children = datasetsChildren({
+      publish: (args) => {
+        if (args[0] === '--symbol') {
+          // R_100 tarda 20 s en no encontrar nada.
+          clock += 20_000;
+          return { exitCode: 0, stdout: nothingDueLine() };
+        }
+        return { exitCode: 0, stdout: as(publishedLine(1, 0, 71), turn) };
+      },
+    });
+    const db = database();
+    const { alerts, lines } = await run(db, children, {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+      now: () => new Date(clock).toISOString(),
+    });
+    expect(publishes(children).map((item) => [item.args, item.timeoutMs, item.env])).toEqual([
+      [['--symbol', 'R_100'], 60_000, publishEnvironment(DATASETS_CONFIG)],
+      [['--sequence', turn], 40_000, publishEnvironment(DATASETS_CONFIG)],
+    ]);
+    expect(alerts).toEqual([]);
+    const line = stepLine(lines, 'publication');
+    expect(line).toMatchObject({ status: 'completed' });
+    expect(line?.['report']).toMatchObject({
+      batch: {
+        behind: null,
+        result: { dataset_id: DATASET, last_segment: 71, sequence: turn, status: 'published' },
+        sequence: turn,
+        skipped: [],
+      },
+      result: { status: 'nothing_due' },
+      state: { attempts: null, stopped: [] },
+    });
+    expect(
+      db.reports.filter((item) => item.row.step === 'publication').map((item) => item.log),
+    ).toEqual([2]);
+  });
+
+  it('con un dataset de R_100 publicado, con un fallo de R_100 o sin tiempo, no lanza los lotes', async () => {
+    for (const [answer, advanceMs] of [
+      [{ exitCode: 0, stdout: publishedLine(1, 0, 71) }, 0],
+      [{ exitCode: 1, stdout: failedLine('storage_unavailable', 1, 72) }, 0],
+      [{ exitCode: 0, stdout: nothingDueLine() }, 60_000],
+    ] as const) {
+      let clock = Date.parse(NOW);
+      const children = datasetsChildren({
+        publish: () => {
+          clock += advanceMs;
+          return answer;
+        },
+      });
+      const { lines } = await run(database(), children, {
+        config: DATASETS_CONFIG,
+        nextId: growing,
+        now: () => new Date(clock).toISOString(),
+      });
+      expect(publishes(children).map((item) => item.args)).toEqual([['--symbol', 'R_100']]);
+      expect(stepLine(lines, 'publication')?.['report']).not.toHaveProperty('batch');
+    }
+  });
+
+  it('por turnos entre las secuencias por lotes con algún log que no venció; sin ninguna, no lanza nada', async () => {
+    const turns: string[] = [];
+    for (const offset of [0, 1, 2, 3]) {
+      const now = new Date(Date.parse(NOW) + offset * BATCH_PUBLICATION_TURN_MS).toISOString();
+      const children = datasetsChildren({
+        publish: (args) => ({
+          exitCode: 0,
+          stdout: args[0] === '--symbol' ? nothingDueLine() : as(nothingDueLine(), args[1] ?? ''),
+        }),
+      });
+      await run(database(), children, { config: DATASETS_CONFIG, nextId: growing, now: () => now });
+      turns.push(String(publishes(children)[1]?.args[1]));
+      expect(turns.at(-1)).toBe(turnAt(now));
+    }
+    // Las tres, una tras otra, y otra vez la primera.
+    expect(new Set(turns.slice(0, 3))).toEqual(new Set(BATCH_SEQUENCES.map((item) => item.name)));
+    expect(turns[3]).toBe(turns[0]);
+    // Solo las cotizaciones tienen un log: siempre ellas.
+    const only = datasetsChildren({
+      publish: (args) => ({
+        exitCode: 0,
+        stdout: args[0] === '--symbol' ? nothingDueLine() : as(nothingDueLine(), args[1] ?? ''),
+      }),
+    });
+    await run(database(batchLogs([BATCH_QUOTES_SEQUENCE])), only, {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+    });
+    expect(publishes(only)[1]?.args).toEqual(['--sequence', 'lotes_cotizaciones']);
+    // Con su único log vencido, 30 días después de su última escritura, ninguna.
+    const expired = datasetsChildren({});
+    await run(database(batchLogs([BATCH_QUOTES_SEQUENCE])), expired, {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+      now: () => '2026-04-02T10:00:00.000Z',
+    });
+    expect(publishes(expired).map((item) => item.args[0])).toEqual(['--symbol']);
+  });
+
+  it('un log de los lotes detenido: su orden lo salta y la de R_100 no, con su secuencia en el estado y en la alerta', async () => {
+    const turn = turnAt(NOW);
+    const db = database();
+    let batchRuns = 0;
+    const children = datasetsChildren({
+      publish: (args) => {
+        if (args[0] === '--symbol') {
+          return { exitCode: 0, stdout: nothingDueLine() };
+        }
+        batchRuns += 1;
+        return batchRuns === 1
+          ? { exitCode: 1, stdout: as(failedLine('publication_not_derivable', 1, 0), turn) }
+          : { exitCode: 0, stdout: as(nothingDueLine(), turn) };
+      },
+    });
+    const first = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    const stopped = {
+      code_version: COMMIT_A,
+      first_segment: 0,
+      log: 1,
+      reason: 'publication_not_derivable',
+      sequence: turn,
+    };
+    expect(stepLine(first.lines, 'publication')).toMatchObject({
+      report: {
+        batch: { result: { reason: 'publication_not_derivable', status: 'failed' } },
+        reason: 'publication_not_derivable',
+        state: { attempts: null, stopped: [stopped] },
+      },
+      status: 'failed',
+    });
+    expect(first.alerts).toContainEqual({
+      event: 'publication_not_derivable',
+      first_segment: '0',
+      log: '1',
+      sequence: turn,
+    });
+    const second = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(
+      publishes(children)
+        .slice(-2)
+        .map((item) => item.args),
+    ).toEqual([
+      ['--symbol', 'R_100'],
+      ['--sequence', turn, '--skip', '1'],
+    ]);
+    expect(stepLine(second.lines, 'publication')).toMatchObject({
+      report: { batch: { skipped: [1] }, state: { stopped: [stopped] } },
+      status: 'failed',
+    });
+  });
+
+  it('la cuenta sin resultado es la de su secuencia: una publicación de R_100 no la pone a cero, y a la tercera el log se detiene', async () => {
+    const turn = turnAt(NOW);
+    const db = database();
+    const timedOut = { exitCode: null, stderr: attempt(1, 6), stdout: '', timedOut: true };
+    const answers: Partial<ChildResult>[] = [
+      { exitCode: 0, stdout: nothingDueLine() },
+      timedOut,
+      { exitCode: 0, stdout: nothingDueLine() },
+      timedOut,
+      { exitCode: 0, stdout: publishedLine(1, 0, 71) },
+      { exitCode: 0, stdout: nothingDueLine() },
+      timedOut,
+    ];
+    const children = datasetsChildren({ publish: () => answers.shift() ?? {} });
+    const states: unknown[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+      states.push((stepLine(lines, 'publication')?.['report'] as Record<string, unknown>)['state']);
+    }
+    const attempts = (count: number) => ({ count, first_segment: 6, log: 1, sequence: turn });
+    expect(states).toEqual([
+      { attempts: attempts(1), stopped: [] },
+      { attempts: attempts(2), stopped: [] },
+      // R_100 publicó: la cuenta de los lotes sigue.
+      { attempts: attempts(2), stopped: [] },
+      {
+        attempts: null,
+        stopped: [
+          {
+            code_version: COMMIT_A,
+            first_segment: 6,
+            log: 1,
+            reason: 'publication_incomplete',
+            sequence: turn,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('una línea de los lotes con otra secuencia no es concluyente', async () => {
+    const children = datasetsChildren({
+      publish: (args) => ({
+        exitCode: 0,
+        stdout: args[0] === '--symbol' ? nothingDueLine() : nothingDueLine(),
+      }),
+    });
+    const { lines } = await run(database(), children, { config: DATASETS_CONFIG, nextId: growing });
+    expect(stepLine(lines, 'publication')).toMatchObject({
+      report: { batch: { result: { reason: 'publish_output_invalid', status: 'failed' } } },
+      status: 'failed',
+    });
   });
 });

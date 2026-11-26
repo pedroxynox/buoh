@@ -8,10 +8,12 @@ import { z } from 'zod';
 
 import { failureReason } from '../source-log/source-event-log.js';
 import {
+  BATCH_SEQUENCES,
   isLogExpired,
   LOG_SEQUENCES,
   R_100_SEQUENCE,
   type CaptureLog,
+  type LogSequence,
 } from '../successive-logs.js';
 import type { ChildResult } from './child.js';
 import { CODE_VERSION, publishEnvironment, replayEnvironment } from './config.js';
@@ -34,6 +36,15 @@ export const PUBLICATION_STEP = 'publication';
  * El PR 7 de ADR-0021 §9 publica también el oro.
  */
 export const PUBLISHED_SEQUENCE = R_100_SEQUENCE;
+/**
+ * Las secuencias por lotes que publica el paso 6 después de la de `PUBLISHED_SEQUENCE`, con el tiempo
+ * que sobra (ADR-0021 §3; precisión del PR 5d2 de su §9): pasa su nombre a `datasets:publish`
+ * (`--sequence`). Una por ejecución, por turnos (`BATCH_PUBLICATION_TURN_MS`), entre las que tienen
+ * algún log que no venció.
+ */
+export const PUBLISHED_BATCH_SEQUENCES: readonly LogSequence[] = BATCH_SEQUENCES;
+/** El turno de cada secuencia por lotes: el de cada ejecución de `buoh-operaciones`, cada 5 minutos. */
+export const BATCH_PUBLICATION_TURN_MS = 300_000;
 /** El paso 7: la verificación de los datasets publicados. */
 export const DATASET_VERIFICATION_STEP = 'dataset_verification';
 /** Los dos pasos solo empiezan si la ejecución lleva menos de esto (ADR-0020 §8). */
@@ -63,8 +74,14 @@ const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const sanitized = z.string().regex(SANITIZED);
 const logNumber = z.number().int().min(1).max(999_999);
 const behindSchema = z.strictObject({ expires_at_utc: utcTimestampMsSchema, log: logNumber });
-/** La secuencia de cada línea de `datasets:publish`: la que pidió el paso. */
-const publishedSequence = z.literal(PUBLISHED_SEQUENCE.name);
+/**
+ * La secuencia de cada línea de `datasets:publish`: una de las que publica el paso. Tiene que ser la
+ * que pidió (`classifyPublish`).
+ */
+const publishedSequence = z.enum([
+  PUBLISHED_SEQUENCE.name,
+  ...PUBLISHED_BATCH_SEQUENCES.map((sequence) => sequence.name),
+] as [string, ...string[]]);
 
 // Las líneas de `datasets:publish` (runbook, «Publicación de los datasets vivos»). `z.object` deja
 // fuera cualquier campo que no esté aquí: al informe solo pasan conteos, códigos y horas.
@@ -286,9 +303,10 @@ type PublishResult =
     }
   | { readonly kind: 'invalid'; readonly report: Report };
 
-function classifyPublish(result: ChildResult): PublishResult {
+/** Clasifica lo que dio `datasets:publish` con la secuencia `sequence`; una línea de otra no vale. */
+function classifyPublish(result: ChildResult, sequence: string): PublishResult {
   const parsed = result.timedOut ? null : publishLineSchema.safeParse(stdoutLine(result.stdout));
-  const line = parsed?.success === true ? parsed.data : null;
+  const line = parsed?.success === true && parsed.data.sequence === sequence ? parsed.data : null;
   if (line !== null && result.exitCode === 0 && line.status !== 'failed') {
     return line.status === 'nothing_due'
       ? { kind: 'nothing_due', line }
@@ -344,23 +362,30 @@ function classifyPublish(result: ChildResult): PublishResult {
  * de los logs de esa secuencia (`PUBLISHED_SEQUENCE`; ADR-0021 §1). Una línea de otra secuencia no
  * es concluyente (`publish_output_invalid`).
  *
+ * - **Los lotes, después** (ADR-0021 §3; precisión del PR 5d2 de su §9). Si R_100 no tiene nada
+ *   pendiente (`nothing_due`) y queda tiempo, el paso publica como mucho un dataset de una secuencia
+ *   por lotes, con `datasets:publish --sequence <nombre>` y lo que le queda de sus 60 s. Le toca a
+ *   una por ejecución, por turnos (`BATCH_PUBLICATION_TURN_MS`), entre las de
+ *   `PUBLISHED_BATCH_SEQUENCES` que tienen algún log que no venció: sin ninguna, no lanza nada.
  * - **Logs detenidos.** Un log se detiene cuando su publicación falla por una causa que repetir no
  *   cambia (`PUBLICATION_STOP_REASONS`), y sigue detenido mientras el código es el mismo
- *   (`codeVersion`, el commit que da Render): la orden lo salta (`--skip`), y el paso deja su
- *   alerta, con el nombre del motivo y la secuencia, en cada ejecución. Un log que venció o ya no
- *   existe deja de contar, y uno de otra secuencia también, porque ese paso no la publica.
+ *   (`codeVersion`, el commit que da Render): la orden de su secuencia lo salta (`--skip`), y el
+ *   paso deja su alerta, con el nombre del motivo y la secuencia, en cada ejecución. Un log que
+ *   venció o ya no existe deja de contar, y uno de una secuencia que el paso no publica también.
  * - **Sin un resultado concluyente.** Un plazo vencido, un proceso que muere, una salida sin su
  *   línea o un error inesperado (`unexpected`) cuentan como una ejecución sin resultado del dataset
  *   que intentaba, que dicen su línea o su aviso `publication_attempt`. A la tercera seguida con el
  *   mismo dataset, el log se detiene con `publication_incomplete`. Un almacén que no responde o un
- *   `COMMIT` ambiguo se repiten sin contar; una publicación, o nada pendiente, ponen la cuenta a
- *   cero.
- * - **Atraso.** Con `behind`, también en una línea `failed`, la alerta `publication_behind`.
+ *   `COMMIT` ambiguo se repiten sin contar; una publicación, o nada pendiente, ponen la cuenta de su
+ *   secuencia a cero. La cuenta es de un solo dataset: la de otro la sustituye.
+ * - **Atraso.** Con `behind`, también en una línea `failed`, la alerta `publication_behind`, con su
+ *   secuencia.
  *
- * El estado (los logs detenidos y la cuenta) va en el informe del paso, en el log activo, y la
- * ejecución siguiente lo lee del más reciente de cualquier log que lo lleva: el informe de un fallo
- * de antes de leerlo no lo lleva, y no lo cambia. El paso falla si la orden falló o hay algún log
- * detenido. El informe se guarda si publicó, si el paso falló o si el estado cambió.
+ * El estado (los logs detenidos y la cuenta) va en el informe del paso, en el log activo de R_100,
+ * y la ejecución siguiente lo lee del más reciente de cualquier log que lo lleva: el informe de un
+ * fallo de antes de leerlo no lo lleva, y no lo cambia. El paso falla si una orden falló o hay algún
+ * log detenido. El informe se guarda si publicó, si el paso falló o si el estado cambió; lo de los
+ * lotes va en su `batch`.
  */
 export async function publicationStep(
   input: OperationsInput,
@@ -369,13 +394,31 @@ export async function publicationStep(
   if (tooLate(input, startedAt)) {
     return DEFERRED;
   }
+  const stepStartedMs = Date.parse(input.now());
   const empty: PublicationState = { attempts: null, stopped: [] };
   let logs: CaptureLog[];
   let loaded: PublicationState | 'invalid';
+  /** Los logs que no vencieron de cada secuencia que publica el paso, por su nombre. */
+  const live = new Map<string, Set<number>>();
+  /** Las secuencias por lotes con algún log que no venció, en su orden. */
+  const batchCandidates: LogSequence[] = [];
   try {
     // El estado va en los informes del paso, en el log activo de R_100.
     logs = await input.database.listLogs(R_100_SEQUENCE);
     loaded = await loadState(input, logs, PUBLICATION_STEP, publicationStateSchema, empty);
+    const now = input.now();
+    const notExpired = (of: readonly CaptureLog[]) =>
+      new Set(of.filter((log) => !isLogExpired(log, now)).map((log) => log.location.number));
+    // Los logs de la secuencia que publica primero: `logs` son los de R_100, que es esa.
+    live.set(PUBLISHED_SEQUENCE.name, notExpired(logs));
+    for (const sequence of PUBLISHED_BATCH_SEQUENCES) {
+      const found = await input.database.listLogs(sequence);
+      live.set(sequence.name, notExpired(found));
+      // `datasets:publish` solo publica los que se pueden leer.
+      if (notExpired(found.filter((log) => log.readable)).size > 0) {
+        batchCandidates.push(sequence);
+      }
+    }
   } catch (error) {
     return { log: null, report: { reason: failureReason(error) }, status: 'failed', store: true };
   }
@@ -387,94 +430,149 @@ export async function publicationStep(
       store: true,
     };
   }
-  const now = input.now();
-  const sequence = PUBLISHED_SEQUENCE.name;
-  // Los logs de la secuencia que publica: `logs` son los de R_100, que es esa.
-  const live = new Set(
-    logs.filter((log) => !isLogExpired(log, now)).map((log) => log.location.number),
-  );
   const code = input.config.codeVersion;
-  let stopped: Stop[] = loaded.stopped.filter(
-    (stop) => stop.sequence === sequence && live.has(stop.log) && stop.code_version === code,
-  );
-  let attempts =
-    loaded.attempts !== null &&
-    loaded.attempts.sequence === sequence &&
-    live.has(loaded.attempts.log)
-      ? loaded.attempts
-      : null;
-  const skip = [...new Set(stopped.map((stop) => stop.log))].sort((a, b) => a - b);
+  const isLive = (sequence: string, log: number) => live.get(sequence)?.has(log) === true;
+  const state: { attempts: PublicationState['attempts']; stopped: Stop[] } = {
+    attempts:
+      loaded.attempts !== null && isLive(loaded.attempts.sequence, loaded.attempts.log)
+        ? loaded.attempts
+        : null,
+    stopped: loaded.stopped.filter(
+      (stop) => isLive(stop.sequence, stop.log) && stop.code_version === code,
+    ),
+  };
 
-  const result = await input.runChild(
-    'publish',
-    ['--symbol', sequence, ...(skip.length === 0 ? [] : ['--skip', skip.join(',')])],
-    publishEnvironment(input.config),
-    { timeoutMs: DATASETS_STEP_DEADLINE_MS },
-  );
-  if (result.stderr.length > 0) {
-    input.forwardChildStderr(result.stderr);
-  }
-  const classified = classifyPublish(result);
-
-  let outcome: Report;
-  let failed = false;
-  let behind: z.infer<typeof behindSchema> | null = null;
-  switch (classified.kind) {
-    case 'published': {
-      const { behind: lineBehind, ...rest } = classified.line;
-      behind = lineBehind;
-      outcome = Object.fromEntries(
-        Object.entries(rest).filter((entry) => entry[1] !== undefined),
-      ) as Report;
-      attempts = null;
-      break;
+  /** Una orden de `datasets:publish` de una secuencia y lo que dio. */
+  const publish = async (
+    sequence: string,
+    selector: readonly string[],
+    timeoutMs: number,
+  ): Promise<{
+    readonly behind: z.infer<typeof behindSchema> | null;
+    readonly failed: boolean;
+    readonly kind: PublishResult['kind'];
+    readonly outcome: Report;
+    readonly skipped: number[];
+  }> => {
+    const skipped = [
+      ...new Set(
+        state.stopped.filter((stop) => stop.sequence === sequence).map((stop) => stop.log),
+      ),
+    ].sort((a, b) => a - b);
+    const result = await input.runChild(
+      'publish',
+      [...selector, ...(skipped.length === 0 ? [] : ['--skip', skipped.join(',')])],
+      publishEnvironment(input.config),
+      { timeoutMs },
+    );
+    if (result.stderr.length > 0) {
+      input.forwardChildStderr(result.stderr);
     }
-    case 'nothing_due':
-      behind = classified.line.behind;
-      outcome = { status: 'nothing_due' };
-      attempts = null;
-      break;
-    case 'stop':
-    case 'repeat':
-    case 'inconclusive':
-    case 'invalid': {
-      failed = true;
-      behind = classified.kind === 'invalid' ? null : classified.behind;
-      outcome = { status: 'failed', ...classified.report };
-      if (classified.kind === 'stop' && classified.dataset !== null) {
-        stopped = [
-          ...stopped.filter((stop) => stop.log !== classified.dataset?.log),
-          {
-            code_version: code,
-            ...classified.dataset,
-            reason: classified.report['reason'] as Stop['reason'],
-            sequence,
-          },
-        ];
-        attempts = null;
-      } else if (classified.kind === 'inconclusive' && classified.dataset !== null) {
-        const { dataset } = classified;
-        const same =
-          attempts !== null &&
-          attempts.log === dataset.log &&
-          attempts.first_segment === dataset.first_segment;
-        const next = same && attempts !== null ? attempts.count + 1 : 1;
-        if (next >= INCONCLUSIVE_RUNS) {
-          stopped = [
-            ...stopped.filter((stop) => stop.log !== dataset.log),
-            { code_version: code, ...dataset, reason: 'publication_incomplete', sequence },
-          ];
-          attempts = null;
-        } else {
-          attempts = { count: next, ...dataset, sequence };
+    const classified = classifyPublish(result, sequence);
+    const mine = state.attempts?.sequence === sequence ? state.attempts : null;
+    switch (classified.kind) {
+      case 'published': {
+        const { behind, ...rest } = classified.line;
+        if (mine !== null) {
+          state.attempts = null;
         }
+        return {
+          behind,
+          failed: false,
+          kind: classified.kind,
+          outcome: Object.fromEntries(
+            Object.entries(rest).filter((entry) => entry[1] !== undefined),
+          ) as Report,
+          skipped,
+        };
       }
-      break;
+      case 'nothing_due':
+        if (mine !== null) {
+          state.attempts = null;
+        }
+        return {
+          behind: classified.line.behind,
+          failed: false,
+          kind: classified.kind,
+          outcome: { status: 'nothing_due' },
+          skipped,
+        };
+      case 'stop':
+      case 'repeat':
+      case 'inconclusive':
+      case 'invalid': {
+        if (classified.kind === 'stop' && classified.dataset !== null) {
+          const { dataset } = classified;
+          state.stopped = [
+            ...state.stopped.filter(
+              (stop) => stop.sequence !== sequence || stop.log !== dataset.log,
+            ),
+            {
+              code_version: code,
+              ...dataset,
+              reason: classified.report['reason'] as Stop['reason'],
+              sequence,
+            },
+          ];
+          if (mine !== null) {
+            state.attempts = null;
+          }
+        } else if (classified.kind === 'inconclusive' && classified.dataset !== null) {
+          const { dataset } = classified;
+          const same =
+            mine !== null &&
+            mine.log === dataset.log &&
+            mine.first_segment === dataset.first_segment;
+          const next = same ? mine.count + 1 : 1;
+          if (next >= INCONCLUSIVE_RUNS) {
+            state.stopped = [
+              ...state.stopped.filter(
+                (stop) => stop.sequence !== sequence || stop.log !== dataset.log,
+              ),
+              { code_version: code, ...dataset, reason: 'publication_incomplete', sequence },
+            ];
+            state.attempts = null;
+          } else {
+            state.attempts = { count: next, ...dataset, sequence };
+          }
+        }
+        return {
+          behind: classified.kind === 'invalid' ? null : classified.behind,
+          failed: true,
+          kind: classified.kind,
+          outcome: { status: 'failed', ...classified.report },
+          skipped,
+        };
+      }
     }
-  }
-  stopped.sort((left, right) => left.log - right.log);
+  };
 
-  for (const stop of stopped) {
+  const sequence = PUBLISHED_SEQUENCE.name;
+  const first = await publish(sequence, ['--symbol', sequence], DATASETS_STEP_DEADLINE_MS);
+  // Los lotes, solo si R_100 no tiene nada pendiente y queda tiempo (ADR-0021 §3).
+  let batch: (Awaited<ReturnType<typeof publish>> & { readonly sequence: string }) | null = null;
+  const turn =
+    batchCandidates[
+      Math.floor(Date.parse(startedAt) / BATCH_PUBLICATION_TURN_MS) % batchCandidates.length
+    ];
+  const remaining = DATASETS_STEP_DEADLINE_MS - (Date.parse(input.now()) - stepStartedMs);
+  if (
+    first.kind === 'nothing_due' &&
+    turn !== undefined &&
+    remaining > 0 &&
+    !tooLate(input, startedAt)
+  ) {
+    batch = {
+      ...(await publish(turn.name, ['--sequence', turn.name], remaining)),
+      sequence: turn.name,
+    };
+  }
+  state.stopped.sort(
+    (left, right) =>
+      sequenceOrder(left.sequence) - sequenceOrder(right.sequence) || left.log - right.log,
+  );
+
+  for (const stop of state.stopped) {
     input.alert({
       event: stop.reason,
       first_segment: String(stop.first_segment),
@@ -482,33 +580,58 @@ export async function publicationStep(
       sequence: stop.sequence,
     });
   }
-  if (behind !== null) {
-    input.alert({
-      event: 'publication_behind',
-      expires_at_utc: behind.expires_at_utc,
-      log: String(behind.log),
-      sequence,
-    });
+  for (const [behind, of] of [
+    [first.behind, sequence],
+    [batch?.behind ?? null, batch?.sequence ?? sequence],
+  ] as const) {
+    if (behind !== null) {
+      input.alert({
+        event: 'publication_behind',
+        expires_at_utc: behind.expires_at_utc,
+        log: String(behind.log),
+        sequence: of,
+      });
+    }
   }
-  const state: PublicationState = { attempts, stopped };
-  const changed = JSON.stringify(storedState(state)) !== JSON.stringify(storedState(loaded));
+  const next: PublicationState = { attempts: state.attempts, stopped: state.stopped };
+  const changed = JSON.stringify(storedState(next)) !== JSON.stringify(storedState(loaded));
+  const failureOf = (outcome: Report) =>
+    typeof outcome['reason'] === 'string' ? outcome['reason'] : null;
   const reason =
-    typeof outcome['reason'] === 'string' ? outcome['reason'] : (stopped[0]?.reason ?? null);
-  const status = failed || stopped.length > 0 ? 'failed' : 'completed';
+    failureOf(first.outcome) ??
+    (batch === null ? null : failureOf(batch.outcome)) ??
+    state.stopped[0]?.reason ??
+    null;
+  const status = first.failed || batch?.failed === true || next.stopped.length > 0;
   return {
     log: null,
     report: {
-      behind,
+      behind: first.behind,
       code_version: code,
       ...(reason === null ? {} : { reason }),
-      result: outcome,
-      skipped: skip,
-      state: storedState(state),
+      result: first.outcome,
+      skipped: first.skipped,
+      ...(batch === null
+        ? {}
+        : {
+            batch: {
+              behind: batch.behind,
+              result: batch.outcome,
+              sequence: batch.sequence,
+              skipped: batch.skipped,
+            },
+          }),
+      state: storedState(next),
     },
-    status,
+    status: status ? 'failed' : 'completed',
     // Siempre que falla (§8), también con un log detenido y nada nuevo; y si el estado cambió.
-    store: status === 'failed' || classified.kind === 'published' || changed,
+    store: status || first.kind === 'published' || batch?.kind === 'published' || changed,
   };
+}
+
+/** El orden de una secuencia en `LOG_SEQUENCES`, para ordenar los logs detenidos. */
+function sequenceOrder(name: string): number {
+  return LOG_SEQUENCES.findIndex((sequence) => sequence.name === name);
 }
 
 /** Lo que dio una ejecución de `data:replay` en un modo. */

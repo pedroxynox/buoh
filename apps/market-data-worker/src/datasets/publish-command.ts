@@ -1,11 +1,25 @@
 import { parseArgs } from 'node:util';
 
 import type { SourceEvent } from '@buoh/contracts';
+import { createBatchLogConfig } from '@buoh/domain';
 
 import { ConfigError, loadConfig, type WorkerConfig } from '../config.js';
+import {
+  batchProfileBytes,
+  batchTradingTimesSymbols,
+  DERIV_BATCH_CONNECTOR_VERSION,
+  derivBatchLogProfileRow,
+  type BatchProfileKind,
+} from '../deriv/batch-profile.js';
+import { batchProfileKindOf } from '../deriv/batch-rounds.js';
+import type { LogQualityProfileRow } from '../deriv/log-profile.js';
 import { createDerivPublicationProfileFromSourceSchema, DERIV_SOURCE } from '../deriv/profile.js';
 import type { ExpectedSchemaArchive } from '../deriv/schema-release.js';
-import { readStoredSourceSchema, type StoredSourceSchema } from '../deriv/stored-source-schema.js';
+import {
+  readStoredBatchSourceSchema,
+  readStoredSourceSchema,
+  type StoredSourceSchema,
+} from '../deriv/stored-source-schema.js';
 import {
   CommitOutcomeUnknownError,
   PublicationConflictError,
@@ -26,6 +40,7 @@ import {
   SourceEventLog,
 } from '../source-log/source-event-log.js';
 import {
+  BATCH_SEQUENCES,
   isLogExpired,
   LOG_RETENTION_MS,
   MAX_LOG_NUMBER,
@@ -35,17 +50,19 @@ import {
   type LogLocation,
   type LogSequence,
 } from '../successive-logs.js';
+import { batchElementsOf, planBatchDataset } from './batch-plan.js';
 import { DATASETS_SCHEMA } from './location.js';
-import { planDataset } from './plan.js';
-import { publishLiveDataset } from './publish-live.js';
+import { planDataset, type DatasetPlan } from './plan.js';
+import { publishLiveDataset, type PublishLiveDatasetInput } from './publish-live.js';
 
 // `datasets:publish` (ADR-0020 §7 y §8, paso 6 de `buoh-operaciones`): publica como mucho un dataset
 // vivo por ejecución, desde los segmentos cerrados de los logs sucesivos, en `buoh_datasets` y bajo
 // el prefijo `datasets/` del bucket de la captura, y escribe una línea JSON. Los logs detenidos los
-// lleva `buoh-operaciones` en sus informes y se los pasa con `--skip`.
+// lleva `buoh-operaciones` en sus informes y se los pasa con `--skip`. Con `--sequence`, los de una
+// secuencia por lotes (precisión del PR 5d2 de ADR-0021 §9).
 
 export const PUBLISH_USAGE =
-  'Uso: pnpm --filter @buoh/market-data-worker run datasets:publish -- [--skip <n>[,<n>...]] [--symbol R_100]';
+  'Uso: pnpm --filter @buoh/market-data-worker run datasets:publish -- [--skip <n>[,<n>...]] [--symbol R_100 | --sequence <secuencia por lotes>]';
 
 /** Lo que le queda a un log para vencer por debajo de lo cual la publicación va atrasada (§8). */
 export const PUBLICATION_BEHIND_MS = 3 * 24 * 3_600_000;
@@ -60,10 +77,14 @@ export class PublishUsageError extends Error {
   }
 }
 
-/** Lo que la publicación lee de un log: sus segmentos cerrados y su esquema de fuente. */
+/** Lo que la publicación lee de un log: sus segmentos cerrados, su perfil y su esquema de fuente. */
 export interface PublicationLogReader {
+  /** El esquema de fuente que guardó el comando de los lotes (`readStoredBatchSourceSchema`). */
+  batchSourceSchema(): Promise<StoredSourceSchema>;
   /** Las filas de sus segmentos cerrados desde `from`, en orden. */
   closedSegments(from: number): Promise<readonly ClosedSourceSegment[]>;
+  /** La fila de `log_quality_profile` del log, o `null` (`readLogQualityProfile`). */
+  profile(): Promise<LogQualityProfileRow | null>;
   /** Los source events de un segmento cerrado, verificados (`LogReadError`, `LogIntegrityError`). */
   readSegment(index: number): Promise<readonly SourceEvent[]>;
   /** El esquema de fuente que guardó `ingest` en el log (`readStoredSourceSchema`). */
@@ -110,9 +131,14 @@ export interface PublishCommandDependencies {
   readonly zlibVersion: string;
 }
 
-/** Los segmentos cerrados y el esquema de fuente de un log, sobre su almacén y sus objetos. */
+/**
+ * Los segmentos cerrados, el perfil y el esquema de fuente de un log, sobre su almacén y sus
+ * objetos. Si un almacén no responde, rechaza con `LogReadError`.
+ */
 export function logReader(input: {
   readonly objects: ObjectStore;
+  /** La fila del perfil del log (`readLogQualityProfile` con su esquema). */
+  readonly profile: () => Promise<LogQualityProfileRow | null>;
   readonly schemas: ExpectedSchemaArchive;
   readonly source: string;
   readonly store: SourceLogStore;
@@ -123,22 +149,20 @@ export function logReader(input: {
     store: input.store,
     zlibVersion: 'solo-lectura',
   });
+  const read = async <T>(run: () => Promise<T>): Promise<T> => {
+    try {
+      return await run();
+    } catch (error) {
+      throw new LogReadError(failureReason(error), { cause: error });
+    }
+  };
   return {
-    closedSegments: async (from) => {
-      try {
-        return await input.store.listClosedSegments(input.source, from, MAX_SEGMENT_INDEX);
-      } catch (error) {
-        throw new LogReadError(failureReason(error), { cause: error });
-      }
-    },
+    batchSourceSchema: () => read(() => readStoredBatchSourceSchema(input.objects, input.schemas)),
+    closedSegments: (from) =>
+      read(() => input.store.listClosedSegments(input.source, from, MAX_SEGMENT_INDEX)),
+    profile: () => read(input.profile),
     readSegment: async (index) => (await reader.readClosedSegment(index)).events,
-    sourceSchema: async () => {
-      try {
-        return await readStoredSourceSchema(input.objects, input.schemas);
-      } catch (error) {
-        throw new LogReadError(failureReason(error), { cause: error });
-      }
-    },
+    sourceSchema: () => read(() => readStoredSourceSchema(input.objects, input.schemas)),
   };
 }
 
@@ -232,21 +256,50 @@ export function publicationFailure(
     : { detail, reason: 'unexpected', stage: 'unknown' };
 }
 
-interface PublishArgs {
-  /** La secuencia del símbolo (ADR-0021 §1), la de los logs que publica. */
+type PublishArgs = {
+  /** La secuencia de los logs que publica (ADR-0021 §1). */
   readonly sequence: LogSequence;
   readonly skip: ReadonlySet<number>;
-  readonly symbol: string;
+} & (
+  | {
+      /** Un símbolo en vivo, con `--symbol`. */
+      readonly kind: 'live';
+      readonly symbol: string;
+    }
+  | {
+      /** Una secuencia por lotes, con `--sequence`, y la clase de su perfil. */
+      readonly kind: 'batch';
+      readonly profile: BatchProfileKind;
+    }
+);
+
+/** Las secuencias por lotes que se publican: las que tienen perfil (`batchProfileKindOf`). */
+function batchSequenceOf(
+  name: string,
+): { profile: BatchProfileKind; sequence: LogSequence } | null {
+  const sequence = BATCH_SEQUENCES.find((item) => item.name === name);
+  if (sequence === undefined) {
+    return null;
+  }
+  try {
+    return { profile: batchProfileKindOf(sequence), sequence };
+  } catch {
+    return null;
+  }
 }
 
 function parsePublishArgs(argv: readonly string[]): PublishArgs {
   const args = argv[0] === '--' ? argv.slice(1) : [...argv];
-  let values: { skip?: string; symbol?: string };
+  let values: { sequence?: string; skip?: string; symbol?: string };
   try {
     ({ values } = parseArgs({
       allowPositionals: false,
       args,
-      options: { skip: { type: 'string' }, symbol: { type: 'string' } },
+      options: {
+        sequence: { type: 'string' },
+        skip: { type: 'string' },
+        symbol: { type: 'string' },
+      },
       strict: true,
     }));
   } catch (error) {
@@ -262,6 +315,22 @@ function parsePublishArgs(argv: readonly string[]): PublishArgs {
       skip.add(number);
     }
   }
+  if (values.sequence !== undefined) {
+    if (values.symbol !== undefined) {
+      throw new PublishUsageError('--symbol y --sequence no van juntos.');
+    }
+    const batch = batchSequenceOf(values.sequence);
+    if (batch === null) {
+      throw new PublishUsageError(
+        `--sequence es una secuencia por lotes con perfil: ${BATCH_SEQUENCES.filter(
+          (item) => batchSequenceOf(item.name) !== null,
+        )
+          .map((item) => item.name)
+          .join(', ')}.`,
+      );
+    }
+    return { kind: 'batch', ...batch, skip };
+  }
   const symbol = values.symbol ?? 'R_100';
   if (symbol !== 'R_100') {
     // Solo R_100 tiene umbrales medidos (ADR-0020 §1).
@@ -269,7 +338,80 @@ function parsePublishArgs(argv: readonly string[]): PublishArgs {
       '--symbol solo admite R_100, el único símbolo con umbrales medidos.',
     );
   }
-  return { sequence: R_100_SEQUENCE, skip, symbol };
+  return { kind: 'live', sequence: R_100_SEQUENCE, skip, symbol };
+}
+
+/** Cómo se planea y se publica un log: el perfil en vivo o lo de los lotes. */
+interface LogDerivation {
+  plan(input: {
+    readonly ceiling: number | undefined;
+    readonly closedSegments: readonly ClosedSourceSegment[];
+    readonly from: number;
+    readonly logTerminated: boolean;
+    readonly readSegment: (index: number) => Promise<readonly SourceEvent[]>;
+  }): Promise<DatasetPlan>;
+  readonly source: PublishLiveDatasetInput['source'];
+}
+
+/**
+ * Lo que necesita la publicación de un log, leído de él: en vivo, su esquema de fuente, con el que
+ * se arma el perfil de publicación del símbolo; en los lotes, la fila de su perfil, que tiene que ser
+ * la de su secuencia, y su esquema de fuente (precisión del PR 5d2 de ADR-0021 §9). Sin ellos, el log
+ * no se puede derivar (`NotDerivableError`).
+ */
+async function logDerivation(
+  reader: PublicationLogReader,
+  args: PublishArgs,
+  schemas: ExpectedSchemaArchive,
+): Promise<LogDerivation> {
+  if (args.kind === 'live') {
+    const schema = await reader.sourceSchema();
+    if (schema.status !== 'found') {
+      throw new NotDerivableError(`source_schema_${schema.status}`);
+    }
+    const profile = createDerivPublicationProfileFromSourceSchema({
+      source_schema_bytes: schema.bytes,
+      source_schema_release: schemas.release,
+      symbol: args.symbol,
+    });
+    return { plan: (input) => planDataset({ ...input, profile }), source: { profile } };
+  }
+  const row = await reader.profile();
+  const expected = derivBatchLogProfileRow(args.profile);
+  if (row === null) {
+    throw new NotDerivableError('profile_missing');
+  }
+  if (
+    row.profile_id !== expected.profile_id ||
+    row.quality_profile_sha256 !== expected.quality_profile_sha256
+  ) {
+    throw new NotDerivableError('profile_mismatch');
+  }
+  const schema = await reader.batchSourceSchema();
+  if (schema.status !== 'found') {
+    throw new NotDerivableError(`source_schema_${schema.status}`);
+  }
+  const config = createBatchLogConfig({
+    source_schema_bytes: schema.bytes,
+    source_schema_release: schemas.release,
+    trading_times_symbols: batchTradingTimesSymbols(args.profile),
+  });
+  return {
+    plan: (input) =>
+      planBatchDataset({
+        ...input,
+        elementsOf: (events) => batchElementsOf(events, config),
+        kind: args.profile,
+      }),
+    source: {
+      batch: {
+        connector_version: DERIV_BATCH_CONNECTOR_VERSION,
+        quality_profile_bytes: batchProfileBytes(args.profile),
+        source_schema_bytes: schema.bytes,
+        source_schema_release: schemas.release,
+      },
+    },
+  };
 }
 
 /**
@@ -323,8 +465,10 @@ async function nextFirstSegment(
 /**
  * `datasets:publish` completo (ADR-0020 §8, paso 6): interpreta los argumentos, carga la
  * configuración, abre los almacenes y publica como mucho un dataset, el siguiente de §7 del log de
- * menor número que no venció, se puede leer, tiene uno pendiente y no está en `--skip`. Devuelve la
- * línea JSON y el código de salida:
+ * menor número que no venció, se puede leer, tiene uno pendiente y no está en `--skip`. Con
+ * `--sequence`, el de una secuencia por lotes, con su plan (`planBatchDataset`), el perfil de su
+ * secuencia y el esquema de fuente que guarda cada log (precisión del PR 5d2 de ADR-0021 §9); un log
+ * sin ellos, o con otro perfil, no se puede derivar. Devuelve la línea JSON y el código de salida:
  *
  * - `published` (salida 0): el `dataset_id`, la publicación, el log, sus segmentos, cómo terminó, sus
  *   conteos, su duración y su memoria máxima. `already_published`, también con salida 0, si estaba
@@ -418,21 +562,12 @@ export async function publishDatasetCommand(
         continue;
       }
       dependencies.progress?.({ event: 'publication_attempt', first_segment: first, log: number });
-      const schema = await reader.sourceSchema();
-      if (schema.status !== 'found') {
-        throw new NotDerivableError(`source_schema_${schema.status}`);
-      }
-      const profile = createDerivPublicationProfileFromSourceSchema({
-        source_schema_bytes: schema.bytes,
-        source_schema_release: dependencies.schemas.release,
-        symbol: args.symbol,
-      });
-      const plan = await planDataset({
+      const derivation = await logDerivation(reader, args, dependencies.schemas);
+      const plan = await derivation.plan({
         ceiling: dependencies.ceiling,
         closedSegments: rows,
         from: first,
         logTerminated: terminated,
-        profile,
         readSegment: (index) => reader.readSegment(index),
       });
       if (plan.status === 'segment_too_large') {
@@ -470,11 +605,11 @@ export async function publishDatasetCommand(
         now: dependencies.now,
         objects: opened.datasetObjects,
         plan,
-        profile,
         publication_id: publicationId,
         published_at_utc: dependencies.now(),
         registry,
         sequence: args.sequence.name,
+        source: derivation.source,
         store: opened.datasets,
         zlibVersion: dependencies.zlibVersion,
       });

@@ -87,7 +87,7 @@ async function harness() {
       now: () => published_at_utc.replace(/:00\.000Z$/u, ':30.000Z'),
       objects,
       plan: due,
-      profile: loaded.profile,
+      source: { profile: loaded.profile },
       publication_id,
       published_at_utc,
       registry,

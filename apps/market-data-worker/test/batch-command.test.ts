@@ -1,5 +1,5 @@
 import type { SourceEvent } from '@buoh/contracts';
-import { BATCH_SEGMENT_POLICY } from '@buoh/domain';
+import { BATCH_SEGMENT_POLICY, BATCH_SOURCE_SCHEMA_OPERATIONS } from '@buoh/domain';
 import { describe, expect, it } from 'vitest';
 
 import { BATCH_DEADLINE_MS, BATCH_PACING_MS, batchCommand } from '../src/batch/command.js';
@@ -8,9 +8,14 @@ import { batchProfileKindOf } from '../src/deriv/batch-rounds.js';
 import { DERIV_SOURCE } from '../src/deriv/profile.js';
 import { DERIV_BATCH_OPERATIONS } from '../src/deriv/schema-release.js';
 import {
+  BATCH_SOURCE_SCHEMA_ENTRIES,
+  readStoredBatchSourceSchema,
+} from '../src/deriv/stored-source-schema.js';
+import {
   BATCH_CANDLES_SEQUENCE,
   BATCH_QUOTES_SEQUENCE,
   BATCH_SCHEDULES_SEQUENCE,
+  contentKey,
   logLocation,
   MAX_LOG_NUMBER,
   SourceEventLog,
@@ -137,6 +142,7 @@ function world(
       const { objects, store } = storesOf(log);
       return {
         close: () => Promise.resolve(),
+        objects,
         log: await SourceEventLog.open({
           objects,
           policy: BATCH_SEGMENT_POLICY,
@@ -150,7 +156,9 @@ function world(
       const state = stateOf(sequence);
       return {
         close: () => Promise.resolve(),
-        firstWrite: () => Promise.resolve(state?.first ?? null),
+        // Solo el log activo tiene escrituras; el siguiente, ninguna.
+        firstWrite: (log) =>
+          Promise.resolve(log.number === state?.active ? (state.first ?? null) : null),
         locateLog: () =>
           options.broken?.[sequence.name] === 'reads'
             ? Promise.reject(Object.assign(new Error('secreto'), { code: '57P01' }))
@@ -812,5 +820,112 @@ describe('batchCommand: el plazo antes de conectar', () => {
       ],
     );
     expect(env.sockets).toEqual([]);
+  });
+});
+
+describe('batchCommand: el esquema de fuente de cada log (precisión del PR 5d2 de ADR-0021 §9)', () => {
+  const schemaKeys = BATCH_SOURCE_SCHEMA_ENTRIES.map((entry) =>
+    contentKey(BATCH_FIXTURE.expected.entries_sha256[entry]),
+  );
+
+  it('antes del primer evento de un log, guarda el esquema de respuesta de cada operación de los lotes con la clave de su SHA-256 fijado', async () => {
+    const env = world();
+    const puts: string[] = [];
+    for (const sequence of [
+      BATCH_SCHEDULES_SEQUENCE,
+      BATCH_QUOTES_SEQUENCE,
+      BATCH_CANDLES_SEQUENCE,
+    ]) {
+      const { objects, store } = env.storesOf(logLocation(1, sequence));
+      objects.failPut = (key) => {
+        // Cuando se escribe una entrada del esquema, el log todavía no tiene ningún evento.
+        if (schemaKeys.includes(key)) {
+          puts.push(`${sequence.name}:${String(store.rows.length)}`);
+        }
+        return false;
+      };
+    }
+    await env.run();
+    expect(puts).toEqual([
+      ...Array<string>(5).fill('lotes_horarios:0'),
+      ...Array<string>(5).fill('lotes_cotizaciones:0'),
+      ...Array<string>(5).fill('lotes_velas:0'),
+    ]);
+    for (const sequence of [BATCH_QUOTES_SEQUENCE, BATCH_CANDLES_SEQUENCE]) {
+      const { objects } = env.storesOf(logLocation(1, sequence));
+      for (const entry of BATCH_SOURCE_SCHEMA_ENTRIES) {
+        expect(
+          await objects.get(contentKey(BATCH_FIXTURE.expected.entries_sha256[entry]), 1_000_000),
+        ).toEqual(BATCH_FIXTURE.entries[entry]);
+      }
+      // Es el que lee la publicación.
+      expect(await readStoredBatchSourceSchema(objects, BATCH_FIXTURE.expected)).toMatchObject({
+        status: 'found',
+      });
+    }
+  });
+
+  it('un log que ya tiene escrituras no lo vuelve a escribir; con un corte, lo guarda el log siguiente', async () => {
+    const env = world({
+      logs: {
+        lotes_cotizaciones: { first: '2026-11-25T00:00:30.000Z' },
+        lotes_horarios: { first: '2026-11-20T10:00:00.000Z', nextReadiness: 'ready' },
+      },
+    });
+    const { line } = await env.run();
+    expect(
+      sequencesOf(line).map((item) => [item['sequence'], item['status'], item['log']]),
+    ).toEqual([
+      ['lotes_horarios', 'completed', 2],
+      ['lotes_cotizaciones', 'completed', 1],
+      ['lotes_velas', 'stopped', 1],
+    ]);
+    const has = (sequence: LogSequence, number: number) =>
+      schemaKeys.every((key) =>
+        env.storesOf(logLocation(number, sequence)).objects.objects.has(key),
+      );
+    expect(has(BATCH_QUOTES_SEQUENCE, 1)).toBe(false);
+    expect(env.storesOf(logLocation(1, BATCH_QUOTES_SEQUENCE)).store.rows.length).toBeGreaterThan(
+      0,
+    );
+    expect(has(BATCH_SCHEDULES_SEQUENCE, 2)).toBe(true);
+    expect(has(BATCH_SCHEDULES_SEQUENCE, 1)).toBe(false);
+  });
+
+  it('si no puede guardarlo, la secuencia falla sin escribir ningún evento ni conectar, y las demás siguen', async () => {
+    const env = world();
+    const quotes = env.storesOf(logLocation(1, BATCH_QUOTES_SEQUENCE));
+    quotes.objects.failPut = (key) => key === schemaKeys[1];
+    const { exitCode, line } = await env.run();
+    expect(exitCode).toBe(1);
+    expect(sequencesOf(line)[1]).toMatchObject({
+      answered: 0,
+      reason: 'source_schema_unavailable',
+      sent: 0,
+      sequence: 'lotes_cotizaciones',
+      status: 'failed',
+    });
+    expect(String(sequencesOf(line)[1]?.['detail'])).toMatch(/^[A-Za-z0-9_:-]+$/u);
+    expect(quotes.store.rows).toEqual([]);
+    expect(env.sockets).toHaveLength(2);
+    // Sin las cotizaciones, las 15 de las velas caben en el plazo.
+    expect(sequencesOf(line).map((item) => item['status'])).toEqual([
+      'completed',
+      'failed',
+      'completed',
+    ]);
+  });
+
+  it('una clave del esquema con otros bytes es source_schema_mismatch, con la operación', async () => {
+    const env = world();
+    const quotes = env.storesOf(logLocation(1, BATCH_QUOTES_SEQUENCE));
+    await quotes.objects.putIfAbsent(schemaKeys[2] ?? '', new TextEncoder().encode('otros bytes'));
+    const { line } = await env.run();
+    expect(sequencesOf(line)[1]).toMatchObject({
+      detail: BATCH_SOURCE_SCHEMA_OPERATIONS[2],
+      reason: 'source_schema_mismatch',
+      status: 'failed',
+    });
+    expect(quotes.store.rows).toEqual([]);
   });
 });

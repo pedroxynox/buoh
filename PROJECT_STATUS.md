@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 117
-updated_at_utc: "2026-11-26T20:39:00.000Z"
+status_version: 118
+updated_at_utc: "2026-11-26T23:30:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -38,7 +38,7 @@ Transformar una hipótesis en una estrategia viva, explicable y no ejecutora, pa
 | F2.3 API, cuentas y auditoría | Hecha, con el PR 7c de ADR-0019 | [Evidencia de F2.3](docs/operacion/evidencia-api-f2-3.md) |
 | F2.4 Datos reales en pantalla | Hecha, con el 7b | [Evidencia de F2.4](docs/operacion/evidencia-datos-f2-4.md) |
 | F2.5 Datasets vivos | Hecha, con el PR 6 de ADR-0020 | [Evidencia de los datasets vivos](docs/operacion/evidencia-datasets-f2-5.md) |
-| F2.5b Mercados reales | En curso: hechos los PR 2 a 4 de [ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md) y, del PR 5, del 5a al 5d1. Siguen el 5d2, el 5e, el 5f y los PR 6 a 8 (ADR-0021 §9; «Siguiente tarea autorizada») | [Evidencia del PR 2d](docs/operacion/evidencia-memoria-f2-5b.md) |
+| F2.5b Mercados reales | En curso: hechos los PR 2 a 4 de [ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md) y, del PR 5, del 5a al 5d2. Siguen el 5e, el 5f y los PR 6 a 8 (ADR-0021 §9; «Siguiente tarea autorizada») | [Evidencia del PR 2d](docs/operacion/evidencia-memoria-f2-5b.md) |
 | F2.6, F2.6b y F2.7 a F2.10 | Sin empezar: las cinco ADR del laboratorio, de ADR-0022 a ADR-0026, están fusionadas | — |
 | F2.11 Puerta de salida | Sin empezar | — |
 
@@ -59,7 +59,7 @@ Cerrar V1, con su prototipo de escritorio, no autoriza la app real de Windows: l
 **Próximos pasos, en orden** (desde el 2026-11-26: plan de Fase 2, §9; [decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Orden del código desde el 2026-11-26»). El detalle de cada incremento está en su ADR.
 
 1. **2026-12-02 a las 00:00:03 UTC:** vence el log 1, y el agente comprueba su borrado (runbook de ingesta, «Operaciones (`buoh-operaciones`)», «El primer borrado»). Vuelve a contar los objetos de `logs/000002/`, que tienen que ser los 317 068 de la [evidencia de producción de F2.2](docs/operacion/evidencia-produccion-f2-2.md). Ese día, el agente le pide además al propietario el uso de `buoh-operaciones` en la facturación de Render, para saber si el cron job pasa del mínimo de 1 USD al mes con lo que suman los datasets vivos ([evidencia de los datasets vivos](docs/operacion/evidencia-datasets-f2-5.md), «El costo»).
-2. **El PR 5 de [ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md)** (§9): siguen el 5d2, `datasets:publish` y el paso 6 con los lotes, el 5e y el 5f. Antes del 5f, el propietario crea en Cloudflare el token `lotes` (§3). El 5f corrige además el comentario de `buoh-api` en `render-datos.yaml`, que dice que sus sesiones y sus límites viven en su memoria: las sesiones están en PostgreSQL (`apps/api/migrations/0003_sesiones.sql`), y de los límites de intentos, el límite por nombre y el tope de 100 de una cuenta que existe salen de la base ([ADR-0019](docs/arquitectura/adr/0019-api-cuentas-y-auditoria.md) §1). El 5e hace además que la lectura de los datasets publicados (`readPublishedDatasets`) conozca `contract_rejected` y `candle_repeated` (relevos de los PR #139 y #141) y lo que suma el 5d1, `candle_missing` y el `DatasetManifestCore` 1.1.0 de los lotes, que `data:replay` ya conoce.
+2. **El PR 5 de [ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md)** (§9): siguen el 5e y el 5f. Antes del 5f, el propietario crea en Cloudflare el token `lotes` (§3). El 5f corrige además el comentario de `buoh-api` en `render-datos.yaml`, que dice que sus sesiones y sus límites viven en su memoria: las sesiones están en PostgreSQL (`apps/api/migrations/0003_sesiones.sql`), y de los límites de intentos, el límite por nombre y el tope de 100 de una cuenta que existe salen de la base ([ADR-0019](docs/arquitectura/adr/0019-api-cuentas-y-auditoria.md) §1). El 5e hace además que la lectura de los datasets publicados (`readPublishedDatasets`) conozca `contract_rejected` y `candle_repeated` (relevos de los PR #139 y #141) y lo que suma el 5d1, `candle_missing` y el `DatasetManifestCore` 1.1.0 de los lotes, que `data:replay` ya conoce.
 3. **El PR 6 de ADR-0021**, la descarga de la historia.
 4. **Mientras la historia se descarga y se publica:** los PR 2 y 3 de [ADR-0022](docs/arquitectura/adr/0022-modelo-de-estrategia.md), los PR 2 a 4 de [ADR-0024](docs/arquitectura/adr/0024-semantica-del-backtest.md) y los PR 2 a 4 de [ADR-0023](docs/arquitectura/adr/0023-motor-de-investigacion.md). Dónde van los PR 4 y 5 de ADR-0022 lo dice el plan (§9).
 5. **El PR 7 de ADR-0021**, los umbrales y la publicación del oro, en su fecha, sin esperar a los pasos 2 a 4 (ADR-0021 §2): fija los umbrales desde el 2026-12-02 a las 05:09:43.577 UTC, a los 7 días del primer tick del oro, y tiene que estar en producción antes del 2026-12-23, 7 días antes de que venza, hacia el 2026-12-30, el primer log del oro, que se corta el lunes 2026-11-30 (runbook de ingesta, «El oro (PR 3 de ADR-0021)»).

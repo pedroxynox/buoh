@@ -195,6 +195,7 @@ export {
 export {
   DATASET_WRITE_CONCURRENCY,
   publishLiveDataset,
+  type BatchPublicationSource,
   type PublishLiveDatasetInput,
   type PublishLiveOutcome,
 } from './datasets/publish-live.js';
@@ -216,6 +217,14 @@ export {
   type ReplayCommandDependencies,
   type ReplayCommandStores,
 } from './replay-command.js';
+export {
+  BATCH_DATASET_SEGMENT_CEILING,
+  batchElementsOf,
+  nextBatchMark,
+  planBatchDataset,
+  type BatchPlanSegment,
+  type PlanBatchDatasetInput,
+} from './datasets/batch-plan.js';
 export {
   DATASET_ELEMENT_CEILING,
   DATASET_END_STEP_SEGMENTS,
@@ -363,6 +372,7 @@ export {
   batchStep,
 } from './operations/batch-steps.js';
 export {
+  BATCH_PUBLICATION_TURN_MS,
   DATASET_VERIFICATION_STEP,
   DATASETS_START_LIMIT_MS,
   DATASETS_STEP_DEADLINE_MS,
@@ -371,6 +381,7 @@ export {
   PUBLICATION_STEP,
   PUBLICATION_STOP_REASONS,
   publicationStep,
+  PUBLISHED_BATCH_SEQUENCES,
   PUBLISHED_SEQUENCE,
 } from './operations/datasets-steps.js';
 export {
