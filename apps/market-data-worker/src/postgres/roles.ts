@@ -4,7 +4,7 @@ import pg, { type PoolClient } from 'pg';
 
 import { POSTGRES_IDENTIFIER } from '../config.js';
 import { DATASETS_SCHEMA } from '../datasets/location.js';
-import type { LogSequence } from '../successive-logs.js';
+import { logOfSchema, type LogSequence } from '../successive-logs.js';
 
 /**
  * Los roles de PostgreSQL de producción (ADR-0018 §8):
@@ -285,8 +285,12 @@ export async function ensureRuntimeRoles(client: Client): Promise<void> {
  *   `INGEST_WRITE_TABLES`, `SELECT` en la tabla de migraciones y en `INGEST_READ_TABLES` y uso de
  *   las secuencias; nada en `INGEST_DENIED_TABLES`. El otro no recibe nada.
  *
- * Antes comprueba que cada tabla del esquema esté en una de esas listas: una tabla nueva sin
- * privilegios decididos lanza `UnclassifiedTableError` sin dar ninguno.
+ * El escritor tiene que ser el de la secuencia del esquema, si es el de un log de `LOG_SEQUENCES`:
+ * así un log de los lotes nunca llega a `buoh_ingesta`, tampoco si una llamada olvida el escritor,
+ * que por defecto es `buoh_ingesta`, como en un esquema de `development` o `test`. Si no lo es, lanza
+ * `TypeError` sin enviar nada. Antes de dar ninguno, comprueba también que cada tabla del esquema
+ * esté en una de esas listas: una tabla nueva sin privilegios decididos lanza
+ * `UnclassifiedTableError`.
  */
 export async function grantLogPrivileges(
   client: Client,
@@ -297,6 +301,10 @@ export async function grantLogPrivileges(
   // También en tiempo de ejecución: el rol va tal cual en las órdenes `GRANT`.
   if (![POSTGRES_ROLES.ingest, BATCH_ROLE].includes(writer)) {
     throw new TypeError(`${writer} no es el escritor de un log.`);
+  }
+  const log = logOfSchema(schema);
+  if (log !== null && logWriterOf(log.sequence) !== writer) {
+    throw new TypeError(`${writer} no es el escritor de los logs de ${log.sequence.name}.`);
   }
   const known = new Set<string>([
     MIGRATIONS_TABLE,

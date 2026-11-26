@@ -187,17 +187,35 @@ describe('grantLogPrivileges', () => {
         ? { rows: tables.map((table_name) => ({ table_name })) }
         : { rows: [] };
     const live = fakeClient(answer);
-    await grantLogPrivileges(live.client, 'buoh_lotes_velas_log_000001');
+    await grantLogPrivileges(live.client, 'buoh_log_000001');
     const batch = fakeClient(answer);
     await grantLogPrivileges(batch.client, 'buoh_lotes_velas_log_000001', BATCH_ROLE);
-    // Las mismas órdenes, con buoh_lotes en lugar de buoh_ingesta.
+    // Las mismas órdenes, con buoh_lotes en lugar de buoh_ingesta, en su esquema.
     expect(batch.queries).toEqual(
-      live.queries.map((text) => text.replaceAll('"buoh_ingesta"', '"buoh_lotes"')),
+      live.queries.map((text) =>
+        text
+          .replaceAll('"buoh_ingesta"', '"buoh_lotes"')
+          .replaceAll('"buoh_log_000001"', '"buoh_lotes_velas_log_000001"'),
+      ),
     );
     expect(batch.queries.some((text) => text.includes('buoh_ingesta'))).toBe(false);
     expect(batch.queries).toContain(
       'GRANT USAGE ON SCHEMA "buoh_lotes_velas_log_000001" TO "buoh_lotes", "buoh_lectura"',
     );
+  });
+
+  it('el escritor tiene que ser el de la secuencia del esquema: sin él, un log de los lotes no llega a buoh_ingesta, ni uno en vivo a buoh_lotes', async () => {
+    const { client, queries } = fakeClient();
+    await expect(grantLogPrivileges(client, 'buoh_lotes_horarios_log_000001')).rejects.toThrow(
+      TypeError,
+    );
+    await expect(
+      grantLogPrivileges(client, 'buoh_lotes_cotizaciones_log_000002', POSTGRES_ROLES.ingest),
+    ).rejects.toThrow(TypeError);
+    for (const schema of ['buoh_log_000001', 'buoh_frxxauusd_log_000001']) {
+      await expect(grantLogPrivileges(client, schema, BATCH_ROLE)).rejects.toThrow(TypeError);
+    }
+    expect(queries).toEqual([]);
   });
 
   it('solo admite como escritor a buoh_ingesta o buoh_lotes', async () => {

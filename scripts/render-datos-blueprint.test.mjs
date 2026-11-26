@@ -394,27 +394,32 @@ test('los símbolos en vivo: ingest captura los mismos que buoh-operaciones prep
   // En el orden de LOG_SEQUENCES, con R_100 primero, el que guarda los informes que no son de un log.
   assert.deepEqual(captured, ['R_100', 'frxXAUUSD']);
   assert.deepEqual(prepared, captured);
-  // En production, cada --symbol tiene que tener su secuencia en LOG_SEQUENCES (precisión del PR 2c
-  // de ADR-0021 §9): los nombres de las constantes de la tabla, no cualquier `name:` del archivo.
+  // En production, cada --symbol tiene que tener su secuencia en vivo en LOG_SEQUENCES (precisión del
+  // PR 2c de ADR-0021 §9; desde el PR 5b, la tabla tiene también las secuencias por lotes, que no
+  // son símbolos): los nombres de las constantes de la tabla con `kind: 'live'`, no cualquier `name:`
+  // del archivo.
   const source = read('apps/market-data-worker/src/successive-logs.ts');
   const table =
     /export const LOG_SEQUENCES: readonly LogSequence\[\] = Object\.freeze\(\[([^\]]*)\]\);/.exec(
       source,
     );
   assert.ok(table, 'LOG_SEQUENCES');
-  const names = table[1]
+  const sequences = table[1]
     .split(',')
     .map((item) => item.trim())
     .filter((item) => item !== '')
     .map((constant) => {
       const found = new RegExp(
-        `export const ${constant}: LogSequence = Object\\.freeze\\(\\{\\n  name: '([^']+)',`,
+        `export const ${constant}: LogSequence = Object\\.freeze\\(\\{\\n  name: '([^']+)',\\n(?:  [a-zA-Z]+: '[^']*',\\n)*?  kind: '(live|batch)',\\n\\}\\);`,
       ).exec(source);
       assert.ok(found, constant);
-      return found[1];
+      return { kind: found[2], name: found[1] };
     });
+  const live = sequences.filter((item) => item.kind === 'live').map((item) => item.name);
+  assert.deepEqual(live, ['R_100', 'frxXAUUSD']);
+  assert.ok(sequences.some((item) => item.kind === 'batch'));
   for (const symbol of captured) {
-    assert.ok(names.includes(symbol), `${symbol} sin secuencia en LOG_SEQUENCES`);
+    assert.ok(live.includes(symbol), `${symbol} sin secuencia en vivo en LOG_SEQUENCES`);
   }
 });
 
