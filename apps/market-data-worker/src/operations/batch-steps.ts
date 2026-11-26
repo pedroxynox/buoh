@@ -76,10 +76,10 @@ const batchLineSchema = z.object({
 });
 
 /**
- * El paso de los lotes: si la ejecución lleva menos de `BATCH_START_LIMIT_MS`, lanza
- * `batch -- --json --state <estado>` con el estado del informe más
- * reciente del paso en los logs de R_100, o el vacío, y guarda en el log activo de R_100 un informe
- * con lo que hizo cada secuencia y el estado nuevo. Con salida 1, el paso falla, y el estado nuevo
+ * El paso de los lotes: si la ejecución lleva menos de `BATCH_START_LIMIT_MS`, lanza `batch --
+ * --json --state <estado>` con el estado del informe más reciente del paso en los logs de R_100, o
+ * el vacío, y guarda en el log activo de R_100 un informe con lo que hizo cada secuencia y el estado
+ * nuevo. Con salida 1, el paso falla, y el estado nuevo
  * se guarda igual: el comando lo devuelve también cuando una secuencia falla. Sin una línea válida,
  * como con un proceso cortado por su plazo, el informe no lleva estado, y la ejecución siguiente
  * sigue con el anterior. Un estado guardado que no tiene la forma del comando para el paso sin
