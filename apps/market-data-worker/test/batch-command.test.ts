@@ -668,6 +668,38 @@ describe('batchCommand: lo que revisó la segunda revisión semántica del PR #1
     expect(env.storesOf(logLocation(2, BATCH_SCHEDULES_SEQUENCE)).store.rows).toHaveLength(13);
   });
 
+  it('si falla el cierre del segmento abierto del log que deja, la línea da ese log, no hay corte y el log siguiente no se toca', async () => {
+    const env = world({
+      logs: { lotes_horarios: { first: '2026-11-20T10:00:00.000Z', nextReadiness: 'ready' } },
+    });
+    const left = await leaveOpen(env, logLocation(1, BATCH_SCHEDULES_SEQUENCE));
+    left.failClose = true;
+    const { line } = await env.run();
+    expect(sequencesOf(line)[0]).toMatchObject({
+      cut: null,
+      log: 1,
+      reason: 'persistence_failed',
+      sent: 0,
+      status: 'failed',
+    });
+    expect(env.storesOf(logLocation(2, BATCH_SCHEDULES_SEQUENCE)).store.rows).toEqual([]);
+  });
+
+  it('en los horarios, con la vuelta del día ya entera, un segmento que quedó abierto por un fallo espera al día siguiente', async () => {
+    const env = world();
+    const schedules = env.storesOf(logLocation(1, BATCH_SCHEDULES_SEQUENCE)).store;
+    schedules.failIndex = (row) => row.kind === 'connection_closed';
+    const first = await env.run();
+    expect(sequencesOf(first.line)[0]).toMatchObject({ next: 11, status: 'failed' });
+    schedules.failIndex = () => false;
+    // Con su estado, la ejecución siguiente del mismo día no tiene nada que pedir en los horarios,
+    // así que no abre su log.
+    const again = world({ start: '2026-11-26T00:06:00.000Z' });
+    const second = await again.run(['--json', '--state', JSON.stringify(first.line?.['state'])]);
+    expect(sequencesOf(second.line)[0]).toMatchObject({ status: 'idle' });
+    expect((await schedules.readLogState(DERIV_SOURCE)).openRows).toHaveLength(12);
+  });
+
   it('si no puede cerrar el segmento que quedó abierto, no pide nada en esa secuencia', async () => {
     const env = world();
     const left = await leaveOpen(env, logLocation(1, BATCH_SCHEDULES_SEQUENCE));

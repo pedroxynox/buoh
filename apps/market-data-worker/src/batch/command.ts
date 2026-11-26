@@ -70,9 +70,11 @@ import {
  *    puede tener migraciones pendientes (`migrations_pending`) y tiene que tener la fila del perfil
  *    de su secuencia (`log_not_derivable`; ADR-0020 §4);
  * 4. cierra el segmento que una ejecución anterior pudo dejar abierto, al fallar al escribir o al
- *    cortarse, para que ningún segmento mezcle dos ejecuciones; abre una conexión, escribe su
- *    apertura, pide lo que le toca y escribe su cierre (`runBatchExchange`), y cierra el segmento
- *    abierto (`requested`), salvo si una escritura falló.
+ *    cortarse, en el log en que escribe y, con un corte, también en el que deja, para que ningún
+ *    segmento mezcle dos ejecuciones; si un fallo es del log que deja, la línea da ese log y no hay
+ *    corte. Si para entonces ya pasó el plazo, no conecta (`deadline`). Si no, abre una conexión,
+ *    escribe su apertura, pide lo que le toca y escribe su cierre (`runBatchExchange`), y cierra el
+ *    segmento abierto (`requested`), salvo si una escritura falló.
  *
  * Un límite de peticiones de Deriv (`rate_limit`) o el plazo (`deadline`) paran también las
  * secuencias siguientes (`skipped`); lo que no se pidió lo pide la ejecución siguiente.
@@ -80,7 +82,7 @@ import {
 
 /** La separación mínima entre dos envíos (ADR-0021 §3: a una cada 1,5 s, 69 seguidas sin límite). */
 export const BATCH_PACING_MS = 1_500;
-/** Desde el arranque del comando, después de esto no envía ninguna petición más. */
+/** Desde el arranque del comando, después de esto no envía ninguna petición más ni conecta. */
 export const BATCH_DEADLINE_MS = 70_000;
 /** Lo que espera el aviso de cierre de una conexión antes de cortarla. */
 export const BATCH_CLOSE_TIMEOUT_MS = 5_000;
@@ -107,7 +109,9 @@ export interface BatchDependencies {
     sequence: LogSequence,
   ) => Promise<SessionLock | null>;
   readonly connect: SocketFactory;
-  /** El plazo de los envíos desde el arranque; por defecto, `BATCH_DEADLINE_MS`. */
+  /**
+   * Desde el arranque, después de esto no envía ni conecta; por defecto, `BATCH_DEADLINE_MS`.
+   */
   readonly deadlineMs?: number;
   /** Archivo de esquemas esperado; por defecto, la release fijada. */
   readonly expected?: ExpectedSchemaArchive;
@@ -360,7 +364,10 @@ interface RunContext {
   readonly config: WorkerConfig;
   readonly deadlineUtc: string;
   readonly deps: BatchDependencies;
-  /** `rate_limit` o `deadline` desde que una secuencia paró por uno de ellos: paran las siguientes. */
+  /**
+   * `rate_limit` desde que una respuesta durable fue un `RateLimit`, o `deadline` desde que una
+   * secuencia paró por el plazo: las secuencias siguientes ya no empiezan.
+   */
   halt: string | null;
   lastSentUtc: string | null;
   readonly schemas: DerivSchemaSet<BatchOperation>;
@@ -462,16 +469,25 @@ async function runSequence(
     // se cierra antes de seguir: ningún segmento mezcla dos ejecuciones. Con un corte, el del log
     // que deja de escribirse, que nadie volverá a abrir para escribir.
     for (const location of previous === null ? [target] : [previous, target]) {
+      // Un fallo en el log que se deja es de ese log, y el corte no llega a hacerse.
+      const failedIn = () => {
+        if (location !== target) {
+          log = location.number;
+          cut = null;
+        }
+      };
       let current: BatchLogHandle;
       try {
         current = await deps.openLog(config, lock, location);
       } catch (error) {
+        failedIn();
         return outcome('failed', { detail: failureReason(error), reason: 'log_open_failed' });
       }
       try {
         await current.log.close('requested');
       } catch (error) {
         await current.close().catch(() => undefined);
+        failedIn();
         return outcome('failed', { detail: writeFailureOf(error), reason: 'persistence_failed' });
       }
       if (location === target) {
