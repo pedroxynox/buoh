@@ -87,7 +87,7 @@ El modelo revisor contrasta el diff con fuentes canónicas y vectores independie
 
 - Antes de pedirla, el autor busca en el repositorio cada referencia a lo que su cambio mueve, renombra, quita o contradice: por el nombre del archivo, por el nombre de la sección entre comillas angulares, por su ancla (`#…`) si cambia el título, y por los datos que cambia, como una cifra, una fecha o un nombre. Corrige las que quedan falsas y comprueba que existen los enlaces relativos de los Markdown que cambia. Así la revisión no gasta una ronda en lo que el autor podía encontrar ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Tareas más rápidas»).
 - Cada PR recibe una sola revisión semántica.
-- Solo se repite si encontró hallazgos bloqueantes, y únicamente tras corregirlos. La repetición revisa el PR entero, y su encargo lleva el informe de la anterior y lo que cambió desde el commit que revisó (`git diff <commit revisado> HEAD`), para que no vuelva a descubrir lo mismo ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Estudio de créditos del 2026-11-26»).
+- Solo se repite si encontró hallazgos bloqueantes, y únicamente tras corregirlos. La repetición revisa el PR entero, y su encargo lleva el informe de la anterior y lo que cambió desde el commit que revisó (`git diff <commit revisado> HEAD`, o `git range-diff` si la rama se rebasó sobre un `main` nuevo), para que no vuelva a descubrir lo mismo ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Estudio de créditos del 2026-11-26»).
 - En lo que dice un documento, solo bloquean un dato falso, una contradicción con otra fuente, una regla o una información perdida, una cita o un enlace roto, una decisión del propietario que falta o está mal registrada, o algo que prohíben las «Invariantes no negociables», como un secreto. Un problema de redacción es menor.
 - Los hallazgos menores no reabren la revisión. Se corrigen en el mismo PR, antes del comentario de listo ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Documentación más corta»). El que no se pueda corregir ahí queda anotado, con su motivo, en el «Relevo» del PR y, si sigue abierto después de fusionarlo, en `PROJECT_STATUS.md` («Quedan abiertos de las entregas hechas»).
 
@@ -111,7 +111,7 @@ La fusión del propietario es su visto bueno. Por eso, al darle el enlace, el ag
 
 Si el PR necesita una decisión del propietario sobre producto, dinero, riesgo o seguridad, el agente le explica las opciones y su recomendación y le pide la decisión antes de abrir el PR («Protocolo ante conflictos o vacíos»). El PR registra cuándo y con qué palabras la dio.
 
-Cada PR sale de `main` actualizado. Si el trabajo siguiente necesita un PR que el propietario todavía no fusionó, el agente se lo dice y, mientras tanto, avanza en lo que no dependa de él.
+Cada PR sale de `main` actualizado. Si el trabajo siguiente necesita un PR que el propietario todavía no fusionó, el agente se lo dice y, mientras tanto, avanza en lo que no dependa de él, en la sesión de otro PR («Eficiencia»).
 
 El propietario puede pedir cambios, cerrar un PR sin fusionarlo o revertir uno fusionado cuando quiera. Nadie sube cambios directamente a `main`.
 
@@ -148,7 +148,7 @@ Para gastar menos crédito, en cualquier cuenta de Kiro y con cualquier motor (d
 
 Desde la decisión del propietario del 2026-11-26 ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Estudio de créditos del 2026-11-26»):
 
-- **Una sesión de Kiro por PR.** Cada paso reenvía la conversación entera, también lo leído para el PR anterior. Al dejar listo un PR («Fusión»), el agente no empieza otro en esa sesión: sigue «Cambio de sesión» de [`.kiro/steering/sandbox-ocasional.md`](.kiro/steering/sandbox-ocasional.md) y le da al propietario, con el enlace, el mensaje para la sesión del PR siguiente.
+- **Una sesión de Kiro por PR.** Cada paso reenvía la conversación entera, también lo leído para el PR anterior. Al dejar listo un PR («Fusión»), el agente no empieza otro en esa sesión: sigue «Cambio de sesión» de [`.kiro/steering/sandbox-ocasional.md`](.kiro/steering/sandbox-ocasional.md) y le da al propietario, con el enlace, el mensaje para la sesión del PR siguiente. Lo que el repositorio todavía no recoge y ya no cabe en ese PR («Fusión»), como una decisión del propietario con sus palabras y su fecha, va en ese mensaje, para el PR siguiente.
 - **Los subagentes, sin arranque.** Un subagente no sigue el arranque de sesión (`.kiro/steering/entorno-sandbox-kiro.md`) ni la «Lectura obligatoria»: lee lo que pide su encargo. El encargo le da las reglas que necesita, como las de «Secretos en el sandbox» de ese archivo y, al revisor semántico, las de «Revisión semántica».
 
 Si ahorrar choca con la corrección, gana la corrección, y el PR dice por qué hizo falta lo que no es habitual.
