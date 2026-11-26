@@ -73,8 +73,9 @@ import {
  * informe final de un log que terminó (§6, «Traspaso»). `retention` es el paso 3. `publication` y
  * `dataset_verification` son los pasos 6 y 7 de ADR-0020 §8, que solo corren con la contraseña de
  * `buoh_publicacion`. `batch` y `batch_final` son los de los lotes (ADR-0021 §3), que solo corren
- * con la contraseña de `buoh_lotes` y el token `lotes`, después de la publicación, que tiene
- * prioridad (§3, «Prioridad»). `memory` es el último, en todas las ejecuciones: la memoria residente
+ * con la contraseña de `buoh_lotes` y el token `lotes`, después de los pasos 6 y 7, para no quitarles
+ * su tiempo (ADR-0020 §8); `batch` espera a la ejecución siguiente si la ejecución ya lleva
+ * `BATCH_START_LIMIT_MS`. `memory` es el último, en todas las ejecuciones: la memoria residente
  * máxima del proceso principal y la de cada proceso que lanzó (precisión del PR 9 de ADR-0018 §13).
  */
 export const OPERATIONS_STEPS = [
@@ -1067,7 +1068,7 @@ export async function runOperations(input: OperationsInput): Promise<OperationsR
     runChild: recordedRunChild(input.runChild, launches),
   };
   const steps: Record<OperationsStep, () => Promise<StepOutcome | StepOutcome[]>> = {
-    batch: () => batchStep(measured),
+    batch: () => batchStep(measured, startedAt),
     batch_final: () => batchFinalStep(measured),
     final_health: () => finalHealth(measured),
     health: () => health(measured),

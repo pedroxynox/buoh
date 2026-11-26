@@ -2033,22 +2033,46 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       { source: DERIV_SOURCE },
     );
     try {
+      // Los horarios piden 11 cada día, con una conexión, y cada ejecución cierra su segmento: la
+      // del 5c1 y la primera de aquí, cada una con sus 11 respuestas, su apertura y su cierre.
       const location = logLocation(1, BATCH_SCHEDULES_SEQUENCE);
-      const { rows: kinds } = await ready(admin).query<{ kind: string; n: number }>(
-        `SELECT kind, count(*)::int AS n FROM ${location.schema}.source_event_index GROUP BY kind`,
-      );
-      const { rows: segments } = await ready(admin).query<{ closed: number; last: number }>(
-        `SELECT count(*)::int AS closed, max(segment_index) AS last
-           FROM ${location.schema}.closed_source_segments`,
-      );
       expect(await database.batchLogSummary(location)).toEqual({
-        closed_segments: segments[0]?.closed,
-        events: Object.fromEntries(kinds.map((row) => [row.kind, row.n])),
-        last_closed_segment: segments[0]?.last,
+        closed_segments: 2,
+        events: { connection_closed: 2, connection_opened: 2, raw_source_frame: 22 },
+        last_closed_segment: 1,
         open_events: 0,
         operational_incidents: 0,
       });
-      expect(segments[0]?.closed).toBeGreaterThan(1);
+      // Un evento en un segmento sin cerrar y una incidencia operativa, sintéticos, como los dejaría
+      // una ejecución cortada. Los disparadores del log nombran sus tablas sin esquema.
+      const client = await ready(admin).connect();
+      try {
+        await client.query(`SET search_path TO ${location.schema}`);
+        await client.query(
+          `INSERT INTO source_event_index
+             (source, segment_index, position, event_id, kind, event_time_utc, object_sha256,
+              byte_length)
+           VALUES ($1, 2, 0, $2, 'raw_source_frame', '2026-01-01T00:00:00.000Z', $3, 10)`,
+          [DERIV_SOURCE, uuid(60_001), 'b'.repeat(64)],
+        );
+        await client.query(
+          `INSERT INTO operational_incidents
+             (incident_id, incident_type, severity, source, symbol, observed_at_utc, incident_jcs)
+           VALUES ($1, 'persistence_unavailable', 'error', $2, NULL, '2026-01-01T00:00:00.000Z',
+                   '{}')`,
+          [`sha256:${'c'.repeat(64)}`, DERIV_SOURCE],
+        );
+        await client.query('RESET search_path');
+      } finally {
+        client.release();
+      }
+      expect(await database.batchLogSummary(location)).toEqual({
+        closed_segments: 2,
+        events: { connection_closed: 2, connection_opened: 2, raw_source_frame: 23 },
+        last_closed_segment: 1,
+        open_events: 1,
+        operational_incidents: 1,
+      });
     } finally {
       await database.close();
     }

@@ -215,7 +215,8 @@ const DEFERRED: StepOutcome = {
 
 /**
  * El estado que dejó el informe más reciente del paso, de cualquier log que se puede leer: el de
- * mayor `report_id`, un UUIDv7, que crece con el tiempo. Lo usan también los lotes (`batch-steps.ts`). Sin ninguno, el estado vacío. `invalid` si
+ * mayor `report_id`, un UUIDv7, que crece con el tiempo. Lo usan también los lotes
+ * (`batch-steps.ts`). Sin ninguno, el estado vacío. `invalid` si
  * el informe no tiene la forma que escribe el paso.
  */
 export async function loadState<T>(

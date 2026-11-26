@@ -355,6 +355,7 @@ export {
 } from './operations/config.js';
 export {
   BATCH_FINAL_STEP,
+  BATCH_START_LIMIT_MS,
   BATCH_STEP,
   batchFinalStep,
   batchStep,

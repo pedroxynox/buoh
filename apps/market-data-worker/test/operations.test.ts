@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   apiMigrateEnvironment,
   batchEnvironment,
+  BATCH_START_LIMIT_MS,
   BATCH_CANDLES_SEQUENCE,
   BATCH_QUOTES_SEQUENCE,
   BATCH_SCHEDULES_SEQUENCE,
@@ -5441,7 +5442,13 @@ describe('los pasos de los lotes (ADR-0021 §3, precisión del PR 5c2 de su §9)
 
   it('con las dos, batch corre después de la publicación y antes de memory, con el estado vacío la primera vez; guarda el estado nuevo en el log activo de R_100, y la ejecución siguiente lo pasa', async () => {
     const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1)] });
-    const first = batchChildren(() => ({ exitCode: 0, stdout: batchLine(STATE_1) }));
+    const first = batchChildren(() => ({
+      exitCode: 0,
+      stdout: batchLine(
+        STATE_1,
+        BATCH_SEQUENCES.map((item) => outcome(item.name, { message: 'texto sin sanear' })),
+      ),
+    }));
     const { lines, result } = await run(db, first, { config: LOTES_CONFIG });
 
     expect(result.status).toBe('completed');
@@ -5470,6 +5477,8 @@ describe('los pasos de los lotes (ADR-0021 §3, precisión del PR 5c2 de su §9)
       },
       schema: 'buoh_log_000001',
     });
+    // Solo pasan al informe los campos conocidos de cada secuencia.
+    expect(JSON.stringify(stored?.row.report)).not.toContain('message');
     const memory = lines.find((line) => line['step'] === 'memory') as
       { report: { children: unknown[] } } | undefined;
     expect(memory?.report.children).toContainEqual({ child: 'batch', max_rss_bytes: null });
@@ -5491,7 +5500,7 @@ describe('los pasos de los lotes (ADR-0021 §3, precisión del PR 5c2 de su §9)
         reason: 'log_not_prepared',
         status: 'failed',
       }),
-      outcome('lotes_velas', { reason: 'rate_limited', status: 'stopped' }),
+      outcome('lotes_velas', { reason: 'rate_limit', status: 'stopped' }),
     ];
     const children = batchChildren(() => ({
       exitCode: 1,
@@ -5511,6 +5520,42 @@ describe('los pasos de los lotes (ADR-0021 §3, precisión del PR 5c2 de su §9)
     });
     expect(batchReports(db)[0]?.row).toMatchObject({
       report: { state: STATE_1 },
+      status: 'failed',
+    });
+
+    // Una escritura que falló da su etapa y su motivo en detail (writeFailureOf), y el estado se
+    // guarda igual: lo que ya era durable cuenta como respondido.
+    const persistence = batchChildren(() => ({
+      exitCode: 1,
+      stdout: batchLine(
+        STATE_2,
+        [
+          outcome('lotes_horarios', {
+            detail: 'source_event_index:synthetic_index_failure',
+            reason: 'persistence_failed',
+            status: 'failed',
+          }),
+        ],
+        'failed',
+      ),
+    }));
+    const written = await run(db, persistence, { config: LOTES_CONFIG, nextId: idsFrom(50) });
+    expect(written.lines.find((line) => line['step'] === 'batch')).toMatchObject({
+      report: {
+        reason: 'persistence_failed',
+        sequences: [{ detail: 'source_event_index:synthetic_index_failure' }],
+        state: STATE_2,
+      },
+      status: 'failed',
+    });
+    // Salida 0 con una línea failed tampoco es un paso completado.
+    const mismatch = batchChildren(() => ({
+      exitCode: 0,
+      stdout: batchLine(STATE_2, [outcome('lotes_horarios')], 'failed'),
+    }));
+    const odd = await run(db, mismatch, { config: LOTES_CONFIG, nextId: idsFrom(80) });
+    expect(odd.lines.find((line) => line['step'] === 'batch')).toMatchObject({
+      report: { reason: 'batch_failed', state: STATE_2 },
       status: 'failed',
     });
 
@@ -5547,6 +5592,7 @@ describe('los pasos de los lotes (ADR-0021 §3, precisión del PR 5c2 de su §9)
       [{ exitCode: null, stdout: '' }, 'child_killed'],
       [{ exitCode: 2, stdout: '' }, 'batch_usage_or_config'],
       [{ exitCode: 0, stdout: 'no es json' }, 'batch_output_invalid'],
+      [{ exitCode: 1, stdout: 'no es json' }, 'batch_output_invalid'],
       [
         { exitCode: 0, stdout: `${batchLine(STATE_1)}\n${batchLine(STATE_1)}` },
         'batch_output_invalid',
@@ -5616,6 +5662,29 @@ describe('los pasos de los lotes (ADR-0021 §3, precisión del PR 5c2 de su §9)
     expect(batchReports(db).at(-1)?.schema).toBe('buoh_log_000002');
   });
 
+  it('si la ejecución ya lleva BATCH_START_LIMIT_MS, batch espera a la siguiente sin lanzarse ni guardar nada', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1)] });
+    const children = batchChildren(() => ({ exitCode: 0, stdout: batchLine(STATE_1) }));
+    let calls = 0;
+    const late = new Date(Date.parse(NOW) + BATCH_START_LIMIT_MS).toISOString();
+    const almost = new Date(Date.parse(NOW) + BATCH_START_LIMIT_MS - 1).toISOString();
+    const { lines } = await run(db, children, {
+      config: LOTES_CONFIG,
+      now: () => ((calls += 1) === 1 ? NOW : late),
+    });
+    expect(batchArgs(children)).toEqual([]);
+    expect(lines.find((line) => line['step'] === 'batch')).toMatchObject({
+      report: { deferred: true },
+      status: 'completed',
+    });
+    expect(batchReports(db)).toEqual([]);
+
+    calls = 0;
+    const onTime = batchChildren(() => ({ exitCode: 0, stdout: batchLine(STATE_1) }));
+    await run(db, onTime, { config: LOTES_CONFIG, now: () => ((calls += 1) === 1 ? NOW : almost) });
+    expect(batchArgs(onTime)).toHaveLength(1);
+  });
+
   it('batch_final guarda en cada log de los lotes que terminó sus conteos y su último segmento cerrado, uno por ejecución y secuencia, y no repite', async () => {
     const at = (
       sequence: LogSequence,
@@ -5645,7 +5714,7 @@ describe('los pasos de los lotes (ADR-0021 §3, precisión del PR 5c2 de su §9)
         at(BATCH_SCHEDULES_SEQUENCE, 2, NOW),
         // Las cotizaciones: solo el activo.
         at(BATCH_QUOTES_SEQUENCE, 1, NOW),
-        // Las velas: el 1 y el 2 terminaron; un log vencido no cuenta.
+        // Las velas: el 1 y el 2 terminaron.
         at(BATCH_CANDLES_SEQUENCE, 1, '2026-02-20T00:00:00.000Z'),
         at(BATCH_CANDLES_SEQUENCE, 2, '2026-02-27T00:00:00.000Z'),
         at(BATCH_CANDLES_SEQUENCE, 3, NOW),

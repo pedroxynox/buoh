@@ -131,11 +131,6 @@ export interface DatasetVerificationRow {
   readonly verified_at_utc: string;
 }
 
-/**
- * Lo que hace `buoh-operaciones` con la credencial dueña (ADR-0018 §8 y §11). Las lecturas de los
- * logs y las escrituras van como `buoh_dueno` (`SET ROLE`), el dueño de los esquemas: así no
- * dependen de que el usuario de Render herede sus privilegios.
- */
 /** Los conteos del informe final de un log de los lotes (`batchLogSummary`). */
 export interface BatchLogSummary {
   readonly closed_segments: number;
@@ -147,6 +142,11 @@ export interface BatchLogSummary {
   readonly operational_incidents: number;
 }
 
+/**
+ * Lo que hace `buoh-operaciones` con la credencial dueña (ADR-0018 §8 y §11). Las lecturas de los
+ * logs y las escrituras van como `buoh_dueno` (`SET ROLE`), el dueño de los esquemas: así no
+ * dependen de que el usuario de Render herede sus privilegios.
+ */
 export interface OwnerDatabase {
   /** Crea los roles que falten y fija sus atributos (`ensureRuntimeRoles`). */
   ensureRuntimeRoles(): Promise<void>;

@@ -28,24 +28,56 @@ export const BATCH_FINAL_STEP = 'batch_final';
 
 type BatchState = z.infer<typeof batchStateSchema>;
 
-/** Lo que el paso lee de cada secuencia de la línea de `batch`; el resto se guarda como llega. */
-const sequenceLineSchema = z.looseObject({
-  detail: z.string().regex(SANITIZED).nullable(),
-  reason: z.string().regex(SANITIZED).nullable(),
+/**
+ * Si la ejecución lleva ya esto o más, `batch` espera a la siguiente: con sus 120 s de plazo, la
+ * ejecución termina antes de los 5 minutos del cron (ADR-0018 §11), como los pasos 6 y 7 con su
+ * límite de ADR-0020 §8.
+ */
+export const BATCH_START_LIMIT_MS = 150_000;
+
+const count = z.number().int().min(0);
+/** Un motivo de una escritura que falló: `<etapa>:<motivo>`, como lo da `writeFailureOf`. */
+const DETAIL = /^[A-Za-z0-9_.-]{1,64}(?::[A-Za-z0-9_.-]{1,64})?$/u;
+const code = z.string().regex(SANITIZED);
+const round = z
+  .string()
+  .regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}(?:T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z)?$/u);
+
+/**
+ * Lo que hizo `batch` en una secuencia, como lo escribe su línea: solo estos campos pasan al informe,
+ * y cada uno es un código, un nombre, un número o una vuelta, nunca un mensaje (ADR-0018 §11).
+ */
+const sequenceLineSchema = z.object({
+  abandoned: z.object({ remaining: count, round }).nullable(),
+  answered: count,
+  cut: z.object({ from: count, to: count }).nullable(),
+  cut_blocked: code.nullable(),
+  detail: z.string().regex(DETAIL).nullable(),
+  errors: z.record(code, z.record(code, count)),
+  from: count,
+  log: count.nullable(),
+  next: count,
+  reason: code.nullable(),
+  round,
+  schema_failures: z.record(code, count),
+  sent: count,
   sequence: z.enum(BATCH_SEQUENCES.map((item) => item.name) as [string, ...string[]]),
   status: z.enum(BATCH_SEQUENCE_STATUSES),
+  unexpected: count,
+  until: count,
 });
 
 /** La única línea de stdout de `batch` con salida 0 o 1. */
-const batchLineSchema = z.looseObject({
-  reason: z.string().regex(SANITIZED).optional(),
+const batchLineSchema = z.object({
+  reason: code.optional(),
   sequences: z.array(sequenceLineSchema),
   state: batchStateSchema,
   status: z.enum(['completed', 'failed']),
 });
 
 /**
- * El paso de los lotes: lanza `batch -- --json --state <estado>` con el estado del informe más
+ * El paso de los lotes: si la ejecución lleva menos de `BATCH_START_LIMIT_MS`, lanza
+ * `batch -- --json --state <estado>` con el estado del informe más
  * reciente del paso en los logs de R_100, o el vacío, y guarda en el log activo de R_100 un informe
  * con lo que hizo cada secuencia y el estado nuevo. Con salida 1, el paso falla, y el estado nuevo
  * se guarda igual: el comando lo devuelve también cuando una secuencia falla. Sin una línea válida,
@@ -53,7 +85,10 @@ const batchLineSchema = z.looseObject({
  * sigue con el anterior. Un estado guardado que no tiene la forma del comando para el paso sin
  * lanzarlo (`batch_state_invalid`).
  */
-export async function batchStep(input: OperationsInput): Promise<StepOutcome> {
+export async function batchStep(input: OperationsInput, startedAt: string): Promise<StepOutcome> {
+  if (Date.parse(input.now()) - Date.parse(startedAt) >= BATCH_START_LIMIT_MS) {
+    return { log: null, report: { deferred: true }, status: 'completed', store: false };
+  }
   let state: BatchState | 'invalid';
   try {
     const logs = await input.database.listLogs(R_100_SEQUENCE);
@@ -85,7 +120,7 @@ export async function batchStep(input: OperationsInput): Promise<StepOutcome> {
   }
   const value = line.data;
   const report: Record<string, JsonValue> = {
-    sequences: value.sequences as JsonValue[],
+    sequences: value.sequences,
     state: value.state as Record<string, JsonValue>,
   };
   if (result.exitCode === 0 && value.status === 'completed') {
