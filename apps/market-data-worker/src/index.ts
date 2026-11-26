@@ -372,6 +372,7 @@ export {
   batchStep,
 } from './operations/batch-steps.js';
 export {
+  BATCH_PUBLICATION_MIN_MS,
   BATCH_PUBLICATION_TURN_MS,
   DATASET_VERIFICATION_STEP,
   DATASETS_START_LIMIT_MS,

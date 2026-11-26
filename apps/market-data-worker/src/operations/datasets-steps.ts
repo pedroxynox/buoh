@@ -45,6 +45,12 @@ export const PUBLISHED_SEQUENCE = R_100_SEQUENCE;
 export const PUBLISHED_BATCH_SEQUENCES: readonly LogSequence[] = BATCH_SEQUENCES;
 /** El turno de cada secuencia por lotes: el de cada ejecución de `buoh-operaciones`, cada 5 minutos. */
 export const BATCH_PUBLICATION_TURN_MS = 300_000;
+/**
+ * Lo que tiene que quedar de los 60 s del paso para lanzar los lotes: más que lo que tardó como
+ * mucho en producción la publicación de un dataset vivo de unos 72 segmentos, 20,2 s (evidencia de
+ * los datasets vivos, «Memoria y duración de cada proceso»). Con menos, el turno espera.
+ */
+export const BATCH_PUBLICATION_MIN_MS = 25_000;
 /** El paso 7: la verificación de los datasets publicados. */
 export const DATASET_VERIFICATION_STEP = 'dataset_verification';
 /** Los dos pasos solo empiezan si la ejecución lleva menos de esto (ADR-0020 §8). */
@@ -156,6 +162,26 @@ const publicationStateSchema = z.strictObject({
   stopped: z.array(stopSchema),
 });
 type PublicationState = z.infer<typeof publicationStateSchema>;
+/** Una cuenta sin resultado: el dataset, por su log y su primer segmento, y las ejecuciones. */
+type Attempts = NonNullable<PublicationState['attempts']>;
+/**
+ * La cuenta sin resultado de los lotes (precisión del PR 5d2 de ADR-0021 §9), en `batch_state` del
+ * informe y no en `state`: así no comparte la de R_100, y el código anterior, que solo lee `state`,
+ * no la ve.
+ */
+const batchPublicationStateSchema = z.strictObject({
+  attempts: z
+    .strictObject({
+      count,
+      first_segment: count,
+      log: logNumber,
+      sequence: z.enum(
+        PUBLISHED_BATCH_SEQUENCES.map((sequence) => sequence.name) as [string, ...string[]],
+      ),
+    })
+    .nullable(),
+});
+type BatchPublicationState = z.infer<typeof batchPublicationStateSchema>;
 
 /**
  * El estado como se guarda en el informe: los logs de R_100 sin `sequence`, como antes de las
@@ -231,17 +257,14 @@ const DEFERRED: StepOutcome = {
 };
 
 /**
- * El estado que dejó el informe más reciente del paso, de cualquier log que se puede leer: el de
- * mayor `report_id`, un UUIDv7, que crece con el tiempo. Sin ninguno, el estado vacío. `invalid` si
- * el informe no tiene la forma que escribe el paso. Lo usan también los lotes (`batch-steps.ts`).
+ * El informe más reciente del paso que lleva estado, de cualquier log que se puede leer: el de mayor
+ * `report_id`, un UUIDv7, que crece con el tiempo. `null` sin ninguno.
  */
-export async function loadState<T>(
+async function latestStateReport(
   input: OperationsInput,
   logs: readonly CaptureLog[],
   step: string,
-  schema: z.ZodType<T>,
-  empty: T,
-): Promise<T | 'invalid'> {
+): Promise<JsonValue | null> {
   let latest: { readonly report: JsonValue; readonly report_id: string } | null = null;
   for (const log of logs) {
     if (!log.readable) {
@@ -252,16 +275,37 @@ export async function loadState<T>(
       latest = found;
     }
   }
-  if (latest === null) {
+  return latest?.report ?? null;
+}
+
+/** Un campo del informe con su forma: sin informe, `empty`; con otra forma, `invalid`. */
+function reportField<T>(
+  report: JsonValue | null,
+  field: string,
+  schema: z.ZodType<T>,
+  empty: T,
+): T | 'invalid' {
+  if (report === null) {
     return empty;
   }
-  const report = latest.report;
-  const state =
-    typeof report === 'object' && report !== null && !Array.isArray(report)
-      ? report['state']
-      : undefined;
-  const parsed = schema.safeParse(state);
+  const value = typeof report === 'object' && !Array.isArray(report) ? report[field] : undefined;
+  const parsed = schema.safeParse(value);
   return parsed.success ? parsed.data : 'invalid';
+}
+
+/**
+ * El estado que dejó el informe más reciente del paso, de cualquier log que se puede leer
+ * (`latestStateReport`). Sin ninguno, el estado vacío. `invalid` si el informe no tiene la forma que
+ * escribe el paso. Lo usan también los lotes (`batch-steps.ts`).
+ */
+export async function loadState<T>(
+  input: OperationsInput,
+  logs: readonly CaptureLog[],
+  step: string,
+  schema: z.ZodType<T>,
+  empty: T,
+): Promise<T | 'invalid'> {
+  return reportField(await latestStateReport(input, logs, step), 'state', schema, empty);
 }
 
 /** Por qué un proceso no dio una línea concluyente: su plazo, una señal o su salida. */
@@ -363,10 +407,13 @@ function classifyPublish(result: ChildResult, sequence: string): PublishResult {
  * es concluyente (`publish_output_invalid`).
  *
  * - **Los lotes, después** (ADR-0021 §3; precisión del PR 5d2 de su §9). Si R_100 no tiene nada
- *   pendiente (`nothing_due`) y queda tiempo, el paso publica como mucho un dataset de una secuencia
- *   por lotes, con `datasets:publish --sequence <nombre>` y lo que le queda de sus 60 s. Le toca a
- *   una por ejecución, por turnos (`BATCH_PUBLICATION_TURN_MS`), entre las de
- *   `PUBLISHED_BATCH_SEQUENCES` que tienen algún log que no venció: sin ninguna, no lanza nada.
+ *   pendiente (`nothing_due`), la ejecución lleva menos de `DATASETS_START_LIMIT_MS` y quedan al
+ *   menos `BATCH_PUBLICATION_MIN_MS` de los 60 s del paso, busca los logs de las secuencias por
+ *   lotes y publica como mucho un dataset de una de ellas, con `datasets:publish --sequence
+ *   <nombre>` y lo que queda del plazo. Le toca a una por ejecución, por turnos
+ *   (`BATCH_PUBLICATION_TURN_MS`), entre las de `PUBLISHED_BATCH_SEQUENCES` que tienen algún log que
+ *   no venció y se puede leer, salvo si una tiene su cuenta sin resultado en marcha: entonces le
+ *   toca a ella, hasta que la pone a cero o detiene su log. Sin ninguna, no lanza nada.
  * - **Logs detenidos.** Un log se detiene cuando su publicación falla por una causa que repetir no
  *   cambia (`PUBLICATION_STOP_REASONS`), y sigue detenido mientras el código es el mismo
  *   (`codeVersion`, el commit que da Render): la orden de su secuencia lo salta (`--skip`), y el
@@ -376,16 +423,16 @@ function classifyPublish(result: ChildResult, sequence: string): PublishResult {
  *   línea o un error inesperado (`unexpected`) cuentan como una ejecución sin resultado del dataset
  *   que intentaba, que dicen su línea o su aviso `publication_attempt`. A la tercera seguida con el
  *   mismo dataset, el log se detiene con `publication_incomplete`. Un almacén que no responde o un
- *   `COMMIT` ambiguo se repiten sin contar; una publicación, o nada pendiente, ponen la cuenta de su
- *   secuencia a cero. La cuenta es de un solo dataset: la de otro la sustituye.
+ *   `COMMIT` ambiguo se repiten sin contar; una publicación, o nada pendiente, ponen la cuenta a
+ *   cero. R_100 y los lotes llevan cada uno su cuenta: la de R_100 en `state`, como antes, y la de
+ *   los lotes en `batch_state`, que el código anterior no lee.
  * - **Atraso.** Con `behind`, también en una línea `failed`, la alerta `publication_behind`, con su
  *   secuencia.
  *
- * El estado (los logs detenidos y la cuenta) va en el informe del paso, en el log activo de R_100,
- * y la ejecución siguiente lo lee del más reciente de cualquier log que lo lleva: el informe de un
- * fallo de antes de leerlo no lo lleva, y no lo cambia. El paso falla si una orden falló o hay algún
- * log detenido. El informe se guarda si publicó, si el paso falló o si el estado cambió; lo de los
- * lotes va en su `batch`.
+ * El estado va en el informe del paso, en el log activo de R_100, y la ejecución siguiente lo lee del
+ * más reciente de cualquier log que lo lleva: el informe de un fallo de antes de leerlo no lo lleva,
+ * y no lo cambia. El paso falla si una orden falló o hay algún log detenido. El informe se guarda si
+ * publicó, si el paso falló o si el estado cambió; lo de los lotes va en su `batch`.
  */
 export async function publicationStep(
   input: OperationsInput,
@@ -395,34 +442,25 @@ export async function publicationStep(
     return DEFERRED;
   }
   const stepStartedMs = Date.parse(input.now());
-  const empty: PublicationState = { attempts: null, stopped: [] };
   let logs: CaptureLog[];
   let loaded: PublicationState | 'invalid';
-  /** Los logs que no vencieron de cada secuencia que publica el paso, por su nombre. */
-  const live = new Map<string, Set<number>>();
-  /** Las secuencias por lotes con algún log que no venció, en su orden. */
-  const batchCandidates: LogSequence[] = [];
+  let loadedBatch: BatchPublicationState | 'invalid';
   try {
     // El estado va en los informes del paso, en el log activo de R_100.
     logs = await input.database.listLogs(R_100_SEQUENCE);
-    loaded = await loadState(input, logs, PUBLICATION_STEP, publicationStateSchema, empty);
-    const now = input.now();
-    const notExpired = (of: readonly CaptureLog[]) =>
-      new Set(of.filter((log) => !isLogExpired(log, now)).map((log) => log.location.number));
-    // Los logs de la secuencia que publica primero: `logs` son los de R_100, que es esa.
-    live.set(PUBLISHED_SEQUENCE.name, notExpired(logs));
-    for (const sequence of PUBLISHED_BATCH_SEQUENCES) {
-      const found = await input.database.listLogs(sequence);
-      live.set(sequence.name, notExpired(found));
-      // `datasets:publish` solo publica los que se pueden leer.
-      if (notExpired(found.filter((log) => log.readable)).size > 0) {
-        batchCandidates.push(sequence);
-      }
-    }
+    const report = await latestStateReport(input, logs, PUBLICATION_STEP);
+    loaded = reportField(report, 'state', publicationStateSchema, { attempts: null, stopped: [] });
+    // Un informe sin `batch_state`, como los de antes del 5d2, no tiene cuenta de los lotes.
+    loadedBatch = reportField(
+      report,
+      'batch_state',
+      batchPublicationStateSchema.optional(),
+      undefined,
+    ) ?? { attempts: null };
   } catch (error) {
     return { log: null, report: { reason: failureReason(error) }, status: 'failed', store: true };
   }
-  if (loaded === 'invalid') {
+  if (loaded === 'invalid' || loadedBatch === 'invalid') {
     return {
       log: null,
       report: { reason: 'publication_state_invalid' },
@@ -430,23 +468,39 @@ export async function publicationStep(
       store: true,
     };
   }
+  const notExpired = (of: readonly CaptureLog[]) => {
+    const now = input.now();
+    return new Set(of.filter((log) => !isLogExpired(log, now)).map((log) => log.location.number));
+  };
   const code = input.config.codeVersion;
-  const isLive = (sequence: string, log: number) => live.get(sequence)?.has(log) === true;
+  const sequence = PUBLISHED_SEQUENCE.name;
+  const batchNames: ReadonlySet<string> = new Set(
+    PUBLISHED_BATCH_SEQUENCES.map((item) => item.name),
+  );
+  // Los logs de la secuencia que publica primero: `logs` son los de R_100, que es esa.
+  const liveLogs = notExpired(logs);
   const state: { attempts: PublicationState['attempts']; stopped: Stop[] } = {
     attempts:
-      loaded.attempts !== null && isLive(loaded.attempts.sequence, loaded.attempts.log)
+      loaded.attempts !== null &&
+      loaded.attempts.sequence === sequence &&
+      liveLogs.has(loaded.attempts.log)
         ? loaded.attempts
         : null,
+    // Los de R_100, con sus logs que no vencieron; los de los lotes, hasta que se buscan sus logs.
     stopped: loaded.stopped.filter(
-      (stop) => isLive(stop.sequence, stop.log) && stop.code_version === code,
+      (stop) =>
+        stop.code_version === code &&
+        (stop.sequence === sequence ? liveLogs.has(stop.log) : batchNames.has(stop.sequence)),
     ),
   };
+  const batchState: BatchPublicationState = { attempts: loadedBatch.attempts };
 
-  /** Una orden de `datasets:publish` de una secuencia y lo que dio. */
+  /** Una orden de `datasets:publish` de una secuencia, con su cuenta, y lo que dio. */
   const publish = async (
-    sequence: string,
+    of: string,
     selector: readonly string[],
     timeoutMs: number,
+    counter: { get(): Attempts | null; set(value: Attempts | null): void },
   ): Promise<{
     readonly behind: z.infer<typeof behindSchema> | null;
     readonly failed: boolean;
@@ -455,9 +509,7 @@ export async function publicationStep(
     readonly skipped: number[];
   }> => {
     const skipped = [
-      ...new Set(
-        state.stopped.filter((stop) => stop.sequence === sequence).map((stop) => stop.log),
-      ),
+      ...new Set(state.stopped.filter((stop) => stop.sequence === of).map((stop) => stop.log)),
     ].sort((a, b) => a - b);
     const result = await input.runChild(
       'publish',
@@ -468,13 +520,14 @@ export async function publicationStep(
     if (result.stderr.length > 0) {
       input.forwardChildStderr(result.stderr);
     }
-    const classified = classifyPublish(result, sequence);
-    const mine = state.attempts?.sequence === sequence ? state.attempts : null;
+    const classified = classifyPublish(result, of);
+    const current = counter.get();
+    const mine = current?.sequence === of ? current : null;
     switch (classified.kind) {
       case 'published': {
         const { behind, ...rest } = classified.line;
         if (mine !== null) {
-          state.attempts = null;
+          counter.set(null);
         }
         return {
           behind,
@@ -488,7 +541,7 @@ export async function publicationStep(
       }
       case 'nothing_due':
         if (mine !== null) {
-          state.attempts = null;
+          counter.set(null);
         }
         return {
           behind: classified.line.behind,
@@ -501,21 +554,19 @@ export async function publicationStep(
       case 'repeat':
       case 'inconclusive':
       case 'invalid': {
-        if (classified.kind === 'stop' && classified.dataset !== null) {
-          const { dataset } = classified;
+        const stopLog = (
+          dataset: { first_segment: number; log: number },
+          reason: Stop['reason'],
+        ) => {
           state.stopped = [
-            ...state.stopped.filter(
-              (stop) => stop.sequence !== sequence || stop.log !== dataset.log,
-            ),
-            {
-              code_version: code,
-              ...dataset,
-              reason: classified.report['reason'] as Stop['reason'],
-              sequence,
-            },
+            ...state.stopped.filter((stop) => stop.sequence !== of || stop.log !== dataset.log),
+            { code_version: code, ...dataset, reason, sequence: of },
           ];
+        };
+        if (classified.kind === 'stop' && classified.dataset !== null) {
+          stopLog(classified.dataset, classified.report['reason'] as Stop['reason']);
           if (mine !== null) {
-            state.attempts = null;
+            counter.set(null);
           }
         } else if (classified.kind === 'inconclusive' && classified.dataset !== null) {
           const { dataset } = classified;
@@ -525,15 +576,10 @@ export async function publicationStep(
             mine.first_segment === dataset.first_segment;
           const next = same ? mine.count + 1 : 1;
           if (next >= INCONCLUSIVE_RUNS) {
-            state.stopped = [
-              ...state.stopped.filter(
-                (stop) => stop.sequence !== sequence || stop.log !== dataset.log,
-              ),
-              { code_version: code, ...dataset, reason: 'publication_incomplete', sequence },
-            ];
-            state.attempts = null;
+            stopLog(dataset, 'publication_incomplete');
+            counter.set(null);
           } else {
-            state.attempts = { count: next, ...dataset, sequence };
+            counter.set({ count: next, ...dataset, sequence: of });
           }
         }
         return {
@@ -547,25 +593,63 @@ export async function publicationStep(
     }
   };
 
-  const sequence = PUBLISHED_SEQUENCE.name;
-  const first = await publish(sequence, ['--symbol', sequence], DATASETS_STEP_DEADLINE_MS);
+  const first = await publish(sequence, ['--symbol', sequence], DATASETS_STEP_DEADLINE_MS, {
+    get: () => state.attempts,
+    set: (value) => {
+      state.attempts = value;
+    },
+  });
   // Los lotes, solo si R_100 no tiene nada pendiente y queda tiempo (ADR-0021 §3).
-  let batch: (Awaited<ReturnType<typeof publish>> & { readonly sequence: string }) | null = null;
-  const turn =
-    batchCandidates[
-      Math.floor(Date.parse(startedAt) / BATCH_PUBLICATION_TURN_MS) % batchCandidates.length
-    ];
+  let batch:
+    | (Awaited<ReturnType<typeof publish>> & { readonly sequence: string })
+    | { readonly failure: string }
+    | null = null;
   const remaining = DATASETS_STEP_DEADLINE_MS - (Date.parse(input.now()) - stepStartedMs);
   if (
     first.kind === 'nothing_due' &&
-    turn !== undefined &&
-    remaining > 0 &&
+    remaining >= BATCH_PUBLICATION_MIN_MS &&
     !tooLate(input, startedAt)
   ) {
-    batch = {
-      ...(await publish(turn.name, ['--sequence', turn.name], remaining)),
-      sequence: turn.name,
-    };
+    try {
+      const candidates: LogSequence[] = [];
+      const live = new Map<string, Set<number>>();
+      for (const item of PUBLISHED_BATCH_SEQUENCES) {
+        const found = await input.database.listLogs(item);
+        live.set(item.name, notExpired(found));
+        // `datasets:publish` solo publica los que se pueden leer.
+        if (notExpired(found.filter((log) => log.readable)).size > 0) {
+          candidates.push(item);
+        }
+      }
+      const isLive = (name: string, log: number) => live.get(name)?.has(log) === true;
+      state.stopped = state.stopped.filter(
+        (stop) => stop.sequence === sequence || isLive(stop.sequence, stop.log),
+      );
+      const counting = batchState.attempts;
+      if (counting !== null && !isLive(counting.sequence, counting.log)) {
+        batchState.attempts = null;
+      }
+      // La que tiene su cuenta en marcha sigue hasta ponerla a cero o detener su log.
+      const turn =
+        candidates.find((item) => item.name === batchState.attempts?.sequence) ??
+        candidates[
+          Math.floor(Date.parse(startedAt) / BATCH_PUBLICATION_TURN_MS) % candidates.length
+        ];
+      if (turn !== undefined) {
+        const left = DATASETS_STEP_DEADLINE_MS - (Date.parse(input.now()) - stepStartedMs);
+        batch = {
+          ...(await publish(turn.name, ['--sequence', turn.name], left, {
+            get: () => batchState.attempts,
+            set: (value) => {
+              batchState.attempts = value;
+            },
+          })),
+          sequence: turn.name,
+        };
+      }
+    } catch (error) {
+      batch = { failure: failureReason(error) };
+    }
   }
   state.stopped.sort(
     (left, right) =>
@@ -580,9 +664,10 @@ export async function publicationStep(
       sequence: stop.sequence,
     });
   }
+  const ran = batch !== null && 'sequence' in batch ? batch : null;
   for (const [behind, of] of [
     [first.behind, sequence],
-    [batch?.behind ?? null, batch?.sequence ?? sequence],
+    [ran?.behind ?? null, ran?.sequence ?? sequence],
   ] as const) {
     if (behind !== null) {
       input.alert({
@@ -594,15 +679,18 @@ export async function publicationStep(
     }
   }
   const next: PublicationState = { attempts: state.attempts, stopped: state.stopped };
-  const changed = JSON.stringify(storedState(next)) !== JSON.stringify(storedState(loaded));
+  const changed =
+    JSON.stringify(storedState(next)) !== JSON.stringify(storedState(loaded)) ||
+    JSON.stringify(batchState) !== JSON.stringify(loadedBatch);
   const failureOf = (outcome: Report) =>
     typeof outcome['reason'] === 'string' ? outcome['reason'] : null;
-  const reason =
-    failureOf(first.outcome) ??
-    (batch === null ? null : failureOf(batch.outcome)) ??
-    state.stopped[0]?.reason ??
-    null;
-  const status = first.failed || batch?.failed === true || next.stopped.length > 0;
+  const batchFailure =
+    batch === null ? null : 'failure' in batch ? batch.failure : failureOf(batch.outcome);
+  const reason = failureOf(first.outcome) ?? batchFailure ?? state.stopped[0]?.reason ?? null;
+  const failed =
+    first.failed ||
+    (batch !== null && ('failure' in batch || batch.failed)) ||
+    next.stopped.length > 0;
   return {
     log: null,
     report: {
@@ -614,24 +702,29 @@ export async function publicationStep(
       ...(batch === null
         ? {}
         : {
-            batch: {
-              behind: batch.behind,
-              result: batch.outcome,
-              sequence: batch.sequence,
-              skipped: batch.skipped,
-            },
+            batch:
+              'failure' in batch
+                ? { reason: batch.failure, status: 'failed' }
+                : {
+                    behind: batch.behind,
+                    result: batch.outcome,
+                    sequence: batch.sequence,
+                    skipped: batch.skipped,
+                  },
           }),
+      // Sin cuenta, no hace falta: un informe sin `batch_state` no la tiene.
+      ...(batchState.attempts === null ? {} : { batch_state: { attempts: batchState.attempts } }),
       state: storedState(next),
     },
-    status: status ? 'failed' : 'completed',
+    status: failed ? 'failed' : 'completed',
     // Siempre que falla (§8), también con un log detenido y nada nuevo; y si el estado cambió.
-    store: status || first.kind === 'published' || batch?.kind === 'published' || changed,
+    store: failed || first.kind === 'published' || ran?.kind === 'published' || changed,
   };
 }
 
 /** El orden de una secuencia en `LOG_SEQUENCES`, para ordenar los logs detenidos. */
 function sequenceOrder(name: string): number {
-  return LOG_SEQUENCES.findIndex((sequence) => sequence.name === name);
+  return LOG_SEQUENCES.findIndex((item) => item.name === name);
 }
 
 /** Lo que dio una ejecución de `data:replay` en un modo. */
