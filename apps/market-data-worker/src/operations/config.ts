@@ -72,8 +72,9 @@ const operationsEnvironmentSchema = z.object({
   /**
    * Los símbolos capturados en vivo, separados por comas (ADR-0021 §1, precisión del PR 2b): el
    * servicio prepara, observa, verifica, mide y borra los logs de la secuencia de cada uno. Cada uno
-   * tiene que tener su secuencia en `LOG_SEQUENCES`, sin repetirse, y R_100 tiene que estar, porque
-   * su log activo guarda los informes. Sin la variable, solo R_100.
+   * tiene que tener su secuencia en vivo en `LOG_SEQUENCES` (`liveSequenceOf`: el nombre de una
+   * secuencia por lotes no vale), sin repetirse, y R_100 tiene que estar, porque su log activo guarda
+   * los informes. Sin la variable, solo R_100.
    */
   BUOH_OPERACIONES_SIMBOLOS: z
     .string()
@@ -100,6 +101,20 @@ const operationsEnvironmentSchema = z.object({
   BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY: nonEmpty,
 });
 
+/**
+ * Las variables que el servicio admite y que su Blueprint todavía no le da: la contraseña de
+ * `buoh_lotes` (ADR-0021 §3), que Render generará en el propio servicio (`generateValue`) con el PR
+ * 5f de su §9, el que pone en marcha los lotes. Es opcional, como la de `buoh_publicacion`: con ella,
+ * el paso 1 crea el rol y prepara los logs de las secuencias por lotes; sin ella, no toca ninguno de
+ * los dos. Va en otro objeto para que la prueba del Blueprint, que compara las variables de
+ * `render-datos.yaml` con las del primero, no la pida antes; esa prueba exige que cada una sea
+ * opcional y que el Blueprint no la tenga. El 5f la pasa al primero, como el PR 6b de ADR-0019 §14
+ * hizo con la de `buoh_api`.
+ */
+const pendingEnvironmentSchema = z.object({
+  BUOH_LOTES_POSTGRES_PASSWORD: rolePassword.optional(),
+});
+
 /** Las variables que el worker lee y que el servicio no tiene (ADR-0018 §11). */
 const WORKER_VARIABLES = /^BUOH_(?:POSTGRES|S3)_/u;
 
@@ -117,6 +132,11 @@ export interface OperationsConfig {
    * servicio no la tiene: entonces el paso 1 no crea el rol de lectura de la API.
    */
   readonly apiReaderPassword: string | null;
+  /**
+   * La contraseña que debe tener `buoh_lotes` (ADR-0021 §3), o `null` mientras el servicio no la
+   * tiene: entonces el paso 1 no crea el rol ni prepara los logs de las secuencias por lotes.
+   */
+  readonly batchPassword: string | null;
   /**
    * El commit del código que corre, el de `RENDER_GIT_COMMIT`, que Render pone en cada servicio, o
    * `null` sin él. Un log que la publicación detuvo sigue detenido mientras el código es el mismo
@@ -156,21 +176,25 @@ export function loadOperationsConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): OperationsConfig {
   const parsed = operationsEnvironmentSchema.safeParse(env);
+  const pending = pendingEnvironmentSchema.safeParse(env);
   const rejected = new Set(
-    parsed.success ? [] : parsed.error.issues.map((issue) => String(issue.path[0])),
+    [parsed, pending].flatMap((result) =>
+      result.success ? [] : result.error.issues.map((issue) => String(issue.path[0])),
+    ),
   );
   for (const [name, value] of Object.entries(env)) {
     if (value !== undefined && WORKER_VARIABLES.test(name)) {
       rejected.add(name);
     }
   }
-  if (!parsed.success || rejected.size > 0) {
+  if (!parsed.success || !pending.success || rejected.size > 0) {
     throw new ConfigError([...rejected].sort());
   }
   const value = parsed.data;
   return {
     apiPassword: value.BUOH_API_POSTGRES_PASSWORD ?? null,
     apiReaderPassword: value.BUOH_API_LECTURA_POSTGRES_PASSWORD ?? null,
+    batchPassword: pending.data.BUOH_LOTES_POSTGRES_PASSWORD ?? null,
     codeVersion: CODE_VERSION.test(env['RENDER_GIT_COMMIT'] ?? '')
       ? (env['RENDER_GIT_COMMIT'] ?? null)
       : null,

@@ -9,6 +9,9 @@ import { DERIV_SOURCE } from '../src/deriv/profile.js';
 import {
   API_READER_ROLE,
   API_ROLE,
+  BATCH_QUOTES_SEQUENCE,
+  BATCH_ROLE,
+  BATCH_SEQUENCES,
   createPool,
   createS3Client,
   DATASETS_PREFIX,
@@ -49,6 +52,7 @@ import {
   type RunChild,
   type WorkerConfig,
 } from '../src/index.js';
+import { derivBatchLogProfileRow } from '../src/deriv/batch-profile.js';
 import { derivLogProfileRow } from '../src/deriv/log-profile.js';
 import { ownMaxRssBytes } from '../src/operations/child.js';
 import { readLogQualityProfile } from '../src/postgres/log-profile.js';
@@ -83,6 +87,7 @@ import { previousConnectionEvents } from '../test/support/recovery-harness.js';
 const DATABASE = 'buoh_integration_ops';
 const RENDER_USER = 'buoh_integration_ops_render';
 const TEST_ROLES = [
+  BATCH_ROLE,
   PUBLICATION_ROLE,
   ...LOGIN_ROLES,
   API_ROLE,
@@ -100,6 +105,7 @@ const secret = () => randomBytes(32).toString('base64');
 const passwords = {
   agent: secret(),
   api: secret(),
+  batch: secret(),
   health: secret(),
   ingest: secret(),
   publication: secret(),
@@ -657,17 +663,26 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     );
     const row = { ...derivLogProfileRow('R_100'), assigned_at_utc: START, run_id: uuid(9313) };
     try {
-      expect(await database.assignLogProfile(location(schemas.fresh), row)).toBe(true);
+      expect(
+        await database.assignLogProfile(location(schemas.fresh), row, POSTGRES_ROLES.ingest),
+      ).toBe(true);
       // Ya tiene su fila: la segunda vez no inserta nada, tampoco con otro perfil.
       expect(
-        await database.assignLogProfile(location(schemas.fresh), {
-          ...row,
-          profile_id: 'otro',
-        }),
+        await database.assignLogProfile(
+          location(schemas.fresh),
+          { ...row, profile_id: 'otro' },
+          POSTGRES_ROLES.ingest,
+        ),
       ).toBe(false);
-      expect(await database.assignLogProfile(location(schemas.granted), row)).toBe(false);
-      expect(await database.assignLogProfile(location(schemas.heartbeat), row)).toBe(false);
-      expect(await database.assignLogProfile(location(schemas.written), row)).toBe(false);
+      expect(
+        await database.assignLogProfile(location(schemas.granted), row, POSTGRES_ROLES.ingest),
+      ).toBe(false);
+      expect(
+        await database.assignLogProfile(location(schemas.heartbeat), row, POSTGRES_ROLES.ingest),
+      ).toBe(false);
+      expect(
+        await database.assignLogProfile(location(schemas.written), row, POSTGRES_ROLES.ingest),
+      ).toBe(false);
       const reader = ready(admin);
       expect(await readLogQualityProfile(reader, schemas.fresh)).toEqual(
         derivLogProfileRow('R_100'),
@@ -1583,6 +1598,197 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     } finally {
       deletion.close();
       objects.destroy();
+    }
+  });
+
+  it('con la contraseña de buoh_lotes (ADR-0021 §3, precisión del PR 5b de su §9): el paso 1 crea el rol, sin pertenencias, y el log 1 de cada secuencia por lotes con su perfil; buoh_lotes solo lee e inserta en ellos (42501 en los logs en vivo, en buoh_datasets y en buoh_api), y buoh_ingesta no toca los suyos', async () => {
+    const roleOf = async () => {
+      const { rows } = await ready(admin).query<{
+        can_login: boolean;
+        create_role: boolean;
+        memberships: string[];
+        superuser: boolean;
+      }>(
+        `SELECT r.rolcanlogin AS can_login, r.rolcreaterole AS create_role, r.rolsuper AS superuser,
+                ARRAY(SELECT g.rolname::text FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid
+                       WHERE m.member = r.oid ORDER BY g.rolname) AS memberships
+           FROM pg_roles r WHERE r.rolname = $1`,
+        [BATCH_ROLE],
+      );
+      return rows;
+    };
+    // Hasta aquí, sin su contraseña, el servicio no creó el rol ni ningún log de los lotes.
+    expect(await roleOf()).toEqual([]);
+    const { rows: none } = await ready(admin).query(
+      "SELECT nspname FROM pg_namespace WHERE nspname LIKE 'buoh\\_lotes\\_%'",
+    );
+    expect(none).toEqual([]);
+
+    const env = { ...operationsEnvironment(), BUOH_LOTES_POSTGRES_PASSWORD: passwords.batch };
+    const first = await operations(env);
+    expect(first.alerts).toEqual([]);
+    expect(first.step('roles_and_logs')).toMatchObject({
+      report: { failures: [], passwords_set: [BATCH_ROLE] },
+      status: 'completed',
+    });
+    const report = first.step('roles_and_logs')?.['report'] as {
+      prepared: unknown[];
+      profiles_assigned: unknown[];
+    };
+    expect(await roleOf()).toEqual([
+      { can_login: true, create_role: false, memberships: [], superuser: false },
+    ]);
+    const kinds = ['schedules', 'quotes', 'candles'] as const;
+    for (const [index, sequence] of BATCH_SEQUENCES.entries()) {
+      const { schema } = logLocation(1, sequence);
+      expect(report.prepared).toContainEqual({ log: 1, sequence: sequence.name });
+      expect(report.profiles_assigned).toContainEqual({ log: 1, sequence: sequence.name });
+      // Sus siete migraciones, de buoh_dueno; el uso de buoh_lotes y de buoh_lectura, y nada de
+      // buoh_ingesta; y su perfil de los lotes.
+      const { rows: applied } = await ready(admin).query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM ${schema}.buoh_schema_migrations`,
+      );
+      expect(applied, schema).toEqual([{ n: 7 }]);
+      const { rows: owners } = await ready(admin).query(
+        `SELECT nspowner::regrole::text AS owner,
+                has_schema_privilege($2, nspname, 'USAGE') AS batch,
+                has_schema_privilege($3, nspname, 'USAGE') AS reader,
+                has_schema_privilege($4, nspname, 'USAGE') AS ingest
+           FROM pg_namespace WHERE nspname = $1`,
+        [schema, BATCH_ROLE, POSTGRES_ROLES.reader, POSTGRES_ROLES.ingest],
+      );
+      expect(owners, schema).toEqual([
+        { batch: true, ingest: false, owner: POSTGRES_ROLES.owner, reader: true },
+      ]);
+      expect(await readLogQualityProfile(ready(admin), schema)).toEqual(
+        derivBatchLogProfileRow(kinds[index] ?? 'schedules'),
+      );
+    }
+
+    // Los logs en vivo que existen: el activo de R_100 y los del oro.
+    const active = await findActiveLog(ready(admin), { now: clock.now, source: DERIV_SOURCE });
+    if (active === null) {
+      throw new TypeError('Falta el log activo de R_100.');
+    }
+    const { rows: liveSchemas } = await ready(admin).query<{ name: string }>(
+      `SELECT nspname AS name FROM pg_namespace WHERE nspname = $1 OR nspname ~ $2`,
+      [active.schema, '^buoh_frxxauusd_log_[0-9]{6}$'],
+    );
+    expect(liveSchemas.length).toBeGreaterThanOrEqual(2);
+    const quotes = logLocation(1, BATCH_QUOTES_SEQUENCE).schema;
+    const heartbeat = (schema: string, id: number) =>
+      `INSERT INTO ${schema}.ingestion_heartbeats
+         (heartbeat_id, source, run_id, observed_at_utc, pg_backend_pid, connection_state,
+          backlog_count, backlog_bytes)
+       VALUES ('${uuid(id)}', '${DERIV_SOURCE}', '${uuid(id + 1)}', '${clock.now()}', 4343,
+               'connecting', 0, 0)`;
+    const asBatch = (text: string) => sqlStateAs(BATCH_ROLE, passwords.batch, text);
+    // En sus logs, lee e inserta, y nada más.
+    expect(await asBatch(`SELECT count(*) FROM ${quotes}.source_event_index`)).toBeNull();
+    expect(await asBatch(`SELECT count(*) FROM ${quotes}.log_quality_profile`)).toBeNull();
+    expect(await asBatch(heartbeat(quotes, 9601))).toBeNull();
+    for (const text of [
+      `UPDATE ${quotes}.ingestion_heartbeats SET source = source`,
+      `DELETE FROM ${quotes}.ingestion_heartbeats`,
+      `TRUNCATE ${quotes}.ingestion_heartbeats`,
+      `CREATE TABLE ${quotes}.intrusa (x int)`,
+      `INSERT INTO ${quotes}.log_quality_profile SELECT * FROM ${quotes}.log_quality_profile LIMIT 0`,
+      `SELECT count(*) FROM ${quotes}.operations_reports`,
+      `INSERT INTO ${quotes}.operations_reports SELECT * FROM ${quotes}.operations_reports LIMIT 0`,
+      'CREATE SCHEMA intruso',
+      // Nada en los logs en vivo, en buoh_datasets ni en buoh_api.
+      ...liveSchemas.flatMap(({ name }) => [
+        `SELECT count(*) FROM ${name}.source_event_index`,
+        `SELECT count(*) FROM ${name}.log_quality_profile`,
+        heartbeat(name, 9611),
+      ]),
+      'SELECT count(*) FROM buoh_datasets.datasets',
+      'SELECT count(*) FROM buoh_datasets.dataset_log_ranges',
+      'SELECT count(*) FROM buoh_api.audit_events',
+    ]) {
+      expect(await asBatch(text), text).toBe('42501');
+    }
+    // buoh_ingesta no toca los logs de los lotes; buoh_salud y buoh_agente los leen.
+    for (const text of [
+      `SELECT count(*) FROM ${quotes}.source_event_index`,
+      heartbeat(quotes, 9621),
+    ]) {
+      expect(await sqlStateAs(POSTGRES_ROLES.ingest, passwords.ingest, text), text).toBe('42501');
+    }
+    const read = `SELECT count(*) FROM ${quotes}.ingestion_heartbeats`;
+    expect(await sqlStateAs(POSTGRES_ROLES.health, passwords.health, read)).toBeNull();
+    expect(await sqlStateAs(POSTGRES_ROLES.agent, passwords.agent, read)).toBeNull();
+
+    // Con esa escritura, la ejecución siguiente prepara el log 2 de las cotizaciones, con su
+    // perfil, y no vuelve a poner la contraseña.
+    const second = await operations(env);
+    expect(second.step('roles_and_logs')).toMatchObject({
+      report: {
+        failures: [],
+        passwords_set: [],
+        prepared: [{ log: 2, sequence: 'lotes_cotizaciones' }],
+        profiles_assigned: [{ log: 2, sequence: 'lotes_cotizaciones' }],
+      },
+      status: 'completed',
+    });
+    expect(
+      await readLogQualityProfile(ready(admin), logLocation(2, BATCH_QUOTES_SEQUENCE).schema),
+    ).toEqual(derivBatchLogProfileRow('quotes'));
+    // La salud no observa los logs de los lotes ni guarda informes en ellos.
+    expect(
+      second.steps
+        .filter((line) => line['step'] === 'health')
+        .map((line) => (line['report'] as { sequence: string }).sequence),
+    ).not.toContain('lotes_cotizaciones');
+    expect(await reportsOf(quotes)).toEqual([]);
+
+    // El espacio y la lista de los logs los ven, como los de cualquier secuencia.
+    const config = loadOperationsConfig(env);
+    const database = openOwnerDatabase(
+      { ...config, owner: plain(config.owner) },
+      { source: DERIV_SOURCE },
+    );
+    try {
+      expect((await database.measureSpace()).logs).toContainEqual(
+        expect.objectContaining({ log: 1, sequence: 'lotes_velas' }),
+      );
+      expect(await database.listLogs(BATCH_QUOTES_SEQUENCE)).toEqual([
+        {
+          lastWriteUtc: clock.now(),
+          location: logLocation(1, BATCH_QUOTES_SEQUENCE),
+          readable: true,
+        },
+        { lastWriteUtc: null, location: logLocation(2, BATCH_QUOTES_SEQUENCE), readable: true },
+      ]);
+
+      // assignLogProfile mira el uso del escritor que se le da: un esquema que ya usa buoh_lotes,
+      // sin fila ni escrituras, no recibe perfil. Un esquema que no es de un log, para que ninguna
+      // ejecución lo vea, con las migraciones de un log.
+      const granted = 'buoh_integration_ops_profile_batch';
+      await ready(admin).query(`CREATE SCHEMA ${granted} AUTHORIZATION ${POSTGRES_ROLES.owner}`);
+      const pool = createPool({
+        ...local.postgres,
+        database: DATABASE,
+        password: passwords.render,
+        schema: granted,
+        user: RENDER_USER,
+      });
+      try {
+        await migrate(pool, { ownerRole: POSTGRES_ROLES.owner });
+      } finally {
+        await pool.end();
+      }
+      await ready(admin).query(`GRANT USAGE ON SCHEMA ${granted} TO ${BATCH_ROLE}`);
+      const row = {
+        ...derivBatchLogProfileRow('candles'),
+        assigned_at_utc: START,
+        run_id: uuid(9631),
+      };
+      const location = { number: 999_999, prefix: 'logs/999999/', schema: granted };
+      expect(await database.assignLogProfile(location, row, BATCH_ROLE)).toBe(false);
+      expect(await readLogQualityProfile(ready(admin), granted)).toBeNull();
+    } finally {
+      await database.close();
     }
   });
 });

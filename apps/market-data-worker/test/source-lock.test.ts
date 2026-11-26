@@ -75,7 +75,12 @@ describe('sequenceLockKey (ADR-0021 §1)', () => {
   });
 
   it('una secuencia que no está en la tabla no tiene clave', () => {
-    const outside = { name: 'X', prefixStem: 'logs/x/', schemaStem: 'buoh_x_log_' };
+    const outside = {
+      kind: 'live',
+      name: 'X',
+      prefixStem: 'logs/x/',
+      schemaStem: 'buoh_x_log_',
+    } as const;
     expect(() => sequenceLockKey('deriv_options', outside)).toThrow(TypeError);
   });
 });

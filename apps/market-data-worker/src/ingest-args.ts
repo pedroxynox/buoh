@@ -4,7 +4,7 @@ import { DEFAULT_POSTGRES_SCHEMA, DEFAULT_S3_BUCKET, type WorkerConfig } from '.
 import { UsageError } from './replay-args.js';
 import { symbolOption } from './smoke-args.js';
 import {
-  LOG_SEQUENCES,
+  LIVE_SEQUENCES,
   liveSequenceOf,
   productionLogConfigErrors,
   type LogSequence,
@@ -60,7 +60,7 @@ export function parseIngestArgs(argv: readonly string[]): IngestOptions {
 
 /**
  * Las secuencias de logs de los símbolos en `production` (ADR-0021 §1): cada símbolo tiene la suya en
- * `LOG_SEQUENCES`, con su log, su bloqueo y su corte; uno sin secuencia es un error de uso. Fuera de
+ * `LIVE_SEQUENCES`, con su log, su bloqueo y su corte; uno sin secuencia es un error de uso. Fuera de
  * `production`, un log es el esquema de `BUOH_POSTGRES_SCHEMA`, así que `ingest` captura un solo
  * símbolo, y da `null`.
  */
@@ -79,7 +79,7 @@ export function ingestSequences(
   return symbols.map((symbol) => {
     const sequence = liveSequenceOf(symbol);
     if (sequence === null) {
-      const names = LOG_SEQUENCES.map((item) => item.name).join(', ');
+      const names = LIVE_SEQUENCES.map((item) => item.name).join(', ');
       throw new UsageError(
         `En production, cada --symbol es el de una secuencia de logs: ${names}. ${INGEST_USAGE}`,
       );

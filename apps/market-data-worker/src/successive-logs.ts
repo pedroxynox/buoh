@@ -5,9 +5,9 @@ import type { WorkerConfig } from './config.js';
 // Los logs sucesivos de producción (ADR-0018 §6 y §7): cada log tiene un número, su esquema de
 // PostgreSQL y su prefijo en el bucket de la captura, y el log activo se busca, sin tabla de
 // registro, por la última escritura de cada uno. Desde ADR-0021 §1, los logs forman secuencias,
-// una por símbolo capturado en vivo, y cada secuencia tiene sus propios nombres. En `development` y
-// `test`, un log sigue siendo el esquema de `BUOH_POSTGRES_SCHEMA` y el bucket de `BUOH_S3_BUCKET`,
-// sin prefijo.
+// una por símbolo capturado en vivo y, desde el PR 5b de su §9, una por clase de datos por lotes
+// (§3), y cada secuencia tiene sus propios nombres. En `development` y `test`, un log sigue siendo
+// el esquema de `BUOH_POSTGRES_SCHEMA` y el bucket de `BUOH_S3_BUCKET`, sin prefijo.
 
 /** Las cifras del número de un log en su esquema y en su prefijo: `buoh_log_000001`. */
 export const LOG_NUMBER_DIGITS = 6;
@@ -22,9 +22,9 @@ export const LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /**
  * Una secuencia de logs (ADR-0021 §1): una serie de logs de una fuente con su nombre, su esquema y
  * su prefijo por log, su bloqueo, su log activo, su corte semanal y su vencimiento. Cada símbolo que
- * se captura en vivo tiene la suya, y dos secuencias nunca comparten un log. `name` es el nombre que
- * guarda `buoh_datasets` en cada rango (`dataset_log_ranges.sequence`): en una secuencia en vivo, su
- * símbolo.
+ * se captura en vivo tiene la suya, y también cada clase de datos por lotes (§3), y dos secuencias
+ * nunca comparten un log. `name` es el nombre que guarda `buoh_datasets` en cada rango
+ * (`dataset_log_ranges.sequence`): en una secuencia en vivo, su símbolo.
  */
 export interface LogSequence {
   readonly name: string;
@@ -32,6 +32,12 @@ export interface LogSequence {
   readonly schemaStem: string;
   /** El prefijo de los objetos del log *n* es este comienzo, *n* en seis cifras y `/`. */
   readonly prefixStem: string;
+  /**
+   * `live`, la de un símbolo que captura `ingest`, con `data:health`; `batch`, la de una clase de
+   * datos por lotes, que escribe el paso de los lotes de `buoh-operaciones` con `buoh_lotes`, sin
+   * `data:health` (ADR-0021 §3; precisión del PR 5b de su §9).
+   */
+  readonly kind: 'batch' | 'live';
 }
 
 /**
@@ -42,6 +48,7 @@ export const R_100_SEQUENCE: LogSequence = Object.freeze({
   name: 'R_100',
   prefixStem: 'logs/',
   schemaStem: 'buoh_log_',
+  kind: 'live',
 });
 
 /**
@@ -53,19 +60,77 @@ export const GOLD_SEQUENCE: LogSequence = Object.freeze({
   name: 'frxXAUUSD',
   prefixStem: 'logs/frxxauusd/',
   schemaStem: 'buoh_frxxauusd_log_',
+  kind: 'live',
+});
+
+/**
+ * La secuencia por lotes de los horarios (ADR-0021 §3; precisión del PR 5b de su §9): cada día,
+ * `trading_times`, `active_symbols` y `contracts_for`, con el perfil
+ * `deriv_options-lotes-v1-horarios`. Su nombre no es el de ningún símbolo de Deriv, y casa con
+ * `dataset_log_ranges.sequence`; su esquema es `buoh_lotes_horarios_log_<n>` y su prefijo
+ * `logs/lotes_horarios/<n>/`, bajo `logs/`, como el oro.
+ */
+export const BATCH_SCHEDULES_SEQUENCE: LogSequence = Object.freeze({
+  name: 'lotes_horarios',
+  prefixStem: 'logs/lotes_horarios/',
+  schemaStem: 'buoh_lotes_horarios_log_',
+  kind: 'batch',
+});
+
+/**
+ * La secuencia por lotes de las cotizaciones (ADR-0021 §3): cada 30 minutos, `proposal` de las
+ * listas del perfil `deriv_options-lotes-v1-cotizaciones`.
+ */
+export const BATCH_QUOTES_SEQUENCE: LogSequence = Object.freeze({
+  name: 'lotes_cotizaciones',
+  prefixStem: 'logs/lotes_cotizaciones/',
+  schemaStem: 'buoh_lotes_cotizaciones_log_',
+  kind: 'batch',
+});
+
+/**
+ * La secuencia por lotes de las velas (ADR-0021 §3): cada día, las de 1 minuto del día anterior de
+ * los siete mercados reales, con el perfil `deriv_options-lotes-v1-velas`.
+ */
+export const BATCH_CANDLES_SEQUENCE: LogSequence = Object.freeze({
+  name: 'lotes_velas',
+  prefixStem: 'logs/lotes_velas/',
+  schemaStem: 'buoh_lotes_velas_log_',
+  kind: 'batch',
 });
 
 /**
  * Las secuencias que existen (ADR-0021 §1: «su PR fija los nombres exactos»). Es una tabla fija, y
  * no una regla sobre el símbolo, para que dos símbolos que solo difieren en mayúsculas nunca
  * compartan un esquema ni un prefijo: una secuencia nueva entra aquí con su PR, y una prueba
- * comprueba que ninguna comparte su nombre, su esquema ni su prefijo con otra.
+ * comprueba que ninguna comparte su nombre, su esquema ni su prefijo con otra. Primero las de los
+ * símbolos en vivo y después las de los lotes; las dos historias llegan con el PR 6 de ADR-0021 §9.
  */
-export const LOG_SEQUENCES: readonly LogSequence[] = Object.freeze([R_100_SEQUENCE, GOLD_SEQUENCE]);
+export const LOG_SEQUENCES: readonly LogSequence[] = Object.freeze([
+  R_100_SEQUENCE,
+  GOLD_SEQUENCE,
+  BATCH_SCHEDULES_SEQUENCE,
+  BATCH_QUOTES_SEQUENCE,
+  BATCH_CANDLES_SEQUENCE,
+]);
 
-/** La secuencia en vivo de `symbol`, o `null` si el símbolo no tiene ninguna. */
+/** Las secuencias de los símbolos en vivo, en el orden de `LOG_SEQUENCES`. */
+export const LIVE_SEQUENCES: readonly LogSequence[] = Object.freeze(
+  LOG_SEQUENCES.filter((sequence) => sequence.kind === 'live'),
+);
+
+/** Las secuencias por lotes (ADR-0021 §3), en el orden de `LOG_SEQUENCES`. */
+export const BATCH_SEQUENCES: readonly LogSequence[] = Object.freeze(
+  LOG_SEQUENCES.filter((sequence) => sequence.kind === 'batch'),
+);
+
+/**
+ * La secuencia en vivo de `symbol`, o `null` si el símbolo no tiene ninguna. El nombre de una
+ * secuencia por lotes no es un símbolo: da `null`, así que no vale para `--symbol` ni para
+ * `BUOH_OPERACIONES_SIMBOLOS`.
+ */
 export function liveSequenceOf(symbol: string): LogSequence | null {
-  return LOG_SEQUENCES.find((sequence) => sequence.name === symbol) ?? null;
+  return LIVE_SEQUENCES.find((sequence) => sequence.name === symbol) ?? null;
 }
 
 /**

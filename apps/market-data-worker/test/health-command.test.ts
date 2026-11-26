@@ -715,6 +715,19 @@ describe('healthCommand en production: el log activo (ADR-0018 §6)', () => {
     expect(run.opened).toEqual([]);
   });
 
+  it('el nombre de una secuencia por lotes no es un --symbol: salida 2, sin buscar ni abrir nada (ADR-0021 §3)', async () => {
+    const run = await commandHarness();
+    const args = ARGS.map((arg) => (arg === 'SYNTH_100' ? 'lotes_velas' : arg));
+    expect(args).toContain('lotes_velas');
+    const result = await healthCommand(args, PRODUCTION_ENV, run.deps());
+
+    expect(result).toMatchObject({ exitCode: 2, stdout: null });
+    const line = JSON.parse(result.stderr ?? '') as Record<string, unknown>;
+    expect(line['message']).toContain('secuencia de logs: R_100, frxXAUUSD. ');
+    expect(run.located).toEqual([]);
+    expect(run.opened).toEqual([]);
+  });
+
   it('sin log activo, la regla 2: el informe failed con la alerta log_not_prepared y salida 1, sin abrir ningún almacén', async () => {
     const run = await commandHarness({ symbol: 'R_100' });
     const result = await healthCommand(PRODUCTION_ARGS, PRODUCTION_ENV, {

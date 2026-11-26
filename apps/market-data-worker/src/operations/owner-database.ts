@@ -6,6 +6,7 @@ import { createPool, postgresSslOption } from '../postgres/metadata-store.js';
 import {
   ensureApiReaderRole,
   ensureApiRole,
+  ensureBatchRole,
   ensurePublicationRole,
   ensureRuntimeRoles,
   grantApiPrivileges,
@@ -13,6 +14,7 @@ import {
   grantLogPrivileges,
   POSTGRES_ROLES,
   setRolePassword,
+  type LogWriterRole,
   type PasswordRole,
 } from '../postgres/roles.js';
 import { failureReason } from '../source-log/source-event-log.js';
@@ -139,17 +141,24 @@ export interface OwnerDatabase {
   ensureRuntimeRoles(): Promise<void>;
   /** Los logs de la secuencia que existen, con su última escritura (`listCaptureLogs`). */
   listLogs(sequence: LogSequence): Promise<CaptureLog[]>;
-  /** Da a los roles de ejecución sus privilegios en el esquema del log (`grantLogPrivileges`). */
-  grantLogPrivileges(log: LogLocation): Promise<void>;
+  /**
+   * Da a los roles de ejecución sus privilegios en el esquema del log (`grantLogPrivileges`), con
+   * su escritor: `buoh_ingesta` en un log en vivo y `buoh_lotes` en uno de los lotes (`logWriterOf`).
+   */
+  grantLogPrivileges(log: LogLocation, writer: LogWriterRole): Promise<void>;
   /** Crea el esquema del log como `buoh_dueno`, si no existe. */
   createLogSchema(log: LogLocation): Promise<void>;
   /**
    * Da su perfil al log (ADR-0020 §4): como `buoh_dueno`, inserta la fila de `log_quality_profile`
-   * solo si el log no tiene ninguna, no tiene escrituras (ni source events ni latidos) y
-   * `buoh_ingesta` todavía no tiene el uso de su esquema, en una sola sentencia. `true` si la
-   * insertó. Necesita la migración 0007 del log.
+   * solo si el log no tiene ninguna, no tiene escrituras (ni source events ni latidos) y su escritor
+   * (`writer`: `buoh_ingesta`, o `buoh_lotes` en un log de los lotes) todavía no tiene el uso de su
+   * esquema, en una sola sentencia. `true` si la insertó. Necesita la migración 0007 del log.
    */
-  assignLogProfile(log: LogLocation, row: LogProfileAssignment): Promise<boolean>;
+  assignLogProfile(
+    log: LogLocation,
+    row: LogProfileAssignment,
+    writer: LogWriterRole,
+  ): Promise<boolean>;
   /** Crea el rol `buoh_api` o le vuelve a fijar sus atributos (`ensureApiRole`, ADR-0019 §7). */
   ensureApiRole(): Promise<void>;
   /** Da a `buoh_api` sus privilegios en el esquema de la API (`grantApiPrivileges`). */
@@ -164,6 +173,11 @@ export interface OwnerDatabase {
    * (`ensurePublicationRole`, ADR-0020 §5).
    */
   ensurePublicationRole(): Promise<void>;
+  /**
+   * Crea el rol `buoh_lotes`, sin pertenencias, o le vuelve a fijar sus atributos
+   * (`ensureBatchRole`, ADR-0021 §3).
+   */
+  ensureBatchRole(): Promise<void>;
   /** Da sus privilegios en `buoh_datasets` (`grantDatasetsPrivileges`, ADR-0020 §5). */
   grantDatasetsPrivileges(): Promise<void>;
   /**
@@ -327,7 +341,7 @@ export function openOwnerDatabase(
       return 'accepted';
     },
     close: () => pool.end(),
-    assignLogProfile: (log, row) =>
+    assignLogProfile: (log, row, writer) =>
       asOwner(async (client) => {
         const s = pg.escapeIdentifier(log.schema);
         const { rowCount } = await client.query(
@@ -343,7 +357,7 @@ export function openOwnerDatabase(
             row.quality_profile_sha256,
             row.run_id,
             row.assigned_at_utc,
-            POSTGRES_ROLES.ingest,
+            writer,
             log.schema,
           ],
         );
@@ -384,11 +398,13 @@ export function openOwnerDatabase(
           }),
     ensureApiReaderRole: () => withClient((client) => ensureApiReaderRole(client)),
     ensureApiRole: () => withClient((client) => ensureApiRole(client)),
+    ensureBatchRole: () => withClient((client) => ensureBatchRole(client)),
     ensurePublicationRole: () => withClient((client) => ensurePublicationRole(client)),
     ensureRuntimeRoles: () => withClient((client) => ensureRuntimeRoles(client)),
     grantApiPrivileges: () => withClient((client) => grantApiPrivileges(client)),
     grantDatasetsPrivileges: () => withClient((client) => grantDatasetsPrivileges(client)),
-    grantLogPrivileges: (log) => withClient((client) => grantLogPrivileges(client, log.schema)),
+    grantLogPrivileges: (log, writer) =>
+      withClient((client) => grantLogPrivileges(client, log.schema, writer)),
     lastCompletedReport: (log, step) =>
       asOwner(async (client) => {
         const { rows } = await client.query<{ last: string | null }>(

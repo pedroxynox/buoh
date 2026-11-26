@@ -44,6 +44,10 @@ describe('parseIngestArgs', () => {
     ]);
     expect(() => ingestSequences(['R_100', 'SYNTH_100'], 'production')).toThrow(UsageError);
     expect(() => ingestSequences(['frxxauusd'], 'production')).toThrow(/R_100, frxXAUUSD/u);
+    // El nombre de una secuencia por lotes no es un símbolo, y el mensaje solo nombra las en vivo.
+    expect(() => ingestSequences(['R_100', 'lotes_horarios'], 'production')).toThrow(
+      /secuencia de logs: R_100, frxXAUUSD\. /u,
+    );
     expect(ingestSequences(['SYNTH_100'], 'development')).toBeNull();
     expect(() => ingestSequences(['R_100', 'frxXAUUSD'], 'test')).toThrow(/un solo símbolo/u);
   });

@@ -11,6 +11,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   apiMigrateEnvironment,
+  BATCH_CANDLES_SEQUENCE,
+  BATCH_QUOTES_SEQUENCE,
+  BATCH_SCHEDULES_SEQUENCE,
+  BATCH_SEQUENCES,
   CHILD_OUTPUT_LIMIT_BYTES,
   ConfigError,
   derivLogProfileRow,
@@ -49,6 +53,7 @@ import {
   type LogObjects,
   type LogSequence,
   type LogSchemaDrop,
+  type LogWriterRole,
   type OperationalAlert,
   type OperationsConfig,
   type OperationsReportRow,
@@ -56,6 +61,7 @@ import {
   type RunChild,
   type SpaceMeasure,
 } from '../src/index.js';
+import { derivBatchLogProfileRow } from '../src/deriv/batch-profile.js';
 import type { Scheduler } from '../src/deriv/ports.js';
 import { MEMORY_REPORT_MODULE, memoryReportOf, ownMaxRssBytes } from '../src/operations/child.js';
 import { uuid } from './support/connection-harness.js';
@@ -164,6 +170,7 @@ describe('loadOperationsConfig (ADR-0018 §11)', () => {
     expect(CONFIG).toEqual({
       apiPassword: null,
       apiReaderPassword: null,
+      batchPassword: null,
       codeVersion: null,
       healthObjects: {
         accessKeyId: 'clave-salud-sintetica',
@@ -421,6 +428,14 @@ function fakeDatabase(state: {
   const ungranted = state.ungranted ?? new Set<number | string>();
   /** La fila de `log_quality_profile` de cada log, por `logKey` (ADR-0020 §4). */
   const profiles = new Map<number | string, LogProfileAssignment>();
+  /**
+   * El escritor con que se pidió cada perfil y cada privilegio, por `logKey` (ADR-0021 §3): el
+   * último de cada uno.
+   */
+  const writers = new Map<number | string, { grant?: LogWriterRole; profile?: LogWriterRole }>();
+  const noteWriter = (target: LogLocation, what: 'grant' | 'profile', writer: LogWriterRole) => {
+    writers.set(logKey(target), { ...writers.get(logKey(target)), [what]: writer });
+  };
   /** La hora y la secuencia con las que se pidió borrar cada esquema. */
   const drops: { log: number; now: string; sequence: string }[] = [];
   const reports: { log: number; row: OperationsReportRow; schema: string }[] = [];
@@ -484,6 +499,10 @@ function fakeDatabase(state: {
       calls.push('api_role');
       return answer('ensureApiRole', () => undefined);
     },
+    ensureBatchRole: () => {
+      calls.push('batch_role');
+      return answer('ensureBatchRole', () => undefined);
+    },
     ensurePublicationRole: () => {
       calls.push('publication_role');
       return answer('ensurePublicationRole', () => undefined);
@@ -500,14 +519,16 @@ function fakeDatabase(state: {
       calls.push('datasets_grant');
       return answer('grantDatasetsPrivileges', () => undefined);
     },
-    grantLogPrivileges: (target) => {
+    grantLogPrivileges: (target, writer) => {
       calls.push(`grant:${String(logKey(target))}`);
+      noteWriter(target, 'grant', writer);
       return answer('grantLogPrivileges', () => {
         ungranted.delete(logKey(target));
       });
     },
-    assignLogProfile: (target, row) => {
+    assignLogProfile: (target, row, writer) => {
       calls.push(`profile:${String(logKey(target))}`);
+      noteWriter(target, 'profile', writer);
       return answer('assignLogProfile', () => {
         const current = state.logs.find((item) => sameLog(item, target));
         if (
@@ -614,7 +635,7 @@ function fakeDatabase(state: {
       });
     },
   };
-  return { calls, database, drops, profiles, reports, verifications };
+  return { calls, database, drops, profiles, reports, verifications, writers };
 }
 
 const coded = (code: string) =>
@@ -892,9 +913,12 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       // El informe final: ningún log terminó, así que no lee nada más ni guarda ningún informe.
       'list',
       // La retención, en cada secuencia de la tabla: ningún log venció, así que no abre los objetos
-      // ni guarda su informe.
+      // ni guarda su informe. También en las de los lotes (precisión del PR 5b de ADR-0021 §9).
       'list',
       'list:frxXAUUSD',
+      'list:lotes_horarios',
+      'list:lotes_cotizaciones',
+      'list:lotes_velas',
       'list',
       'segments:1:120',
       'list',
@@ -1482,6 +1506,9 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
       // informe.
       'list',
       'list:frxXAUUSD',
+      'list:lotes_horarios',
+      'list:lotes_cotizaciones',
+      'list:lotes_velas',
       'list',
       'list',
       'list',
@@ -1552,6 +1579,10 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
           unlisted: [
             { reason: 'ECONNREFUSED', sequence: 'R_100' },
             { reason: 'ECONNREFUSED', sequence: 'frxXAUUSD' },
+            // Las de los lotes también: la retención mira todas las de la tabla.
+            { reason: 'ECONNREFUSED', sequence: 'lotes_horarios' },
+            { reason: 'ECONNREFUSED', sequence: 'lotes_cotizaciones' },
+            { reason: 'ECONNREFUSED', sequence: 'lotes_velas' },
           ],
         },
         status: 'failed',
@@ -5039,5 +5070,211 @@ describe('buoh-operaciones por secuencia (ADR-0021 §1, precisión del PR 2b)', 
         status: 'failed',
       });
     });
+  });
+});
+
+describe('las secuencias por lotes en el paso 1 (ADR-0021 §3, precisión del PR 5b de su §9)', () => {
+  /** La contraseña de `buoh_lotes`, que el Blueprint le dará a `buoh-operaciones` con el PR 5f. */
+  const BATCH_PASSWORD = 'lotes-sintetica-0123456789';
+  const BATCH_CONFIG = loadOperationsConfig({
+    ...ENV,
+    BUOH_LOTES_POSTGRES_PASSWORD: BATCH_PASSWORD,
+  });
+  const loggedIn = () => new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente']);
+  const schemaOf = (sequence: LogSequence, number = 1) => logLocation(number, sequence).schema;
+  const SCHEDULES_1 = schemaOf(BATCH_SCHEDULES_SEQUENCE);
+  const QUOTES_1 = schemaOf(BATCH_QUOTES_SEQUENCE);
+  const CANDLES_1 = schemaOf(BATCH_CANDLES_SEQUENCE);
+
+  /** Las variables que rechaza `loadOperationsConfig` con esas, o `[]`. */
+  const rejectedWith = (env: Record<string, string>): readonly string[] => {
+    try {
+      loadOperationsConfig({ ...ENV, ...env });
+      return [];
+    } catch (error) {
+      if (error instanceof ConfigError) {
+        return error.variables;
+      }
+      throw error;
+    }
+  };
+
+  it('las tres secuencias por lotes tienen sus nombres, y ninguna es un símbolo de BUOH_OPERACIONES_SIMBOLOS', () => {
+    expect(BATCH_SEQUENCES).toEqual([
+      BATCH_SCHEDULES_SEQUENCE,
+      BATCH_QUOTES_SEQUENCE,
+      BATCH_CANDLES_SEQUENCE,
+    ]);
+    expect([SCHEDULES_1, QUOTES_1, CANDLES_1]).toEqual([
+      'buoh_lotes_horarios_log_000001',
+      'buoh_lotes_cotizaciones_log_000001',
+      'buoh_lotes_velas_log_000001',
+    ]);
+    for (const value of ['R_100,lotes_horarios', 'R_100,lotes_cotizaciones', 'R_100,lotes_velas']) {
+      expect(rejectedWith({ BUOH_OPERACIONES_SIMBOLOS: value }), value).toEqual([
+        'BUOH_OPERACIONES_SIMBOLOS',
+      ]);
+    }
+  });
+
+  it('BUOH_LOTES_POSTGRES_PASSWORD es opcional, con las reglas de las demás contraseñas', () => {
+    expect(CONFIG.batchPassword).toBeNull();
+    expect(BATCH_CONFIG.batchPassword).toBe(BATCH_PASSWORD);
+    for (const value of ['corta-0123', 'con espacio 0123456789', '']) {
+      expect(rejectedWith({ BUOH_LOTES_POSTGRES_PASSWORD: value }), value).toEqual([
+        'BUOH_LOTES_POSTGRES_PASSWORD',
+      ]);
+    }
+  });
+
+  it('sin la contraseña, el paso 1 no crea buoh_lotes ni prepara ningún log de los lotes', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [] });
+    const { lines } = await run(db, fakeChildren());
+    const step1 = db.calls.slice(0, db.calls.indexOf('login:buoh_ingesta'));
+    expect(step1).toEqual(['roles', 'list', 'list', 'create:1', 'profile:1', 'grant:1']);
+    expect(db.calls).not.toContain('batch_role');
+    expect(db.calls).not.toContain('login:buoh_lotes');
+    expect(lines[0]).toMatchObject({ report: { prepared: [{ log: 1, sequence: 'R_100' }] } });
+  });
+
+  it('con la contraseña, después de las secuencias en vivo crea buoh_lotes y prepara el log 1 de cada secuencia por lotes, con su perfil y buoh_lotes como escritor, y le pone su contraseña', async () => {
+    const state: Parameters<typeof fakeDatabase>[0] = { loggedIn: loggedIn(), logs: [] };
+    const db = fakeDatabase(state);
+    const children = fakeChildren();
+    const { lines, result } = await run(db, children, { config: BATCH_CONFIG });
+
+    expect(result.status).toBe('completed');
+    const step1 = db.calls.slice(
+      0,
+      db.calls.indexOf('list', db.calls.indexOf('login:buoh_ingesta')),
+    );
+    expect(step1).toEqual([
+      'roles',
+      'list',
+      'list',
+      'create:1',
+      'profile:1',
+      'grant:1',
+      'batch_role',
+      ...[SCHEDULES_1, QUOTES_1, CANDLES_1].flatMap((schema) => {
+        const name = BATCH_SEQUENCES.find((item) => schemaOf(item) === schema)?.name ?? '';
+        return [
+          `list:${name}`,
+          `list:${name}`,
+          `create:${schema}`,
+          `profile:${schema}`,
+          `grant:${schema}`,
+        ];
+      }),
+      'login:buoh_ingesta',
+      'login:buoh_salud',
+      'login:buoh_agente',
+      'login:buoh_lotes',
+      'password:buoh_lotes',
+    ]);
+    // Cada log con el perfil de su clase, y el escritor de su secuencia.
+    expect(Object.fromEntries(db.profiles)).toEqual({
+      1: { ...derivLogProfileRow('R_100'), assigned_at_utc: NOW, run_id: uuid(1) },
+      [SCHEDULES_1]: {
+        ...derivBatchLogProfileRow('schedules'),
+        assigned_at_utc: NOW,
+        run_id: uuid(1),
+      },
+      [QUOTES_1]: { ...derivBatchLogProfileRow('quotes'), assigned_at_utc: NOW, run_id: uuid(1) },
+      [CANDLES_1]: { ...derivBatchLogProfileRow('candles'), assigned_at_utc: NOW, run_id: uuid(1) },
+    });
+    const ingest: LogWriterRole = 'buoh_ingesta';
+    const batch: LogWriterRole = 'buoh_lotes';
+    expect(Object.fromEntries(db.writers)).toEqual({
+      1: { grant: ingest, profile: ingest },
+      [SCHEDULES_1]: { grant: batch, profile: batch },
+      [QUOTES_1]: { grant: batch, profile: batch },
+      [CANDLES_1]: { grant: batch, profile: batch },
+    });
+    expect(
+      children.runs.filter((item) => item.child === 'migrate').map((item) => item.env),
+    ).toEqual(
+      ['buoh_log_000001', SCHEDULES_1, QUOTES_1, CANDLES_1].map((schema) =>
+        migrateEnvironment(BATCH_CONFIG, schema),
+      ),
+    );
+    expect(lines[0]).toMatchObject({
+      report: {
+        failures: [],
+        passwords_set: ['buoh_lotes'],
+        prepared: [
+          { log: 1, sequence: 'R_100' },
+          { log: 1, sequence: 'lotes_horarios' },
+          { log: 1, sequence: 'lotes_cotizaciones' },
+          { log: 1, sequence: 'lotes_velas' },
+        ],
+        profiles_assigned: [
+          { log: 1, sequence: 'R_100' },
+          { log: 1, sequence: 'lotes_horarios' },
+          { log: 1, sequence: 'lotes_cotizaciones' },
+          { log: 1, sequence: 'lotes_velas' },
+        ],
+      },
+    });
+    // La salud, el informe final y la verificación siguen siendo de las secuencias en vivo: ningún
+    // data:health ni segmento de un log de los lotes, y ningún informe en ellos.
+    expect(
+      children.runs.filter((item) => item.child === 'health').map((item) => item.args),
+    ).toEqual([['--json', '--symbol', 'R_100', '--log', '1']]);
+    expect(db.calls.filter((call) => call.startsWith('segments:'))).toEqual(['segments:1:120']);
+    expect(new Set(db.reports.map(({ schema }) => schema))).toEqual(new Set(['buoh_log_000001']));
+
+    // La ejecución siguiente no cambia nada; con una escritura en el log 1 de las cotizaciones,
+    // prepara su log 2, con su perfil y su escritor, y solo ese.
+    const second = await run(db, fakeChildren(), { config: BATCH_CONFIG });
+    expect(second.lines[0]).toMatchObject({
+      report: { passwords_set: [], prepared: [], profiles_assigned: [] },
+    });
+    state.logs = state.logs.map((item) =>
+      item.location.schema === QUOTES_1 ? { ...item, lastWriteUtc: NOW } : item,
+    );
+    const third = await run(db, fakeChildren(), { config: BATCH_CONFIG });
+    const quotes2 = schemaOf(BATCH_QUOTES_SEQUENCE, 2);
+    expect(third.lines[0]).toMatchObject({
+      report: {
+        failures: [],
+        prepared: [{ log: 2, sequence: 'lotes_cotizaciones' }],
+        profiles_assigned: [{ log: 2, sequence: 'lotes_cotizaciones' }],
+      },
+    });
+    expect(db.profiles.get(quotes2)).toEqual({
+      ...derivBatchLogProfileRow('quotes'),
+      assigned_at_utc: NOW,
+      run_id: uuid(1),
+    });
+    expect(db.writers.get(quotes2)).toEqual({ grant: batch, profile: batch });
+  });
+
+  it('si no puede crear buoh_lotes, no prepara ningún log de los lotes ni le pone la contraseña; el paso termina failed con batch_role y lo demás sigue', async () => {
+    const db = fakeDatabase({
+      fail: { ensureBatchRole: coded('42501') },
+      loggedIn: loggedIn(),
+      logs: [],
+    });
+    const { lines, result } = await run(db, fakeChildren(), { config: BATCH_CONFIG });
+    expect(db.calls.filter((call) => call.includes('lotes'))).toEqual([
+      // Solo la retención, que mira todas las secuencias de la tabla.
+      'list:lotes_horarios',
+      'list:lotes_cotizaciones',
+      'list:lotes_velas',
+    ]);
+    expect(db.calls.indexOf('list:lotes_horarios')).toBeGreaterThan(
+      db.calls.indexOf('report:1:health'),
+    );
+    expect(db.calls).toContain('login:buoh_agente');
+    expect(lines[0]).toMatchObject({
+      report: {
+        failures: [{ action: 'batch_role', reason: '42501' }],
+        prepared: [{ log: 1, sequence: 'R_100' }],
+      },
+      status: 'failed',
+    });
+    expect(lines.map((line) => line['step'])).toContain('space');
+    expect(result.status).toBe('failed');
   });
 });
