@@ -283,17 +283,38 @@ function compareCandles(left: MarketCandle, right: MarketCandle): number {
   );
 }
 
+/** Una página de velas pedida: su petición, de `echo_req`, y el frame que la respondió. */
+interface CandlePage extends PageRequest {
+  readonly frame: RawSourceFrame;
+}
+
+/**
+ * La página de velas que responde un frame, válido o no, si su `echo_req` es una petición de velas
+ * del paso de los lotes (la de `deriveMarketCandles`); si no, `null`.
+ */
+function candlePageOf(root: JsonNode, frame: RawSourceFrame): CandlePage | null {
+  const echo = getMember(root, 'echo_req');
+  const request = pageRequestOf(echo, CANDLE_REQUEST_KEYS);
+  return request === null ||
+    stringOf(getMember(echo, 'style')) !== 'candles' ||
+    echoIntegerOf(getMember(echo, 'granularity')) !== CANDLE_SECONDS
+    ? null
+    : { ...request, frame };
+}
+
 /**
  * Convierte un frame de un log de los lotes según su `msg_type`. Un frame que no es JSON da
  * `payload_not_json`, y uno que no responde a una operación de los lotes, `unexpected_msg_type`. Un
  * error a `ticks_history`, que Deriv manda con `msg_type` `ticks_history`, da `source_error_response`.
- * La respuesta `active_symbols` válida no da registro: el raw la conserva.
+ * La respuesta `active_symbols` válida no da registro: el raw la conserva. Con una respuesta a una
+ * página de velas, válida o no, da también la página pedida (`page`).
  */
 function convertFrame(
   frame: RawSourceFrame,
   config: BatchLogConfig,
 ): BatchConversion<unknown> & {
   readonly kind: keyof Omit<DerivedBatchLog, 'incidents'> | null;
+  readonly page?: CandlePage | null;
 } {
   let root: JsonNode;
   try {
@@ -318,7 +339,11 @@ function convertFrame(
     case 'proposal':
       return { ...deriveContractQuote(frame, schemas.proposal), kind: 'quotes' };
     case 'candles':
-      return { ...deriveMarketCandles(frame, schemas.ticks_history), kind: 'candles' };
+      return {
+        ...deriveMarketCandles(frame, schemas.ticks_history),
+        kind: 'candles',
+        page: candlePageOf(root, frame),
+      };
     case 'history':
       return { ...deriveHistoryDownloadTicks(frame, schemas.ticks_history), kind: 'ticks' };
     case 'active_symbols': {
@@ -337,6 +362,7 @@ function convertFrame(
         return {
           incidents: [deriveBatchInvalidIncident(frame, 'source_error_response', symbol)],
           kind: null,
+          page: candlePageOf(root, frame),
           records: [],
         };
       }
@@ -352,9 +378,95 @@ function convertFrame(
   };
 }
 
+const MINUTE_MS = CANDLE_SECONDS * 1000;
+
+/**
+ * Los tramos sin velas dentro del horario (precisión del PR 5d1 de ADR-0021 §9; ADR-0024 §5). Un
+ * minuto está pedido si una página de velas respondida, válida o no, lo pide entero: desde el
+ * minuto de su `start` hasta su `end`, ya terminado al recibirse, y dentro de un intervalo del
+ * horario de su símbolo y su día, el último `TradingSession` recibido para ese día en el mismo log.
+ * Un minuto pedido sin vela falta, y cada tramo de minutos seguidos que faltan da un
+ * `candle_missing`, con la última página que pidió su primer minuto en `observed_ref` y los horarios
+ * que usó en `related_refs`. Sin horario de su día, un minuto no se comprueba.
+ */
+function candleGaps(
+  pages: readonly CandlePage[],
+  candles: readonly MarketCandle[],
+  sessions: readonly TradingSession[],
+): DataQualityIncident[] {
+  const latest = new Map<string, Map<string, TradingSession>>();
+  for (const session of [...sessions].sort(compareBatchRecords)) {
+    const days = latest.get(session.symbol) ?? new Map<string, TradingSession>();
+    days.set(session.trading_date, session);
+    latest.set(session.symbol, days);
+  }
+  const present = new Set(
+    candles.map((candle) => `${candle.symbol} ${String(Date.parse(candle.open_time_utc))}`),
+  );
+
+  // Por símbolo y minuto, la última página que lo pidió y el horario con que se pidió.
+  const asked = new Map<string, Map<number, { page: CandlePage; session: TradingSession }>>();
+  for (const page of pages) {
+    const firstMs = (page.start - (page.start % CANDLE_SECONDS)) * 1000;
+    const lastMs = Math.min(page.end * 1000, Date.parse(page.frame.received_at_utc) - MINUTE_MS);
+    const minutes =
+      asked.get(page.symbol) ?? new Map<number, { page: CandlePage; session: TradingSession }>();
+    asked.set(page.symbol, minutes);
+    for (const session of latest.get(page.symbol)?.values() ?? []) {
+      for (const interval of session.intervals) {
+        const opens = Date.parse(interval.opens_at_utc);
+        const from = Math.max(firstMs, Math.ceil(opens / MINUTE_MS) * MINUTE_MS);
+        const to = Math.min(lastMs, Date.parse(interval.closes_at_utc) - MINUTE_MS);
+        for (let minute = from; minute <= to; minute += MINUTE_MS) {
+          minutes.set(minute, { page, session });
+        }
+      }
+    }
+  }
+
+  const incidents: DataQualityIncident[] = [];
+  for (const [symbol, minutes] of asked) {
+    const missing = [...minutes.keys()]
+      .filter((minute) => !present.has(`${symbol} ${String(minute)}`))
+      .sort((left, right) => left - right);
+    for (let start = 0; start < missing.length;) {
+      let end = start;
+      while (missing[end + 1] === (missing[end] ?? 0) + MINUTE_MS) {
+        end += 1;
+      }
+      const first = missing[start] ?? 0;
+      const run = missing.slice(start, end + 1).map((minute) => minutes.get(minute));
+      const { page } = minutes.get(first) ?? { page: null };
+      if (page !== null) {
+        incidents.push(
+          incidentOf({
+            evidence: {
+              from_open_time_utc: new Date(first).toISOString(),
+              to_open_time_utc: new Date(missing[end] ?? first).toISOString(),
+            },
+            incident_type: 'candle_missing',
+            observed_at_utc: page.frame.received_at_utc,
+            observed_ref: page.frame.observation_id,
+            related_refs: [
+              ...new Set(run.flatMap((item) => (item ? [item.session.observation_id] : []))),
+            ].sort(compareText),
+            severity: 'error',
+            source: page.frame.source,
+            symbol,
+          }),
+        );
+      }
+      start = end + 1;
+    }
+  }
+  return incidents;
+}
+
 /**
  * Las reglas de los lotes 4.0.0 sobre los source events de un log, en su orden: cada respuesta da
- * sus registros y sus incidencias, y los eventos de conexión no dan nada. Una vela o un tick que
+ * sus registros y sus incidencias, y los eventos de conexión no dan nada. Una página de velas
+ * respondida deja además un `candle_missing` por cada tramo sin velas dentro del horario
+ * (`candleGaps`). Una vela o un tick que
  * llegan otra vez, en otra página, no son un registro, porque cuenta el primero: la vela deja
  * `candle_repeated`, y el tick, `duplicate_exact` si es igual o `source_time_conflict` si tiene el
  * mismo instante con otro precio, con la observación del primero en `related_refs`. Se compara solo
@@ -371,6 +483,7 @@ export function deriveBatchLog(
   const offers: ContractOffer[] = [];
   const quotes: ContractQuote[] = [];
   const incidents: DataQualityIncident[] = [];
+  const pages: CandlePage[] = [];
   const firstCandle = new Map<string, MarketCandle>();
   const firstTickByFingerprint = new Map<string, MarketTick>();
   const firstTickByTime = new Map<string, MarketTick>();
@@ -390,6 +503,9 @@ export function deriveBatchLog(
     }
     const converted = convertFrame(event, config);
     incidents.push(...converted.incidents);
+    if (converted.page) {
+      pages.push(converted.page);
+    }
     switch (converted.kind) {
       case 'candles':
         for (const candle of converted.records as MarketCandle[]) {
@@ -462,6 +578,7 @@ export function deriveBatchLog(
         break;
     }
   }
+  incidents.push(...candleGaps(pages, candles, sessions));
   return {
     candles: candles.sort(compareCandles),
     incidents: incidents.sort(compareIncidents),

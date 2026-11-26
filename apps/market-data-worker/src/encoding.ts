@@ -12,15 +12,20 @@ const GZIP_LEVEL = 9;
 
 /** Roles derivados que pueden ir en gzip (ADR-0020 §7, «Formato físico»). */
 const DERIVED_ROLES: ReadonlySet<StorageObjectRef['role']> = new Set([
+  'contract_offers',
+  'contract_quotes',
+  'market_candles',
   'normalized_ticks',
   'operational_conditions',
   'quality_incidents',
+  'trading_sessions',
 ]);
 
 /**
  * Codificación física de F1.3 (ADR-0004 §6): source events en gzip determinista para el mismo
  * writer (`node:zlib`, nivel 9, sin nombre ni fecha en la cabecera); el resto en NDJSON/JSON sin
- * compresión. Con `derived: 'gzip'`, los roles derivados (ticks, incidencias y condiciones) van
+ * compresión. Con `derived: 'gzip'`, los roles derivados (ticks, incidencias y condiciones, y los
+ * registros de los lotes: velas, horarios, contratos y cotizaciones) van
  * también en gzip, con el mismo writer, como los datasets vivos (ADR-0020 §7); el perfil y el esquema
  * nunca se comprimen, y los vectores siguen sin comprimir. Parquet queda para un incremento posterior.
  * Pura: la versión de zlib se inyecta.

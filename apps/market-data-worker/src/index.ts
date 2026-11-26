@@ -185,9 +185,11 @@ export {
   type PasswordRole,
 } from './postgres/roles.js';
 export {
+  prepareBatchPublication,
   preparePublication,
   publishDataset,
   writePublication,
+  type PrepareBatchPublicationInput,
   type PublishDatasetInput,
 } from './publication.js';
 export {

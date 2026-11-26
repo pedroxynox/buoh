@@ -422,7 +422,7 @@ function forge(
   }
 
   const parsedCore = datasetManifestCoreSchema.parse(core);
-  const datasetId = deriveDatasetId(parsedCore);
+  const datasetId = deriveDatasetId(parsedCore as JsonValue);
   const manifest = datasetManifestSchema.parse({
     ...base.manifest,
     dataset_id: datasetId,

@@ -7,6 +7,7 @@ import {
   validatePublicationRecord,
   type DatasetManifest,
   type DatasetManifestCore,
+  type JsonValue,
   type PublishedManifestRecord,
   type SourceEvent,
   type StorageObjectRef,
@@ -26,12 +27,16 @@ type ArtifactRole = StorageObjectRef['role'];
 
 /** Media type lógico por rol; la compresión se declara aparte en `StorageObjectRef.compression`. */
 export const MEDIA_TYPES = {
+  contract_offers: 'application/x-ndjson',
+  contract_quotes: 'application/x-ndjson',
+  market_candles: 'application/x-ndjson',
   normalized_ticks: 'application/x-ndjson',
   operational_conditions: 'application/x-ndjson',
   quality_incidents: 'application/x-ndjson',
   quality_profile: 'application/json',
   source_events: 'application/x-ndjson',
   source_schema: 'application/schema+json',
+  trading_sessions: 'application/x-ndjson',
 } as const satisfies Record<ArtifactRole, string>;
 
 /** Codificación física de un objeto. Cambiarla altera hashes físicos, nunca `dataset_id`. */
@@ -94,8 +99,63 @@ export interface DatasetPublication {
   readonly record: PublishedManifestRecord;
 }
 
-function artifactId(role: string, index: number): string {
+export function artifactId(role: string, index: number): string {
   return `${role}:${index.toString().padStart(6, '0')}`;
+}
+
+/** Un artefacto lógico antes del manifiesto: sus bytes NDJSON, su conteo y su rol. */
+export interface LogicalSequence {
+  readonly bytes: Uint8Array;
+  readonly count: number;
+  readonly id: string;
+  readonly index: number;
+  readonly role: ArtifactRole;
+}
+
+/** Los `source_events` de cada segmento: un artefacto por segmento, en su orden. */
+export function segmentSequences(segments: readonly (readonly SourceEvent[])[]): LogicalSequence[] {
+  return segments.map((segment, index) => ({
+    bytes: ndjsonBytes(segment),
+    count: segment.length,
+    id: artifactId('source_events', index),
+    index,
+    role: 'source_events' as const,
+  }));
+}
+
+/** Los registros de un rol derivado en sus partes (`partsOf`), cada una con su artefacto. */
+export function derivedSequences(
+  role: ArtifactRole,
+  records: readonly object[],
+  size: number | null,
+): LogicalSequence[] {
+  return partsOf(records, size).map((part, index) => ({
+    bytes: ndjsonBytes(part),
+    count: part.length,
+    id: artifactId(role, index),
+    index,
+    role,
+  }));
+}
+
+/** Los `logical_artifacts` de `DatasetManifestCore`, de los artefactos lógicos. */
+export function logicalArtifactsOf(sequences: readonly LogicalSequence[]) {
+  return sequences.map((sequence) => ({
+    artifact_id: sequence.id,
+    logical_content_sha256: sha256Hex(sequence.bytes),
+    record_count: sequence.count,
+    role: sequence.role,
+    segment_index: sequence.index,
+  }));
+}
+
+/** Los segmentos validados como `SourceEvent`; lanza sin segmentos o con uno vacío. */
+export function parseSegments(segments: readonly (readonly unknown[])[]): SourceEvent[][] {
+  const parsed = segments.map((segment) => segment.map((event) => sourceEventSchema.parse(event)));
+  if (parsed.length === 0 || parsed.some((segment) => segment.length === 0)) {
+    throw new TypeError('Se requiere al menos un segmento y ningún segmento vacío.');
+  }
+  return parsed;
 }
 
 /**
@@ -134,110 +194,40 @@ function collectSymbols(events: readonly SourceEvent[], derived: DerivedMarketDa
   return [...symbols].sort();
 }
 
+/** Lo que necesita `assemblePublication`, además de las ubicaciones y la codificación. */
+export interface AssembleInput extends Omit<PublicationInput, 'profile' | 'segments'> {
+  readonly core: DatasetManifestCore;
+  readonly quality_profile: { readonly bytes: Uint8Array; readonly sha256: string };
+  readonly sequences: readonly LogicalSequence[];
+  readonly source_schema: { readonly bytes: Uint8Array; readonly sha256: string };
+}
+
 /**
- * Recomputa los derivados desde source events y construye la publicación según ADR-0004 §8: artefactos lógicos (incluidos vacíos de cero
- * bytes), `DatasetManifestCore`, `dataset_id`, objetos, documento JCS y `PublishedManifestRecord`.
- * Pura: no escribe almacenamiento; F1.3 persiste estos bytes y hace el commit transaccional.
+ * La parte común de toda publicación, con el core ya validado: el `dataset_id`, los objetos físicos
+ * (los artefactos lógicos, el perfil y el esquema de fuente, por `artifact_id`), el documento JCS y
+ * el `PublishedManifestRecord`. Pura.
  */
-export function buildDatasetPublication(input: PublicationInput): DatasetPublication {
-  const { profile } = input;
-  // Un perfil de medición nunca publica (ADR-0012 §8 y ADR-0015 §2): falla antes de leer nada.
-  publicationThresholds(profile);
-  const segments = input.segments.map((segment) =>
-    segment.map((event) => sourceEventSchema.parse(event)),
-  );
-  if (segments.length === 0 || segments.some((segment) => segment.length === 0)) {
-    throw new TypeError('Se requiere al menos un segmento y ningún segmento vacío.');
-  }
-  const events = segments.flat();
-  const derived = deriveMarketData(segments, profile);
-  const derivedParts = (role: ArtifactRole, records: readonly object[]) =>
-    partsOf(records, profile.rules.derived_part_records).map((part, index) => ({
-      bytes: ndjsonBytes(part),
-      count: part.length,
-      id: artifactId(role, index),
-      index,
-      role,
-    }));
-
-  const sequences: {
-    bytes: Uint8Array;
-    count: number;
-    id: string;
-    index: number;
-    role: ArtifactRole;
-  }[] = [
-    ...segments.map((segment, index) => ({
-      bytes: ndjsonBytes(segment),
-      count: segment.length,
-      id: artifactId('source_events', index),
-      index,
-      role: 'source_events' as const,
-    })),
-    ...derivedParts('normalized_ticks', derived.ticks),
-    ...derivedParts('quality_incidents', derived.incidents),
-    ...derivedParts('operational_conditions', derived.conditions),
-  ];
-
-  const firstTick = derived.ticks[0];
-  const lastTick = derived.ticks.at(-1);
-  const symbols = collectSymbols(events, derived);
-  if (symbols.length === 0) {
-    // Reglas 2.0.0: un dataset cuyos frames no permiten atribuir ningún símbolo no es publicable.
-    throw new TypeError('El dataset no tiene símbolos atribuibles; no es publicable.');
-  }
-
-  const core = datasetManifestCoreSchema.parse({
-    canonicalization_version: CANONICALIZATION_VERSION,
-    condition_event_count: derived.conditions.length,
-    condition_event_schema_version: CONTRACT_SCHEMA_VERSION,
-    connector_version: profile.connector_version,
-    event_time_from_utc: firstTick?.event_time_utc ?? null,
-    event_time_to_utc: lastTick?.event_time_utc ?? null,
-    incident_count: derived.incidents.length,
-    incident_schema_version: profile.rules.incident_schema_version,
-    logical_artifacts: sequences.map((sequence) => ({
-      artifact_id: sequence.id,
-      logical_content_sha256: sha256Hex(sequence.bytes),
-      record_count: sequence.count,
-      role: sequence.role,
-      segment_index: sequence.index,
-    })),
-    market_tick_schema_version: CONTRACT_SCHEMA_VERSION,
-    normalized_tick_count: derived.ticks.length,
-    normalizer_version: profile.rules.normalizer_version,
-    quality_profile_id: profile.quality_profile.profile_id,
-    quality_profile_sha256: profile.quality_profile_sha256,
-    quality_rule_version: profile.rules.quality_rule_version,
-    raw_frame_count: events.filter((event) => event.kind === 'raw_source_frame').length,
-    schema_version: CONTRACT_SCHEMA_VERSION,
-    segment_policy_version: SEGMENT_POLICY_VERSION,
-    source: profile.source,
-    source_event_count: events.length,
-    source_event_schema_version: CONTRACT_SCHEMA_VERSION,
-    source_schema_release: profile.source_schema_release,
-    source_schema_sha256: profile.source_schema_sha256,
-    symbols,
-  });
-  const datasetId = deriveDatasetId(core);
+export function assemblePublication(input: AssembleInput): Omit<DatasetPublication, 'derived'> {
+  const { core } = input;
+  const datasetId = deriveDatasetId(core as JsonValue);
 
   const physical = [
-    ...sequences.map((sequence) => ({
+    ...input.sequences.map((sequence) => ({
       bytes: sequence.bytes,
       id: sequence.id,
       logical: sha256Hex(sequence.bytes),
       role: sequence.role,
     })),
     {
-      bytes: profile.quality_profile_bytes,
+      bytes: input.quality_profile.bytes,
       id: artifactId('quality_profile', 0),
-      logical: profile.quality_profile_sha256,
+      logical: input.quality_profile.sha256,
       role: 'quality_profile' as const,
     },
     {
-      bytes: profile.source_schema_bytes,
+      bytes: input.source_schema.bytes,
       id: artifactId('source_schema', 0),
-      logical: profile.source_schema_sha256,
+      logical: input.source_schema.sha256,
       role: 'source_schema' as const,
     },
   ].sort((left, right) => (left.id < right.id ? -1 : 1));
@@ -302,10 +292,80 @@ export function buildDatasetPublication(input: PublicationInput): DatasetPublica
   return {
     core,
     dataset_id: datasetId,
-    derived,
     manifest,
     manifest_bytes: manifestBytes,
     objects: new Map(encoded.map((object) => [object.id, object.encoding.bytes])),
     record,
+  };
+}
+
+/**
+ * Recomputa los derivados desde source events y construye la publicación según ADR-0004 §8:
+ * artefactos lógicos (incluidos vacíos de cero bytes), `DatasetManifestCore`, `dataset_id`, objetos,
+ * documento JCS y `PublishedManifestRecord`. Pura: no escribe almacenamiento; F1.3 persiste estos
+ * bytes y hace el commit transaccional.
+ */
+export function buildDatasetPublication(input: PublicationInput): DatasetPublication {
+  const { profile } = input;
+  // Un perfil de medición nunca publica (ADR-0012 §8 y ADR-0015 §2): falla antes de leer nada.
+  publicationThresholds(profile);
+  const segments = parseSegments(input.segments);
+  const events = segments.flat();
+  const derived = deriveMarketData(segments, profile);
+  const size = profile.rules.derived_part_records;
+  const sequences = [
+    ...segmentSequences(segments),
+    ...derivedSequences('normalized_ticks', derived.ticks, size),
+    ...derivedSequences('quality_incidents', derived.incidents, size),
+    ...derivedSequences('operational_conditions', derived.conditions, size),
+  ];
+
+  const firstTick = derived.ticks[0];
+  const lastTick = derived.ticks.at(-1);
+  const symbols = collectSymbols(events, derived);
+  if (symbols.length === 0) {
+    // Reglas 2.0.0: un dataset cuyos frames no permiten atribuir ningún símbolo no es publicable.
+    throw new TypeError('El dataset no tiene símbolos atribuibles; no es publicable.');
+  }
+
+  const core = datasetManifestCoreSchema.parse({
+    canonicalization_version: CANONICALIZATION_VERSION,
+    condition_event_count: derived.conditions.length,
+    condition_event_schema_version: CONTRACT_SCHEMA_VERSION,
+    connector_version: profile.connector_version,
+    event_time_from_utc: firstTick?.event_time_utc ?? null,
+    event_time_to_utc: lastTick?.event_time_utc ?? null,
+    incident_count: derived.incidents.length,
+    incident_schema_version: profile.rules.incident_schema_version,
+    logical_artifacts: logicalArtifactsOf(sequences),
+    market_tick_schema_version: CONTRACT_SCHEMA_VERSION,
+    normalized_tick_count: derived.ticks.length,
+    normalizer_version: profile.rules.normalizer_version,
+    quality_profile_id: profile.quality_profile.profile_id,
+    quality_profile_sha256: profile.quality_profile_sha256,
+    quality_rule_version: profile.rules.quality_rule_version,
+    raw_frame_count: events.filter((event) => event.kind === 'raw_source_frame').length,
+    schema_version: CONTRACT_SCHEMA_VERSION,
+    segment_policy_version: SEGMENT_POLICY_VERSION,
+    source: profile.source,
+    source_event_count: events.length,
+    source_event_schema_version: CONTRACT_SCHEMA_VERSION,
+    source_schema_release: profile.source_schema_release,
+    source_schema_sha256: profile.source_schema_sha256,
+    symbols,
+  });
+
+  return {
+    ...assemblePublication({
+      ...input,
+      core,
+      quality_profile: {
+        bytes: profile.quality_profile_bytes,
+        sha256: profile.quality_profile_sha256,
+      },
+      sequences,
+      source_schema: { bytes: profile.source_schema_bytes, sha256: profile.source_schema_sha256 },
+    }),
+    derived,
   };
 }

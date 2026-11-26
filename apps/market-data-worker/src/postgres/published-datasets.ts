@@ -10,6 +10,7 @@ import {
   uuidV7Schema,
   type DatasetManifestCore,
   type DeploymentEnvironment,
+  type JsonValue,
 } from '@buoh/contracts';
 import pg, { type Pool } from 'pg';
 import type { z } from 'zod';
@@ -185,7 +186,7 @@ function coreOf(row: DatasetRow): DatasetManifestCore {
   const parsed = datasetManifestCoreSchema.safeParse(stored);
   check(
     parsed.success &&
-      deriveDatasetId(parsed.data) === row.dataset_id &&
+      deriveDatasetId(parsed.data as JsonValue) === row.dataset_id &&
       parsed.data.source === row.source,
   );
   return (parsed as { data: DatasetManifestCore }).data;

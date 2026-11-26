@@ -246,11 +246,13 @@ describe('peticiones de los lotes', () => {
     });
   });
 
-  it('las velas de un día son dos páginas por mercado, contiguas, de las 00:00:00 a las 23:59:59', () => {
+  it('las velas de un día son su horario y dos páginas por mercado, contiguas, de las 00:00:00 a las 23:59:59', () => {
     const day = Date.UTC(2026, 10, 25) / 1000;
     const requests = candleRequests(derivCandlesProfile(), '2026-11-25');
-    expect(requests).toHaveLength(14);
-    expect(requests.slice(0, 2)).toEqual([
+    // Primero el horario de ese día, con el que se buscan las velas que faltan (PR 5d1).
+    expect(requests).toHaveLength(15);
+    expect(requests[0]).toEqual({ date: '2026-11-25', operation: 'trading_times' });
+    expect(requests.slice(1, 3)).toEqual([
       {
         count: 1000,
         end: day + 43_199,
@@ -269,7 +271,9 @@ describe('peticiones de los lotes', () => {
       },
     ]);
     expect(
-      requests.map((request) => (request.operation === 'ticks_history' ? request.symbol : null)),
+      requests
+        .slice(1)
+        .map((request) => (request.operation === 'ticks_history' ? request.symbol : null)),
     ).toEqual(REAL_MARKETS.flatMap((symbol) => [symbol, symbol]));
   });
 
@@ -316,7 +320,7 @@ describe('peticiones de los lotes', () => {
       ...quoteRequests(derivQuotesProfile()),
       ...candleRequests(derivCandlesProfile(), '2026-11-24'),
     ];
-    expect(requests).toHaveLength(11 + 126 + 14);
+    expect(requests).toHaveLength(11 + 126 + 15);
     for (const [index, request] of requests.entries()) {
       const text = encodeBatchRequest(schemas, request, index + 1);
       expect(text, JSON.stringify(request)).not.toBeNull();
@@ -395,7 +399,7 @@ describe('las respuestas a estas peticiones dan sus registros con las reglas 4.0
     }
   });
 
-  it('cada una de las 151 peticiones distintas de un día da su registro, salvo el catálogo, sin incidencias', () => {
+  it('cada una de las 152 peticiones distintas de un día da su registro, salvo el catálogo, sin incidencias', () => {
     let records = 0;
     for (const request of quoteRequests(derivQuotesProfile())) {
       if (request.operation !== 'proposal') {
@@ -415,6 +419,21 @@ describe('las respuestas a estas peticiones dan sus registros con las reglas 4.0
       records += result.records.length;
     }
     for (const page of candleRequests(derivCandlesProfile(), '2026-11-24')) {
+      if (page.operation === 'trading_times') {
+        // El horario del día de las velas: lo buscan en los siete mercados de su perfil.
+        const echo = JSON.stringify(batchRequestBody(page, 6));
+        const result = deriveTradingSessions(
+          frame(
+            `{"echo_req":${echo},"msg_type":"trading_times","req_id":6,"trading_times":{"markets":[{"name":"x","submarkets":[{"name":"x","symbols":[{"name":"x","times":{"close":["21:00:00"],"open":["01:00:00"]},"underlying_symbol":"frxXAUUSD"}]}]}]}}`,
+          ),
+          accept,
+          derivCandlesProfile().symbols,
+        );
+        expect(result.incidents, echo).toEqual([]);
+        expect(result.records, echo).toMatchObject([{ trading_date: '2026-11-24' }]);
+        records += 1;
+        continue;
+      }
       if (page.operation !== 'ticks_history') {
         throw new TypeError('se esperaba ticks_history');
       }
@@ -461,7 +480,7 @@ describe('las respuestas a estas peticiones dan sus registros con las reglas 4.0
       }
       records += 1;
     }
-    expect(records).toBe(151);
+    expect(records).toBe(152);
   });
 
   it('el rechazo de un multiplicador pedido es contract_rejected', () => {
@@ -483,7 +502,7 @@ describe('las respuestas a estas peticiones dan sus registros con las reglas 4.0
   });
 
   it('una página de velas pedida da sus velas, y el horario y los contratos, su día y su símbolo', () => {
-    const [page] = candleRequests(derivCandlesProfile(), '2026-11-24');
+    const [, page] = candleRequests(derivCandlesProfile(), '2026-11-24');
     if (page?.operation !== 'ticks_history') {
       throw new TypeError('falta la página');
     }

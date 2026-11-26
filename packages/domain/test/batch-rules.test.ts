@@ -111,9 +111,11 @@ afterEach(() => {
 });
 
 describe('conjunto de reglas de los lotes', () => {
-  it('es el 4.0.0, con el esquema de incidencias 3.0.0', () => {
+  it('es el 4.0.0, con el esquema de incidencias 3.0.0, su normalizador y partes de 5000', () => {
     expect(BATCH_RULE_SET).toEqual({
+      derived_part_records: 5000,
       incident_schema_version: '3.0.0',
+      normalizer_version: '4.0.0',
       quality_rule_version: '4.0.0',
     });
   });

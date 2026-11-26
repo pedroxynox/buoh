@@ -31,7 +31,11 @@ import { epochSecondsToUtc, isEpochSecondsLexeme } from './normalizer.js';
  * `contracts_for` o `proposal`; las velas, los ticks de la historia y un log, `batch-series.ts`.
  */
 export const BATCH_RULE_SET = {
+  /** Registros de cada parte de un rol derivado de un dataset de los lotes, como las 3.0.0. */
+  derived_part_records: 5000,
   incident_schema_version: '3.0.0',
+  /** Las reglas normalizan también: el normalizador es el mismo conjunto. */
+  normalizer_version: '4.0.0',
   quality_rule_version: '4.0.0',
 } as const;
 

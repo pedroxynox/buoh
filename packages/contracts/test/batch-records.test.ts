@@ -608,3 +608,43 @@ describe('candle_repeated', () => {
     expect(accepts(body('warning', RAW, '2.0.0'))).toBe(false);
   });
 });
+
+// Precisión del PR 5d1 de ADR-0021 §9: un tramo de minutos sin vela dentro del horario.
+describe('candle_missing', () => {
+  const body = (overrides: {
+    from?: string;
+    severity?: string;
+    to?: string;
+    version?: string;
+  }) => ({
+    evidence: {
+      from_open_time_utc: overrides.from ?? '2026-11-21T10:00:00.000Z',
+      to_open_time_utc: overrides.to ?? '2026-11-21T10:03:00.000Z',
+    },
+    incident_type: 'candle_missing',
+    observed_at_utc: '2026-11-22T00:00:01.250Z',
+    observed_ref: OBSERVATION,
+    quality_rule_version: '4.0.0',
+    related_refs: [OTHER_OBSERVATION],
+    schema_version: overrides.version ?? '3.0.0',
+    severity: overrides.severity ?? 'error',
+    source: 'deriv_options',
+    symbol: 'SYNTH_GOLD',
+  });
+  const accepts = (value: Record<string, unknown>) =>
+    publicContracts.dataQualityIncidentSchema.safeParse({
+      ...value,
+      incident_id: `sha256:${sha256(canonicalizeJson(value) ?? '')}`,
+    }).success;
+
+  it('es un error de minutos enteros, del primero al último que faltan, solo con 3.0.0', () => {
+    expect(accepts(body({}))).toBe(true);
+    // Un solo minuto: el primero y el último son el mismo.
+    expect(accepts(body({ to: '2026-11-21T10:00:00.000Z' }))).toBe(true);
+    expect(accepts(body({ severity: 'warning' }))).toBe(false);
+    expect(accepts(body({ version: '2.0.0' }))).toBe(false);
+    expect(accepts(body({ from: '2026-11-21T10:00:30.000Z' }))).toBe(false);
+    expect(accepts(body({ to: '2026-11-21T10:03:00.001Z' }))).toBe(false);
+    expect(accepts(body({ from: '2026-11-21T10:04:00.000Z' }))).toBe(false);
+  });
+});

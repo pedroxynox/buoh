@@ -109,9 +109,11 @@ export {
 } from './data-quality.js';
 export { validateDatasetConsistency, type DatasetConsistencyInput } from './dataset-consistency.js';
 export {
+  BATCH_MANIFEST_CORE_SCHEMA_VERSION,
   EMPTY_SEQUENCE_SHA256,
   canonicalManifestBytes,
   datasetManifestCoreSchema,
+  isBatchManifestCore,
   datasetManifestSchema,
   logicalArtifactSchema,
   publishedManifestRecordSchema,

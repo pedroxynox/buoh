@@ -53,7 +53,7 @@ Fase 1 usa `execution_mode = disabled`. Un servicio pausado no cambia de entorno
 - Incidencias se ordenan por `observed_at_utc`, `incident_type`, `incident_id`.
 - Implementación: `packages/domain/src/quality.ts` produce este orden y `packages/contracts/src/dataset-consistency.ts` lo valida, cada uno con sus propios comparadores por unidades UTF-16. Deben cambiar a la vez ([estado del código](estado-del-codigo.md) D-06).
 - Las entradas de `SourceCatalogSnapshot` se ordenan por `underlying_symbol` en unidades UTF-16: `deriveCatalogSnapshot` (`packages/domain/src/catalog.ts`) las ordena y `isSortedUnique` (`packages/contracts`) lo valida, los dos con el operador `<` de JavaScript.
-- Las `offers` de `ContractOffer` se ordenan por `contract_type` y `expiry_type` en unidades UTF-16, con el operador `<`, y los `intervals` de `TradingSession`, por su hora, sin solaparse ni tocarse. Los valida `packages/contracts`, y los ordenan las reglas de los lotes (`deriveContractOffer` y `deriveTradingSessions`, en `packages/domain/src/batch-rules.ts`). Los horarios, los contratos y las cotizaciones de un dataset se ordenan por `received_at_utc`, `observation_id` y `symbol`, con el mismo operador (`compareBatchRecords`). Las velas se ordenan por `open_time_utc` y `symbol`, y los ticks de la historia, como los de los datasets en vivo, por `event_time_utc`, huella y observación.
+- Las `offers` de `ContractOffer` se ordenan por `contract_type` y `expiry_type` en unidades UTF-16, con el operador `<`, y los `intervals` de `TradingSession`, por su hora, sin solaparse ni tocarse. Los valida `packages/contracts`, y los ordenan las reglas de los lotes (`deriveContractOffer` y `deriveTradingSessions`, en `packages/domain/src/batch-rules.ts`). Los horarios, los contratos y las cotizaciones de un dataset se ordenan por `received_at_utc`, `observation_id` y `symbol`, con el mismo operador (`compareBatchRecords`). Las velas se ordenan por `open_time_utc` y `symbol`, y los ticks de la historia, como los de los datasets en vivo, por `event_time_utc`, huella y observación. Desde el PR 5d1 de [ADR-0021](adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §9, `validateDatasetConsistency` valida también el orden de las velas, los horarios, los contratos y las cotizaciones de un dataset de los lotes, con sus propios comparadores, que deben coincidir con los de las reglas.
 - El orden de las condiciones operativas (`occurred_at_utc`, `condition_event_id`; ver `OperationalConditionEvent`) está implementado tres veces: `compareConditions` en `packages/domain/src/quality.ts`, por unidades UTF-16, y `validateConditionCausality` y `reduceOpenConditions` en `packages/contracts/src/conditions.ts`, con `localeCompare`. Coinciden porque los dos campos tienen formato fijo ([estado del código](estado-del-codigo.md) D-13).
 - IDs de source events se obtienen de un generador UUIDv7 inyectable y se reutilizan en replay.
 - `incident_id` y `condition_event_id` son `DerivedEventId`: se calculan después de ordenar referencias sobre todos los campos del evento excepto el propio ID; luego se inserta el ID sin recalcularlo.
@@ -238,7 +238,7 @@ Desde el PR 4b de [ADR-0021](adr/0021-mercados-reales-y-fuentes-de-investigacion
 ```text
 schema_version: SchemaVersion
 incident_id: DerivedEventId
-incident_type: QualityIncidentType | "contract_rejected" | "candle_repeated"   # los dos últimos, solo con el esquema 3.0.0; no son marcas de tick ni de vela
+incident_type: QualityIncidentType | "contract_rejected" | "candle_repeated" | "candle_missing"   # los tres últimos, solo con el esquema 3.0.0; no son marcas de tick ni de vela
 severity: "info" | "warning" | "error" | "critical"
 quality_rule_version: SchemaVersion
 source: string
@@ -249,7 +249,7 @@ related_refs: EventRef[]
 evidence: QualityEvidence
 ```
 
-`symbol = null` solo se permite para incidencias de conexión o recursos sin símbolo conocido y, desde el esquema de incidencias 2.0.0, para `invalid_source_frame` sin símbolo atribuible (reglas de calidad 2.0.0). El esquema 3.0.0, el de las [reglas de los lotes 4.0.0](#semántica-ejecutable-de-las-reglas-de-los-lotes-400), lo admite igual y suma `contract_rejected` y `candle_repeated`, que solo existen con él. `related_refs` es único y ordenado. `evidence` rechaza campos desconocidos y se discrimina por `incident_type`:
+`symbol = null` solo se permite para incidencias de conexión o recursos sin símbolo conocido y, desde el esquema de incidencias 2.0.0, para `invalid_source_frame` sin símbolo atribuible (reglas de calidad 2.0.0). El esquema 3.0.0, el de las [reglas de los lotes 4.0.0](#semántica-ejecutable-de-las-reglas-de-los-lotes-400), lo admite igual y suma `contract_rejected`, `candle_repeated` y `candle_missing`, que solo existen con él. `related_refs` es único y ordenado. `evidence` rechaza campos desconocidos y se discrimina por `incident_type`:
 
 | `incident_type` | `evidence` exacta |
 |---|---|
@@ -264,6 +264,7 @@ evidence: QualityEvidence
 | `source_limit_exceeded` | `{ resource: SourceResource, unit: LimitUnit, observed_value: NonNegativeInteger, maximum_value: NonNegativeInteger }` con `observed_value > maximum_value` |
 | `candle_repeated` | `{ open_time_utc: UtcTimestampMs, first_candle_fingerprint_sha256: Sha256Hex, candle_fingerprint_sha256: Sha256Hex }`; `warning` si las dos huellas son iguales y `error` si no; solo con el esquema 3.0.0 |
 | `contract_rejected` | `{ raw_payload_sha256: Sha256Hex, error_code: string, contract_type: "MULTUP" \| "MULTDOWN", multiplier_decimal: DecimalString }`, con el multiplicador mayor que cero; solo con el esquema 3.0.0 |
+| `candle_missing` | `{ from_open_time_utc: UtcTimestampMs, to_open_time_utc: UtcTimestampMs }`: la apertura de la primera y de la última vela que faltan de un tramo seguido, las dos incluidas, en minutos enteros y sin invertirse; siempre `error`; solo con el esquema 3.0.0 (desde el PR 5d1 de ADR-0021 §9) |
 
 ```text
 PersistenceStage =
@@ -323,16 +324,16 @@ Transiciones derivables:
 
 ```text
 artifact_id: string                         # `<role>:<segment_index de 6 dígitos>`
-role: "source_events" | "normalized_ticks" | "quality_incidents" |
-      "operational_conditions"
+role: "source_events" | "normalized_ticks" | "market_candles" | "trading_sessions" |
+      "contract_offers" | "contract_quotes" | "quality_incidents" | "operational_conditions"
 segment_index: NonNegativeInteger
 record_count: NonNegativeInteger
 logical_content_sha256: Sha256Hex
 ```
 
-Orden obligatorio de roles: `source_events`, `normalized_ticks`, `quality_incidents`, `operational_conditions`; dentro del rol, `segment_index` asciende de cero sin huecos. Cada rol aparece al menos una vez. Una secuencia vacía usa un artefacto índice cero, conteo cero, cero bytes y hash `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+Orden obligatorio de roles: `source_events`, `normalized_ticks`, `market_candles`, `trading_sessions`, `contract_offers`, `contract_quotes`, `quality_incidents`, `operational_conditions`; dentro del rol, `segment_index` asciende de cero sin huecos. Cada rol aparece al menos una vez, salvo los cuatro de los registros de los lotes (`market_candles` a `contract_quotes`), que solo existen, y entonces todos, en un `DatasetManifestCore` 1.1.0. Una secuencia vacía usa un artefacto índice cero, conteo cero, cero bytes y hash `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
 
-`source_events` lleva un artefacto por segmento del log. Los roles derivados (`normalized_ticks`, `quality_incidents` y `operational_conditions`) llevan uno con las reglas 1.0.0 y 2.0.0. Con las 3.0.0 se dividen en partes de como mucho 5000 registros, en su orden canónico: un rol con *n* registros tiene ⌈*n* / 5000⌉ partes, y al menos una, la vacía si no tiene ninguno ([ADR-0020](adr/0020-datasets-vivos.md) §7). El tamaño lo fija el conjunto de reglas (`derived_part_records`), así que no cambia sin otra versión, y el replay une las partes de cada rol en su orden.
+`source_events` lleva un artefacto por segmento del log. Los roles derivados (`normalized_ticks`, `quality_incidents` y `operational_conditions`) llevan uno con las reglas 1.0.0 y 2.0.0. Con las 3.0.0 y las de los lotes 4.0.0, también los roles de sus registros, se dividen en partes de como mucho 5000 registros, en su orden canónico: un rol con *n* registros tiene ⌈*n* / 5000⌉ partes, y al menos una, la vacía si no tiene ninguno ([ADR-0020](adr/0020-datasets-vivos.md) §7). El tamaño lo fija el conjunto de reglas (`derived_part_records`), así que no cambia sin otra versión, y el replay une las partes de cada rol en su orden.
 
 ## `StorageObjectRef`
 
@@ -340,8 +341,7 @@ Campos comunes:
 
 ```text
 artifact_id: string                         # clave de unión, única en el manifiesto
-role: "source_events" | "normalized_ticks" | "quality_incidents" |
-      "operational_conditions" | "source_schema" | "quality_profile"
+role: LogicalArtifactRef.role | "source_schema" | "quality_profile"
 uri: URI absoluta
 media_type: string no vacío
 compression: "none" | "gzip"
@@ -382,10 +382,24 @@ raw_frame_count: NonNegativeInteger
 normalized_tick_count: NonNegativeInteger
 incident_count: NonNegativeInteger
 condition_event_count: NonNegativeInteger
+# solo en la versión 1.1.0, la de un dataset de los lotes, y entonces todos:
+market_candle_schema_version: SchemaVersion
+trading_session_schema_version: SchemaVersion
+contract_offer_schema_version: SchemaVersion
+contract_quote_schema_version: SchemaVersion
+candle_time_from_utc: UtcTimestampMs | null
+candle_time_to_utc: UtcTimestampMs | null
+market_candle_count: NonNegativeInteger
+trading_session_count: NonNegativeInteger
+contract_offer_count: NonNegativeInteger
+contract_quote_count: NonNegativeInteger
 logical_artifacts: LogicalArtifactRef[]
 ```
 
-Los conteos coinciden con la suma de artefactos de su rol y `raw_frame_count <= source_event_count`. Si `normalized_tick_count = 0`, ambos tiempos son `null`; de otro modo ambos son no nulos, `from <= to` y representan extremos de ticks normalizados.
+Los conteos coinciden con la suma de artefactos de su rol y `raw_frame_count <= source_event_count`. Si `normalized_tick_count = 0`, ambos tiempos son `null`; de otro modo ambos son no nulos, `from <= to` y representan extremos de ticks normalizados. Lo mismo valen `candle_time_from_utc` y `candle_time_to_utc` con las velas: la apertura de la primera y de la última en su orden canónico.
+
+- **La versión 1.1.0** (desde el PR 5d1 de [ADR-0021](adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §9) es la de un dataset de una secuencia por lotes (ADR-0021 §3), y la 1.0.0 sigue siendo la de la captura en vivo, así que sus `dataset_id` no cambian. Es un cambio aditivo: suma los campos y los roles de los registros de los lotes. Un core 1.1.0 lleva las reglas de los lotes 4.0.0, con su normalizador (`normalizer_version` 4.0.0), su esquema de incidencias (3.0.0) y su política de segmentos (2.0.0); sus registros, en la versión 1.0.0, y los ticks de la historia, `MarketTick` 1.1.0; `operational_conditions` vacío, porque las reglas de los lotes no derivan condiciones; y, como `symbols`, los de sus registros y sus incidencias.
+- **Su esquema de fuente** (`source_schema:000000`) es un objeto con el esquema de respuesta de la release fijada de cada operación que usan las reglas de los lotes (`active_symbols`, `contracts_for`, `proposal`, `ticks_history` y `trading_times`), tal como lo trae la release (`batchSourceSchemaBytes`). Las reglas aplican a `active_symbols` y a `contracts_for` sus relajaciones (`createBatchLogConfig`). Su perfil (`quality_profile:000000`) es el de su secuencia, el de la fila `log_quality_profile` de su log, y las reglas buscan en `trading_times` los símbolos de su `symbols`; el de las cotizaciones no lo tiene.
 
 `dataset_id = "sha256:" + SHA256(JCS(manifest_core))`.
 
@@ -656,7 +670,7 @@ commission_decimal: DecimalString
 5. regenerar ticks, incidencias derivables y `OperationalConditionEvent` derivables;
 6. ordenar/canonicalizar resultados y comparar hashes, conteos, core y `dataset_id`.
 
-`--verify-only` termina después del paso 3 y demuestra integridad, no corrección del normalizador. Desde F1.3a lo implementa [`apps/market-data-worker`](../../apps/market-data-worker/); informe JSON y códigos de salida en el [runbook](../operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13). Incidencias operativas `persistence_unavailable` y `source_limit_exceeded` fuera de un dataset no se recomputan; se validan en pruebas fail-closed mediante sus causas inyectadas. Un replay nunca contacta a Deriv ni usa reloj/IDs nuevos.
+`--verify-only` termina después del paso 3 y demuestra integridad, no corrección del normalizador. Desde el PR 5d1 de [ADR-0021](adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §9, un dataset de los lotes (`DatasetManifestCore` 1.1.0) se valida igual, con sus registros y su coherencia, y se recomputa con las reglas de los lotes 4.0.0 (`buildBatchDatasetPublication`), desde sus source events, su esquema de fuente y su perfil. En los dos modos, un core 1.1.0 tiene que declarar las reglas 4.0.0 y un core 1.0.0 no puede declararlas, y las reglas 4.0.0 atan su esquema de incidencias al 3.0.0; la recomputación pide además el normalizador 4.0.0 y la política de segmentos 2.0.0. Desde F1.3a lo implementa [`apps/market-data-worker`](../../apps/market-data-worker/); informe JSON y códigos de salida en el [runbook](../operacion/runbook-ingesta-de-datos.md#entorno-local-y-replay-f13). Incidencias operativas `persistence_unavailable` y `source_limit_exceeded` fuera de un dataset no se recomputan; se validan en pruebas fail-closed mediante sus causas inyectadas. Un replay nunca contacta a Deriv ni usa reloj/IDs nuevos.
 
 ## Reglas de calidad v1
 
@@ -739,7 +753,7 @@ Implementado en `packages/domain` (`RULE_SETS['3.0.0']`, `deriveMarketData`, `hi
 
 ### Semántica ejecutable de las reglas de los lotes 4.0.0
 
-Desde el PR 4c de [ADR-0021](adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §9, para las secuencias por lotes de ADR-0021 §3. Son un conjunto propio, no la versión siguiente de las reglas en vivo: el número sigue la serie para que una `quality_rule_version` nombre un solo conjunto, y `RULE_SETS` no lo tiene, así que un perfil en vivo no lo puede pedir. Sus incidencias usan el esquema 3.0.0. El PR 4c trajo las de `trading_times`, `contracts_for` y `proposal`, y el 4d, las de las velas y los ticks de la historia, con sus repetidos entre páginas, y la clasificación de los frames de un log. Un tramo sin ticks o una vela que falta dentro del horario de su mercado (ADR-0021 §4; ADR-0024 §5) llegan con el PR 5, para las velas, y el PR 6, para la historia: necesitan el horario de cada día y un umbral por mercado, que fijan sus perfiles.
+Desde el PR 4c de [ADR-0021](adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §9, para las secuencias por lotes de ADR-0021 §3. Son un conjunto propio, no la versión siguiente de las reglas en vivo: el número sigue la serie para que una `quality_rule_version` nombre un solo conjunto, y `RULE_SETS` no lo tiene, así que un perfil en vivo no lo puede pedir. Sus incidencias usan el esquema 3.0.0. El PR 4c trajo las de `trading_times`, `contracts_for` y `proposal`, y el 4d, las de las velas y los ticks de la historia, con sus repetidos entre páginas, y la clasificación de los frames de un log. El 5d1 trae las velas que faltan dentro del horario de su mercado (ADR-0021 §4; ADR-0024 §5), sin umbral: cada minuto que falta cuenta. Un tramo sin ticks de la historia llega con el PR 6, con el umbral por mercado que fije su perfil.
 
 - **Entrada.** Un `RawSourceFrame` durable que responde a la operación, con el esquema de respuesta de la release fijada que compila quien llama. Las funciones son puras. Un frame que no es JSON o que responde a otra operación (`msg_type`) es un error del llamador, y lanza: los frames de un log pasan antes por su clasificación (`deriveBatchLog`).
 - **Comprobaciones comunes**, en este orden, como en las [respuestas pedidas](#incidencias-de-respuestas-pedidas): un objeto `error` da `source_error_response`, salvo el rechazo de un multiplicador, y una respuesta que no cumple su esquema, `schema_validation_failed`. Las dos son `invalid_source_frame` de gravedad `error`, con la observación, la recepción y el hash del frame y el símbolo pedido de `echo_req` si lo trae.
@@ -751,11 +765,12 @@ Desde el PR 4c de [ADR-0021](adr/0021-mercados-reales-y-fuentes-de-investigacion
 - **Velas** (`deriveMarketCandles`). Una página de `ticks_history` con `msg_type` `candles`. La petición, de `echo_req`, tiene que ser de las del paso de los lotes: un símbolo, `style` `candles`, `granularity` 60, `start` y `end` enteros, con `end` no anterior a `start` y no `latest`, y solo los campos `ticks_history`, `style`, `granularity`, `start`, `end`, `count` y `req_id`; si no, `history_request_unsupported`. Cada vela tiene un `epoch` entero, desde el principio del minuto de `start` hasta `end`, estrictamente creciente, y sus cuatro precios con el `pip_size` de la respuesta, por la regla de `quote_decimal`, y el contrato la acepta. Si no, la página entera da `candles_inconsistent`, sin velas. La última vela, si su minuto no había terminado en `received_at_utc`, queda fuera sin incidencia, y una vela así que no es la última hace la página incoherente. Una página sin velas, como con el mercado cerrado, no da nada.
 - **Ticks de la historia** (`deriveHistoryDownloadTicks`). Una página de `ticks_history` con `msg_type` `history`, con una petición como la de las velas pero con `style` `ticks` o sin `style`, y sin `granularity`; si no, `history_request_unsupported`. La página pasa las comprobaciones de `readHistoryTicks` (ADR-0015 §4) con su `start` y su `end`; si no, `history_inconsistent`, sin ticks. Cada tick es un `MarketTick` 1.1.0 con el origen `history_download`, la procedencia del frame y `quality_flags` vacío.
 - **Un log** (`deriveBatchLog`). Recorre los source events de un log de los lotes en su orden y convierte cada frame según su `msg_type`: `trading_times`, `contracts_for`, `proposal`, `candles`, `history` o `active_symbols`. Los eventos de conexión no dan nada. Un frame que no es JSON da `payload_not_json`, y uno con otro `msg_type`, `unexpected_msg_type`, los dos sin símbolo. Un error a `ticks_history`, que Deriv manda con `msg_type` `ticks_history`, da `source_error_response` con el símbolo pedido. La respuesta `active_symbols`, el catálogo de los lotes (ADR-0021 §3), no da registro: el raw la conserva, y una inválida da su incidencia con el motivo del catálogo (ver `SourceCatalogSnapshot`).
+- **Velas que faltan** (desde el PR 5d1 de ADR-0021 §9). Un minuto está pedido si una página de velas respondida, válida o no (también con un error, como `RateLimit`), cuya petición es de las del paso de los lotes, lo pide entero, desde el principio del minuto de su `start` hasta su `end`, y si ya había terminado al recibirse y cae entero dentro de un intervalo del horario de su símbolo y su día: el último `TradingSession` recibido para ese día en el mismo log. Un minuto pedido sin vela de ninguna página falta. Cada tramo de minutos seguidos que faltan, por símbolo, da un `candle_missing`, con el tramo, la observación de la última página que pidió su primer minuto en `observed_ref` y la de los horarios que usó en `related_refs`. Sin horario de su día, un minuto no se comprueba. Por eso el paso de los lotes pide, antes de las páginas de cada día, el `trading_times` de ese día.
 - **Repetidos entre páginas.** Cuenta el primero, en el orden del log, y el repetido no es un registro. Una vela con el mismo símbolo y minuto que la primera, la que cuenta, da `candle_repeated`, `warning` si es igual a ella y `error` si trae otros precios. Un tick con la misma huella que otro que cuenta da `duplicate_exact`, y uno con el mismo símbolo e instante y otra huella, `source_time_conflict`, como en las reglas en vivo, pero sin quedar en la lista con su marca. Solo se compara con el tick que cuenta: una tercera copia igual a la segunda, que no contó, da otro `source_time_conflict` contra el primero, y no `duplicate_exact`. Las tres llevan la observación del primero en `related_refs`, y la del repetido en `observed_ref`.
 - **Orden.** Cada clase sale en su orden canónico (ver «Canonicalización y orden»), y las incidencias, por `observed_at_utc`, tipo e `incident_id`, como en los datasets en vivo.
 - **Política de segmentos 2.0.0** (`BATCH_SEGMENT_POLICY`). La de las secuencias en vivo, con el segmento cerrado además a las 15 respuestas: el motivo es `raw_frames`, porque cada respuesta es un frame raw, y los demás eventos no cuentan. Mantiene los 64 MiB y la ventana de 5 minutos: un segmento que no llega a 15 respuestas se cierra con el primer evento que llega 5 minutos o más después del suyo primero, que puede ser de la misma ejecución o de otra, si antes no se cierra de forma explícita (ADR-0005 §5), lo que fija el PR 5. `evaluateSegmentRotation` recibe la política; sin ella, sigue la 1.0.0 de las secuencias en vivo. La usará el paso de los lotes desde el PR 5. (Precisión del PR 5c1 de ADR-0021 §9: el comando de los lotes abre el log con esta política, que el segmento cerrado lleva en `segment_policy_version`, y al terminar cada secuencia de una ejecución cierra el segmento abierto de forma explícita, con el motivo `requested`. Si una escritura falla o el proceso se corta, el segmento queda abierto hasta la siguiente ejecución que escribe en esa secuencia, que lo cierra igual, con `requested`, antes de escribir nada, también si con un corte escribe en el log siguiente. En los horarios y las velas, si la vuelta del día ya estaba entera, esa ejecución es la del día siguiente. Así ningún segmento de los lotes mezcla dos ejecuciones, aunque la conexión de la que falló quede sin su `ConnectionClosed`.)
 
-Implementado en `packages/domain/src/batch-rules.ts` (`BATCH_RULE_SET`, `deriveTradingSessions`, `deriveContractOffer`, `relaxContractsForResponseSchema`, `deriveContractQuote` y `compareBatchRecords`), en `batch-series.ts` (`deriveMarketCandles`, `deriveHistoryDownloadTicks` y `deriveBatchLog`) y en `segment-policy.ts`. Sus vectores sintéticos están en `packages/domain/test/batch-rules.test.ts` y `batch-series.test.ts`, que corren con `pnpm run test:vectors` bajo las mismas guardas de reloj, azar y red.
+Implementado en `packages/domain/src/batch-rules.ts` (`BATCH_RULE_SET`, `deriveTradingSessions`, `deriveContractOffer`, `relaxContractsForResponseSchema`, `deriveContractQuote` y `compareBatchRecords`), en `batch-series.ts` (`deriveMarketCandles`, `deriveHistoryDownloadTicks` y `deriveBatchLog`), en `segment-policy.ts` y, la publicación de sus datasets, en `batch-publication.ts` (`batchSourceSchemaBytes`, `createBatchLogConfig` y `buildBatchDatasetPublication`). Sus vectores sintéticos están en `packages/domain/test/batch-rules.test.ts`, `batch-series.test.ts` y `batch-publication.test.ts`, que corren con `pnpm run test:vectors` bajo las mismas guardas de reloj, azar y red.
 
 ### Validador del esquema de fuente
 
@@ -1024,9 +1039,9 @@ AuditObject = { kind: "account" | "credential" | "link" | "session", id: UuidV7 
 - Cambio aditivo compatible incrementa minor; cambio de semántica, tipo, requiredness, orden o canonicalización incrementa major.
 - Contratos internos son estrictos y productores/consumidores se actualizan coordinadamente.
 - Payload externo se preserva completo como raw; el adaptador extrae campos validados y tolera extras solo si el esquema fijado lo permite.
-- Toda versión mayor conserva lector/replay mientras exista un dataset que la referencie, o documenta migración explícita sin sobrescribir originales. Así conviven hoy las incidencias 1.0.0, 2.0.0 y 3.0.0 (esta, de las reglas de los lotes, que todavía no produce nada en producción: el PR 4d le suma `candle_repeated` sin otra versión, y desde el 5f, la parte del PR 5 que la publica en producción, cada cambio sube su versión), los conjuntos de reglas 1.0.0, 2.0.0 y 3.0.0, y los snapshots de catálogo 1.0.0 y 2.0.0. `MarketTick` 1.1.0, una versión menor, solo suma el origen `history_download`, y la 1.0.0 sigue siendo la de la captura.
+- Toda versión mayor conserva lector/replay mientras exista un dataset que la referencie, o documenta migración explícita sin sobrescribir originales. Así conviven hoy las incidencias 1.0.0, 2.0.0 y 3.0.0 (esta, de las reglas de los lotes, que todavía no produce nada en producción: el PR 4d le suma `candle_repeated` y el 5d1 `candle_missing` sin otra versión, como a las reglas de los lotes 4.0.0 su normalizador y el tamaño de sus partes, y desde el 5f, la parte del PR 5 que la publica en producción, cada cambio sube su versión), los conjuntos de reglas 1.0.0, 2.0.0 y 3.0.0, y los snapshots de catálogo 1.0.0 y 2.0.0. `MarketTick` 1.1.0, una versión menor, solo suma el origen `history_download`, y la 1.0.0 sigue siendo la de la captura. Lo mismo `DatasetManifestCore` 1.1.0, que suma los registros de los lotes, con la 1.0.0 en la captura.
 - TypeScript y futuro Python comparten JSON Schema generado y vectores.
 
 ## Oráculo inicial
 
-[`test-vectors/market-data/v1`](../../test-vectors/market-data/v1/) es normativo para serialización lógica, hashes, calidad, salud y fallo de persistencia. Sus datos son sintéticos. Las reglas 3.0.0 tienen su propio vector sintético, con las expectativas escritas a mano y el `dataset_id` fijado, en [`packages/domain/test/rules-3-0-0.test.ts`](../../packages/domain/test/rules-3-0-0.test.ts), que corre con `pnpm run test:vectors` bajo las mismas guardas de reloj, azar y red, como los de las reglas de los lotes 4.0.0, en [`packages/domain/test/batch-rules.test.ts`](../../packages/domain/test/batch-rules.test.ts) y [`batch-series.test.ts`](../../packages/domain/test/batch-series.test.ts). El verificador limita cada archivo a 8 MiB y cada manifiesto a 64 MiB declarados, rechaza paths absolutos, traversal y symlinks, y valida expectativas/perfiles además de checksums.
+[`test-vectors/market-data/v1`](../../test-vectors/market-data/v1/) es normativo para serialización lógica, hashes, calidad, salud y fallo de persistencia. Sus datos son sintéticos. Las reglas 3.0.0 tienen su propio vector sintético, con las expectativas escritas a mano y el `dataset_id` fijado, en [`packages/domain/test/rules-3-0-0.test.ts`](../../packages/domain/test/rules-3-0-0.test.ts), que corre con `pnpm run test:vectors` bajo las mismas guardas de reloj, azar y red, como los de las reglas de los lotes 4.0.0, en [`packages/domain/test/batch-rules.test.ts`](../../packages/domain/test/batch-rules.test.ts) y [`batch-series.test.ts`](../../packages/domain/test/batch-series.test.ts), y el de la publicación de sus datasets, en [`batch-publication.test.ts`](../../packages/domain/test/batch-publication.test.ts). El verificador limita cada archivo a 8 MiB y cada manifiesto a 64 MiB declarados, rechaza paths absolutos, traversal y symlinks, y valida expectativas/perfiles además de checksums.

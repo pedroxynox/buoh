@@ -26,12 +26,30 @@ import {
 export const EMPTY_SEQUENCE_SHA256 =
   'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 
+/**
+ * Roles lógicos en su orden canónico. Los cuatro de los registros de los lotes (`market_candles`,
+ * `trading_sessions`, `contract_offers` y `contract_quotes`) solo existen en un core 1.1.0, el de un
+ * dataset de los lotes (ADR-0021 §3); un core 1.0.0, el de la captura en vivo, no los tiene, así que
+ * su orden y su `dataset_id` no cambian.
+ */
 const logicalArtifactRoleSchema = z.enum([
   'source_events',
   'normalized_ticks',
+  'market_candles',
+  'trading_sessions',
+  'contract_offers',
+  'contract_quotes',
   'quality_incidents',
   'operational_conditions',
 ]);
+const BATCH_ROLES = new Set<string>([
+  'market_candles',
+  'trading_sessions',
+  'contract_offers',
+  'contract_quotes',
+]);
+/** La versión de `DatasetManifestCore` de un dataset de los lotes, con sus campos propios. */
+export const BATCH_MANIFEST_CORE_SCHEMA_VERSION = '1.1.0';
 const storageObjectRoleSchema = z.enum([
   ...logicalArtifactRoleSchema.options,
   'source_schema',
@@ -41,7 +59,7 @@ const segmentIndexSchema = z.number().int().min(0).max(999_999);
 const artifactIdSchema = z
   .string()
   .regex(
-    /^(?:source_events|normalized_ticks|quality_incidents|operational_conditions|source_schema|quality_profile):\d{6}$/u,
+    /^(?:source_events|normalized_ticks|market_candles|trading_sessions|contract_offers|contract_quotes|quality_incidents|operational_conditions|source_schema|quality_profile):\d{6}$/u,
   );
 
 export const logicalArtifactStructuralSchema = z.strictObject({
@@ -127,9 +145,38 @@ export const datasetManifestCoreStructuralSchema = z
     normalized_tick_count: nonNegativeIntegerSchema,
     incident_count: nonNegativeIntegerSchema,
     condition_event_count: nonNegativeIntegerSchema,
+    // Solo en un core 1.1.0, el de un dataset de los lotes, y entonces todos.
+    market_candle_schema_version: schemaVersionSchema.optional(),
+    trading_session_schema_version: schemaVersionSchema.optional(),
+    contract_offer_schema_version: schemaVersionSchema.optional(),
+    contract_quote_schema_version: schemaVersionSchema.optional(),
+    candle_time_from_utc: utcTimestampMsSchema.nullable().optional(),
+    candle_time_to_utc: utcTimestampMsSchema.nullable().optional(),
+    market_candle_count: nonNegativeIntegerSchema.optional(),
+    trading_session_count: nonNegativeIntegerSchema.optional(),
+    contract_offer_count: nonNegativeIntegerSchema.optional(),
+    contract_quote_count: nonNegativeIntegerSchema.optional(),
     logical_artifacts: z.array(logicalArtifactStructuralSchema).min(4),
   })
   .meta({ id: 'DatasetManifestCore', title: 'DatasetManifestCore' });
+
+const BATCH_CORE_FIELDS = [
+  'market_candle_schema_version',
+  'trading_session_schema_version',
+  'contract_offer_schema_version',
+  'contract_quote_schema_version',
+  'candle_time_from_utc',
+  'candle_time_to_utc',
+  'market_candle_count',
+  'trading_session_count',
+  'contract_offer_count',
+  'contract_quote_count',
+] as const;
+
+/** Si el core es el de un dataset de los lotes: `schema_version` 1.1.0. */
+export function isBatchManifestCore(core: { readonly schema_version: string }): boolean {
+  return core.schema_version === BATCH_MANIFEST_CORE_SCHEMA_VERSION;
+}
 
 // Orden canónico de los roles lógicos: el de la enumeración de arriba.
 const roleOrder = new Map(logicalArtifactRoleSchema.options.map((role, index) => [role, index]));
@@ -173,6 +220,36 @@ export const datasetManifestCoreSchema = datasetManifestCoreStructuralSchema.sup
       });
     }
 
+    const batch = isBatchManifestCore(value);
+    for (const field of BATCH_CORE_FIELDS) {
+      if ((value[field] !== undefined) !== batch) {
+        context.addIssue({
+          code: 'custom',
+          message: `${field} va exactamente en un core ${BATCH_MANIFEST_CORE_SCHEMA_VERSION}, el de los lotes.`,
+          path: [field],
+        });
+      }
+    }
+    if (batch) {
+      const hasNoCandles = value.market_candle_count === 0;
+      const candleFrom = value.candle_time_from_utc ?? null;
+      const candleTo = value.candle_time_to_utc ?? null;
+      if (hasNoCandles !== (candleFrom === null && candleTo === null)) {
+        context.addIssue({
+          code: 'custom',
+          message: 'El rango de velas debe ser null exactamente cuando no hay velas.',
+          path: ['candle_time_from_utc'],
+        });
+      }
+      if (candleFrom !== null && candleTo !== null && compareUtc(candleFrom, candleTo) > 0) {
+        context.addIssue({
+          code: 'custom',
+          message: 'El rango de velas es inválido.',
+          path: ['candle_time_to_utc'],
+        });
+      }
+    }
+
     const artifactIds = value.logical_artifacts.map((artifact) => artifact.artifact_id);
     if (new Set(artifactIds).size !== artifactIds.length) {
       context.addIssue({
@@ -211,12 +288,26 @@ export const datasetManifestCoreSchema = datasetManifestCoreStructuralSchema.sup
     const expectedCounts = {
       source_events: value.source_event_count,
       normalized_ticks: value.normalized_tick_count,
+      market_candles: value.market_candle_count ?? 0,
+      trading_sessions: value.trading_session_count ?? 0,
+      contract_offers: value.contract_offer_count ?? 0,
+      contract_quotes: value.contract_quote_count ?? 0,
       quality_incidents: value.incident_count,
       operational_conditions: value.condition_event_count,
     } as const;
 
     for (const role of logicalArtifactRoleSchema.options) {
       const artifacts = byRole.get(role);
+      if (BATCH_ROLES.has(role) && !batch) {
+        if (artifacts !== undefined) {
+          context.addIssue({
+            code: 'custom',
+            message: `El rol ${role} solo existe en un core ${BATCH_MANIFEST_CORE_SCHEMA_VERSION}, el de los lotes.`,
+            path: ['logical_artifacts'],
+          });
+        }
+        continue;
+      }
       if (artifacts === undefined || artifacts.length === 0) {
         context.addIssue({
           code: 'custom',
@@ -293,7 +384,8 @@ export const datasetManifestSchema = datasetManifestStructuralSchema.superRefine
       });
     }
 
-    if (deriveDatasetId(value.manifest_core) !== value.dataset_id) {
+    // Los campos opcionales que faltan no están en el objeto validado, así que es JSON.
+    if (deriveDatasetId(value.manifest_core as JsonValue) !== value.dataset_id) {
       context.addIssue({
         code: 'custom',
         message: 'dataset_id no corresponde a manifest_core.',
