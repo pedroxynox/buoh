@@ -8,7 +8,7 @@ Notas prácticas para sesiones de Kiro. No deciden nada: el proceso está en [`A
 
 ## Arranque de sesión
 
-Kiro Web abre el espacio de trabajo en `/projects/sandbox`, con el repositorio en `/projects/sandbox/buoh`. El 2026-10-27 el agente no recibió ni este steering ni el `AGENTS.md` del repositorio ([ADR-0014](../../docs/arquitectura/adr/0014-skills-de-terceros-para-el-agente.md), «Contexto»). Antes de la primera respuesta de cada sesión:
+Kiro Web abre el espacio de trabajo en `/projects/sandbox`, con el repositorio en `/projects/sandbox/buoh`. El 2026-10-27 el agente no recibió ni este steering ni el `AGENTS.md` del repositorio ([ADR-0014](../../docs/arquitectura/adr/0014-skills-de-terceros-para-el-agente.md), «Contexto»). Un subagente no sigue estos pasos: lee lo que pide su encargo (`AGENTS.md`, «Eficiencia»). Antes de la primera respuesta de cada sesión:
 
 1. Instalar las skills: `node /projects/sandbox/buoh/.kiro/instalar-skills.mjs`. Si termina con 1, decir al propietario en una línea qué origen faltó y seguir con las demás. Si el instalador de la rama de la sesión no es el de `main` (`git -C /projects/sandbox/buoh diff --quiet origin/main -- .kiro/instalar-skills.mjs` falla), no ejecutarlo sin preguntar antes al propietario: puede traer skills que nadie ha revisado (ADR-0014, «Consecuencias»).
 2. Activar la skill `caveman` («Comunicación con el propietario»).

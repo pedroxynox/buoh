@@ -12,6 +12,8 @@ buoh es un sistema de investigación, señales y futura ejecución controlada. C
 4. Lee código, contratos, ADR y runbooks afectados antes de proponer cambios.
 5. Si altera datos, contratos, estrategia, riesgo, ejecución, seguridad, infraestructura o alcance, actualiza la fuente canónica o crea una ADR antes del código.
 
+Un subagente hace los pasos 1 a 4 solo con lo que pide su encargo ([AGENTS.md](AGENTS.md), «Eficiencia»).
+
 No agregues cuentas reales, secretos, pagos ni ejecución con dinero real sin una puerta aprobada.
 
 ## Fuentes de verdad
