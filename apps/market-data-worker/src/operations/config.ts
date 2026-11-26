@@ -108,7 +108,7 @@ const operationsEnvironmentSchema = z.object({
  * el paso 1 crea el rol y prepara los logs de las secuencias por lotes; sin ella, no toca ninguno de
  * los dos. Va en otro objeto para que la prueba del Blueprint, que compara las variables de
  * `render-datos.yaml` con las del primero, no la pida antes; esa prueba exige que cada una sea
- * opcional y que el Blueprint no la tenga. El 5f la pasa al primero, como el PR 6b de ADR-0019 §14
+ * opcional y que el Blueprint no la tenga. El 5f la pasa al primero, como el PR 6 de ADR-0019 §14
  * hizo con la de `buoh_api`.
  */
 const pendingEnvironmentSchema = z.object({
