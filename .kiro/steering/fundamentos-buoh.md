@@ -10,7 +10,7 @@ buoh es un bot multiplataforma de investigación cuantitativa, señales trazable
 
 ## Protocolo obligatorio para agentes
 
-- Antes de trabajar, leer [`AGENTS.md`](../../AGENTS.md), [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md) y, de los planes activos enlazados allí (`plan` y `parallel_plans`), lo que pide `AGENTS.md` («Lectura obligatoria»).
+- Antes de trabajar, leer [`AGENTS.md`](../../AGENTS.md), [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md) y, de los planes activos enlazados allí (`plan` y `parallel_plans`), lo que pide `AGENTS.md` («Lectura obligatoria»). Un subagente lee lo que pide su encargo (`AGENTS.md`, «Eficiencia»).
 - Las conversaciones no sustituyen las fuentes canónicas del repositorio.
 - Ante conflicto o decisión ausente, seguir el protocolo de `AGENTS.md`; no improvisar silenciosamente.
 
