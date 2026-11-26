@@ -7,10 +7,10 @@ import { WORKER_NODE_FLAGS } from '../node-flags.js';
  * Los comandos que `buoh-operaciones` corre en un proceso aparte (ADR-0018 §11): `data:health` y
  * `db:migrate` del worker, `db:migrate` de la API (`api_migrate`, ADR-0019 §7) y, desde el PR 4
  * de ADR-0020 §13, las migraciones de `buoh_datasets` (`datasets_migrate`), `datasets:publish`
- * (`publish`) y `data:replay` (`replay`).
+ * (`publish`) y `data:replay` (`replay`), y, desde el PR 5c2 de ADR-0021 §9, `batch`.
  */
 export type WorkerChild =
-  'api_migrate' | 'datasets_migrate' | 'health' | 'migrate' | 'publish' | 'replay';
+  'api_migrate' | 'batch' | 'datasets_migrate' | 'health' | 'migrate' | 'publish' | 'replay';
 
 /** Cómo terminó un proceso: su código, su salida y si se cortó por su plazo. */
 export interface ChildResult {
@@ -41,10 +41,12 @@ export type RunChild = (
 /**
  * El plazo de cada proceso. `data:health` responde en unos 35 s como mucho (`HEALTH_DEADLINE_MS` y
  * `HEALTH_CLOSE_DEADLINE_MS`); los `db:migrate` aplican migraciones que solo añaden. La publicación
- * y la verificación tienen 60 s cada paso (ADR-0020 §8).
+ * y la verificación tienen 60 s cada paso (ADR-0020 §8). `batch` no envía ni conecta después de
+ * `BATCH_DEADLINE_MS` (70 s), y la última petición espera su respuesta 15 s y su cierre 5 s.
  */
 export const CHILD_TIMEOUT_MS: Readonly<Record<WorkerChild, number>> = {
   api_migrate: 120_000,
+  batch: 120_000,
   datasets_migrate: 120_000,
   health: 60_000,
   migrate: 120_000,
@@ -58,6 +60,7 @@ export const CHILD_TIMEOUT_MS: Readonly<Record<WorkerChild, number>> = {
  */
 const CHILD_SCRIPTS: Readonly<Record<WorkerChild, URL>> = {
   api_migrate: new URL('../../../api/dist/cli/migrate.js', import.meta.url),
+  batch: new URL('../cli/batch.js', import.meta.url),
   datasets_migrate: new URL('../cli/migrate-datasets.js', import.meta.url),
   health: new URL('../cli/health.js', import.meta.url),
   migrate: new URL('../cli/migrate.js', import.meta.url),

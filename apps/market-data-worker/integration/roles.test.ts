@@ -673,6 +673,7 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
     return {
       apiPassword: null,
       apiReaderPassword: null,
+      batchObjects: null,
       batchPassword: null,
       codeVersion: null,
       healthObjects: config.s3,

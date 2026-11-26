@@ -172,7 +172,13 @@ function operationsEnvironment(rotated: { agent?: string; health?: string } = {}
  * `db:migrate` de la API corre en su proceso, con el CLI compilado de `apps/api` y el entorno que le
  * da el servicio, salvo el cifrado, que el servidor local no tiene: `test` y `disable`.
  */
+/** El proceso de `batch` en este proceso, con los almacenes locales; lo pone la prueba del PR 5c2. */
+let batchChild: RunChild | null = null;
+
 const inProcess: RunChild = async (child, args, env) => {
+  if (child === 'batch' && batchChild !== null) {
+    return batchChild(child, args, env);
+  }
   if (child === 'api_migrate') {
     return runNodeScript(
       workerChildScript(child, args, {
@@ -1921,5 +1927,154 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       ),
     ).toEqual(['idle', 'idle', 'idle']);
     expect(sockets).toHaveLength(3);
+  });
+
+  it('el paso de los lotes (PR 5c2 de ADR-0021 §9) lanza batch con buoh_lotes y el token lotes, guarda su estado en el log activo de R_100 y lo pasa a la ejecución siguiente; batchLogSummary da los conteos de un log de los lotes', async () => {
+    // Después de la prueba anterior, en la media hora siguiente: el paso empieza sin estado, así
+    // que las tres secuencias vuelven a pedir lo suyo.
+    const halfHour = 30 * 60_000;
+    const startMs = Math.ceil(Date.parse(clock.now()) / halfHour) * halfHour + 31 * 60_000;
+    const realStart = Date.now();
+    const batchNow = () => new Date(startMs + (Date.now() - realStart)).toISOString();
+    let id = 0;
+    const index = { value: 0 };
+    const received: Readonly<Record<string, string>>[] = [];
+    batchChild = async (_child, args, env) => {
+      received.push(env);
+      const result = await batchCommand(args, env, {
+        acquireLock: (config, sequence) =>
+          SourceLock.acquire({ postgres: plain(config.postgres), sequence, source: DERIV_SOURCE }),
+        connect: (input) => new AnsweringSocket(input, answer, index),
+        expected: BATCH_FIXTURE.expected,
+        fetch: () => Promise.resolve(new Response(BATCH_FIXTURE.archive, { status: 200 })),
+        nextId: () => uuid((id += 1) + 40_000),
+        now: batchNow,
+        openLog: (config, lock, log) => openBatchLog(plainConfig(config), lock, log),
+        openReads: (config, sequence) =>
+          openStartupReads(plainConfig(config), { now: batchNow, sequence, source: DERIV_SOURCE }),
+        pacingMs: 10,
+        scheduler: realScheduler,
+      });
+      return {
+        exitCode: result.exitCode,
+        stderr: result.stderr === null ? '' : `${result.stderr}\n`,
+        stdout: result.stdout === null ? '' : `${result.stdout}\n`,
+        timedOut: false,
+      };
+    };
+    const env = {
+      ...operationsEnvironment(),
+      BUOH_LOTES_POSTGRES_PASSWORD: passwords.batch,
+      BUOH_LOTES_S3_ACCESS_KEY_ID: local.s3.accessKeyId,
+      BUOH_LOTES_S3_BUCKET: local.s3.bucket,
+      BUOH_LOTES_S3_ENDPOINT: local.s3.endpoint,
+      BUOH_LOTES_S3_REGION: local.s3.region,
+      BUOH_LOTES_S3_SECRET_ACCESS_KEY: local.s3.secretAccessKey,
+    };
+    /** Los informes del paso de los lotes en todos los logs de R_100, en orden. */
+    const batchReports = async () => {
+      const { rows: schemas } = await ready(admin).query<{ nspname: string }>(
+        "SELECT nspname FROM pg_namespace WHERE nspname ~ '^buoh_log_[0-9]{6}$' ORDER BY nspname",
+      );
+      const found: { report_id: string; report: Record<string, unknown>; schema: string }[] = [];
+      for (const { nspname } of schemas) {
+        const { rows } = await ready(admin).query<{ report_id: string; report_jcs: string }>(
+          `SELECT report_id::text AS report_id, report_jcs FROM ${nspname}.operations_reports
+            WHERE step = 'batch'`,
+        );
+        found.push(
+          ...rows.map((row) => ({
+            report: JSON.parse(row.report_jcs) as Record<string, unknown>,
+            report_id: row.report_id,
+            schema: nspname,
+          })),
+        );
+      }
+      return found.sort((left, right) => left.report_id.localeCompare(right.report_id));
+    };
+
+    try {
+      const first = await operations(env);
+      expect(first.step('batch')).toMatchObject({ status: 'completed' });
+      expect(received[0]?.['BUOH_POSTGRES_USER']).toBe(BATCH_ROLE);
+      expect(received[0]?.['BUOH_POSTGRES_PASSWORD']).toBe(passwords.batch);
+      const firstLine = first.step('batch')?.['report'] as {
+        sequences: { sequence: string; status: string }[];
+        state: Record<string, unknown>;
+      };
+      expect(firstLine.sequences.map((item) => item.status)).toEqual([
+        'completed',
+        'completed',
+        'completed',
+      ]);
+      const stored = await batchReports();
+      expect(stored).toHaveLength(1);
+      expect(stored[0]?.report['state']).toEqual(firstLine.state);
+
+      const second = await operations(env);
+      const secondLine = second.step('batch')?.['report'] as {
+        sequences: { status: string }[];
+        state: Record<string, unknown>;
+      };
+      expect(secondLine.sequences.map((item) => item.status)).toEqual(['idle', 'idle', 'idle']);
+      expect(secondLine.state).toEqual(firstLine.state);
+      expect(await batchReports()).toHaveLength(2);
+      // Ningún log de los lotes terminó: el informe final no guarda nada.
+      expect(
+        second.lines.filter((line) => line['step'] === 'batch_final').map((line) => line['report']),
+      ).toEqual(BATCH_SEQUENCES.map((item) => ({ log: null, sequence: item.name })));
+    } finally {
+      batchChild = null;
+    }
+
+    const config = loadOperationsConfig(env);
+    const database = openOwnerDatabase(
+      { ...config, owner: plain(config.owner) },
+      { source: DERIV_SOURCE },
+    );
+    try {
+      // Los horarios piden 11 cada día, con una conexión, y cada ejecución cierra su segmento: la
+      // del 5c1 y la primera de aquí, cada una con sus 11 respuestas, su apertura y su cierre.
+      const location = logLocation(1, BATCH_SCHEDULES_SEQUENCE);
+      expect(await database.batchLogSummary(location)).toEqual({
+        closed_segments: 2,
+        events: { connection_closed: 2, connection_opened: 2, raw_source_frame: 22 },
+        last_closed_segment: 1,
+        open_events: 0,
+        operational_incidents: 0,
+      });
+      // Un evento en un segmento sin cerrar y una incidencia operativa, sintéticos, como los dejaría
+      // una ejecución cortada. Los disparadores del log nombran sus tablas sin esquema.
+      const client = await ready(admin).connect();
+      try {
+        await client.query(`SET search_path TO ${location.schema}`);
+        await client.query(
+          `INSERT INTO source_event_index
+             (source, segment_index, position, event_id, kind, event_time_utc, object_sha256,
+              byte_length)
+           VALUES ($1, 2, 0, $2, 'raw_source_frame', '2026-01-01T00:00:00.000Z', $3, 10)`,
+          [DERIV_SOURCE, uuid(60_001), 'b'.repeat(64)],
+        );
+        await client.query(
+          `INSERT INTO operational_incidents
+             (incident_id, incident_type, severity, source, symbol, observed_at_utc, incident_jcs)
+           VALUES ($1, 'persistence_unavailable', 'error', $2, NULL, '2026-01-01T00:00:00.000Z',
+                   '{}')`,
+          [`sha256:${'c'.repeat(64)}`, DERIV_SOURCE],
+        );
+        await client.query('RESET search_path');
+      } finally {
+        client.release();
+      }
+      expect(await database.batchLogSummary(location)).toEqual({
+        closed_segments: 2,
+        events: { connection_closed: 2, connection_opened: 2, raw_source_frame: 23 },
+        last_closed_segment: 1,
+        open_events: 1,
+        operational_incidents: 1,
+      });
+    } finally {
+      await database.close();
+    }
   });
 });

@@ -11,6 +11,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   apiMigrateEnvironment,
+  batchEnvironment,
+  BATCH_START_LIMIT_MS,
   BATCH_CANDLES_SEQUENCE,
   BATCH_QUOTES_SEQUENCE,
   BATCH_SCHEDULES_SEQUENCE,
@@ -57,6 +59,7 @@ import {
   type OperationalAlert,
   type OperationsConfig,
   type OperationsReportRow,
+  type BatchLogSummary,
   type OwnerDatabase,
   type RunChild,
   type SpaceMeasure,
@@ -170,6 +173,7 @@ describe('loadOperationsConfig (ADR-0018 §11)', () => {
     expect(CONFIG).toEqual({
       apiPassword: null,
       apiReaderPassword: null,
+      batchObjects: null,
       batchPassword: null,
       codeVersion: null,
       healthObjects: {
@@ -417,6 +421,8 @@ function fakeDatabase(state: {
   space?: SpaceMeasure;
   /** Las publicaciones activas de `production`, en orden de publicación (ADR-0020 §8, paso 7). */
   publications?: readonly { dataset_id: string; publication_id: string }[];
+  /** Los conteos de cada log de los lotes para su informe final, por su esquema (`logKey`). */
+  summaries?: Readonly<Record<number | string, BatchLogSummary>>;
   /**
    * Los logs en los que `buoh_ingesta` todavía no tiene el uso del esquema, por su número en R_100
    * o su esquema (`logKey`). Sin él, ninguno: los de `logs` ya están preparados. Un log que crea
@@ -460,6 +466,20 @@ function fakeDatabase(state: {
       return answer('appendReport', () => {
         reports.push({ log: target.number, row, schema: target.schema });
       });
+    },
+    batchLogSummary: (target) => {
+      calls.push(`summary:${String(logKey(target))}`);
+      return answer(
+        'batchLogSummary',
+        () =>
+          state.summaries?.[logKey(target)] ?? {
+            closed_segments: 0,
+            events: {},
+            last_closed_segment: null,
+            open_events: 0,
+            operational_incidents: 0,
+          },
+      );
     },
     checkLogin: (role) => {
       calls.push(`login:${role}`);
@@ -877,6 +897,8 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       'space',
       'publication',
       'dataset_verification',
+      'batch',
+      'batch_final',
       'memory',
     ]);
     const db = fakeDatabase({ loggedIn: new Set(), logs: [] });
@@ -5276,5 +5298,521 @@ describe('las secuencias por lotes en el paso 1 (ADR-0021 §3, precisión del PR
     });
     expect(lines.map((line) => line['step'])).toContain('space');
     expect(result.status).toBe('failed');
+  });
+});
+
+describe('los pasos de los lotes (ADR-0021 §3, precisión del PR 5c2 de su §9)', () => {
+  /** La contraseña de `buoh_lotes` y el token `lotes`, que el Blueprint le dará con el PR 5f. */
+  const LOTES_ENV = {
+    BUOH_LOTES_POSTGRES_PASSWORD: 'lotes-sintetica-0123456789',
+    BUOH_LOTES_S3_ACCESS_KEY_ID: 'clave-lotes-sintetica',
+    BUOH_LOTES_S3_BUCKET: 'buoh-captura',
+    BUOH_LOTES_S3_ENDPOINT: 'https://cuenta-sintetica.r2.invalid',
+    BUOH_LOTES_S3_REGION: 'auto',
+    BUOH_LOTES_S3_SECRET_ACCESS_KEY: 'secreto-lotes-sintetico',
+  };
+  const LOTES_CONFIG = loadOperationsConfig({ ...ENV, ...LOTES_ENV });
+  const loggedIn = () => new Set(['buoh_ingesta', 'buoh_salud', 'buoh_agente', 'buoh_lotes']);
+  /** IDs crecientes desde `start`, para que los informes de cada ejecución sigan a los anteriores. */
+  const idsFrom = (start: number) => {
+    let next = start;
+    return () => uuid((next += 1));
+  };
+  const rejectedWith = (env: Record<string, string>): readonly string[] => {
+    try {
+      loadOperationsConfig({ ...ENV, ...env });
+      return [];
+    } catch (error) {
+      if (error instanceof ConfigError) {
+        return error.variables;
+      }
+      throw error;
+    }
+  };
+  /** Lo que hizo `batch` en una secuencia, como lo escribe su línea. */
+  const outcome = (sequence: string, extra: Record<string, unknown> = {}) => ({
+    abandoned: null,
+    answered: 11,
+    cut: null,
+    cut_blocked: null,
+    detail: null,
+    errors: {},
+    from: 0,
+    log: 1,
+    next: 11,
+    reason: null,
+    round: '2026-03-02',
+    schema_failures: {},
+    sent: 11,
+    sequence,
+    status: 'completed',
+    unexpected: 0,
+    until: 11,
+    ...extra,
+  });
+  const STATE_1 = {
+    lotes_cotizaciones: { next: 21, round: '2026-03-02T09:30:00.000Z' },
+    lotes_horarios: { next: 11, round: '2026-03-02' },
+    lotes_velas: { next: 14, round: '2026-03-01' },
+  };
+  const STATE_2 = {
+    ...STATE_1,
+    lotes_cotizaciones: { next: 42, round: '2026-03-02T09:30:00.000Z' },
+  };
+  const batchLine = (
+    state: unknown,
+    sequences: readonly unknown[] = BATCH_SEQUENCES.map((item) => outcome(item.name)),
+    status = 'completed',
+  ) =>
+    JSON.stringify({
+      schemas: { archive_sha256: 'a'.repeat(64), release: 'release-sintetica' },
+      sequences,
+      state,
+      status,
+    });
+  /** Procesos falsos en los que `batch` responde con `answer`. */
+  const batchChildren = (answer: () => Partial<ChildResult>) =>
+    fakeChildren((child) => (child === 'batch' ? answer() : {}));
+  const batchArgs = (children: ReturnType<typeof fakeChildren>) =>
+    children.runs.filter((item) => item.child === 'batch').map((item) => item.args);
+  const batchReports = (db: ReturnType<typeof fakeDatabase>, step = 'batch') =>
+    db.reports.filter((item) => item.row.step === step);
+
+  it('las variables del token lotes van las cinco o ninguna, y el proceso de batch recibe solo buoh_lotes y el token lotes', () => {
+    expect(CONFIG.batchObjects).toBeNull();
+    expect(LOTES_CONFIG.batchObjects).toEqual({
+      accessKeyId: 'clave-lotes-sintetica',
+      bucket: 'buoh-captura',
+      endpoint: 'https://cuenta-sintetica.r2.invalid',
+      region: 'auto',
+      secretAccessKey: 'secreto-lotes-sintetico',
+    });
+    expect(rejectedWith({ BUOH_LOTES_S3_ACCESS_KEY_ID: 'clave-lotes-sintetica' })).toEqual([
+      'BUOH_LOTES_S3_BUCKET',
+      'BUOH_LOTES_S3_ENDPOINT',
+      'BUOH_LOTES_S3_REGION',
+      'BUOH_LOTES_S3_SECRET_ACCESS_KEY',
+    ]);
+    expect(rejectedWith({ ...LOTES_ENV, BUOH_LOTES_S3_ENDPOINT: 'no-es-url' })).toEqual([
+      'BUOH_LOTES_S3_ENDPOINT',
+    ]);
+    expect(batchEnvironment(LOTES_CONFIG)).toEqual({
+      BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+      BUOH_POSTGRES_DB: 'buoh',
+      BUOH_POSTGRES_HOST: 'pg-sintetico.invalid',
+      BUOH_POSTGRES_PASSWORD: 'lotes-sintetica-0123456789',
+      BUOH_POSTGRES_PORT: '5432',
+      BUOH_POSTGRES_SSLMODE: 'require',
+      BUOH_POSTGRES_USER: 'buoh_lotes',
+      BUOH_S3_ACCESS_KEY_ID: 'clave-lotes-sintetica',
+      BUOH_S3_BUCKET: 'buoh-captura',
+      BUOH_S3_ENDPOINT: 'https://cuenta-sintetica.r2.invalid',
+      BUOH_S3_REGION: 'auto',
+      BUOH_S3_SECRET_ACCESS_KEY: 'secreto-lotes-sintetico',
+    });
+    expect(() => batchEnvironment(CONFIG)).toThrow(TypeError);
+    const token = Object.fromEntries(
+      Object.entries(LOTES_ENV).filter(([name]) => name !== 'BUOH_LOTES_POSTGRES_PASSWORD'),
+    );
+    expect(() => batchEnvironment(loadOperationsConfig({ ...ENV, ...token }))).toThrow(TypeError);
+    expect(workerChildScript('batch', ['--json'], {}).timeoutMs).toBe(120_000);
+    const spec = workerChildScript('batch', ['--json'], {});
+    expect(
+      spec.script.endsWith('/dist/cli/batch.js') || spec.script.endsWith('/src/cli/batch.js'),
+    ).toBe(true);
+    expect(spec.reportMemory).toBe(true);
+  });
+
+  it('sin la contraseña de buoh_lotes o sin el token lotes, los pasos de los lotes no corren ni dejan línea', async () => {
+    const { BUOH_LOTES_POSTGRES_PASSWORD: password, ...token } = LOTES_ENV;
+    for (const config of [
+      CONFIG,
+      loadOperationsConfig({ ...ENV, BUOH_LOTES_POSTGRES_PASSWORD: password }),
+      loadOperationsConfig({ ...ENV, ...token }),
+    ]) {
+      const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1)] });
+      const children = batchChildren(() => ({ exitCode: 0, stdout: batchLine(STATE_1) }));
+      const { lines } = await run(db, children, { config });
+      const steps = lines.map((line) => line['step']);
+      expect(steps).not.toContain('batch');
+      expect(steps).not.toContain('batch_final');
+      expect(batchArgs(children)).toEqual([]);
+    }
+  });
+
+  it('con las dos, batch corre después de la publicación y antes de memory, con el estado vacío la primera vez; guarda el estado nuevo en el log activo de R_100, y la ejecución siguiente lo pasa', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1)] });
+    const first = batchChildren(() => ({
+      exitCode: 0,
+      stdout: batchLine(
+        STATE_1,
+        BATCH_SEQUENCES.map((item) => outcome(item.name, { message: 'texto sin sanear' })),
+      ),
+    }));
+    const { lines, result } = await run(db, first, { config: LOTES_CONFIG });
+
+    expect(result.status).toBe('completed');
+    const steps = lines.map((line) => line['step']);
+    expect(steps.slice(steps.indexOf('space'))).toEqual([
+      'space',
+      'batch',
+      'batch_final',
+      'batch_final',
+      'batch_final',
+      'memory',
+      undefined,
+    ]);
+    expect(batchArgs(first)).toEqual([['--json', '--state', '{}']]);
+    expect(first.runs.find((item) => item.child === 'batch')?.env).toEqual(
+      batchEnvironment(LOTES_CONFIG),
+    );
+    const [stored] = batchReports(db);
+    expect(stored).toMatchObject({
+      row: {
+        report: {
+          sequences: BATCH_SEQUENCES.map((item) => outcome(item.name)),
+          state: STATE_1,
+        },
+        status: 'completed',
+      },
+      schema: 'buoh_log_000001',
+    });
+    // Solo pasan al informe los campos conocidos de cada secuencia.
+    expect(JSON.stringify(stored?.row.report)).not.toContain('message');
+    const memory = lines.find((line) => line['step'] === 'memory') as
+      { report: { children: unknown[] } } | undefined;
+    expect(memory?.report.children).toContainEqual({ child: 'batch', max_rss_bytes: null });
+
+    const second = batchChildren(() => ({ exitCode: 0, stdout: batchLine(STATE_2) }));
+    await run(db, second, { config: LOTES_CONFIG, nextId: idsFrom(100) });
+    const [args] = batchArgs(second);
+    expect(args?.slice(0, 2)).toEqual(['--json', '--state']);
+    expect(JSON.parse(args?.[2] ?? 'null')).toEqual(STATE_1);
+    expect(batchReports(db).map((item) => item.row.report['state'])).toEqual([STATE_1, STATE_2]);
+  });
+
+  it('con salida 1, el paso falla con el motivo de la primera secuencia que falló y guarda igual el estado nuevo', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1)] });
+    const sequences = [
+      outcome('lotes_horarios'),
+      outcome('lotes_cotizaciones', {
+        detail: null,
+        reason: 'log_not_prepared',
+        status: 'failed',
+      }),
+      outcome('lotes_velas', { reason: 'rate_limit', status: 'stopped' }),
+    ];
+    const children = batchChildren(() => ({
+      exitCode: 1,
+      stdout: batchLine(STATE_1, sequences, 'failed'),
+    }));
+    const { alerts, lines, result } = await run(db, children, { config: LOTES_CONFIG });
+
+    expect(result.status).toBe('failed');
+    expect(lines.find((line) => line['step'] === 'batch')).toMatchObject({
+      report: { reason: 'log_not_prepared', state: STATE_1 },
+      status: 'failed',
+    });
+    expect(alerts).toContainEqual({
+      event: 'operations_step_failed',
+      reason: 'log_not_prepared',
+      step: 'batch',
+    });
+    expect(batchReports(db)[0]?.row).toMatchObject({
+      report: { state: STATE_1 },
+      status: 'failed',
+    });
+
+    // Una escritura que falló da su etapa y su motivo en detail (writeFailureOf), y el estado se
+    // guarda igual: lo que ya era durable cuenta como respondido.
+    const persistence = batchChildren(() => ({
+      exitCode: 1,
+      stdout: batchLine(
+        STATE_2,
+        [
+          outcome('lotes_horarios', {
+            detail: 'source_event_index:synthetic_index_failure',
+            reason: 'persistence_failed',
+            status: 'failed',
+          }),
+        ],
+        'failed',
+      ),
+    }));
+    const written = await run(db, persistence, { config: LOTES_CONFIG, nextId: idsFrom(50) });
+    expect(written.lines.find((line) => line['step'] === 'batch')).toMatchObject({
+      report: {
+        reason: 'persistence_failed',
+        sequences: [{ detail: 'source_event_index:synthetic_index_failure' }],
+        state: STATE_2,
+      },
+      status: 'failed',
+    });
+    // Salida 0 con una línea failed tampoco es un paso completado.
+    const mismatch = batchChildren(() => ({
+      exitCode: 0,
+      stdout: batchLine(STATE_2, [outcome('lotes_horarios')], 'failed'),
+    }));
+    const odd = await run(db, mismatch, { config: LOTES_CONFIG, nextId: idsFrom(80) });
+    expect(odd.lines.find((line) => line['step'] === 'batch')).toMatchObject({
+      report: { reason: 'batch_failed', state: STATE_2 },
+      status: 'failed',
+    });
+
+    // Si fallan los esquemas, la línea trae su motivo y el estado de entrada.
+    const schemas = batchChildren(() => ({
+      exitCode: 1,
+      stdout: JSON.stringify({
+        detail: null,
+        reason: 'schema_archive_unavailable',
+        schemas: null,
+        sequences: [],
+        state: STATE_1,
+        status: 'failed',
+      }),
+    }));
+    const again = await run(db, schemas, { config: LOTES_CONFIG, nextId: idsFrom(100) });
+    expect(again.lines.find((line) => line['step'] === 'batch')).toMatchObject({
+      report: { reason: 'schema_archive_unavailable', state: STATE_1 },
+      status: 'failed',
+    });
+  });
+
+  it('sin una línea válida, el informe no lleva estado, y la ejecución siguiente sigue con el anterior', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1)] });
+    await run(
+      db,
+      batchChildren(() => ({ exitCode: 0, stdout: batchLine(STATE_1) })),
+      {
+        config: LOTES_CONFIG,
+      },
+    );
+    const cases: readonly [Partial<ChildResult>, string][] = [
+      [{ exitCode: null, stdout: '', timedOut: true }, 'child_timeout'],
+      [{ exitCode: null, stdout: '' }, 'child_killed'],
+      [{ exitCode: 2, stdout: '' }, 'batch_usage_or_config'],
+      [{ exitCode: 0, stdout: 'no es json' }, 'batch_output_invalid'],
+      [{ exitCode: 1, stdout: 'no es json' }, 'batch_output_invalid'],
+      [
+        { exitCode: 0, stdout: `${batchLine(STATE_1)}\n${batchLine(STATE_1)}` },
+        'batch_output_invalid',
+      ],
+      [
+        { exitCode: 0, stdout: batchLine({ lotes_horarios: { next: -1, round: '2026-03-02' } }) },
+        'batch_output_invalid',
+      ],
+      [
+        {
+          exitCode: 0,
+          stdout: batchLine(STATE_1, [outcome('lotes_horarios', { reason: 'con espacio' })]),
+        },
+        'batch_output_invalid',
+      ],
+    ];
+    let id = 100;
+    for (const [answer, reason] of cases) {
+      const children = batchChildren(() => answer);
+      const { lines } = await run(db, children, { config: LOTES_CONFIG, nextId: idsFrom(id) });
+      id += 100;
+      expect(JSON.parse(batchArgs(children)[0]?.[2] ?? 'null'), reason).toEqual(STATE_1);
+      const line = lines.find((item) => item['step'] === 'batch');
+      expect(line, reason).toMatchObject({ report: { reason }, status: 'failed' });
+      expect(line?.['report'], reason).not.toHaveProperty('state');
+    }
+    expect(batchReports(db)).toHaveLength(1 + cases.length);
+  });
+
+  it('un estado guardado con otra forma para el paso sin lanzar batch (batch_state_invalid)', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1)] });
+    await db.database.appendReport(logLocation(1), {
+      observed_at_utc: NOW,
+      report: { state: { lotes_horarios: { next: 'once', round: '2026-03-02' } } },
+      report_id: uuid(999),
+      run_id: uuid(998),
+      status: 'completed',
+      step: 'batch',
+    });
+    const children = batchChildren(() => ({ exitCode: 0, stdout: batchLine(STATE_1) }));
+    const { lines } = await run(db, children, { config: LOTES_CONFIG });
+    expect(batchArgs(children)).toEqual([]);
+    expect(lines.find((line) => line['step'] === 'batch')).toMatchObject({
+      report: { reason: 'batch_state_invalid' },
+      status: 'failed',
+    });
+  });
+
+  it('el estado es el del informe más reciente de cualquier log de R_100, también tras su corte', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1, NOW), log(2, NOW)] });
+    for (const [number, id, state] of [
+      [1, 500, STATE_2],
+      [2, 400, STATE_1],
+    ] as const) {
+      await db.database.appendReport(logLocation(number), {
+        observed_at_utc: NOW,
+        report: { state },
+        report_id: uuid(id),
+        run_id: uuid(id),
+        status: 'completed',
+        step: 'batch',
+      });
+    }
+    const children = batchChildren(() => ({ exitCode: 0, stdout: batchLine(STATE_1) }));
+    await run(db, children, { config: LOTES_CONFIG, nextId: idsFrom(1000) });
+    expect(JSON.parse(batchArgs(children)[0]?.[2] ?? 'null')).toEqual(STATE_2);
+    expect(batchReports(db).at(-1)?.schema).toBe('buoh_log_000002');
+  });
+
+  it('si la ejecución ya lleva BATCH_START_LIMIT_MS, batch espera a la siguiente sin lanzarse ni guardar nada', async () => {
+    const db = fakeDatabase({ loggedIn: loggedIn(), logs: [log(1)] });
+    const children = batchChildren(() => ({ exitCode: 0, stdout: batchLine(STATE_1) }));
+    let calls = 0;
+    const late = new Date(Date.parse(NOW) + BATCH_START_LIMIT_MS).toISOString();
+    const almost = new Date(Date.parse(NOW) + BATCH_START_LIMIT_MS - 1).toISOString();
+    const { lines } = await run(db, children, {
+      config: LOTES_CONFIG,
+      now: () => ((calls += 1) === 1 ? NOW : late),
+    });
+    expect(batchArgs(children)).toEqual([]);
+    expect(lines.find((line) => line['step'] === 'batch')).toMatchObject({
+      report: { deferred: true },
+      status: 'completed',
+    });
+    expect(batchReports(db)).toEqual([]);
+
+    calls = 0;
+    const onTime = batchChildren(() => ({ exitCode: 0, stdout: batchLine(STATE_1) }));
+    await run(db, onTime, { config: LOTES_CONFIG, now: () => ((calls += 1) === 1 ? NOW : almost) });
+    expect(batchArgs(onTime)).toHaveLength(1);
+  });
+
+  it('batch_final guarda en cada log de los lotes que terminó sus conteos y su último segmento cerrado, uno por ejecución y secuencia, y no repite', async () => {
+    const at = (
+      sequence: LogSequence,
+      number: number,
+      lastWriteUtc: string | null,
+    ): CaptureLog => ({
+      lastWriteUtc,
+      location: logLocation(number, sequence),
+      readable: true,
+    });
+    const schedules1 = logLocation(1, BATCH_SCHEDULES_SEQUENCE).schema;
+    const candles1 = logLocation(1, BATCH_CANDLES_SEQUENCE).schema;
+    const candles2 = logLocation(2, BATCH_CANDLES_SEQUENCE).schema;
+    const summary: BatchLogSummary = {
+      closed_segments: 3,
+      events: { connection_closed: 3, connection_opened: 3, raw_source_frame: 33 },
+      last_closed_segment: 2,
+      open_events: 0,
+      operational_incidents: 0,
+    };
+    const db = fakeDatabase({
+      loggedIn: loggedIn(),
+      logs: [
+        log(1),
+        // Los horarios: el 1 terminó, porque el 2 tiene una escritura.
+        at(BATCH_SCHEDULES_SEQUENCE, 1, '2026-02-28T00:00:00.000Z'),
+        at(BATCH_SCHEDULES_SEQUENCE, 2, NOW),
+        // Las cotizaciones: solo el activo.
+        at(BATCH_QUOTES_SEQUENCE, 1, NOW),
+        // Las velas: el 1 y el 2 terminaron.
+        at(BATCH_CANDLES_SEQUENCE, 1, '2026-02-20T00:00:00.000Z'),
+        at(BATCH_CANDLES_SEQUENCE, 2, '2026-02-27T00:00:00.000Z'),
+        at(BATCH_CANDLES_SEQUENCE, 3, NOW),
+      ],
+      summaries: { [schedules1]: summary },
+    });
+    const children = () => batchChildren(() => ({ exitCode: 0, stdout: batchLine(STATE_1) }));
+    const finals = (lines: readonly Record<string, unknown>[]) =>
+      lines.filter((line) => line['step'] === 'batch_final').map((line) => line['report']);
+
+    const first = await run(db, children(), { config: LOTES_CONFIG });
+    expect(finals(first.lines)).toEqual([
+      { ...summary, log: 1, sequence: 'lotes_horarios' },
+      { log: null, sequence: 'lotes_cotizaciones' },
+      {
+        closed_segments: 0,
+        events: {},
+        last_closed_segment: null,
+        log: 1,
+        open_events: 0,
+        operational_incidents: 0,
+        sequence: 'lotes_velas',
+      },
+    ]);
+    expect(batchReports(db, 'batch_final').map((item) => item.schema)).toEqual([
+      schedules1,
+      candles1,
+    ]);
+
+    const second = await run(db, children(), { config: LOTES_CONFIG, nextId: idsFrom(100) });
+    expect(finals(second.lines).map((report) => (report as { log: unknown }).log)).toEqual([
+      null,
+      null,
+      2,
+    ]);
+    expect(batchReports(db, 'batch_final').map((item) => item.schema)).toEqual([
+      schedules1,
+      candles1,
+      candles2,
+    ]);
+    const third = await run(db, children(), { config: LOTES_CONFIG, nextId: idsFrom(200) });
+    expect(finals(third.lines).map((report) => (report as { log: unknown }).log)).toEqual([
+      null,
+      null,
+      null,
+    ]);
+
+    // Un log vencido o sin escrituras no recibe informe final, también si la retención todavía no
+    // borró el vencido.
+    const old = fakeDatabase({
+      dropResult: 'not_expired',
+      loggedIn: loggedIn(),
+      logs: [
+        log(1),
+        at(BATCH_SCHEDULES_SEQUENCE, 1, '2026-01-01T00:00:00.000Z'),
+        at(BATCH_SCHEDULES_SEQUENCE, 2, null),
+        at(BATCH_SCHEDULES_SEQUENCE, 3, NOW),
+      ],
+    });
+    const expired = await run(old, children(), { config: LOTES_CONFIG });
+    expect(old.calls).toContain(`drop:${logLocation(1, BATCH_SCHEDULES_SEQUENCE).schema}`);
+    expect(finals(expired.lines)[0]).toEqual({ log: null, sequence: 'lotes_horarios' });
+  });
+
+  it('un informe final que falla se guarda failed en ese log, y la ejecución siguiente lo repite', async () => {
+    const schedules = (number: number, lastWriteUtc: string): CaptureLog => ({
+      lastWriteUtc,
+      location: logLocation(number, BATCH_SCHEDULES_SEQUENCE),
+      readable: true,
+    });
+    const state: Parameters<typeof fakeDatabase>[0] = {
+      fail: { batchLogSummary: coded('57014') },
+      loggedIn: loggedIn(),
+      logs: [log(1), schedules(1, '2026-02-28T00:00:00.000Z'), schedules(2, NOW)],
+    };
+    const db = fakeDatabase(state);
+    const children = () => batchChildren(() => ({ exitCode: 0, stdout: batchLine(STATE_1) }));
+    const { alerts, lines } = await run(db, children(), { config: LOTES_CONFIG });
+    const schedules1 = logLocation(1, BATCH_SCHEDULES_SEQUENCE).schema;
+    expect(lines.find((line) => line['step'] === 'batch_final')).toMatchObject({
+      report: { log: 1, reason: '57014', sequence: 'lotes_horarios' },
+      status: 'failed',
+    });
+    expect(alerts).toContainEqual({
+      event: 'operations_step_failed',
+      reason: '57014',
+      sequence: 'lotes_horarios',
+      step: 'batch_final',
+    });
+    expect(batchReports(db, 'batch_final')).toMatchObject([
+      { row: { status: 'failed' }, schema: schedules1 },
+    ]);
+
+    delete state.fail;
+    await run(db, children(), { config: LOTES_CONFIG, nextId: idsFrom(100) });
+    expect(batchReports(db, 'batch_final')).toMatchObject([
+      { row: { status: 'failed' }, schema: schedules1 },
+      { row: { status: 'completed' }, schema: schedules1 },
+    ]);
   });
 });
