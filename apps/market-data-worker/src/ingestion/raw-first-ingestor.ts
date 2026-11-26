@@ -51,9 +51,13 @@ export interface FrameInput {
 /**
  * `RawSourceFrame` de un frame del transporte. Es pura: el ingestor la usa antes de escribir, y quien
  * correlaciona respuestas la repite sobre el texto que conserva para obtener el mismo frame sin
- * releer el log (ADR-0012 §5).
+ * releer el log (ADR-0012 §5). Del perfil solo usa la fuente y el conector, así que sirve también
+ * para los lotes (ADR-0021 §3), con el suyo.
  */
-export function buildRawSourceFrame(frame: FrameInput, profile: PipelineProfile): RawSourceFrame {
+export function buildRawSourceFrame(
+  frame: FrameInput,
+  profile: Pick<PipelineProfile, 'connector_version' | 'source'>,
+): RawSourceFrame {
   return rawSourceFrameSchema.parse({
     connection_id: frame.connection_id,
     connector_version: profile.connector_version,

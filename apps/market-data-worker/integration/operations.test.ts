@@ -11,6 +11,7 @@ import {
   API_ROLE,
   BATCH_QUOTES_SEQUENCE,
   BATCH_ROLE,
+  BATCH_SCHEDULES_SEQUENCE,
   BATCH_SEQUENCES,
   createPool,
   createS3Client,
@@ -33,6 +34,7 @@ import {
   openLogObjects,
   openOwnerDatabase,
   openPublicationStores,
+  openStartupReads,
   openStores,
   operationsCommand,
   parseStoredHealthObservation,
@@ -46,12 +48,16 @@ import {
   runNodeScript,
   S3ObjectStore,
   SourceEventLog,
+  SourceLock,
   withLog,
   workerChildScript,
   type ChildResult,
   type RunChild,
   type WorkerConfig,
 } from '../src/index.js';
+import { batchCommand } from '../src/batch/command.js';
+import { openBatchLog } from '../src/batch/log.js';
+import { realScheduler } from '../src/cli/scheduler.js';
 import { derivBatchLogProfileRow } from '../src/deriv/batch-profile.js';
 import { derivLogProfileRow } from '../src/deriv/log-profile.js';
 import { ownMaxRssBytes } from '../src/operations/child.js';
@@ -60,6 +66,7 @@ import { START, uuid } from '../test/support/connection-harness.js';
 import { contentKey } from '../src/object-keys.js';
 import { waitForNoSessions } from '../test/support/databases.js';
 import { syntheticSchemas } from '../test/support/connection-harness.js';
+import { answer, AnsweringSocket, BATCH_FIXTURE } from '../test/support/batch-fixtures.js';
 import { ManualClock, syntheticSchemaArchive } from '../test/support/deriv-fixtures.js';
 import { liveEvents, writeLiveLog } from '../test/support/live-log.js';
 import { createDerivPublicationProfile } from '../src/deriv/profile.js';
@@ -1790,5 +1797,129 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     } finally {
       await database.close();
     }
+  });
+
+  it('el comando de los lotes (PR 5c1 de ADR-0021 §9) escribe con buoh_lotes en el log activo de cada secuencia, raw primero, con la política 2.0.0, y su estado sigue en la ejecución siguiente', async () => {
+    // Después de la prueba anterior: buoh_lotes existe, y cada secuencia por lotes tiene su log 1
+    // preparado, y las cotizaciones, una escritura en él y su log 2.
+    // Al minuto 1 de la media hora siguiente, le toca la primera parte de las cotizaciones, 21. El
+    // tiempo corre de verdad desde ahí, con el temporizador real y un ritmo de 10 ms, para que la
+    // prueba mida los almacenes y los privilegios, y no el ritmo, que prueba test/batch-command.test.ts.
+    const halfHour = 30 * 60_000;
+    const startMs = Math.ceil(Date.parse(clock.now()) / halfHour) * halfHour + 60_000;
+    const realStart = Date.now();
+    const batchNow = () => new Date(startMs + (Date.now() - realStart)).toISOString();
+    const env = {
+      BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+      BUOH_POSTGRES_DB: DATABASE,
+      BUOH_POSTGRES_HOST: local.postgres.host,
+      BUOH_POSTGRES_PASSWORD: passwords.batch,
+      BUOH_POSTGRES_PORT: String(local.postgres.port),
+      BUOH_POSTGRES_SSLMODE: 'require',
+      BUOH_POSTGRES_USER: BATCH_ROLE,
+      BUOH_S3_ACCESS_KEY_ID: local.s3.accessKeyId,
+      BUOH_S3_BUCKET: local.s3.bucket,
+      BUOH_S3_ENDPOINT: local.s3.endpoint,
+      BUOH_S3_REGION: local.s3.region,
+      BUOH_S3_SECRET_ACCESS_KEY: local.s3.secretAccessKey,
+    };
+    let id = 0;
+    const sockets: AnsweringSocket[] = [];
+    const index = { value: 0 };
+    const deps: Parameters<typeof batchCommand>[2] = {
+      acquireLock: (config, sequence) =>
+        SourceLock.acquire({ postgres: plain(config.postgres), sequence, source: DERIV_SOURCE }),
+      connect: (input) => {
+        const socket = new AnsweringSocket(input, answer, index);
+        sockets.push(socket);
+        return socket;
+      },
+      expected: BATCH_FIXTURE.expected,
+      fetch: () => Promise.resolve(new Response(BATCH_FIXTURE.archive, { status: 200 })),
+      nextId: () => uuid((id += 1) + 20_000),
+      now: batchNow,
+      // El de producción, con la conexión sin TLS del servidor local.
+      openLog: (config, lock, log) => openBatchLog(plainConfig(config), lock, log),
+      openReads: (config, sequence) =>
+        openStartupReads(plainConfig(config), {
+          now: batchNow,
+          sequence,
+          source: DERIV_SOURCE,
+        }),
+      pacingMs: 10,
+      scheduler: realScheduler,
+    };
+    const runBatch = (argv: readonly string[]) => batchCommand(argv, env, deps);
+
+    const first = await runBatch(['--json']);
+    expect(first.stderr).toBeNull();
+    expect(first.exitCode).toBe(0);
+    const line = JSON.parse(first.stdout ?? '{}') as {
+      sequences: { log: number; next: number; sequence: string; status: string }[];
+      state: Record<string, unknown>;
+    };
+    expect(line.sequences.map((item) => [item.sequence, item.status, item.log])).toEqual([
+      ['lotes_horarios', 'completed', 1],
+      ['lotes_cotizaciones', 'completed', 1],
+      ['lotes_velas', 'completed', 1],
+    ]);
+    for (const item of line.sequences) {
+      const sequence = BATCH_SEQUENCES.find((candidate) => candidate.name === item.sequence);
+      if (sequence === undefined) {
+        throw new TypeError(item.sequence);
+      }
+      const { schema } = logLocation(1, sequence);
+      const { rows: kinds } = await ready(admin).query<{ kind: string; n: number }>(
+        `SELECT kind, count(*)::int AS n FROM ${schema}.source_event_index GROUP BY kind ORDER BY kind`,
+      );
+      expect(kinds, schema).toEqual([
+        { kind: 'connection_closed', n: 1 },
+        { kind: 'connection_opened', n: 1 },
+        { kind: 'raw_source_frame', n: item.next },
+      ]);
+      const { rows: segments } = await ready(admin).query<{ open: number; policies: string[] }>(
+        `SELECT (SELECT count(*)::int FROM ${schema}.source_event_index i
+                  WHERE NOT EXISTS (SELECT 1 FROM ${schema}.closed_source_segments c
+                                     WHERE c.segment_index = i.segment_index)) AS open,
+                ARRAY(SELECT DISTINCT segment_policy_version FROM ${schema}.closed_source_segments)
+                  AS policies`,
+      );
+      // Nada queda abierto, y cada segmento cerrado es de la política de los lotes.
+      expect(segments, schema).toEqual([{ open: 0, policies: ['2.0.0'] }]);
+    }
+    // Los objetos están bajo el prefijo de su log.
+    const objects = new S3ObjectStore(
+      createS3Client(local.s3),
+      local.s3.bucket,
+      logLocation(1, BATCH_SCHEDULES_SEQUENCE).prefix,
+    );
+    try {
+      const { rows } = await ready(admin).query<{
+        object_bytes_sha256: string;
+        object_size_bytes: string;
+      }>(
+        `SELECT object_bytes_sha256, object_size_bytes::text FROM
+           ${logLocation(1, BATCH_SCHEDULES_SEQUENCE).schema}.closed_source_segments`,
+      );
+      expect(rows).toHaveLength(1);
+      const [segment] = rows;
+      const bytes = await objects.get(
+        contentKey(segment?.object_bytes_sha256 ?? ''),
+        Number(segment?.object_size_bytes),
+      );
+      expect(bytes.byteLength).toBe(Number(segment?.object_size_bytes));
+    } finally {
+      objects.destroy();
+    }
+
+    // Con su estado, otra ejecución en la misma media hora no tiene nada que pedir.
+    const again = await runBatch(['--json', '--state', JSON.stringify(line.state)]);
+    expect(again.exitCode).toBe(0);
+    expect(
+      (JSON.parse(again.stdout ?? '{}') as { sequences: { status: string }[] }).sequences.map(
+        (item) => item.status,
+      ),
+    ).toEqual(['idle', 'idle', 'idle']);
+    expect(sockets).toHaveLength(3);
   });
 });

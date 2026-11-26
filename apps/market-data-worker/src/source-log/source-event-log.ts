@@ -6,6 +6,7 @@ import {
   EMPTY_SEGMENT_STATS,
   evaluateSegmentRotation,
   SEGMENT_POLICY,
+  type SegmentPolicy,
   sourceEventLine,
   sourceEventTime,
   type SegmentCloseReason,
@@ -187,6 +188,12 @@ function parseLine(bytes: Uint8Array): SourceEvent {
 
 export interface OpenSourceEventLogInput {
   readonly objects: ObjectStore;
+  /**
+   * La política de rotación de los segmentos que escribe, con su versión en cada segmento cerrado:
+   * sin ella, la de las secuencias en vivo, `SEGMENT_POLICY` (1.0.0); en un log de los lotes,
+   * `BATCH_SEGMENT_POLICY` (2.0.0; ADR-0021 §3). No cambia lo que lee.
+   */
+  readonly policy?: SegmentPolicy;
   readonly source: string;
   readonly store: SourceLogStore;
   /** Versión de zlib del writer gzip de segmentos (`process.versions.zlib` en runtime). */
@@ -196,8 +203,9 @@ export interface OpenSourceEventLogInput {
 /**
  * Log append-only de source events (F1-STREAM-001, ADR-0005 §4). Un evento solo es durable cuando
  * su línea JCS está en un objeto content-addressed verificado (`raw_object_write`) **y** su fila en
- * `source_event_index` está confirmada (`source_event_index`). Los segmentos rotan según
- * `segment_policy_version = 1.0.0`; al cerrar, el NDJSON del segmento se escribe en gzip.
+ * `source_event_index` está confirmada (`source_event_index`). Los segmentos rotan según la política
+ * de la apertura, `segment_policy_version = 1.0.0` por defecto; al cerrar, el NDJSON del segmento se
+ * escribe en gzip.
  *
  * Tras cualquier fallo de persistencia la instancia queda inválida: el estado en memoria podría no
  * coincidir con el durable, así que se debe reabrir desde los almacenes con `open`.
@@ -207,6 +215,7 @@ export class SourceEventLog {
   readonly #objects: ObjectStore;
   readonly #store: SourceLogStore;
   readonly #encode: ReturnType<typeof createStorageEncoder>;
+  readonly #policy: SegmentPolicy;
   #segmentIndex: number;
   #lines: Uint8Array[];
   #stats: SegmentStats;
@@ -234,6 +243,7 @@ export class SourceEventLog {
     this.#objects = input.objects;
     this.#store = input.store;
     this.#encode = createStorageEncoder(input.zlibVersion);
+    this.#policy = input.policy ?? SEGMENT_POLICY;
     this.#segmentIndex = state.segmentIndex;
     this.#lines = state.lines;
     this.#stats = state.stats;
@@ -375,7 +385,7 @@ export class SourceEventLog {
     if (event.source !== this.source) {
       throw new TypeError(`Source event de otra fuente: ${event.source}.`);
     }
-    const reason = evaluateSegmentRotation(this.#stats, event);
+    const reason = evaluateSegmentRotation(this.#stats, event, this.#policy);
     const closed = reason === null ? null : await this.close(reason);
 
     const line = sourceEventLine(event);
@@ -450,7 +460,7 @@ export class SourceEventLog {
       object_size_bytes: encoded.bytes.byteLength,
       raw_frame_count: this.#stats.raw_frame_count,
       segment_index: this.#segmentIndex,
-      segment_policy_version: SEGMENT_POLICY.version,
+      segment_policy_version: this.#policy.version,
       source: this.source,
       writer_name: encoded.writer_name ?? null,
       writer_version: encoded.writer_version ?? null,
