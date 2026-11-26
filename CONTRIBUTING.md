@@ -104,7 +104,7 @@ Cada dato vive en su fuente canónica (`AGENTS.md`, «Autoridad por materia»). 
 
 Una ADR nueva fija decisiones y sus razones, y apunta a unas 4 000 palabras sin contar su resumen. Fija la secuencia de sus PR ([plan de Fase 2](docs/plan/fase-2-laboratorio-y-bot-shadow.md) §8), pero lo que no decide va a su lugar: los pasos de operación, al runbook; las cifras de cada medición, a la evidencia; y el detalle de cada PR, a su descripción. Si una ADR necesita más, su PR dice por qué.
 
-Se escribe corto, porque cada frase de más es un sitio más donde la revisión semántica puede encontrar un dato mal escrito. Lo decidió el propietario el 2026-11-26 ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Escribir más corto»):
+Se escribe corto, porque cada frase de más es un sitio más donde la revisión semántica puede encontrar un dato mal escrito. El propietario decidió el 2026-11-26 lo esencial de los tres primeros puntos; lo que esta lista suma a sus palabras es propuesta de la dirección técnica, y esa decisión dice qué es ([decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Escribir más corto»):
 
 - en `PROJECT_STATUS.md`, cada entrega ocupa una o dos líneas, con lo hecho y el enlace a su ADR o a su evidencia, y cada paso de «Siguiente tarea autorizada» dice qué falta, sin la historia de cómo se llegó;
 - una ADR, y cada precisión suya, dice solo lo que decide;
