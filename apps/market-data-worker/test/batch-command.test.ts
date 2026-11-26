@@ -185,7 +185,7 @@ const sequencesOf = (line: Record<string, unknown> | null) =>
   (line?.['sequences'] ?? []) as Record<string, unknown>[];
 
 describe('batchCommand: lo que toca a cada secuencia, en su log', () => {
-  it('la primera ejecución del día pide los 11 horarios, las 21 primeras cotizaciones y las 14 páginas de velas, cada secuencia en su log y por su conexión', async () => {
+  it('la primera ejecución del día pide los 11 horarios, las 21 primeras cotizaciones y 14 de las 15 peticiones de velas, cada secuencia en su log y por su conexión', async () => {
     const env = world();
     const { exitCode, line } = await env.run();
     expect(exitCode).toBe(0);
@@ -205,13 +205,15 @@ describe('batchCommand: lo que toca a cada secuencia, en su log', () => {
     ).toEqual([
       ['lotes_horarios', 'completed', 11, 11, 1],
       ['lotes_cotizaciones', 'completed', 21, 21, 1],
-      ['lotes_velas', 'completed', 14, 14, 1],
+      ['lotes_velas', 'stopped', 14, 14, 1],
     ]);
     expect(line?.['state']).toEqual({
       lotes_cotizaciones: { next: 21, round: '2026-11-26T00:00:00.000Z' },
       lotes_horarios: { next: 11, round: '2026-11-26' },
       lotes_velas: { next: 14, round: '2026-11-25' },
     });
+    // La última de las velas, pasados los 70 s, queda para la ejecución siguiente (PR 5d1).
+    expect(sequencesOf(line)[2]).toMatchObject({ reason: 'deadline', status: 'stopped' });
     expect(env.sockets).toHaveLength(3);
     expect(env.released).toEqual(['lotes_horarios', 'lotes_cotizaciones', 'lotes_velas']);
     // Una petición cada 1,5 s como mucho, también entre conexiones: 46 envíos en 67,5 s.
@@ -252,16 +254,30 @@ describe('batchCommand: lo que toca a cada secuencia, en su log', () => {
     ).toEqual([[11, 'requested']]);
   });
 
-  it('con el estado de esa ejecución, la siguiente de la misma media hora no tiene nada que pedir y no abre nada', async () => {
+  it('con el estado de esa ejecución, la siguiente de la misma media hora solo pide la de velas que faltaba, y otra ya no abre nada', async () => {
     const first = world();
     const { line } = await first.run();
     const second = world({ start: '2026-11-26T00:04:00.000Z' });
     const again = await second.run(['--json', '--state', JSON.stringify(line?.['state'])]);
     expect(again.exitCode).toBe(0);
-    expect(sequencesOf(again.line).map((item) => item['status'])).toEqual(['idle', 'idle', 'idle']);
-    expect(second.sockets).toEqual([]);
-    expect(second.released).toEqual([]);
-    expect(again.line?.['state']).toEqual(line?.['state']);
+    expect(sequencesOf(again.line).map((item) => [item['status'], item['sent']])).toEqual([
+      ['idle', 0],
+      ['idle', 0],
+      ['completed', 1],
+    ]);
+    expect(second.sockets).toHaveLength(1);
+    expect(again.line?.['state']).toEqual({
+      ...(line?.['state'] as object),
+      lotes_velas: { next: 15, round: '2026-11-25' },
+    });
+
+    const third = world({ start: '2026-11-26T00:04:30.000Z' });
+    const last = await third.run(['--json', '--state', JSON.stringify(again.line?.['state'])]);
+    expect(last.exitCode).toBe(0);
+    expect(sequencesOf(last.line).map((item) => item['status'])).toEqual(['idle', 'idle', 'idle']);
+    expect(third.sockets).toEqual([]);
+    expect(third.released).toEqual([]);
+    expect(last.line?.['state']).toEqual(again.line?.['state']);
   });
 
   it('cuenta las respuestas con error de Deriv por código y las que no cumplen su esquema, por operación', async () => {
@@ -352,7 +368,7 @@ describe('batchCommand: lo que para el paso', () => {
       [
         ['completed', null, 11],
         ['stopped', 'request_timeout', 0],
-        ['completed', null, 14],
+        ['completed', null, 15],
       ],
     );
   });
@@ -611,7 +627,7 @@ describe('batchCommand: lo que revisó la revisión semántica del PR #145', () 
       '--state',
       JSON.stringify({
         lotes_cotizaciones: { next: 21, round: '2026-11-26T00:00:00.000Z' },
-        lotes_velas: { next: 14, round: '2026-11-25' },
+        lotes_velas: { next: 15, round: '2026-11-25' },
       }),
     ]);
     expect(

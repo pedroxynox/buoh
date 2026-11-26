@@ -169,7 +169,8 @@ export async function commitPublicationIn(
   extra: (client: pg.PoolClient) => Promise<void>,
 ): Promise<void> {
   const { core, environment, incidents, record } = input;
-  const coreJcs = canonicalJson(core);
+  // Los campos opcionales del core que faltan no están en el objeto validado.
+  const coreJcs = canonicalJson(core as JsonValue);
   const client = await pool.connect();
   // Mientras el cliente está fuera del pool, un corte de la conexión emite `error` en él, y sin
   // oyente tumbaría el proceso. La consulta en curso, o la siguiente, falla con ese error.

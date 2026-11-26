@@ -1,8 +1,11 @@
 import { sha256Hex, type DeploymentEnvironment } from '@buoh/contracts';
 import {
+  buildBatchDatasetPublication,
   buildDatasetPublication,
+  type BatchDatasetPublication,
   type DatasetPublication,
   type PipelineProfile,
+  type PublicationInput,
 } from '@buoh/domain';
 
 import { createStorageEncoder, storageContentType } from './encoding.js';
@@ -69,7 +72,7 @@ async function writeVerified(
  * manifiesto. Lanza `PublicationLimitError` con el primero que pasa.
  */
 function checkReadLimits(
-  publication: DatasetPublication,
+  publication: Prepared,
   logicalSizes: ReadonlyMap<string, number>,
   limits: ReplayReadLimits,
 ): void {
@@ -116,6 +119,49 @@ export async function publishDataset(input: PublishDatasetInput): Promise<Datase
 export function preparePublication(
   input: Omit<PublishDatasetInput, 'metadata'>,
 ): DatasetPublication {
+  return prepared(input, (common) =>
+    buildDatasetPublication({ ...common, profile: input.profile }),
+  );
+}
+
+/** Lo que necesita `prepareBatchPublication`: lo de `preparePublication`, sin su perfil en vivo. */
+export interface PrepareBatchPublicationInput extends Omit<
+  PublishDatasetInput,
+  'metadata' | 'profile'
+> {
+  readonly connector_version: string;
+  /** El perfil de la secuencia por lotes, como lo guarda su log. */
+  readonly quality_profile_bytes: Uint8Array;
+  /** Los esquemas de respuesta de la release (`batchSourceSchemaBytes`). */
+  readonly source_schema_bytes: Uint8Array;
+  readonly source_schema_release: string;
+}
+
+/**
+ * Como `preparePublication`, la de un dataset de los lotes (precisión del PR 5d1 de ADR-0021 §9):
+ * construye su publicación (`buildBatchDatasetPublication`) y comprueba los límites del replay.
+ */
+export function prepareBatchPublication(
+  input: PrepareBatchPublicationInput,
+): BatchDatasetPublication {
+  return prepared(input, (common) =>
+    buildBatchDatasetPublication({
+      ...common,
+      connector_version: input.connector_version,
+      quality_profile_bytes: input.quality_profile_bytes,
+      source_schema_bytes: input.source_schema_bytes,
+      source_schema_release: input.source_schema_release,
+    }),
+  );
+}
+
+type Prepared = DatasetPublication | BatchDatasetPublication;
+
+/** Las ubicaciones, la codificación y los límites comunes de `preparePublication` y sus variantes. */
+function prepared<P extends Prepared>(
+  input: Omit<PublishDatasetInput, 'metadata' | 'profile'>,
+  build: (common: Omit<PublicationInput, 'profile'>) => P,
+): P {
   const { bucket } = input.objects;
   const prefix = input.keyPrefix ?? '';
   if (!KEY_PREFIX.test(prefix)) {
@@ -127,7 +173,7 @@ export function preparePublication(
     derived: input.derivedCompression ?? 'none',
   });
   const logicalSizes = new Map<string, number>();
-  const publication = buildDatasetPublication({
+  const publication = build({
     encodeObject: (object) => {
       logicalSizes.set(object.artifact_id, object.logical_bytes.byteLength);
       return encode(object);
@@ -135,7 +181,6 @@ export function preparePublication(
     locateManifest: (ids) => objectUri(bucket, prefix + manifestKey(ids)),
     locateObject: (_artifactId, object) =>
       objectUri(bucket, prefix + contentKey(object.object_bytes_sha256)),
-    profile: input.profile,
     publication_id: input.publication_id,
     published_at_utc: input.published_at_utc,
     segments: input.segments,
@@ -150,14 +195,14 @@ export function preparePublication(
  * Escribe una publicación preparada (`preparePublication`): la consulta previa, los objetos, el
  * documento y el commit, con la fila de rango de `buoh_datasets` si la lleva (ADR-0020 §9).
  */
-export async function writePublication(
-  publication: DatasetPublication,
+export async function writePublication<P extends Prepared>(
+  publication: P,
   input: Pick<PublishDatasetInput, 'environment' | 'metadata' | 'objects'> & {
     /** Los objetos que se escriben a la vez; por defecto, de uno en uno. */
     readonly concurrency?: number;
     readonly logRange?: DatasetLogRange;
   },
-): Promise<DatasetPublication> {
+): Promise<P> {
   const { bucket } = input.objects;
   const concurrency = input.concurrency ?? 1;
   if (!Number.isSafeInteger(concurrency) || concurrency < 1) {

@@ -182,8 +182,10 @@ export function quoteRequests(profile: QuotesProfile): BatchRequest[] {
 }
 
 /**
- * Las páginas de velas de un día UTC, en orden: por símbolo, de las 00:00:00 al último segundo del
- * día en tramos contiguos de `page_seconds`, cada uno con su primer y su último segundo incluidos.
+ * Las peticiones de las velas de un día UTC, en orden: el `trading_times` de ese día, con el que las
+ * reglas 4.0.0 buscan las velas que faltan dentro del horario (precisión del PR 5d1 de ADR-0021 §9),
+ * y las páginas: por símbolo, de las 00:00:00 al último segundo del día en tramos contiguos de
+ * `page_seconds`, cada uno con su primer y su último segundo incluidos.
  */
 export function candleRequests(profile: CandlesProfile, date: string): BatchRequest[] {
   if (profile.granularity_seconds !== 60) {
@@ -201,14 +203,17 @@ export function candleRequests(profile: CandlesProfile, date: string): BatchRequ
   }
   const start = dayStartEpoch(date);
   const pages = DAY_SECONDS / profile.page_seconds;
-  return profile.symbols.flatMap((symbol) =>
-    Array.from({ length: pages }, (_, page): BatchRequest => ({
-      count: profile.count,
-      end: start + (page + 1) * profile.page_seconds - 1,
-      granularity: profile.granularity_seconds,
-      operation: 'ticks_history',
-      start: start + page * profile.page_seconds,
-      symbol,
-    })),
-  );
+  return [
+    { date, operation: 'trading_times' },
+    ...profile.symbols.flatMap((symbol) =>
+      Array.from({ length: pages }, (_, page): BatchRequest => ({
+        count: profile.count,
+        end: start + (page + 1) * profile.page_seconds - 1,
+        granularity: profile.granularity_seconds,
+        operation: 'ticks_history',
+        start: start + page * profile.page_seconds,
+        symbol,
+      })),
+    ),
+  ];
 }

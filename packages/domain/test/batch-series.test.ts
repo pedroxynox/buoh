@@ -606,3 +606,166 @@ describe('un log de los lotes', () => {
     });
   });
 });
+
+// --- las velas que faltan dentro del horario -----------------------------------------------------
+
+// Precisión del PR 5d1 de ADR-0021 §9: un minuto cuya vela pide una página respondida, ya terminado
+// al recibirla y entero dentro del horario de su día entre los mismos eventos, sin vela, falta; cada
+// tramo de minutos seguidos que faltan es un `candle_missing`. El horario es como el del oro el
+// 2026-11-24: de 00:00 a 22:00 y de 23:00 al fin del día.
+describe('las velas que faltan dentro del horario', () => {
+  const DAY = '2026-11-24';
+  const GOLD_OPEN = ['00:00:00', '23:00:00'];
+  const GOLD_CLOSE = ['22:00:00', '23:59:59'];
+  /** Las 22:00 del día de T, el cierre diario del oro. */
+  const CLOSE = T + 10 * 3600;
+  const sessionText = (
+    open: string[],
+    close: string[],
+    symbols = ['SYNTH_GOLD'],
+    date = DAY,
+  ): string => {
+    const entries = symbols
+      .map(
+        (symbol) =>
+          `{"name":"x","times":{"close":${JSON.stringify(close)},"open":${JSON.stringify(open)}},"underlying_symbol":"${symbol}"}`,
+      )
+      .join(',');
+    return `{"echo_req":{"req_id":1,"trading_times":"${date}"},"msg_type":"trading_times","req_id":1,"trading_times":{"markets":[{"name":"x","submarkets":[{"name":"x","symbols":[${entries}]}]}]}}`;
+  };
+  const page = (
+    start: number,
+    end: number,
+    epochs: number[],
+    received: number,
+    symbol = 'SYNTH_GOLD',
+  ) =>
+    frame(
+      candlesText(
+        candleEcho(start, end, '', symbol),
+        epochs.map((epoch) => candle(epoch, '1', '1', '1', '1')).join(','),
+      ),
+      iso(received),
+    );
+  const missingOf = (
+    source: RawSourceFrame,
+    from: number,
+    to: number,
+    sessions: RawSourceFrame[],
+    symbol = 'SYNTH_GOLD',
+  ) =>
+    expected(source, {
+      evidence: { from_open_time_utc: iso(from), to_open_time_utc: iso(to) },
+      incident_type: 'candle_missing',
+      related_refs: sessions.map((session) => session.observation_id).sort(),
+      severity: 'error',
+      symbol,
+    });
+  const missing = (events: SourceEvent[], at = config) =>
+    deriveBatchLog(events, at).incidents.filter(
+      (incident) => incident.incident_type === 'candle_missing',
+    );
+
+  it('da un candle_missing por tramo dentro del horario, y nada en el cierre ni en su borde', () => {
+    const session = frame(sessionText(GOLD_OPEN, GOLD_CLOSE), iso(T + 3000));
+    // Recibidas al día siguiente, con el día ya terminado, como las pide el paso de los lotes.
+    const next = T + 12 * 3600 + 60;
+    // Faltan las 12:02 y las 12:03, seguidas: un tramo.
+    const gap = page(T, T + 299, [T, T + 60, T + 240], next);
+    // De 22:00 a 22:59 el oro está cerrado, y Deriv no da velas.
+    const closed = page(CLOSE, CLOSE + 3599, [], next + 1);
+    // Las 21:58 y las 21:59 son del horario; las 22:00 y las 22:01, no.
+    const edge = page(CLOSE - 120, CLOSE + 119, [CLOSE - 120, CLOSE - 60], next + 2);
+    forbidAmbientEffects();
+    expect(deriveBatchLog([session, gap, closed, edge], config).incidents).toEqual([
+      missingOf(gap, T + 120, T + 180, [session]),
+    ]);
+  });
+
+  it('pide desde el minuto de su start hasta el de su end, como acepta las velas la regla', () => {
+    const session = frame(sessionText(GOLD_OPEN, GOLD_CLOSE), iso(T + 3000));
+    const next = T + 12 * 3600 + 60;
+    // Empieza a las 12:00:30 y acaba a las 12:02:30: pide las velas de las 12:00, 12:01 y 12:02.
+    const page = frame(
+      candlesText(candleEcho(T + 30, T + 150), candle(T + 60, '1', '1', '1', '1')),
+      iso(next),
+    );
+    forbidAmbientEffects();
+    expect(missing([session, page])).toEqual(
+      [missingOf(page, T, T, [session]), missingOf(page, T + 120, T + 120, [session])].sort(
+        (left, right) => (left.incident_id < right.incident_id ? -1 : 1),
+      ),
+    );
+  });
+
+  it('no espera el minuto que no había terminado al recibir la página', () => {
+    const session = frame(sessionText(GOLD_OPEN, GOLD_CLOSE), iso(T + 3000));
+    // Recibida a las 12:02:30: la vela de las 12:02 está en curso y queda fuera, sin faltar.
+    const live = page(T, T + 299, [T, T + 60, T + 120], T + 150);
+    forbidAmbientEffects();
+    expect(missing([session, live])).toEqual([]);
+  });
+
+  it('sin horario de su día no comprueba nada, y con dos vale el último recibido', () => {
+    const gap = page(T, T + 119, [T], T + 3600);
+    const allDay = frame(sessionText(['00:00:00'], ['23:59:59']), iso(T + 3000));
+    // Cerrado de 12:00 a 13:00.
+    const halted = frame(
+      sessionText(['00:00:00', '13:00:00'], ['12:00:00', '23:59:59']),
+      iso(T + 3001),
+    );
+    const otherDay = frame(sessionText(['00:00:00'], ['23:59:59'], ['SYNTH_GOLD'], '2026-11-25'));
+    forbidAmbientEffects();
+    expect(missing([gap])).toEqual([]);
+    expect(missing([otherDay, gap])).toEqual([]);
+    // El último recibido, no el último del log: aquí el que dice cerrado.
+    expect(missing([halted, allDay, gap])).toEqual([]);
+    const allDayLate = frame(sessionText(['00:00:00'], ['23:59:59']), iso(T + 3002));
+    expect(missing([halted, allDayLate, gap])).toEqual([
+      missingOf(gap, T + 60, T + 60, [allDayLate]),
+    ]);
+  });
+
+  it('un minuto que trae otra página no falta; uno que pidió una página con error, sí', () => {
+    const session = frame(sessionText(GOLD_OPEN, GOLD_CLOSE), iso(T + 3000));
+    const first = page(T, T + 119, [T], T + 3600);
+    const second = page(T + 60, T + 119, [T + 60], T + 3601);
+    const limited = frame(
+      `{"echo_req":${candleEcho(T + 600, T + 719)},"error":{"code":"RateLimit","message":"x"},"msg_type":"ticks_history"}`,
+      iso(T + 3602),
+    );
+    forbidAmbientEffects();
+    // Las dos con el mismo instante: van por su tipo.
+    expect(deriveBatchLog([session, first, second, limited], config).incidents).toEqual([
+      missingOf(limited, T + 600, T + 660, [session]),
+      invalidOf(limited, 'source_error_response', 'SYNTH_GOLD'),
+    ]);
+  });
+
+  it('un tramo cruza páginas y lo firma la última que pidió su primer minuto; cada símbolo, el suyo', () => {
+    const symbols = { ...config, trading_times_symbols: ['SYNTH_GOLD', 'SYNTH_SILVER'] };
+    const session = frame(
+      sessionText(['00:00:00'], ['23:59:59'], ['SYNTH_GOLD', 'SYNTH_SILVER']),
+      iso(T + 3000),
+    );
+    // Faltan las 12:01, en la primera, y las 12:02, en la segunda: un tramo de las dos.
+    const first = page(T, T + 119, [T], T + 3600);
+    const second = page(T + 120, T + 239, [T + 180], T + 3601);
+    // La tercera vuelve a pedir las 12:01, sin velas: es la última que la pidió.
+    const again = page(T + 60, T + 119, [], T + 3602);
+    // En la plata faltan las 12:01 y las 12:03, separadas: dos tramos.
+    const silver = page(T, T + 239, [T, T + 120], T + 3603, 'SYNTH_SILVER');
+    forbidAmbientEffects();
+    const found = missing([session, first, second, again, silver], symbols);
+    expect(found).toHaveLength(3);
+    expect(found[0]).toEqual(missingOf(again, T + 60, T + 120, [session]));
+    expect(found.slice(1)).toEqual(
+      expect.arrayContaining([
+        missingOf(silver, T + 60, T + 60, [session], 'SYNTH_SILVER'),
+        missingOf(silver, T + 180, T + 180, [session], 'SYNTH_SILVER'),
+      ]),
+    );
+    const ids = found.slice(1).map((incident) => incident.incident_id);
+    expect(ids).toEqual([...ids].sort());
+  });
+});

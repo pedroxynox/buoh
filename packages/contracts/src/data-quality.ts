@@ -25,7 +25,8 @@ import {
  * Versiones de `DataQualityIncident` con lector. 2.0.0 solo difiere de 1.0.0 en que admite
  * `symbol = null` en `invalid_source_frame` (reglas de calidad 2.0.0). 3.0.0, la de las reglas de
  * los lotes (4.0.0), suma `contract_rejected` y también admite `symbol = null` en
- * `invalid_source_frame`; desde el PR 4d de ADR-0021, también `candle_repeated`. Otra versión se rechaza.
+ * `invalid_source_frame`; desde el PR 4d de ADR-0021, también `candle_repeated`, y desde el 5d1,
+ * `candle_missing`. Otra versión se rechaza.
  */
 export const INCIDENT_SCHEMA_VERSIONS = ['1.0.0', '2.0.0', '3.0.0'] as const;
 
@@ -143,6 +144,21 @@ const candleRepeatedSchema = z.strictObject({
     candle_fingerprint_sha256: sha256HexSchema,
   }),
 });
+/**
+ * Un tramo de minutos seguidos dentro del horario de su mercado sin vela de 1 minuto: la apertura de
+ * la primera vela que falta y la de la última, las dos incluidas. Deriv no da velas sin ticks, así
+ * que son minutos sin datos registrados (ADR-0024 §5). Siempre `error`, como `event_gap_unresolved`.
+ * Solo con el esquema 3.0.0.
+ */
+const candleMissingSchema = z.strictObject({
+  ...incidentBase,
+  incident_type: z.literal('candle_missing'),
+  symbol: symbolSchema,
+  evidence: z.strictObject({
+    from_open_time_utc: utcTimestampMsSchema,
+    to_open_time_utc: utcTimestampMsSchema,
+  }),
+});
 const sourceLimitExceededSchema = z.strictObject({
   ...incidentBase,
   incident_type: z.literal('source_limit_exceeded'),
@@ -168,6 +184,7 @@ export const dataQualityIncidentStructuralSchema = z
     sourceLimitExceededSchema,
     contractRejectedSchema,
     candleRepeatedSchema,
+    candleMissingSchema,
   ])
   .meta({ id: 'DataQualityIncident', title: 'DataQualityIncident' });
 
@@ -310,6 +327,32 @@ export const dataQualityIncidentSchema = dataQualityIncidentStructuralSchema.sup
             code: 'custom',
             message: 'candle_repeated es warning si la repetición es exacta y error si no.',
             path: ['severity'],
+          });
+        }
+        break;
+      }
+      case 'candle_missing': {
+        if (value.schema_version !== '3.0.0') {
+          context.addIssue({
+            code: 'custom',
+            message: 'candle_missing requiere el esquema de incidencias 3.0.0.',
+            path: ['schema_version'],
+          });
+        }
+        if (value.severity !== 'error') {
+          context.addIssue({
+            code: 'custom',
+            message: 'candle_missing es siempre error.',
+            path: ['severity'],
+          });
+        }
+        const from = Date.parse(value.evidence.from_open_time_utc);
+        const to = Date.parse(value.evidence.to_open_time_utc);
+        if (from % 60_000 !== 0 || to % 60_000 !== 0 || from > to) {
+          context.addIssue({
+            code: 'custom',
+            message: 'El tramo sin velas va de un minuto entero a otro, sin invertirse.',
+            path: ['evidence'],
           });
         }
         break;

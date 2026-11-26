@@ -25,8 +25,8 @@ import {
  * - **Horarios:** una vuelta por día UTC, la de ese día: `trading_times` del día y del siguiente,
  *   `active_symbols` y `contracts_for` de los ocho mercados (`scheduleRequests`), desde la primera
  *   ejecución del día.
- * - **Velas:** una vuelta por día UTC, la del día anterior, ya completo: sus 14 páginas
- *   (`candleRequests`), desde la primera ejecución del día.
+ * - **Velas:** una vuelta por día UTC, la del día anterior, ya completo: el `trading_times` de ese
+ *   día y sus 14 páginas (`candleRequests`), desde la primera ejecución del día.
  * - **Cotizaciones:** una vuelta por media hora UTC, la que empieza en el minuto 0 o 30: sus 126
  *   `proposal` (`quoteRequests`), repartidas entre las seis ejecuciones de esa media hora: en la
  *   ejecución *k* (de 0 a 5, por los minutos desde su comienzo), hasta la ⌈126 (*k* + 1) / 6⌉. Así

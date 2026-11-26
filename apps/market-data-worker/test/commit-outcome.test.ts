@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 
-import { canonicalJson } from '@buoh/contracts';
+import { canonicalJson, type JsonValue } from '@buoh/contracts';
 import type pg from 'pg';
 import { describe, expect, it } from 'vitest';
 
@@ -73,7 +73,7 @@ function fakePool(failing: string, code: string | undefined, coreJcs: () => stri
 }
 
 describe('el COMMIT ambiguo (ADR-0020 §9)', () => {
-  const coreOf = async () => canonicalJson((await commitInput()).core);
+  const coreOf = async () => canonicalJson((await commitInput()).core as JsonValue);
 
   it.each([
     ['la conexión cae, sin SQLSTATE', undefined],

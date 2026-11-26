@@ -18,6 +18,15 @@ export {
   type BatchResponseSchema,
 } from './batch-rules.js';
 export {
+  BATCH_SOURCE_SCHEMA_OPERATIONS,
+  batchSourceSchemaBytes,
+  buildBatchDatasetPublication,
+  createBatchLogConfig,
+  type BatchDatasetPublication,
+  type BatchPublicationInput,
+  type BatchSourceSchemaOperation,
+} from './batch-publication.js';
+export {
   deriveBatchLog,
   deriveHistoryDownloadTicks,
   deriveMarketCandles,

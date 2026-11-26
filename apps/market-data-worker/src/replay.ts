@@ -1,12 +1,18 @@
 import {
+  BATCH_MANIFEST_CORE_SCHEMA_VERSION,
   canonicalJson,
   ContractContextError,
+  contractOfferSchema,
+  contractQuoteSchema,
   INCIDENT_SCHEMA_VERSIONS as INCIDENT_SCHEMA_VERSION_LIST,
   dataQualityIncidentSchema,
   datasetManifestSchema,
+  isBatchManifestCore,
+  marketCandleSchema,
   marketTickSchema,
   sha256Hex,
   sourceEventSchema,
+  tradingSessionSchema,
   validateConditionCausality,
   validateDatasetConsistency,
   validatePublicationRecord,
@@ -19,6 +25,9 @@ import {
   type StorageObjectRef,
 } from '@buoh/contracts';
 import {
+  BATCH_RULE_SET,
+  BATCH_SEGMENT_POLICY,
+  buildBatchDatasetPublication,
   buildDatasetPublication,
   CANONICALIZATION_VERSION,
   CONTRACT_SCHEMA_VERSION,
@@ -81,6 +90,11 @@ export interface ReplayReport {
   /** `verified`: integridad (`--verify-only`); `reproduced`: recomputación idéntica. */
   readonly status: 'reproduced' | 'verified';
   readonly storage_object_count: number;
+  /** Solo en un dataset de los lotes (`DatasetManifestCore` 1.1.0): sus registros por clase. */
+  readonly contract_offer_count?: number;
+  readonly contract_quote_count?: number;
+  readonly market_candle_count?: number;
+  readonly trading_session_count?: number;
 }
 
 const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -329,6 +343,17 @@ function validateLogicalArtifacts(
 
   const segments = parseAll('source_events', (value) => sourceEventSchema.safeParse(value));
   const ticks = parseAll('normalized_ticks', (value) => marketTickSchema.safeParse(value)).flat();
+  // Los registros de los lotes: sus roles solo existen en un core 1.1.0.
+  const candles = parseAll('market_candles', (value) => marketCandleSchema.safeParse(value)).flat();
+  const sessions = parseAll('trading_sessions', (value) =>
+    tradingSessionSchema.safeParse(value),
+  ).flat();
+  const offers = parseAll('contract_offers', (value) =>
+    contractOfferSchema.safeParse(value),
+  ).flat();
+  const quotes = parseAll('contract_quotes', (value) =>
+    contractQuoteSchema.safeParse(value),
+  ).flat();
   const incidents = parseAll('quality_incidents', (value) =>
     dataQualityIncidentSchema.safeParse(value),
   ).flat();
@@ -346,7 +371,17 @@ function validateLogicalArtifacts(
 
   // Invariantes entre artefactos: conteos, orden, tick→raw, referencias, procedencia y extremos.
   try {
-    validateDatasetConsistency({ conditions, core, incidents, sourceEvents, ticks });
+    validateDatasetConsistency({
+      candles,
+      conditions,
+      core,
+      incidents,
+      offers,
+      quotes,
+      sessions,
+      sourceEvents,
+      ticks,
+    });
   } catch (error) {
     if (error instanceof ContractContextError) {
       fail(
@@ -382,13 +417,31 @@ function validateLogicalArtifacts(
   return { segments };
 }
 
+/**
+ * El conjunto de reglas que declara el core, si está implementado: el de los lotes (4.0.0) en un
+ * core 1.1.0 y uno de `RULE_SETS` en un core 1.0.0; si no, `null`.
+ */
+function rulesOf(
+  core: DatasetManifestCore,
+): { readonly incident_schema_version: string; readonly normalizer_version: string } | null {
+  if (isBatchManifestCore(core)) {
+    return core.quality_rule_version === BATCH_RULE_SET.quality_rule_version
+      ? BATCH_RULE_SET
+      : null;
+  }
+  return ruleSetFor(core.quality_rule_version);
+}
+
 /** Versiones de los lectores que usa el propio replay; se exigen en ambos modos. */
 function contractVersionMismatches(
   manifest: DatasetManifest,
   record: PublishedManifestRecord,
 ): string[] {
   const core = manifest.manifest_core;
-  const fields: [string, string, string][] = [
+  const batch = isBatchManifestCore(core);
+  // Un dataset de los lotes lleva el core 1.1.0, sus registros 1.0.0 y los ticks de la historia,
+  // `MarketTick` 1.1.0 (precisión del PR 5d1 de ADR-0021 §9).
+  const fields: [string, string | undefined, string][] = [
     ['canonicalization_version', core.canonicalization_version, CANONICALIZATION_VERSION],
     [
       'condition_event_schema_version',
@@ -396,17 +449,37 @@ function contractVersionMismatches(
       CONTRACT_SCHEMA_VERSION,
     ],
     ['manifest.schema_version', manifest.schema_version, CONTRACT_SCHEMA_VERSION],
-    ['market_tick_schema_version', core.market_tick_schema_version, CONTRACT_SCHEMA_VERSION],
+    [
+      'market_tick_schema_version',
+      core.market_tick_schema_version,
+      batch ? '1.1.0' : CONTRACT_SCHEMA_VERSION,
+    ],
     ['record.schema_version', record.schema_version, CONTRACT_SCHEMA_VERSION],
-    ['schema_version', core.schema_version, CONTRACT_SCHEMA_VERSION],
+    [
+      'schema_version',
+      core.schema_version,
+      batch ? BATCH_MANIFEST_CORE_SCHEMA_VERSION : CONTRACT_SCHEMA_VERSION,
+    ],
     ['source_event_schema_version', core.source_event_schema_version, CONTRACT_SCHEMA_VERSION],
+    ...(batch
+      ? ([
+          ['contract_offer_schema_version', core.contract_offer_schema_version, '1.0.0'],
+          ['contract_quote_schema_version', core.contract_quote_schema_version, '1.0.0'],
+          ['market_candle_schema_version', core.market_candle_schema_version, '1.0.0'],
+          ['trading_session_schema_version', core.trading_session_schema_version, '1.0.0'],
+        ] satisfies [string, string | undefined, string][])
+      : []),
   ];
   const mismatches = fields
     .filter(([, declared, implemented]) => declared !== implemented)
     .map(([field]) => field);
+  // Las reglas de los lotes solo van en un core 1.1.0, y un core 1.1.0 solo lleva esas reglas.
+  if (batch !== (core.quality_rule_version === BATCH_RULE_SET.quality_rule_version)) {
+    mismatches.push('quality_rule_version');
+  }
   // El esquema de incidencias depende del conjunto de reglas: debe tener lector y, si las reglas
   // están implementadas, ser el que esas reglas emiten (la tabla de contratos de dominio).
-  const rules = ruleSetFor(core.quality_rule_version);
+  const rules = rulesOf(core);
   if (
     !INCIDENT_SCHEMA_VERSIONS.has(core.incident_schema_version) ||
     (rules !== null && rules.incident_schema_version !== core.incident_schema_version)
@@ -421,14 +494,16 @@ function contractVersionMismatches(
  * deben ser un conjunto implementado y el normalizador y el esquema de incidencias, los suyos.
  */
 function implementationVersionMismatches(core: DatasetManifestCore): string[] {
-  const rules = ruleSetFor(core.quality_rule_version);
+  const rules = rulesOf(core);
   if (rules === null) {
     return ['quality_rule_version'];
   }
+  // Los logs de los lotes se segmentan con la política 2.0.0; los de la captura, con la 1.0.0.
+  const policy = isBatchManifestCore(core) ? BATCH_SEGMENT_POLICY.version : SEGMENT_POLICY_VERSION;
   const fields: [string, string, string][] = [
     ['incident_schema_version', core.incident_schema_version, rules.incident_schema_version],
     ['normalizer_version', core.normalizer_version, rules.normalizer_version],
-    ['segment_policy_version', core.segment_policy_version, SEGMENT_POLICY_VERSION],
+    ['segment_policy_version', core.segment_policy_version, policy],
   ];
   return fields
     .filter(([, declared, implemented]) => declared !== implemented)
@@ -459,28 +534,38 @@ function recompute(
 
   let rebuilt: { core: DatasetManifestCore; dataset_id: string };
   try {
-    const profile = createPipelineProfile({
-      connector_version: core.connector_version,
-      quality_profile_bytes: qualityProfile,
-      source_schema_bytes: sourceSchema,
-      source_schema_release: core.source_schema_release,
-    });
     // Solo source events + esquema + perfil + versiones; la identidad física no participa en core.
-    rebuilt = buildDatasetPublication({
+    const common = {
       locateManifest: () => record.manifest_object_uri,
-      locateObject: (artifactId) => uriById.get(artifactId) ?? record.manifest_object_uri,
-      profile,
+      locateObject: (artifactId: string) => uriById.get(artifactId) ?? record.manifest_object_uri,
       publication_id: manifest.publication_id,
       published_at_utc: manifest.published_at_utc,
       segments,
-    });
+    };
+    rebuilt = isBatchManifestCore(core)
+      ? buildBatchDatasetPublication({
+          ...common,
+          connector_version: core.connector_version,
+          quality_profile_bytes: qualityProfile,
+          source_schema_bytes: sourceSchema,
+          source_schema_release: core.source_schema_release,
+        })
+      : buildDatasetPublication({
+          ...common,
+          profile: createPipelineProfile({
+            connector_version: core.connector_version,
+            quality_profile_bytes: qualityProfile,
+            source_schema_bytes: sourceSchema,
+            source_schema_release: core.source_schema_release,
+          }),
+        });
   } catch (error) {
     fail('RECOMPUTATION_FAILED', 'La recomputación abortó.', {}, error);
   }
 
   if (
     rebuilt.dataset_id !== manifest.dataset_id ||
-    canonicalJson(rebuilt.core) !== canonicalJson(core)
+    canonicalJson(rebuilt.core as JsonValue) !== canonicalJson(core as JsonValue)
   ) {
     const stored = new Map(
       core.logical_artifacts.map((artifact) => [artifact.artifact_id, artifact]),
@@ -539,5 +624,13 @@ export async function replayDataset(input: ReplayInput): Promise<ReplayReport> {
     source_event_count: core.source_event_count,
     status: input.mode === 'recompute' ? 'reproduced' : 'verified',
     storage_object_count: manifest.storage_objects.length,
+    ...(isBatchManifestCore(core)
+      ? {
+          contract_offer_count: core.contract_offer_count ?? 0,
+          contract_quote_count: core.contract_quote_count ?? 0,
+          market_candle_count: core.market_candle_count ?? 0,
+          trading_session_count: core.trading_session_count ?? 0,
+        }
+      : {}),
   };
 }

@@ -157,7 +157,8 @@ export function derivQuotesProfile(): QuotesProfile {
 /**
  * Las velas (§3): una vez al día, las de `granularity_seconds` del día UTC anterior de los siete
  * mercados reales, en páginas de `page_seconds`, con `count` como mucho por página. Doce horas de
- * velas de 1 minuto son 720, por debajo de las 1000 de una página.
+ * velas de 1 minuto son 720, por debajo de las 1000 de una página. Antes de las páginas, el
+ * `trading_times` de ese día, en el que las reglas 4.0.0 buscan `symbols` (precisión del PR 5d1).
  */
 export function derivCandlesProfile(): CandlesProfile {
   return {

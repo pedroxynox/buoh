@@ -38,10 +38,11 @@ describe('batchRound: los horarios y las velas, una vuelta por día UTC', () => 
     ).toMatchObject({ from: 4, until: 11 });
   });
 
-  it('las velas piden las 14 páginas del día anterior, ya completo', () => {
+  it('las velas piden el horario y las 14 páginas del día anterior, ya completo', () => {
     const round = batchRound(BATCH_CANDLES_SEQUENCE, '2026-11-26T00:00:07.000Z', null);
-    expect(round).toMatchObject({ from: 0, round: '2026-11-25', until: 14 });
-    expect(round.requests[0]).toMatchObject({
+    expect(round).toMatchObject({ from: 0, round: '2026-11-25', until: 15 });
+    expect(round.requests[0]).toEqual({ date: '2026-11-25', operation: 'trading_times' });
+    expect(round.requests[1]).toMatchObject({
       end: Date.UTC(2026, 10, 25, 12) / 1000 - 1,
       operation: 'ticks_history',
       start: Date.UTC(2026, 10, 25) / 1000,

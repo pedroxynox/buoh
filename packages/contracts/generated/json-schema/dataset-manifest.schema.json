@@ -37,13 +37,17 @@
             "properties": {
               "artifact_id": {
                 "type": "string",
-                "pattern": "^(?:source_events|normalized_ticks|quality_incidents|operational_conditions|source_schema|quality_profile):\\d{6}$"
+                "pattern": "^(?:source_events|normalized_ticks|market_candles|trading_sessions|contract_offers|contract_quotes|quality_incidents|operational_conditions|source_schema|quality_profile):\\d{6}$"
               },
               "role": {
                 "type": "string",
                 "enum": [
                   "source_events",
                   "normalized_ticks",
+                  "market_candles",
+                  "trading_sessions",
+                  "contract_offers",
+                  "contract_quotes",
                   "quality_incidents",
                   "operational_conditions",
                   "source_schema",
@@ -233,6 +237,66 @@
           "minimum": 0,
           "maximum": 9007199254740991
         },
+        "market_candle_schema_version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "trading_session_schema_version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "contract_offer_schema_version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "contract_quote_schema_version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "candle_time_from_utc": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candle_time_to_utc": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "market_candle_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "trading_session_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "contract_offer_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "contract_quote_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "logical_artifacts": {
           "minItems": 4,
           "type": "array",
@@ -241,13 +305,17 @@
             "properties": {
               "artifact_id": {
                 "type": "string",
-                "pattern": "^(?:source_events|normalized_ticks|quality_incidents|operational_conditions|source_schema|quality_profile):\\d{6}$"
+                "pattern": "^(?:source_events|normalized_ticks|market_candles|trading_sessions|contract_offers|contract_quotes|quality_incidents|operational_conditions|source_schema|quality_profile):\\d{6}$"
               },
               "role": {
                 "type": "string",
                 "enum": [
                   "source_events",
                   "normalized_ticks",
+                  "market_candles",
+                  "trading_sessions",
+                  "contract_offers",
+                  "contract_quotes",
                   "quality_incidents",
                   "operational_conditions"
                 ]
