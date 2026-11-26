@@ -1,3 +1,4 @@
+import type { SourceEvent } from '@buoh/contracts';
 import { BATCH_SEGMENT_POLICY } from '@buoh/domain';
 import { describe, expect, it } from 'vitest';
 
@@ -11,6 +12,7 @@ import {
   BATCH_QUOTES_SEQUENCE,
   BATCH_SCHEDULES_SEQUENCE,
   logLocation,
+  MAX_LOG_NUMBER,
   SourceEventLog,
   type LogLocation,
   type LogSequence,
@@ -43,6 +45,8 @@ const ENV = {
 };
 
 interface LogState {
+  /** El número del log activo; por defecto, 1. */
+  active: number;
   first: string | null;
   nextReadiness: LogReadiness;
   pending: readonly string[];
@@ -54,7 +58,11 @@ function world(
   options: {
     readonly busy?: readonly LogSequence[];
     /** Las secuencias cuyo bloqueo no responde, o cuyo log no se abre. */
-    readonly broken?: Partial<Record<string, 'lock' | 'open'>>;
+    readonly broken?: Partial<Record<string, 'lock' | 'open' | 'reads'>>;
+    /** Lo que salta el reloj de pared cuando se abre un log, como una apertura lenta. */
+    readonly jumpOnOpenMs?: number;
+    /** El socket de cada conexión; por defecto, `AnsweringSocket`. */
+    readonly socket?: typeof AnsweringSocket;
     readonly fixture?: typeof BATCH_FIXTURE;
     readonly logs?: Partial<Record<string, Partial<LogState> | null>>;
     readonly respond?: Respond;
@@ -79,6 +87,7 @@ function world(
       return null;
     }
     return {
+      active: 1,
       first: null,
       nextReadiness: 'not_prepared',
       pending: [],
@@ -104,7 +113,8 @@ function world(
                 },
           ),
     connect: (input) => {
-      const socket = new AnsweringSocket(input, options.respond ?? answer, index);
+      const Socket = options.socket ?? AnsweringSocket;
+      const socket = new Socket(input, options.respond ?? answer, index);
       sockets.push(socket);
       return socket;
     },
@@ -114,6 +124,9 @@ function world(
     nextId: () => uuid((id += 1)),
     now: clock.now,
     openLog: async (_config, _lock, log) => {
+      if (options.jumpOnOpenMs !== undefined) {
+        clock.jumpWallClock(options.jumpOnOpenMs);
+      }
       if (
         Object.entries(options.broken ?? {}).some(
           ([name, what]) => what === 'open' && log.schema.includes(name),
@@ -138,7 +151,10 @@ function world(
       return {
         close: () => Promise.resolve(),
         firstWrite: () => Promise.resolve(state?.first ?? null),
-        locateLog: () => Promise.resolve(state === null ? null : logLocation(1, sequence)),
+        locateLog: () =>
+          options.broken?.[sequence.name] === 'reads'
+            ? Promise.reject(Object.assign(new Error('secreto'), { code: '57P01' }))
+            : Promise.resolve(state === null ? null : logLocation(state.active, sequence)),
         logProfile: () => Promise.resolve(state?.profile ?? null),
         pendingMigrations: () => Promise.resolve(state?.pending ?? []),
         readiness: () => Promise.resolve(state?.nextReadiness ?? 'not_prepared'),
@@ -607,5 +623,146 @@ describe('batchCommand: lo que revisó la revisión semántica del PR #145', () 
     ]);
     expect(env.sockets).toEqual([]);
     expect(env.released).toEqual([]);
+  });
+});
+
+describe('batchCommand: lo que revisó la segunda revisión semántica del PR #145', () => {
+  /** Deja en el log un segmento abierto, como una ejecución que falló al escribir. */
+  const leaveOpen = async (env: ReturnType<typeof world>, location: LogLocation) => {
+    const { objects, store } = env.storesOf(location);
+    const previous = await SourceEventLog.open({
+      objects,
+      policy: BATCH_SEGMENT_POLICY,
+      source: DERIV_SOURCE,
+      store,
+      zlibVersion: process.versions.zlib,
+    });
+    const opened: SourceEvent = {
+      connection_id: uuid(900),
+      event_id: uuid(901),
+      kind: 'connection_opened',
+      occurred_at_utc: '2026-11-20T10:00:00.000Z',
+      schema_version: '1.0.0',
+      source: DERIV_SOURCE,
+      supersedes_connection_id: null,
+    };
+    await previous.append(opened);
+    return store;
+  };
+
+  it('con un corte, cierra antes el segmento que quedó abierto en el log que deja de escribirse', async () => {
+    const env = world({
+      logs: { lotes_horarios: { first: '2026-11-20T10:00:00.000Z', nextReadiness: 'ready' } },
+    });
+    const left = await leaveOpen(env, logLocation(1, BATCH_SCHEDULES_SEQUENCE));
+    const { line } = await env.run();
+    expect(sequencesOf(line)[0]).toMatchObject({
+      cut: { from: 1, to: 2 },
+      log: 2,
+      status: 'completed',
+    });
+    expect(left.closed.map((segment) => [segment.event_count, segment.close_reason])).toEqual([
+      [1, 'requested'],
+    ]);
+    expect((await left.readLogState(DERIV_SOURCE)).openRows).toEqual([]);
+    expect(env.storesOf(logLocation(2, BATCH_SCHEDULES_SEQUENCE)).store.rows).toHaveLength(13);
+  });
+
+  it('si no puede cerrar el segmento que quedó abierto, no pide nada en esa secuencia', async () => {
+    const env = world();
+    const left = await leaveOpen(env, logLocation(1, BATCH_SCHEDULES_SEQUENCE));
+    left.failClose = true;
+    const { exitCode, line } = await env.run();
+    expect(exitCode).toBe(1);
+    expect(sequencesOf(line)[0]).toMatchObject({
+      reason: 'persistence_failed',
+      sent: 0,
+      status: 'failed',
+    });
+    expect(env.sockets).toHaveLength(2);
+  });
+
+  it('un RateLimit que se escribe después de un corte de la conexión para también las secuencias siguientes', async () => {
+    class ClosingSocket extends AnsweringSocket {
+      override text(payload: string): void {
+        super.text(payload);
+        if (payload.includes('RateLimit')) {
+          // El corte llega antes de que el frame del límite sea durable.
+          this.emit({ code: 1006, kind: 'closed' });
+        }
+      }
+    }
+    const env = world({
+      respond: (request, index) =>
+        'proposal' in request && index === 12
+          ? {
+              echo_req: request,
+              error: { code: 'RateLimit', message: 'x' },
+              msg_type: 'proposal',
+              req_id: request['req_id'],
+            }
+          : answer(request, index),
+      socket: ClosingSocket,
+    });
+    const { line } = await env.run();
+    expect(sequencesOf(line).map((item) => [item['status'], item['reason'], item['next']])).toEqual(
+      [
+        ['completed', null, 11],
+        ['stopped', 'disconnected', 1],
+        ['skipped', 'rate_limit', 0],
+      ],
+    );
+  });
+
+  it('sin lecturas que respondan, log_unavailable con el código; y lo abandonado de la vuelta anterior y el log 999 999 se dicen', async () => {
+    const env = world({
+      broken: { lotes_horarios: 'reads' },
+      logs: {
+        lotes_velas: {
+          active: MAX_LOG_NUMBER,
+          first: '2026-11-20T10:00:00.000Z',
+          nextReadiness: 'ready',
+        },
+      },
+    });
+    const { line } = await env.run([
+      '--json',
+      '--state',
+      JSON.stringify({ lotes_cotizaciones: { next: 100, round: '2026-11-25T23:30:00.000Z' } }),
+    ]);
+    const [schedules, quotes, candles] = sequencesOf(line);
+    expect(schedules).toMatchObject({
+      detail: '57P01',
+      reason: 'log_unavailable',
+      status: 'failed',
+    });
+    expect(quotes).toMatchObject({
+      abandoned: { remaining: 26, round: '2026-11-25T23:30:00.000Z' },
+      from: 0,
+      next: 21,
+      status: 'completed',
+    });
+    expect(candles).toMatchObject({
+      cut: null,
+      cut_blocked: 'log_number_exhausted',
+      log: MAX_LOG_NUMBER,
+      status: 'completed',
+    });
+  });
+});
+
+describe('batchCommand: el plazo antes de conectar', () => {
+  it('si al abrir el log ya pasó el plazo, no conecta, y las secuencias siguientes no empiezan', async () => {
+    const env = world({ jumpOnOpenMs: 80_000 });
+    const { exitCode, line } = await env.run();
+    expect(exitCode).toBe(0);
+    expect(sequencesOf(line).map((item) => [item['status'], item['reason'], item['sent']])).toEqual(
+      [
+        ['stopped', 'deadline', 0],
+        ['skipped', 'deadline', 0],
+        ['skipped', 'deadline', 0],
+      ],
+    );
+    expect(env.sockets).toEqual([]);
   });
 });

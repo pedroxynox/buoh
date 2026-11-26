@@ -328,6 +328,8 @@ async function targetLog(
       readonly cut: SequenceOutcome['cut'];
       readonly cutBlocked: string | null;
       readonly log: LogLocation;
+      /** Con un corte, el log activo, que deja de escribirse. */
+      readonly previous: LogLocation | null;
     }
   | { readonly reason: string }
 > {
@@ -337,16 +339,21 @@ async function targetLog(
   }
   const first = await reads.firstWrite(active);
   if (first === null || Date.parse(nowUtc) < Date.parse(cutTimeOf(first))) {
-    return { cut: null, cutBlocked: null, log: active };
+    return { cut: null, cutBlocked: null, log: active, previous: null };
   }
   if (active.number >= MAX_LOG_NUMBER) {
-    return { cut: null, cutBlocked: 'log_number_exhausted', log: active };
+    return { cut: null, cutBlocked: 'log_number_exhausted', log: active, previous: null };
   }
   const next = logLocation(active.number + 1, sequence);
   const readiness = await reads.readiness(next);
   return readiness === 'ready'
-    ? { cut: { from: active.number, to: next.number }, cutBlocked: null, log: next }
-    : { cut: null, cutBlocked: `next_log_${readiness}`, log: active };
+    ? {
+        cut: { from: active.number, to: next.number },
+        cutBlocked: null,
+        log: next,
+        previous: active,
+      }
+    : { cut: null, cutBlocked: `next_log_${readiness}`, log: active, previous: null };
 }
 
 interface RunContext {
@@ -425,12 +432,13 @@ async function runSequence(
   let handle: BatchLogHandle | null = null;
   try {
     let target: LogLocation;
+    let previous: LogLocation | null;
     try {
       const found = await targetLog(reads, sequence, deps.now());
       if ('reason' in found) {
         return outcome('failed', { reason: found.reason });
       }
-      ({ cut } = found);
+      ({ cut, previous } = found);
       cutBlocked = found.cutBlocked;
       target = found.log;
       log = target.number;
@@ -450,19 +458,37 @@ async function runSequence(
     } catch (error) {
       return outcome('failed', { detail: failureReason(error), reason: 'log_unavailable' });
     }
-    try {
-      handle = await deps.openLog(config, lock, target);
-    } catch (error) {
-      return outcome('failed', { detail: failureReason(error), reason: 'log_open_failed' });
+    // Un segmento que dejó abierto una ejecución anterior, porque falló al escribir o la cortaron,
+    // se cierra antes de seguir: ningún segmento mezcla dos ejecuciones. Con un corte, el del log
+    // que deja de escribirse, que nadie volverá a abrir para escribir.
+    for (const location of previous === null ? [target] : [previous, target]) {
+      let current: BatchLogHandle;
+      try {
+        current = await deps.openLog(config, lock, location);
+      } catch (error) {
+        return outcome('failed', { detail: failureReason(error), reason: 'log_open_failed' });
+      }
+      try {
+        await current.log.close('requested');
+      } catch (error) {
+        await current.close().catch(() => undefined);
+        return outcome('failed', { detail: writeFailureOf(error), reason: 'persistence_failed' });
+      }
+      if (location === target) {
+        handle = current;
+      } else {
+        await current.close().catch(() => undefined);
+      }
+    }
+    if (handle === null) {
+      throw new TypeError('El log de la secuencia no se abrió.');
+    }
+    if (Date.parse(deps.now()) >= Date.parse(context.deadlineUtc)) {
+      // Sin conectar: lo que tardó en abrirse el log ya pasó del plazo.
+      context.halt ??= 'deadline';
+      return outcome('stopped', { reason: 'deadline' });
     }
     const opened = handle.log;
-    try {
-      // Un segmento que dejó abierto una ejecución anterior, porque falló al escribir o la cortaron,
-      // se cierra antes de seguir: ningún segmento mezcla dos ejecuciones.
-      await opened.close('requested');
-    } catch (error) {
-      return outcome('failed', { detail: writeFailureOf(error), reason: 'persistence_failed' });
-    }
     const result = await runBatchExchange({
       closeTimeoutMs: BATCH_CLOSE_TIMEOUT_MS,
       closed: async (input) => {
@@ -506,10 +532,11 @@ async function runSequence(
       scheduler: deps.scheduler,
     });
     context.lastSentUtc = result.last_sent_utc;
-    const stopReason = result.stopped?.reason;
-    if (stopReason === 'rate_limit' || stopReason === 'deadline') {
-      // También si después falló una escritura: el paso para igual.
-      context.halt ??= stopReason;
+    if (result.rate_limited) {
+      // También si después falló una escritura, o si el RateLimit llegó con otra parada.
+      context.halt ??= 'rate_limit';
+    } else if (result.stopped?.reason === 'deadline') {
+      context.halt ??= 'deadline';
     }
     const done = { answered: result.answered, sent: result.sent };
     if (result.write_failure !== null) {

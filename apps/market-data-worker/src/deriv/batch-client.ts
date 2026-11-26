@@ -95,6 +95,11 @@ export interface BatchExchangeResult {
   readonly connection_id: string | null;
   /** La hora del último envío, o la de `previousSentUtc` si no envió nada. */
   readonly last_sent_utc: string | null;
+  /**
+   * Si alguna respuesta durable fue un `RateLimit`, también si llegó a escribirse después de parar
+   * por otro motivo: el paso tiene que parar igual.
+   */
+  readonly rate_limited: boolean;
   readonly sent: number;
   readonly stopped: BatchStop | null;
   /**
@@ -388,6 +393,7 @@ class BatchExchange {
         answered: 0,
         connection_id: null,
         last_sent_utc: input.previousSentUtc,
+        rate_limited: false,
         sent: 0,
         stopped: notOpened,
         write_failure: this.#writeFailure,
@@ -492,6 +498,7 @@ class BatchExchange {
       answered,
       connection_id: connectionId,
       last_sent_utc: lastSentUtc,
+      rate_limited: [...this.#outcomes.values()].some((limited) => limited),
       sent,
       stopped: stop,
       write_failure: this.#writeFailure,

@@ -108,6 +108,7 @@ describe('runBatchExchange: una petición a la vez, al ritmo de Deriv', () => {
       answered: 3,
       connection_id: uuid(1),
       last_sent_utc: '2026-11-26T10:00:05.500Z',
+      rate_limited: false,
       sent: 3,
       stopped: null,
       write_failure: null,
@@ -183,6 +184,7 @@ describe('runBatchExchange: lo que la para, sin fallar', () => {
       answered: 1,
       connection_id: uuid(1),
       last_sent_utc: '2026-11-26T10:00:01.500Z',
+      rate_limited: true,
       sent: 2,
       stopped: { detail: 'proposal', reason: 'rate_limit' },
       write_failure: null,
@@ -322,7 +324,7 @@ describe('runBatchExchange: lo respondido es lo durable', () => {
     });
   });
 
-  it('un RateLimit que se hace durable después del plazo de la respuesta no cuenta', async () => {
+  it('un RateLimit que se hace durable después del plazo de la respuesta no cuenta, y lo dice rate_limited', async () => {
     let release: (() => void) | null = null;
     const run = harness({
       frame: () =>
@@ -337,6 +339,7 @@ describe('runBatchExchange: lo respondido es lo durable', () => {
     (release as unknown as () => void)();
     await expect(run.result).resolves.toMatchObject({
       answered: 0,
+      rate_limited: true,
       stopped: { reason: 'request_timeout' },
     });
   });
@@ -380,6 +383,7 @@ describe('runBatchExchange: un fallo al escribir o al conectar', () => {
       answered: 0,
       connection_id: null,
       last_sent_utc: null,
+      rate_limited: false,
       sent: 0,
       stopped: { detail: null, reason: 'connect_timeout' },
       write_failure: null,
