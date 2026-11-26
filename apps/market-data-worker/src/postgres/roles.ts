@@ -4,6 +4,7 @@ import pg, { type PoolClient } from 'pg';
 
 import { POSTGRES_IDENTIFIER } from '../config.js';
 import { DATASETS_SCHEMA } from '../datasets/location.js';
+import { logOfSchema, type LogSequence } from '../successive-logs.js';
 
 /**
  * Los roles de PostgreSQL de producción (ADR-0018 §8):
@@ -58,11 +59,34 @@ export const API_READER_ROLE = 'buoh_api_lectura';
  */
 export const PUBLICATION_ROLE = 'buoh_publicacion';
 /**
- * Los roles a los que `buoh-operaciones` pone contraseña: los de ejecución, los de la API y el de
- * la publicación.
+ * El rol de los lotes (ADR-0021 §3), que inicia sesión: el escritor de los logs de las secuencias
+ * por lotes, con los privilegios que tiene `buoh_ingesta` en un log en vivo, y nada en los logs en
+ * vivo, en `buoh_datasets` ni en `buoh_api`. No es miembro de `buoh_lectura`, que lee todos los
+ * logs. Como el de la publicación, no es un rol de `LOGIN_ROLES`: `buoh-operaciones` solo lo crea
+ * cuando tiene su contraseña, que le llega con el PR 5f de ADR-0021 §9.
+ */
+export const BATCH_ROLE = 'buoh_lotes';
+/**
+ * Los roles a los que `buoh-operaciones` pone contraseña: los de ejecución, los de la API, el de la
+ * publicación y el de los lotes.
  */
 export type PasswordRole =
-  LoginRole | typeof API_ROLE | typeof API_READER_ROLE | typeof PUBLICATION_ROLE;
+  | LoginRole
+  | typeof API_ROLE
+  | typeof API_READER_ROLE
+  | typeof PUBLICATION_ROLE
+  | typeof BATCH_ROLE;
+
+/**
+ * El escritor de un log (ADR-0021 §3): `buoh_ingesta` en los de las secuencias en vivo y
+ * `buoh_lotes` en los de las secuencias por lotes. Solo él inserta en el log.
+ */
+export type LogWriterRole = typeof POSTGRES_ROLES.ingest | typeof BATCH_ROLE;
+
+/** El escritor de los logs de `sequence`: `buoh_lotes` en una secuencia por lotes. */
+export function logWriterOf(sequence: Pick<LogSequence, 'kind'>): LogWriterRole {
+  return sequence.kind === 'batch' ? BATCH_ROLE : POSTGRES_ROLES.ingest;
+}
 
 /** Conexiones de `buoh_agente` a la vez, para que no ocupe las 100 de Basic-256mb. */
 export const AGENT_CONNECTION_LIMIT = 4;
@@ -185,6 +209,7 @@ const ROLE_ATTRIBUTES = {
   [API_ROLE]: 'LOGIN NOCREATEROLE',
   [API_READER_ROLE]: 'LOGIN NOCREATEROLE',
   [PUBLICATION_ROLE]: 'LOGIN NOCREATEROLE',
+  [BATCH_ROLE]: 'LOGIN NOCREATEROLE',
 } as const;
 
 /** Crea `role` con sus atributos o, si ya existe, se los vuelve a fijar. */
@@ -255,15 +280,32 @@ export async function ensureRuntimeRoles(client: Client): Promise<void> {
  * Da a los roles de ejecución sus privilegios en el esquema de un log (ADR-0018 §8), en una
  * transacción y como `buoh_dueno`, el dueño de sus tablas. Es idempotente.
  * - `buoh_lectura`: uso del esquema y `SELECT` en todas sus tablas.
- * - `buoh_ingesta`: uso del esquema, `SELECT` e `INSERT` en `INGEST_WRITE_TABLES`, `SELECT` en la
- *   tabla de migraciones y en `INGEST_READ_TABLES` y uso de las secuencias; nada en
- *   `INGEST_DENIED_TABLES`.
+ * - el escritor del log (`writer`; `logWriterOf`), `buoh_ingesta` en un log en vivo y `buoh_lotes`
+ *   en uno de los lotes (ADR-0021 §3): uso del esquema, `SELECT` e `INSERT` en
+ *   `INGEST_WRITE_TABLES`, `SELECT` en la tabla de migraciones y en `INGEST_READ_TABLES` y uso de
+ *   las secuencias; nada en `INGEST_DENIED_TABLES`. El otro no recibe nada.
  *
- * Antes comprueba que cada tabla del esquema esté en una de esas listas: una tabla nueva sin
- * privilegios decididos lanza `UnclassifiedTableError` sin dar ninguno.
+ * El escritor tiene que ser el de la secuencia del esquema, si es el de un log de `LOG_SEQUENCES`:
+ * así un log de los lotes nunca llega a `buoh_ingesta`, tampoco si una llamada olvida el escritor,
+ * que por defecto es `buoh_ingesta`, como en un esquema de `development` o `test`. Si no lo es, lanza
+ * `TypeError` sin enviar nada. Antes de dar ninguno, comprueba también que cada tabla del esquema
+ * esté en una de esas listas: una tabla nueva sin privilegios decididos lanza
+ * `UnclassifiedTableError`.
  */
-export async function grantLogPrivileges(client: Client, schema: string): Promise<void> {
+export async function grantLogPrivileges(
+  client: Client,
+  schema: string,
+  writer: LogWriterRole = POSTGRES_ROLES.ingest,
+): Promise<void> {
   assertIdentifier(schema, 'El esquema');
+  // También en tiempo de ejecución: el rol va tal cual en las órdenes `GRANT`.
+  if (![POSTGRES_ROLES.ingest, BATCH_ROLE].includes(writer)) {
+    throw new TypeError(`${writer} no es el escritor de un log.`);
+  }
+  const log = logOfSchema(schema);
+  if (log !== null && logWriterOf(log.sequence) !== writer) {
+    throw new TypeError(`${writer} no es el escritor de los logs de ${log.sequence.name}.`);
+  }
   const known = new Set<string>([
     MIGRATIONS_TABLE,
     ...INGEST_WRITE_TABLES,
@@ -283,21 +325,36 @@ export async function grantLogPrivileges(client: Client, schema: string): Promis
     }
     const present = new Set(rows.map((row) => row.table_name));
     const s = ident(schema);
-    const ingest = ident(POSTGRES_ROLES.ingest);
+    const author = ident(writer);
     const reader = ident(POSTGRES_ROLES.reader);
-    await client.query(`GRANT USAGE ON SCHEMA ${s} TO ${ingest}, ${reader}`);
+    await client.query(`GRANT USAGE ON SCHEMA ${s} TO ${author}, ${reader}`);
     await client.query(`GRANT SELECT ON ALL TABLES IN SCHEMA ${s} TO ${reader}`);
     for (const table of INGEST_WRITE_TABLES) {
       if (present.has(table)) {
-        await client.query(`GRANT SELECT, INSERT ON ${s}.${ident(table)} TO ${ingest}`);
+        await client.query(`GRANT SELECT, INSERT ON ${s}.${ident(table)} TO ${author}`);
       }
     }
     for (const table of [MIGRATIONS_TABLE, ...INGEST_READ_TABLES]) {
       if (present.has(table)) {
-        await client.query(`GRANT SELECT ON ${s}.${ident(table)} TO ${ingest}`);
+        await client.query(`GRANT SELECT ON ${s}.${ident(table)} TO ${author}`);
       }
     }
-    await client.query(`GRANT USAGE ON ALL SEQUENCES IN SCHEMA ${s} TO ${ingest}`);
+    await client.query(`GRANT USAGE ON ALL SEQUENCES IN SCHEMA ${s} TO ${author}`);
+  });
+}
+
+/**
+ * Crea el rol `buoh_lotes` o, si ya existe, le vuelve a fijar sus atributos (ADR-0021 §3): inicia
+ * sesión y no crea roles. No lo hace miembro de ningún rol, tampoco de `buoh_lectura`: sus únicos
+ * privilegios son los de escritor de los logs de las secuencias por lotes (`grantLogPrivileges`).
+ * Lo crea `buoh_dueno` (`SET LOCAL ROLE`), que lo administra como a los demás, en una transacción.
+ * Necesita `buoh_dueno` (`ensureRuntimeRoles`). Sin contraseña: la pone `setRolePassword`. Es
+ * idempotente.
+ */
+export async function ensureBatchRole(client: Client): Promise<void> {
+  await inTransaction(client, async () => {
+    await client.query(`SET LOCAL ROLE ${ident(POSTGRES_ROLES.owner)}`);
+    await ensureRole(client, BATCH_ROLE);
   });
 }
 
@@ -451,16 +508,17 @@ export function scramSha256Verifier(
 export const MIN_ROLE_PASSWORD_LENGTH = 16;
 
 /**
- * Pone la contraseña de un rol de ejecución que inicia sesión, o la de `buoh_api` o
- * `buoh_api_lectura` (ADR-0019 §7), como `buoh_dueno`, que los administra (ADR-0018 §8). Envía el
- * verificador SCRAM calculado aquí, nunca la contraseña.
+ * Pone la contraseña de un rol de ejecución que inicia sesión, o la de `buoh_api`,
+ * `buoh_api_lectura` (ADR-0019 §7), `buoh_publicacion` (ADR-0020 §5) o `buoh_lotes` (ADR-0021 §3),
+ * como `buoh_dueno`, que los administra (ADR-0018 §8). Envía el verificador SCRAM calculado aquí,
+ * nunca la contraseña.
  */
 export async function setRolePassword(
   client: Client,
   role: PasswordRole,
   password: string,
 ): Promise<void> {
-  if (![...LOGIN_ROLES, API_ROLE, API_READER_ROLE, PUBLICATION_ROLE].includes(role)) {
+  if (![...LOGIN_ROLES, API_ROLE, API_READER_ROLE, PUBLICATION_ROLE, BATCH_ROLE].includes(role)) {
     throw new TypeError(`${role} no es un rol que inicia sesión.`);
   }
   if (password.length < MIN_ROLE_PASSWORD_LENGTH) {

@@ -6,12 +6,18 @@ import type { OperationalAlert } from '../operational/registry.js';
 import {
   API_READER_ROLE,
   API_ROLE,
+  BATCH_ROLE,
   LOGIN_ROLES,
+  logWriterOf,
   PUBLICATION_ROLE,
   type PasswordRole,
 } from '../postgres/roles.js';
 import { failureReason } from '../source-log/source-event-log.js';
 import {
+  BATCH_CANDLES_SEQUENCE,
+  BATCH_QUOTES_SEQUENCE,
+  BATCH_SCHEDULES_SEQUENCE,
+  BATCH_SEQUENCES,
   isLogExpired,
   LOG_SEQUENCES,
   logLocation,
@@ -30,6 +36,7 @@ import {
   migrateEnvironment,
   type OperationsConfig,
 } from './config.js';
+import { derivBatchLogProfileRow, type BatchProfileKind } from '../deriv/batch-profile.js';
 import { derivLogProfileRow, type LogQualityProfileRow } from '../deriv/log-profile.js';
 import { DERIV_PUBLICATION_THRESHOLDS } from '../deriv/profile.js';
 import { datasetVerificationStep, publicationStep } from './datasets-steps.js';
@@ -55,7 +62,10 @@ import {
 // siguientes. Están los roles y los logs, la salud con el informe final de un log cortado, la
 // retención, la verificación por partes y el espacio. Desde ADR-0021 §1, cada paso trabaja con los
 // logs de cada secuencia de `BUOH_OPERACIONES_SIMBOLOS`, y la salud y el informe final dejan un
-// informe por secuencia, en su log; los demás informes van al log activo de R_100.
+// informe por secuencia, en su log; los demás informes van al log activo de R_100. Desde el PR 5b de
+// su §9, con la contraseña de `buoh_lotes`, el paso 1 prepara también los logs de las secuencias por
+// lotes (§3), y la retención y el espacio, que miran todas las de `LOG_SEQUENCES`, los incluyen; la
+// salud, el informe final y la verificación siguen siendo de las secuencias en vivo.
 
 /**
  * Los pasos de una ejecución, en orden. `final_health` es la segunda parte del paso 2 de §11: el
@@ -149,12 +159,28 @@ export function nextLogToPrepare(
   return logLocation(highest.location.number + 1, sequence);
 }
 
+/** El perfil de cada secuencia por lotes del PR 5 de ADR-0021 §9 (§3). */
+const BATCH_PROFILE_KINDS: ReadonlyMap<LogSequence, BatchProfileKind> = new Map([
+  [BATCH_SCHEDULES_SEQUENCE, 'schedules'],
+  [BATCH_QUOTES_SEQUENCE, 'quotes'],
+  [BATCH_CANDLES_SEQUENCE, 'candles'],
+]);
+
 /**
- * La fila del perfil que reciben los logs nuevos de la secuencia (ADR-0020 §4; ADR-0021 §2): la del
- * perfil de publicación de su símbolo, si tiene umbrales medidos (ADR-0020 §1), como R_100; si no,
- * ninguna, y sus logs se derivan con el perfil de medición, como el oro hasta su PR 7.
+ * La fila del perfil que reciben los logs nuevos de la secuencia (ADR-0020 §4; ADR-0021 §2 y §3): en
+ * una secuencia por lotes, la de su perfil de los lotes (precisión del PR 5b de ADR-0021 §9); en una
+ * en vivo, la del perfil de publicación de su símbolo, si tiene umbrales medidos (ADR-0020 §1), como
+ * R_100; si no, ninguna, y sus logs se derivan con el perfil de medición, como el oro hasta su PR 7.
+ * Una secuencia por lotes sin perfil lanza `TypeError`: sus logs no se preparan.
  */
 function sequenceProfileRow(sequence: LogSequence): LogQualityProfileRow | null {
+  if (sequence.kind === 'batch') {
+    const kind = BATCH_PROFILE_KINDS.get(sequence);
+    if (kind === undefined) {
+      throw new TypeError(`La secuencia por lotes ${sequence.name} no tiene perfil.`);
+    }
+    return derivBatchLogProfileRow(kind);
+  }
   return Object.hasOwn(DERIV_PUBLICATION_THRESHOLDS, sequence.name)
     ? derivLogProfileRow(sequence.name)
     : null;
@@ -302,6 +328,21 @@ async function prepareDatasets(
 }
 
 /**
+ * El rol de los lotes (ADR-0021 §3): crea o ajusta `buoh_lotes`, sin pertenencias. Anota el fallo.
+ * Da si el rol existe, para preparar después los logs de las secuencias por lotes y ponerle su
+ * contraseña.
+ */
+async function prepareBatchRole(input: OperationsInput, failures: Report[]): Promise<boolean> {
+  try {
+    await input.database.ensureBatchRole();
+    return true;
+  } catch (error) {
+    failures.push({ action: 'batch_role', reason: failureReason(error) });
+    return false;
+  }
+}
+
+/**
  * Paso 1 (ADR-0018 §11): crea y ajusta los roles; en cada secuencia de la configuración (ADR-0021
  * §1), aplica las migraciones pendientes a cada log que existe, cada uno con `db:migrate` en un
  * proceso aparte, le da su perfil si su símbolo tiene umbrales (`sequenceProfileRow`) y los
@@ -317,10 +358,16 @@ async function prepareDatasets(
  * ajusta ese rol (`prepareApiReader`, ADR-0019 §8) y le pone su contraseña; sin ella, no lo toca.
  * Con la de `buoh_publicacion`, prepara `buoh_datasets` (`prepareDatasets`, ADR-0020 §5) y le
  * pone su contraseña; el informe lleva entonces `datasets_migrated`. Sin ella, no los toca.
+ *
+ * Con la de `buoh_lotes` (ADR-0021 §3; precisión del PR 5b de su §9), después de las secuencias en
+ * vivo, crea o ajusta ese rol (`prepareBatchRole`), prepara los logs de cada secuencia por lotes
+ * (`BATCH_SEQUENCES`) como los de las secuencias en vivo, cada uno con su perfil de los lotes y con
+ * `buoh_lotes` como escritor, y le pone su contraseña. Si no puede crear el rol, no prepara esos
+ * logs. Sin ella no toca nada de los lotes: así es en producción hasta el PR 5f.
  */
 async function rolesAndLogs(input: OperationsInput, runId: string): Promise<StepOutcome> {
   const { database } = input;
-  const { apiPassword, apiReaderPassword, publicationPassword } = input.config;
+  const { apiPassword, apiReaderPassword, batchPassword, publicationPassword } = input.config;
   const failures: Report[] = [];
   const migrated: Report[] = [];
   const apiMigrated: string[] = [];
@@ -359,8 +406,9 @@ async function rolesAndLogs(input: OperationsInput, runId: string): Promise<Step
   }
   /**
    * Migra el log de la secuencia, le da su perfil si la secuencia tiene uno y todavía no lo usa
-   * nadie (ADR-0020 §4) y, si las dos cosas salieron, le da los privilegios: un log de R_100 sin su
-   * perfil no llega a `buoh_ingesta`. Un log sin perfil que dar, como los del oro, solo se migra y
+   * nadie (ADR-0020 §4) y, si las dos cosas salieron, le da los privilegios, con el escritor de la
+   * secuencia (`logWriterOf`): un log de R_100 sin su perfil no llega a `buoh_ingesta`, ni uno de los
+   * lotes sin el suyo a `buoh_lotes`. Un log sin perfil que dar, como los del oro, solo se migra y
    * recibe sus privilegios.
    */
   const prepareSchema = async (
@@ -369,6 +417,7 @@ async function rolesAndLogs(input: OperationsInput, runId: string): Promise<Step
     profile: LogQualityProfileRow | null,
   ): Promise<boolean> => {
     const where = { log: log.number, sequence: sequence.name };
+    const writer = logWriterOf(sequence);
     const result = await migrateLog(input, log);
     if ('reason' in result) {
       failures.push({ action: 'migrate', ...where, reason: result.reason });
@@ -380,7 +429,7 @@ async function rolesAndLogs(input: OperationsInput, runId: string): Promise<Step
     if (profile !== null) {
       try {
         const row = { ...profile, assigned_at_utc: input.now(), run_id: runId };
-        if (await database.assignLogProfile(log, row)) {
+        if (await database.assignLogProfile(log, row, writer)) {
           profilesAssigned.push(where);
         }
       } catch (error) {
@@ -389,16 +438,17 @@ async function rolesAndLogs(input: OperationsInput, runId: string): Promise<Step
       }
     }
     try {
-      await database.grantLogPrivileges(log);
+      await database.grantLogPrivileges(log, writer);
     } catch (error) {
       failures.push({ action: 'grant', ...where, reason: failureReason(error) });
       return false;
     }
     return true;
   };
-  for (const sequence of input.config.sequences) {
-    const profile = sequenceProfileRow(sequence);
+  /** Prepara los logs que existen de la secuencia y su log siguiente (`nextLogToPrepare`). */
+  const prepareSequence = async (sequence: LogSequence): Promise<void> => {
     try {
+      const profile = sequenceProfileRow(sequence);
       for (const log of await database.listLogs(sequence)) {
         await prepareSchema(log.location, sequence, profile);
       }
@@ -413,6 +463,15 @@ async function rolesAndLogs(input: OperationsInput, runId: string): Promise<Step
     } catch (error) {
       // Una secuencia que falla no impide las demás.
       failures.push({ action: 'logs', reason: failureReason(error), sequence: sequence.name });
+    }
+  };
+  for (const sequence of input.config.sequences) {
+    await prepareSequence(sequence);
+  }
+  const batchRoleReady = batchPassword !== null && (await prepareBatchRole(input, failures));
+  if (batchRoleReady) {
+    for (const sequence of BATCH_SEQUENCES) {
+      await prepareSequence(sequence);
     }
   }
   const apiRoleReady = apiPassword !== null && (await prepareApi(input, failures, apiMigrated));
@@ -430,6 +489,9 @@ async function rolesAndLogs(input: OperationsInput, runId: string): Promise<Step
   }
   if (publicationReady) {
     passwords.push([PUBLICATION_ROLE, publicationPassword]);
+  }
+  if (batchRoleReady) {
+    passwords.push([BATCH_ROLE, batchPassword]);
   }
   for (const [role, password] of passwords) {
     try {

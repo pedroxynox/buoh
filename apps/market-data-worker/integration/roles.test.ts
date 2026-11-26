@@ -673,6 +673,7 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
     return {
       apiPassword: null,
       apiReaderPassword: null,
+      batchPassword: null,
       codeVersion: null,
       healthObjects: config.s3,
       operationsObjects: config.s3,
@@ -703,7 +704,7 @@ describe('rotaciones de la credencial dueña como las de Render (PR 7c de ADR-00
       await owner.createLogSchema(location);
       const { applied } = await migrate(pool, { ownerRole: POSTGRES_ROLES.owner });
       expect(applied).toHaveLength(7);
-      await owner.grantLogPrivileges(location);
+      await owner.grantLogPrivileges(location, POSTGRES_ROLES.ingest);
       await owner.setRolePassword(POSTGRES_ROLES.health, passwords.health);
       expect(await owner.checkLogin(POSTGRES_ROLES.health, passwords.health)).toBe('accepted');
       await owner.appendReport(location, {

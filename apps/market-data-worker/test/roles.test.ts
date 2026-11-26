@@ -7,16 +7,22 @@ import {
   API_READER_ROLE,
   API_ROLE,
   API_SCHEMA,
+  BATCH_CANDLES_SEQUENCE,
+  BATCH_ROLE,
   ensureApiReaderRole,
   ensureApiRole,
+  ensureBatchRole,
   ensureRuntimeRoles,
   grantApiPrivileges,
   grantLogPrivileges,
   INGEST_DENIED_TABLES,
   INGEST_READ_TABLES,
   INGEST_WRITE_TABLES,
+  logWriterOf,
   MIGRATIONS_TABLE,
   POSTGRES_ROLES,
+  R_100_SEQUENCE,
+  GOLD_SEQUENCE,
   scramSha256Verifier,
   setRolePassword,
   UnclassifiedTableError,
@@ -173,6 +179,87 @@ describe('grantLogPrivileges', () => {
     const { client, queries } = fakeClient();
     await expect(grantLogPrivileges(client, 'Log; DROP')).rejects.toThrow(TypeError);
     expect(queries).toEqual([]);
+  });
+
+  it('en un log de los lotes, el escritor es buoh_lotes, con los mismos privilegios, y buoh_ingesta no recibe nada (ADR-0021 §3)', async () => {
+    const answer = (text: string) =>
+      text.includes('information_schema.tables')
+        ? { rows: tables.map((table_name) => ({ table_name })) }
+        : { rows: [] };
+    const live = fakeClient(answer);
+    await grantLogPrivileges(live.client, 'buoh_log_000001');
+    const batch = fakeClient(answer);
+    await grantLogPrivileges(batch.client, 'buoh_lotes_velas_log_000001', BATCH_ROLE);
+    // Las mismas órdenes, con buoh_lotes en lugar de buoh_ingesta, en su esquema.
+    expect(batch.queries).toEqual(
+      live.queries.map((text) =>
+        text
+          .replaceAll('"buoh_ingesta"', '"buoh_lotes"')
+          .replaceAll('"buoh_log_000001"', '"buoh_lotes_velas_log_000001"'),
+      ),
+    );
+    expect(batch.queries.some((text) => text.includes('buoh_ingesta'))).toBe(false);
+    expect(batch.queries).toContain(
+      'GRANT USAGE ON SCHEMA "buoh_lotes_velas_log_000001" TO "buoh_lotes", "buoh_lectura"',
+    );
+  });
+
+  it('el escritor tiene que ser el de la secuencia del esquema: sin él, un log de los lotes no llega a buoh_ingesta, ni uno en vivo a buoh_lotes', async () => {
+    const { client, queries } = fakeClient();
+    await expect(grantLogPrivileges(client, 'buoh_lotes_horarios_log_000001')).rejects.toThrow(
+      TypeError,
+    );
+    await expect(
+      grantLogPrivileges(client, 'buoh_lotes_cotizaciones_log_000002', POSTGRES_ROLES.ingest),
+    ).rejects.toThrow(TypeError);
+    for (const schema of ['buoh_log_000001', 'buoh_frxxauusd_log_000001']) {
+      await expect(grantLogPrivileges(client, schema, BATCH_ROLE)).rejects.toThrow(TypeError);
+    }
+    expect(queries).toEqual([]);
+  });
+
+  it('solo admite como escritor a buoh_ingesta o buoh_lotes', async () => {
+    const { client, queries } = fakeClient();
+    for (const writer of [POSTGRES_ROLES.reader, POSTGRES_ROLES.owner, API_ROLE, 'postgres']) {
+      await expect(
+        grantLogPrivileges(client, 'buoh_log_000001', writer as typeof BATCH_ROLE),
+      ).rejects.toThrow(TypeError);
+    }
+    expect(queries).toEqual([]);
+  });
+
+  it('logWriterOf: buoh_lotes en una secuencia por lotes y buoh_ingesta en una en vivo', () => {
+    expect(logWriterOf(R_100_SEQUENCE)).toBe(POSTGRES_ROLES.ingest);
+    expect(logWriterOf(GOLD_SEQUENCE)).toBe(POSTGRES_ROLES.ingest);
+    expect(logWriterOf(BATCH_CANDLES_SEQUENCE)).toBe(BATCH_ROLE);
+  });
+});
+
+describe('el rol de los lotes (ADR-0021 §3)', () => {
+  it('ensureBatchRole: como buoh_dueno, crea buoh_lotes con inicio de sesión y sin CREATEROLE, sin hacerlo miembro de ningún rol', async () => {
+    const { client, queries } = fakeClient((text) =>
+      text.includes('pg_roles') ? { rows: [{ exists: false }] } : { rows: [] },
+    );
+    await ensureBatchRole(client);
+    expect(queries.filter((text) => !text.includes('pg_roles'))).toEqual([
+      'BEGIN',
+      'SET LOCAL ROLE "buoh_dueno"',
+      'CREATE ROLE "buoh_lotes" LOGIN NOCREATEROLE',
+      'COMMIT',
+    ]);
+    const existing = fakeClient((text) =>
+      text.includes('pg_roles') ? { rows: [{ exists: true }] } : { rows: [] },
+    );
+    await ensureBatchRole(existing.client);
+    expect(existing.queries).toContain('ALTER ROLE "buoh_lotes" LOGIN NOCREATEROLE');
+    expect(existing.queries.some((text) => text.startsWith('GRANT'))).toBe(false);
+  });
+
+  it('setRolePassword le pone su contraseña, como buoh_dueno', async () => {
+    const { client, queries } = fakeClient();
+    await setRolePassword(client, BATCH_ROLE, 'a'.repeat(32));
+    expect(queries[1]).toBe('SET LOCAL ROLE "buoh_dueno"');
+    expect(queries[2]).toMatch(/^ALTER ROLE "buoh_lotes" PASSWORD 'SCRAM-SHA-256\$4096:/u);
   });
 });
 

@@ -6,7 +6,7 @@ import { HEALTH_USAGE, parseHealthArgs } from '../health-args.js';
 import { UsageError } from '../replay-args.js';
 import { failureReason } from '../source-log/source-event-log.js';
 import {
-  LOG_SEQUENCES,
+  LIVE_SEQUENCES,
   liveSequenceOf,
   productionLogConfigErrors,
   R_100_SEQUENCE,
@@ -201,7 +201,7 @@ async function locateAndObserve(
 function productionSequence(symbol: string): LogSequence {
   const sequence = liveSequenceOf(symbol);
   if (sequence === null) {
-    const names = LOG_SEQUENCES.map((item) => item.name).join(', ');
+    const names = LIVE_SEQUENCES.map((item) => item.name).join(', ');
     throw new UsageError(
       `En production, --symbol es el de una secuencia de logs: ${names}. ${HEALTH_USAGE}`,
     );

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  BATCH_CANDLES_SEQUENCE,
+  BATCH_QUOTES_SEQUENCE,
+  BATCH_SCHEDULES_SEQUENCE,
+  BATCH_SEQUENCES,
   findActiveLog,
   firstWriteOf,
   GOLD_SEQUENCE,
@@ -10,6 +14,7 @@ import {
   liveSequenceOf,
   loadConfig,
   LOG_RETENTION_MS,
+  LIVE_SEQUENCES,
   LOG_SEQUENCES,
   logLocation,
   logNumberOf,
@@ -114,6 +119,37 @@ describe('las secuencias de logs (ADR-0021 §1)', () => {
     expect(liveSequenceOf('frxXAUUSD')).toBe(GOLD_SEQUENCE);
   });
 
+  it('las secuencias por lotes (precisión del PR 5b de ADR-0021 §9): su nombre en el esquema y en el prefijo, bajo logs/, y ninguna es la de un símbolo', () => {
+    expect(BATCH_SEQUENCES.map((sequence) => logLocation(1, sequence))).toEqual([
+      {
+        number: 1,
+        prefix: 'logs/lotes_horarios/000001/',
+        schema: 'buoh_lotes_horarios_log_000001',
+      },
+      {
+        number: 1,
+        prefix: 'logs/lotes_cotizaciones/000001/',
+        schema: 'buoh_lotes_cotizaciones_log_000001',
+      },
+      { number: 1, prefix: 'logs/lotes_velas/000001/', schema: 'buoh_lotes_velas_log_000001' },
+    ]);
+    expect(BATCH_SEQUENCES).toEqual([
+      BATCH_SCHEDULES_SEQUENCE,
+      BATCH_QUOTES_SEQUENCE,
+      BATCH_CANDLES_SEQUENCE,
+    ]);
+    expect(LIVE_SEQUENCES).toEqual([R_100_SEQUENCE, GOLD_SEQUENCE]);
+    // Las dos listas reparten la tabla entera, en su orden.
+    expect([...LIVE_SEQUENCES, ...BATCH_SEQUENCES]).toEqual(LOG_SEQUENCES);
+    for (const sequence of BATCH_SEQUENCES) {
+      expect(sequence.kind).toBe('batch');
+      expect(liveSequenceOf(sequence.name)).toBeNull();
+      // El nombre que guarda buoh_datasets en cada rango (`dataset_log_ranges.sequence`).
+      expect(sequence.name).toMatch(/^[A-Za-z0-9_]{1,64}$/u);
+      expect(logOfSchema(logLocation(3, sequence).schema)).toEqual({ number: 3, sequence });
+    }
+  });
+
   it('un esquema de una secuencia nunca es un log de otra', () => {
     for (const sequence of LOG_SEQUENCES) {
       for (const other of LOG_SEQUENCES) {
@@ -149,7 +185,12 @@ describe('las secuencias de logs (ADR-0021 §1)', () => {
   });
 
   it('una secuencia que no está en la tabla no da nombres ni lee logs', async () => {
-    const outside = { name: 'X', prefixStem: 'logs/x/', schemaStem: 'buoh_x_log_' };
+    const outside = {
+      kind: 'live',
+      name: 'X',
+      prefixStem: 'logs/x/',
+      schemaStem: 'buoh_x_log_',
+    } as const;
     expect(() => logLocation(1, outside)).toThrow(TypeError);
     expect(() => logNumberOf('buoh_x_log_000001', outside)).toThrow(TypeError);
     const { pool } = fakePool(() => ({ rows: [] }));
