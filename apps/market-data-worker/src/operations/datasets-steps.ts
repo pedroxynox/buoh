@@ -48,7 +48,8 @@ export const BATCH_PUBLICATION_TURN_MS = 300_000;
 /**
  * Lo que tiene que quedar de los 60 s del paso para lanzar los lotes: más que lo que tardó como
  * mucho en producción la publicación de un dataset vivo de unos 72 segmentos, 20,2 s (evidencia de
- * los datasets vivos, «Memoria y duración de cada proceso»). Con menos, el turno espera.
+ * los datasets vivos, «Memoria y duración de cada proceso»). Con menos, esa ejecución no lanza los
+ * lotes, y la secuencia lo intenta en su turno siguiente.
  */
 export const BATCH_PUBLICATION_MIN_MS = 25_000;
 /** El paso 7: la verificación de los datasets publicados. */
@@ -418,7 +419,7 @@ function classifyPublish(result: ChildResult, sequence: string): PublishResult {
  *   <nombre>` y lo que queda del plazo. Le toca a una por ejecución, por turnos
  *   (`BATCH_PUBLICATION_TURN_MS`), entre las de `PUBLISHED_BATCH_SEQUENCES` que tienen algún log que
  *   no venció y se puede leer. Sin ninguna, no lanza nada. Si al lanzarlo ya no quedan
- *   `BATCH_PUBLICATION_MIN_MS`, el turno espera.
+ *   `BATCH_PUBLICATION_MIN_MS`, no lo lanza, y la secuencia lo intenta en su turno siguiente.
  * - **Logs detenidos.** Un log se detiene cuando su publicación falla por una causa que repetir no
  *   cambia (`PUBLICATION_STOP_REASONS`), y sigue detenido mientras el código es el mismo
  *   (`codeVersion`, el commit que da Render): la orden de su secuencia lo salta (`--skip`), y el
@@ -648,7 +649,7 @@ export async function publicationStep(
         candidates[
           Math.floor(Date.parse(startedAt) / BATCH_PUBLICATION_TURN_MS) % candidates.length
         ];
-      // El mínimo, otra vez después de buscar los logs: si ya no queda, el turno espera.
+      // El mínimo, otra vez después de buscar los logs: si ya no queda, en su turno siguiente.
       const left = remaining();
       if (turn !== undefined && left >= BATCH_PUBLICATION_MIN_MS) {
         batch = {

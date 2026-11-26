@@ -6172,7 +6172,7 @@ describe('el paso 6 con los lotes (ADR-0021 §3, precisión del PR 5d2 de su §9
     expect(expired.reports.filter((item) => item.row.step === 'publication').length).toBe(2);
   });
 
-  it('el mínimo se mira otra vez después de buscar los logs de los lotes: si ya no queda, el turno espera', async () => {
+  it('el mínimo se mira otra vez después de buscar los logs de los lotes: si ya no queda, no se lanza', async () => {
     let clock = Date.parse(NOW);
     const db = database();
     const list = db.database.listLogs.bind(db.database);
@@ -6200,7 +6200,7 @@ describe('el paso 6 con los lotes (ADR-0021 §3, precisión del PR 5d2 de su §9
     expect(stepLine(lines, 'publication')?.['report']).not.toHaveProperty('batch');
   });
 
-  it('con menos de BATCH_PUBLICATION_MIN_MS del plazo, o con R_100 publicado, no lanza los lotes', async () => {
+  it('con menos de BATCH_PUBLICATION_MIN_MS del plazo, o con R_100 publicado, no busca ni lanza los lotes', async () => {
     expect(BATCH_PUBLICATION_MIN_MS).toBe(25_000);
     for (const [answer, advanceMs, launched] of [
       // Quedan 24 999 ms: no; quedan 25 000: sí.
@@ -6210,22 +6210,35 @@ describe('el paso 6 con los lotes (ADR-0021 §3, precisión del PR 5d2 de su §9
     ] as const) {
       let clock = Date.parse(NOW);
       const turn = turnAt(NOW);
+      // Las búsquedas de los logs de los lotes después de R_100: las del paso 6.
+      let afterLive = false;
+      let batchLists = 0;
       const children = datasetsChildren({
         publish: (args) => {
           if (args[0] === '--symbol') {
             clock += advanceMs;
+            afterLive = true;
             return answer;
           }
           return { exitCode: 0, stdout: as(nothingDueLine(), turn) };
         },
       });
       const db = database();
+      const list = db.database.listLogs.bind(db.database);
+      db.database.listLogs = (sequence) => {
+        if (afterLive && sequence.kind === 'batch') {
+          batchLists += 1;
+        }
+        return list(sequence);
+      };
       await run(db, children, {
         config: DATASETS_CONFIG,
         nextId: growing,
         now: () => new Date(clock).toISOString(),
       });
       expect(publishes(children).length, String(advanceMs)).toBe(launched ? 2 : 1);
+      // Sin el mínimo, ni los busca.
+      expect(batchLists, String(advanceMs)).toBe(launched ? BATCH_SEQUENCES.length : 0);
     }
   });
 
