@@ -609,8 +609,8 @@ describe('un log de los lotes', () => {
 
 // --- las velas que faltan dentro del horario -----------------------------------------------------
 
-// Precisión del PR 5d1 de ADR-0021 §9: un minuto pedido entero por una página respondida, ya
-// terminado al recibirla y dentro del horario de su día en el mismo log, sin vela, falta; cada
+// Precisión del PR 5d1 de ADR-0021 §9: un minuto cuya vela pide una página respondida, ya terminado
+// al recibirla y entero dentro del horario de su día entre los mismos eventos, sin vela, falta; cada
 // tramo de minutos seguidos que faltan es un `candle_missing`. El horario es como el del oro el
 // 2026-11-24: de 00:00 a 22:00 y de 23:00 al fin del día.
 describe('las velas que faltan dentro del horario', () => {
@@ -682,7 +682,7 @@ describe('las velas que faltan dentro del horario', () => {
     ]);
   });
 
-  it('pide desde el minuto de su start hasta el de su end, como da las velas Deriv', () => {
+  it('pide desde el minuto de su start hasta el de su end, como acepta las velas la regla', () => {
     const session = frame(sessionText(GOLD_OPEN, GOLD_CLOSE), iso(T + 3000));
     const next = T + 12 * 3600 + 60;
     // Empieza a las 12:00:30 y acaba a las 12:02:30: pide las velas de las 12:00, 12:01 y 12:02.
