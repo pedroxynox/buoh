@@ -14,9 +14,6 @@ import {
 } from '../postgres/roles.js';
 import { failureReason } from '../source-log/source-event-log.js';
 import {
-  BATCH_CANDLES_SEQUENCE,
-  BATCH_QUOTES_SEQUENCE,
-  BATCH_SCHEDULES_SEQUENCE,
   BATCH_SEQUENCES,
   isLogExpired,
   LOG_SEQUENCES,
@@ -36,7 +33,8 @@ import {
   migrateEnvironment,
   type OperationsConfig,
 } from './config.js';
-import { derivBatchLogProfileRow, type BatchProfileKind } from '../deriv/batch-profile.js';
+import { derivBatchLogProfileRow } from '../deriv/batch-profile.js';
+import { batchProfileKindOf } from '../deriv/batch-rounds.js';
 import { derivLogProfileRow, type LogQualityProfileRow } from '../deriv/log-profile.js';
 import { DERIV_PUBLICATION_THRESHOLDS } from '../deriv/profile.js';
 import { datasetVerificationStep, publicationStep } from './datasets-steps.js';
@@ -159,27 +157,17 @@ export function nextLogToPrepare(
   return logLocation(highest.location.number + 1, sequence);
 }
 
-/** El perfil de cada secuencia por lotes del PR 5 de ADR-0021 §9 (§3). */
-const BATCH_PROFILE_KINDS: ReadonlyMap<LogSequence, BatchProfileKind> = new Map([
-  [BATCH_SCHEDULES_SEQUENCE, 'schedules'],
-  [BATCH_QUOTES_SEQUENCE, 'quotes'],
-  [BATCH_CANDLES_SEQUENCE, 'candles'],
-]);
-
 /**
  * La fila del perfil que reciben los logs nuevos de la secuencia (ADR-0020 §4; ADR-0021 §2 y §3): en
  * una secuencia por lotes, la de su perfil de los lotes (precisión del PR 5b de ADR-0021 §9); en una
  * en vivo, la del perfil de publicación de su símbolo, si tiene umbrales medidos (ADR-0020 §1), como
  * R_100; si no, ninguna, y sus logs se derivan con el perfil de medición, como el oro hasta su PR 7.
- * Una secuencia por lotes sin perfil lanza `TypeError`: sus logs no se preparan.
+ * Una secuencia por lotes sin perfil (`batchProfileKindOf`) lanza `TypeError`: sus logs no se
+ * preparan.
  */
 function sequenceProfileRow(sequence: LogSequence): LogQualityProfileRow | null {
   if (sequence.kind === 'batch') {
-    const kind = BATCH_PROFILE_KINDS.get(sequence);
-    if (kind === undefined) {
-      throw new TypeError(`La secuencia por lotes ${sequence.name} no tiene perfil.`);
-    }
-    return derivBatchLogProfileRow(kind);
+    return derivBatchLogProfileRow(batchProfileKindOf(sequence));
   }
   return Object.hasOwn(DERIV_PUBLICATION_THRESHOLDS, sequence.name)
     ? derivLogProfileRow(sequence.name)
