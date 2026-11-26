@@ -6027,15 +6027,14 @@ describe('el paso 6 con los lotes (ADR-0021 §3, precisión del PR 5d2 de su §9
       const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
       reports.push(stepLine(lines, 'publication')?.['report'] as Record<string, unknown>);
     }
-    const attempts = (count: number) => ({ count, first_segment: 6, log: 1, sequence: turn });
+    const attempts = (count: number) => ({
+      attempts: [{ count, first_segment: 6, log: 1, sequence: turn }],
+    });
     expect(reports.map((report) => [report['state'], report['batch_state']])).toEqual([
-      [{ attempts: null, stopped: [] }, { attempts: attempts(1) }],
-      [
-        { attempts: { count: 1, first_segment: 144, log: 1 }, stopped: [] },
-        { attempts: attempts(1) },
-      ],
-      [{ attempts: null, stopped: [] }, { attempts: attempts(1) }],
-      [{ attempts: null, stopped: [] }, { attempts: attempts(2) }],
+      [{ attempts: null, stopped: [] }, attempts(1)],
+      [{ attempts: { count: 1, first_segment: 144, log: 1 }, stopped: [] }, attempts(1)],
+      [{ attempts: null, stopped: [] }, attempts(1)],
+      [{ attempts: null, stopped: [] }, attempts(2)],
       [
         {
           attempts: null,
@@ -6054,7 +6053,7 @@ describe('el paso 6 con los lotes (ADR-0021 §3, precisión del PR 5d2 de su §9
     ]);
   });
 
-  it('con dos secuencias por lotes sin resultado, la que tiene la cuenta en marcha sigue en los turnos hasta detenerse, y después la otra', async () => {
+  it('cada secuencia por lotes lleva su cuenta: con dos sin resultado en turnos alternos, las dos se detienen en su tercer turno', async () => {
     const quotes = 'lotes_cotizaciones';
     const candles = 'lotes_velas';
     const db = database(batchLogs([BATCH_QUOTES_SEQUENCE, BATCH_CANDLES_SEQUENCE]));
@@ -6065,6 +6064,7 @@ describe('el paso 6 con los lotes (ADR-0021 §3, precisión del PR 5d2 de su §9
           : { exitCode: null, stderr: attempt(1, 0), stdout: '', timedOut: true },
     });
     const sequences: string[] = [];
+    const counts: unknown[] = [];
     let stopped: unknown = null;
     for (let offset = 0; offset < 6; offset += 1) {
       const now = new Date(Date.parse(NOW) + offset * BATCH_PUBLICATION_TURN_MS).toISOString();
@@ -6074,17 +6074,130 @@ describe('el paso 6 con los lotes (ADR-0021 §3, precisión del PR 5d2 de su §9
         now: () => now,
       });
       sequences.push(String(publishes(children).at(-1)?.args[1]));
+      const report = stepLine(lines, 'publication')?.['report'] as Record<string, unknown>;
+      counts.push(report['batch_state']);
       stopped = (
-        (stepLine(lines, 'publication')?.['report'] as Record<string, unknown>)['state'] as {
-          stopped: { reason: string; sequence: string }[];
-        }
+        report['state'] as { stopped: { reason: string; sequence: string }[] }
       ).stopped.map((stop) => [stop.sequence, stop.reason]);
     }
     const first = turnAt(NOW, [BATCH_QUOTES_SEQUENCE, BATCH_CANDLES_SEQUENCE]);
     const other = first === quotes ? candles : quotes;
-    // Tres turnos seguidos de la primera, que se detiene, y después la otra, aunque no le tocaba.
-    expect(sequences).toEqual([first, first, first, other, other, other]);
+    expect(sequences).toEqual([first, other, first, other, first, other]);
+    const both = (one: number, two: number) => ({
+      attempts: [
+        { count: first === quotes ? one : two, first_segment: 0, log: 1, sequence: quotes },
+        { count: first === quotes ? two : one, first_segment: 0, log: 1, sequence: candles },
+      ],
+    });
+    expect(counts.slice(0, 4)).toEqual([
+      { attempts: [{ count: 1, first_segment: 0, log: 1, sequence: first }] },
+      both(1, 1),
+      both(2, 1),
+      both(2, 2),
+    ]);
     expect(stopped).toEqual([quotes, candles].map((name) => [name, 'publication_incomplete']));
+  });
+
+  it('una cuenta de los lotes puesta a cero por nada pendiente se guarda, y la de un log que venció deja de contar', async () => {
+    const turn = turnAt(NOW);
+    const db = database();
+    const timedOut = { exitCode: null, stderr: attempt(1, 6), stdout: '', timedOut: true };
+    const answers: Partial<ChildResult>[] = [
+      { exitCode: 0, stdout: nothingDueLine() },
+      timedOut,
+      { exitCode: 0, stdout: nothingDueLine() },
+      { exitCode: 0, stdout: as(nothingDueLine(), turn) },
+      { exitCode: 0, stdout: nothingDueLine() },
+      timedOut,
+    ];
+    const children = datasetsChildren({ publish: () => answers.shift() ?? {} });
+    const states: unknown[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      const { lines } = await run(db, children, { config: DATASETS_CONFIG, nextId: growing });
+      states.push(
+        (stepLine(lines, 'publication')?.['report'] as Record<string, unknown>)['batch_state'],
+      );
+    }
+    // La segunda ejecución solo cambia batch_state, y se guarda: la tercera vuelve a 1.
+    expect(states).toEqual([
+      { attempts: [{ count: 1, first_segment: 6, log: 1, sequence: turn }] },
+      undefined,
+      { attempts: [{ count: 1, first_segment: 6, log: 1, sequence: turn }] },
+    ]);
+
+    // La cuenta de las cotizaciones es de su log 1, que vence; le toca a otra secuencia.
+    const among = [BATCH_SCHEDULES_SEQUENCE, BATCH_QUOTES_SEQUENCE];
+    const now =
+      [0, 1]
+        .map((offset) =>
+          new Date(Date.parse(NOW) + offset * BATCH_PUBLICATION_TURN_MS).toISOString(),
+        )
+        .find((candidate) => turnAt(candidate, among) === 'lotes_horarios') ?? NOW;
+    const expired = database([
+      at(BATCH_SCHEDULES_SEQUENCE, 1, '2026-03-02T09:55:00.000Z'),
+      at(BATCH_QUOTES_SEQUENCE, 1, '2026-01-20T00:00:00.000Z'),
+      at(BATCH_QUOTES_SEQUENCE, 2, '2026-03-02T09:55:00.000Z'),
+    ]);
+    expired.reports.push({
+      log: 2,
+      row: {
+        observed_at_utc: NOW,
+        report: {
+          batch_state: {
+            attempts: [{ count: 2, first_segment: 0, log: 1, sequence: 'lotes_cotizaciones' }],
+          },
+          state: { attempts: null, stopped: [] },
+        },
+        report_id: uuid(902),
+        run_id: uuid(903),
+        status: 'failed',
+        step: 'publication',
+      },
+      schema: logLocation(2).schema,
+    });
+    const quiet = datasetsChildren({
+      publish: (args) => ({
+        exitCode: 0,
+        stdout: args[0] === '--symbol' ? nothingDueLine() : as(nothingDueLine(), args[1] ?? ''),
+      }),
+    });
+    const { lines } = await run(expired, quiet, {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+      now: () => now,
+    });
+    expect(publishes(quiet).at(-1)?.args).toEqual(['--sequence', 'lotes_horarios']);
+    const line = stepLine(lines, 'publication');
+    expect(line?.['report']).not.toHaveProperty('batch_state');
+    expect(expired.reports.filter((item) => item.row.step === 'publication').length).toBe(2);
+  });
+
+  it('el mínimo se mira otra vez después de buscar los logs de los lotes: si ya no queda, el turno espera', async () => {
+    let clock = Date.parse(NOW);
+    const db = database();
+    const list = db.database.listLogs.bind(db.database);
+    db.database.listLogs = (sequence) => {
+      if (sequence.kind === 'batch') {
+        // Una base lenta: 2 s por lista.
+        clock += 2_000;
+      }
+      return list(sequence);
+    };
+    const children = datasetsChildren({
+      publish: () => {
+        // R_100 deja 30 s: después de las tres listas quedan 24.
+        clock += 30_000;
+        return { exitCode: 0, stdout: nothingDueLine() };
+      },
+    });
+    const { lines } = await run(db, children, {
+      config: DATASETS_CONFIG,
+      nextId: growing,
+      now: () => new Date(clock).toISOString(),
+    });
+    expect(publishes(children).map((item) => item.args)).toEqual([['--symbol', 'R_100']]);
+    expect(stepLine(lines, 'publication')).toMatchObject({ status: 'completed' });
+    expect(stepLine(lines, 'publication')?.['report']).not.toHaveProperty('batch');
   });
 
   it('con menos de BATCH_PUBLICATION_MIN_MS del plazo, o con R_100 publicado, no lanza los lotes', async () => {
