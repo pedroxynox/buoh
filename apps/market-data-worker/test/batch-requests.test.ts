@@ -5,6 +5,7 @@ import {
   BATCH_RULE_SET,
   deriveContractOffer,
   deriveContractQuote,
+  deriveHistoryDownloadTicks,
   deriveMarketCandles,
   deriveTradingSessions,
 } from '@buoh/domain';
@@ -15,6 +16,7 @@ import {
   DERIV_BATCH_CONNECTOR_VERSION,
   derivBatchLogProfileRow,
   derivCandlesProfile,
+  derivHistoryProfile,
   derivQuotesProfile,
   derivSchedulesProfile,
 } from '../src/deriv/batch-profile.js';
@@ -23,7 +25,10 @@ import {
   candleRequests,
   dayStartEpoch,
   encodeBatchRequest,
-  EXPECTED_BATCH_MSG_TYPE,
+  expectedBatchMsgType,
+  HISTORY_WINDOW_MARGIN_SECONDS,
+  historyBlocks,
+  historyRequestsFrom,
   quoteRequests,
   scheduleRequests,
   type BatchRequest,
@@ -326,7 +331,11 @@ describe('peticiones de los lotes', () => {
       expect(text, JSON.stringify(request)).not.toBeNull();
       expect(JSON.parse(text ?? 'null')).toEqual(batchRequestBody(request, index + 1));
     }
-    expect(EXPECTED_BATCH_MSG_TYPE).toEqual({
+    expect(
+      Object.fromEntries(
+        requests.map((request) => [request.operation, expectedBatchMsgType(request)]),
+      ),
+    ).toEqual({
       active_symbols: 'active_symbols',
       contracts_for: 'contracts_for',
       proposal: 'proposal',
@@ -542,5 +551,181 @@ describe('las respuestas a estas peticiones dan sus registros con las reglas 4.0
     );
     expect(offer.incidents).toEqual([]);
     expect(offer.records).toMatchObject([{ symbol: 'cryETHUSD' }]);
+  });
+});
+
+// La historia del PR 6a de ADR-0021 §9 (§4). El oráculo del primer tick en vivo de cada símbolo es
+// el que leyó el agente en la captura el 2026-11-27, escrito aquí a mano como hora UTC, y el de los
+// 365 días, el borde que dio `ticks_history` ese día.
+describe('la historia de un año (ADR-0021 §4)', () => {
+  const schemas = batchSchemas();
+  const utc = (iso: string) => Date.parse(iso) / 1000;
+  const FIRST_LIVE = { R_100: utc('2026-11-01T00:06:08Z'), frxXAUUSD: utc('2026-11-25T05:09:43Z') };
+
+  it('cada historia termina en el segundo anterior a su primer tick en vivo y empieza en el primer bloque desde 365 días antes', () => {
+    expect(derivHistoryProfile('R_100')).toEqual({
+      block_seconds: 21_600,
+      count: 1000,
+      end_epoch: FIRST_LIVE.R_100 - 1,
+      profile_id: 'deriv_options-lotes-v1-historia-r_100',
+      quality_rule_version: '4.0.0',
+      source: 'deriv_options',
+      // 2025-11-01T00:06:08Z, 365 días antes, va al bloque de 6 horas siguiente.
+      start_epoch: utc('2025-11-01T06:00:00Z'),
+      symbol: 'R_100',
+      tranche_seconds: 1_800,
+    });
+    expect(derivHistoryProfile('frxXAUUSD')).toEqual({
+      block_seconds: 14_400,
+      count: 1000,
+      end_epoch: FIRST_LIVE.frxXAUUSD - 1,
+      profile_id: 'deriv_options-lotes-v1-historia-frxxauusd',
+      quality_rule_version: '4.0.0',
+      source: 'deriv_options',
+      // 2025-11-25T05:09:43Z va al bloque de 4 horas siguiente.
+      start_epoch: utc('2025-11-25T08:00:00Z'),
+      symbol: 'frxXAUUSD',
+      tranche_seconds: 900,
+    });
+  });
+
+  it('los bloques van del más antiguo al más reciente, con el horario de su día y sus tramos contiguos sin solaparse', () => {
+    for (const [symbol, blocks, requests, lastBlock] of [
+      ['R_100', 1460, 18_969, 2],
+      ['frxXAUUSD', 2190, 37_219, 6],
+    ] as const) {
+      const profile = derivHistoryProfile(symbol);
+      const all = historyBlocks(profile);
+      expect(all, symbol).toHaveLength(blocks);
+      expect(
+        all.flatMap((block) => block.requests),
+        symbol,
+      ).toHaveLength(requests);
+      expect(all.at(-1)?.requests, symbol).toHaveLength(lastBlock);
+      let next = profile.start_epoch;
+      for (const block of all) {
+        expect(block.start).toBe(next);
+        const [times, ...tranches] = block.requests;
+        expect(times).toEqual({
+          date: new Date(block.start * 1000).toISOString().slice(0, 10),
+          operation: 'trading_times',
+        });
+        for (const tranche of tranches) {
+          if (tranche.operation !== 'ticks_history' || 'granularity' in tranche) {
+            throw new TypeError('se esperaba una página de ticks');
+          }
+          expect(tranche).toEqual({
+            count: 1000,
+            end: Math.min(next + profile.tranche_seconds - 1, profile.end_epoch),
+            operation: 'ticks_history',
+            start: next,
+            symbol,
+          });
+          // Dentro del bloque y de su día.
+          expect(tranche.end).toBeLessThan(block.start + profile.block_seconds);
+          next = tranche.end + 1;
+        }
+      }
+      // La historia entera, sin huecos, hasta el segundo anterior al primer tick en vivo.
+      expect(next, symbol).toBe(FIRST_LIVE[symbol]);
+    }
+  });
+
+  it('cada petición de la historia cumple su esquema de petición y espera una página history', () => {
+    const [block] = historyBlocks(derivHistoryProfile('frxXAUUSD'));
+    const [times, page] = block?.requests ?? [];
+    if (times === undefined || page === undefined) {
+      throw new TypeError('falta el bloque');
+    }
+    for (const request of [times, page]) {
+      const text = encodeBatchRequest(schemas, request, 1);
+      expect(text, JSON.stringify(request)).not.toBeNull();
+    }
+    expect(batchRequestBody(page, 2)).toEqual({
+      count: 1000,
+      end: String(utc('2025-11-25T08:14:59Z')),
+      req_id: 2,
+      start: utc('2025-11-25T08:00:00Z'),
+      style: 'ticks',
+      ticks_history: 'frxXAUUSD',
+    });
+    expect(expectedBatchMsgType(page)).toBe('history');
+    expect(expectedBatchMsgType(times)).toBe('trading_times');
+  });
+
+  it('una página de su tramo da sus ticks de la historia, y una con ticks fuera del tramo, ninguno', () => {
+    const [block] = historyBlocks(derivHistoryProfile('R_100'));
+    const page = block?.requests[1];
+    if (page?.operation !== 'ticks_history') {
+      throw new TypeError('falta la página');
+    }
+    const echo = JSON.stringify(batchRequestBody(page, 3));
+    const inside = deriveHistoryDownloadTicks(
+      frame(
+        `{"echo_req":${echo},"history":{"prices":[100.25,100.50],"times":[${String(page.start)},${String(page.end)}]},"msg_type":"history","pip_size":2,"req_id":3}`,
+      ),
+      accept,
+    );
+    expect(inside.incidents).toEqual([]);
+    expect(inside.records).toMatchObject([
+      { origin: 'history_download', schema_version: '1.1.0', symbol: 'R_100' },
+      { origin: 'history_download', symbol: 'R_100' },
+    ]);
+    // Un tramo más antiguo que lo que guarda Deriv trae sus últimos ticks, fuera de lo pedido.
+    const latest = deriveHistoryDownloadTicks(
+      frame(
+        `{"echo_req":${echo},"history":{"prices":[100.25],"times":[${String(FIRST_LIVE.R_100 + 86_400 * 26)}]},"msg_type":"history","pip_size":2,"req_id":3}`,
+      ),
+      accept,
+    );
+    expect(latest.records).toEqual([]);
+    expect(latest.incidents).toMatchObject([
+      { evidence: { reason: 'history_inconsistent' }, incident_type: 'invalid_source_frame' },
+    ]);
+  });
+
+  it('no pide lo que Deriv ya no guarda: empieza en el primer bloque que queda dentro de sus 365 días con una hora de margen', () => {
+    const profile = derivHistoryProfile('R_100');
+    const blocks = historyBlocks(profile);
+    const requests = blocks.flatMap((block) => block.requests);
+    // El 2026-11-27 a las 05:00, el borde es el 2025-11-27 a las 05:00: el primer bloque que
+    // empieza una hora después o más es el de las 06:00.
+    const from = historyRequestsFrom(blocks, Date.parse('2026-11-27T05:00:00Z'));
+    expect(HISTORY_WINDOW_MARGIN_SECONDS).toBe(3_600);
+    expect(from).toBe(26 * 4 * 13);
+    expect(requests[from]).toEqual({ date: '2025-11-27', operation: 'trading_times' });
+    expect(requests[from + 1]).toMatchObject({ start: utc('2025-11-27T06:00:00Z') });
+    // Un milisegundo antes, el bloque de las 06:00 sigue valiendo; un segundo después, ya no.
+    expect(historyRequestsFrom(blocks, Date.parse('2026-11-27T05:00:00Z') - 1)).toBe(from);
+    expect(historyRequestsFrom(blocks, Date.parse('2026-11-27T05:00:01Z'))).toBe(from + 13);
+    // Con todo dentro, desde la primera; con todo fuera, ninguna.
+    expect(historyRequestsFrom(blocks, Date.parse('2026-11-01T00:00:00Z'))).toBe(0);
+    expect(historyRequestsFrom(blocks, Date.parse('2027-11-02T00:00:00Z'))).toBe(requests.length);
+  });
+
+  it('rechaza bloques que no parten el día, tramos que no parten el bloque y bloques que pasan del techo', () => {
+    const profile = derivHistoryProfile('frxXAUUSD');
+    for (const [name, change] of [
+      ['bloque que no parte el día', { block_seconds: 25_200, start_epoch: 0 }],
+      ['tramo que no parte el bloque', { tranche_seconds: 1_000 }],
+      ['tramo de 0 s', { tranche_seconds: 0 }],
+      ['sin ticks por página', { count: 0 }],
+      // 24 tramos de 900 ticks más el horario: 21 601 elementos.
+      ['bloque que pasa del techo', { block_seconds: 21_600, start_epoch: 0 }],
+      ['comienzo fuera de bloque', { start_epoch: profile.start_epoch + 900 }],
+      ['termina antes de empezar', { end_epoch: profile.start_epoch - 1 }],
+      ['sin símbolo', { symbol: '' }],
+    ] as const) {
+      expect(() => historyBlocks({ ...profile, ...change }), name).toThrow(TypeError);
+    }
+    // En el borde: 16 tramos de 1000 ticks más el horario pasan del techo; con 999, no.
+    const edge = { block_seconds: 21_600, start_epoch: 0, tranche_seconds: 1_350 };
+    expect(() => historyBlocks({ ...profile, ...edge, count: 1000 })).toThrow(TypeError);
+    expect(() => historyBlocks({ ...profile, ...edge, count: 999 })).not.toThrow();
+    // R_100 pide 1000 como mucho por tramo de 1800 s: 12 por bloque, 12 001 elementos.
+    expect(() => historyBlocks(derivHistoryProfile('R_100'))).not.toThrow();
+    expect(() =>
+      historyBlocks({ ...derivHistoryProfile('R_100'), block_seconds: 43_200, start_epoch: 0 }),
+    ).toThrow(TypeError);
   });
 });

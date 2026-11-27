@@ -9,7 +9,8 @@ import { DERIV_SOURCE } from './profile.js';
  * y las velas (§3). Cada perfil dice qué pide su secuencia y cada cuánto, y con qué reglas se deriva
  * (las de los lotes 4.0.0). Sus bytes son su JCS, y cambiar una lista, la apuesta o el ritmo crea
  * otro perfil, con otro `profile_id` (§3: «La lista y la apuesta van en el perfil»). La historia de
- * R_100 y la del oro, las otras dos secuencias por lotes, tienen sus perfiles con el PR 6.
+ * R_100 y la del oro, las otras dos secuencias por lotes, tienen sus perfiles desde el PR 6a
+ * (`derivHistoryProfile`), y sus secuencias llegan con otra parte del PR 6.
  */
 
 /**
@@ -57,6 +58,59 @@ export type CandlesProfile = ProfileHeader & {
   /** Segundos de velas de cada página. */
   readonly page_seconds: number;
   readonly symbols: string[];
+};
+
+/**
+ * Una historia de la descarga de un año (ADR-0021 §4; precisión del PR 6a de su §9): los ticks de
+ * un símbolo desde `start_epoch` hasta `end_epoch`, los dos incluidos, en bloques de
+ * `block_seconds` dentro de un día UTC. Cada bloque pide el `trading_times` de su día y después sus
+ * tramos contiguos de `tranche_seconds`, con `count` ticks como mucho por página.
+ */
+export type HistoryProfile = ProfileHeader & {
+  readonly block_seconds: number;
+  readonly count: number;
+  /** El segundo anterior al del primer tick en vivo: así la historia y la captura no se solapan. */
+  readonly end_epoch: number;
+  /** El primer comienzo de bloque desde 365 días antes del primer tick en vivo. */
+  readonly start_epoch: number;
+  readonly symbol: string;
+  readonly tranche_seconds: number;
+};
+
+/** Los símbolos con historia (ADR-0021 §4): los dos que se capturan en vivo. */
+export type HistorySymbol = 'R_100' | 'frxXAUUSD';
+
+/**
+ * Los días que Deriv guarda de historia: el 2026-11-27, `ticks_history` de R_100 y del oro dio
+ * ticks desde hace 365 días y, para un tramo más antiguo, los últimos ticks, fuera del tramo pedido
+ * (precisión del PR 6a de ADR-0021 §9).
+ */
+export const DERIV_HISTORY_DAYS = 365;
+
+const DAY_SECONDS = 86_400;
+
+/**
+ * El epoch en segundos del primer tick en vivo de cada símbolo, el que leyó el agente en la captura
+ * con su acceso el 2026-11-27 (ADR-0021 §4): el primero del log 1 de R_100, de las
+ * 2026-11-01T00:06:08Z, y el primero del log 1 del oro, de las 2026-11-25T05:09:43Z.
+ */
+const FIRST_LIVE_TICK_EPOCH: Readonly<Record<HistorySymbol, number>> = {
+  R_100: 1_793_491_568,
+  frxXAUUSD: 1_795_583_383,
+};
+
+/**
+ * Los tramos y los bloques de cada historia. Una página trae como mucho `count` ticks, los últimos
+ * del tramo (el 2026-11-27 Deriv dio 2000 con `count` de 5000 y 1000 con 1000), y un tick por
+ * segundo como mucho: R_100 manda uno cada 2 s, 900 por tramo de 1800 s, y el oro uno por segundo,
+ * 900 por tramo de 900 s. Así ningún bloque pasa de 16 000 elementos, el techo de un dataset
+ * (`historyBlocks`).
+ */
+const HISTORY_SHAPE: Readonly<
+  Record<HistorySymbol, { block_seconds: number; name: string; tranche_seconds: number }>
+> = {
+  R_100: { block_seconds: 21_600, name: 'historia-r_100', tranche_seconds: 1_800 },
+  frxXAUUSD: { block_seconds: 14_400, name: 'historia-frxxauusd', tranche_seconds: 900 },
 };
 
 const minutes = (duration: number): ContractDuration => ({ duration, duration_unit: 'm' });
@@ -167,6 +221,26 @@ export function derivCandlesProfile(): CandlesProfile {
     granularity_seconds: 60,
     page_seconds: 43_200,
     symbols: realMarkets(),
+  };
+}
+
+/**
+ * La historia de un símbolo (ADR-0021 §4): sus ticks desde un año antes de su primer tick en vivo
+ * hasta el segundo anterior, por bloques y tramos (`HISTORY_SHAPE`). Lo que Deriv ya no guarda
+ * (`DERIV_HISTORY_DAYS`) no se pide (`historyRequestsFrom`).
+ */
+export function derivHistoryProfile(symbol: HistorySymbol): HistoryProfile {
+  const shape = HISTORY_SHAPE[symbol];
+  const first = FIRST_LIVE_TICK_EPOCH[symbol];
+  const from = first - DERIV_HISTORY_DAYS * DAY_SECONDS;
+  return {
+    ...header(shape.name),
+    block_seconds: shape.block_seconds,
+    count: 1000,
+    end_epoch: first - 1,
+    start_epoch: Math.ceil(from / shape.block_seconds) * shape.block_seconds,
+    symbol,
+    tranche_seconds: shape.tranche_seconds,
   };
 }
 
