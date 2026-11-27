@@ -525,7 +525,7 @@ Desde el PR 5c1 de [ADR-0021](../arquitectura/adr/0021-mercados-reales-y-fuentes
 
 ### La historia (`history`)
 
-Desde el PR 6c de [ADR-0021](../arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §9 (§4), el worker trae el comando de la historia, `apps/market-data-worker/dist/cli/history.js` (`src/history/command.ts`), para el proceso temporal que descarga y publica el año de ticks de R_100 y del oro ([decisiones vigentes](../gobierno/decisiones-vigentes.md), «Proceso temporal de la historia»). Ese proceso, en Render, llega con el PR 6e; hasta entonces el comando no corre en ningún servicio.
+Desde el PR 6c de [ADR-0021](../arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §9 (§4), el worker trae el comando de la historia, `apps/market-data-worker/dist/cli/history.js` (`src/history/command.ts`), para el proceso temporal que descarga y publica el año de ticks de R_100 y del oro ([decisiones vigentes](../gobierno/decisiones-vigentes.md), «Proceso temporal de la historia»). Desde el PR 6e lo corre el background worker `buoh-historia` (ver «La historia en producción (PR 6e de ADR-0021)»).
 
 - **Uso:** `pnpm --filter @buoh/market-data-worker run history`, sin argumentos, solo en `production`, con los tamaños de V8 de los demás procesos del worker. Como `buoh-operaciones`, no admite ninguna variable `BUOH_POSTGRES_*` ni `BUOH_S3_*`, y cada credencial va con su nombre. Tampoco admite las `BUOH_DUENO_*`: no recibe la credencial dueña. Sus variables son `BUOH_HISTORIA_POSTGRES_DB`, `_HOST`, `_PORT` y `_SSLMODE` (nunca `disable`), la base sin usuario; `BUOH_LOTES_POSTGRES_PASSWORD` y las cinco `BUOH_LOTES_S3_*` del token `lotes`, con las que descarga como `buoh_lotes`; y `BUOH_PUBLICACION_POSTGRES_PASSWORD` y las cinco `BUOH_OPERACIONES_S3_*` del token `operaciones`, que solo recibe el proceso de `datasets:publish`.
 - **Las secuencias:** `lotes_historia_r_100` y `lotes_historia_frxxauusd`, con los perfiles `deriv_options-lotes-v1-historia-r_100` y `-historia-frxxauusd`. Sus logs los prepara `buoh-operaciones`, con `buoh_lotes` como escritor, y les deja su informe final (`batch_final`) cuando uno termina, pero su paso `batch` y su paso 6 no las tocan. Sin su log preparado, el comando lo busca otra vez a los 60 s, y a la décima vez termina.
@@ -806,7 +806,7 @@ Un segmento que no coincide es un resultado, no un fallo del paso: va al informe
 
 El informe lleva `result`, lo que publicó (los campos de `published` o `already_published`, sin `behind`; desde el PR 2b de ADR-0021, con `sequence`), `{ "status": "nothing_due" }` o el fallo, con `status: failed`, `reason`, `stage`, `detail`, `log`, `first_segment` y `exit_code`; `behind`; `skipped`, los logs que saltó; `code_version`; `reason`, si falló o hay un log detenido; y `state`, con `stopped` (cada uno con `log`, `first_segment`, `reason` y `code_version`) y `attempts` (`log`, `first_segment` y `count`, o `null`). Desde el PR 2b, uno de otra secuencia lleva además `sequence`; los de R_100 van sin ella, como antes, para que el paso 6 del código anterior siga leyendo el estado si Render vuelve atrás un despliegue. Al leerlo, uno sin `sequence` es de R_100, y uno con una secuencia que no está en la tabla falla con `publication_state_invalid`, sin publicar. Se guarda en el log activo de R_100 si publicó, si el paso falló o si `state` cambió.
 
-**Paso 7, `dataset_verification`.** Busca, como `buoh_dueno`, la publicación activa de `production` más antigua (por `published_at_utc` y `publication_id`) sin un resultado en los dos modos en `buoh_datasets.dataset_verifications`, y corre `data:replay` en un proceso aparte, con `buoh_salud` y el token `salud`, primero con `--verify-only` y después en recomputación, los modos que le falten, los dos dentro de 60 s: el segundo recibe el plazo que queda, y si no queda nada, falla con `deadline_exceeded`. Guarda cada resultado en `dataset_verifications`, como `buoh_dueno`, con la ejecución (`run_id`) y la hora:
+**Paso 7, `dataset_verification`.** Busca, como `buoh_dueno`, la publicación activa de `production` más antigua (por `published_at_utc` y `publication_id`) sin un resultado en los dos modos en `buoh_datasets.dataset_verifications`, con las de las dos historias después de todas las demás desde el PR 6e de ADR-0021 §9, para que los datasets nuevos no esperen detrás de los miles de la historia, y corre `data:replay` en un proceso aparte, con `buoh_salud` y el token `salud`, primero con `--verify-only` y después en recomputación, los modos que le falten, los dos dentro de 60 s: el segundo recibe el plazo que queda, y si no queda nada, falla con `deadline_exceeded`. Guarda cada resultado en `dataset_verifications`, como `buoh_dueno`, con la ejecución (`run_id`) y la hora:
 
 | Estado | Cuándo | Qué guarda |
 |---|---|---|
@@ -1152,6 +1152,23 @@ El PR #152 se fusionó el 2026-11-27 a las 04:35:52 UTC, y el agente lo comprob�
 
 Lo urgente: un `ConfigError`, un paso `batch` `failed` en todas las ejecuciones o un log de los lotes detenido (ver «Paso 6, `publication`»).
 
+### La historia en producción (PR 6e de ADR-0021)
+
+Con el PR 6e de [ADR-0021](../arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §9, `render-datos.yaml` crea el background worker `buoh-historia`, que corre el comando de la historia (ver «La historia (`history`)») hasta tener pedidas y publicadas las dos historias, y después espera sin hacer nada. Si termina con 1, Render lo reinicia y sigue desde el log. Es temporal: después del PR 6d, que le suma las velas del último año, un PR lo quita del archivo y el propietario lo borra en Render, en ese orden ([despliegue en Render](despliegue-en-render.md), «Volver atrás»). Lo que cuesta está en ADR-0021 §9, precisión del PR 6e.
+
+**Antes de fusionar.** No hace falta crear nada: el servicio copia de `buoh-operaciones` (`fromService`) la contraseña de `buoh_lotes`, la de `buoh_publicacion` y el endpoint y las claves de los tokens `lotes` y `operaciones`. La rotación de la credencial dueña no está en curso (ADR-0021 §9, punto 3; «Rotar credenciales»), y el PR se fusiona con su rama al día con `main` ([despliegue en Render](despliegue-en-render.md), «Cuándo despliegan»).
+
+**Al fusionar.** La sincronización del Blueprint crea `buoh-historia` con sus 17 variables y despliega los cuatro servicios, porque el PR cambia el worker. Dos veces, una variable que copia otra (`fromService`) no se creó en la sincronización automática ([despliegue en Render](despliegue-en-render.md), «Cuándo despliegan»). Si la página del Blueprint `buoh-datos` muestra un cambio pendiente o un error, o `buoh-historia` no aparece con sus variables en **Environment**, el propietario se lo pasa al agente antes de pulsar nada. Con una **Manual Sync**, solo se aprueba `buoh-historia` y sus 17 variables.
+
+**Después, el agente, con su acceso** («Acceso del agente»):
+
+1. A los pocos minutos, los logs `buoh_lotes_historia_r_100_log_000001` y `buoh_lotes_historia_frxxauusd_log_000001` tienen eventos, y el más antiguo de cada uno es el primer bloque que Deriv todavía guarda. Sin eventos, el propietario le pasa al agente las últimas líneas de los **Logs** de `buoh-historia`, que solo llevan códigos, nombres y números: un `ConfigError` nombra las variables rechazadas, sin sus valores.
+2. Las dos historias publican un dataset por bloque en `buoh_datasets`, y el paso 7 de `buoh-operaciones` sigue verificando primero los datasets nuevos de R_100 y de los lotes (ver «Operaciones (`buoh-operaciones`)», «Paso 7, `dataset_verification`»).
+3. La memoria de `buoh-historia`, en su **Metrics**, que el propietario le manda en una captura, queda por debajo de los 512 MB del Starter, con el proceso de `datasets:publish`.
+4. Al terminar, con todos los bloques de las dos historias publicados, el agente se lo dice al propietario. Si el PR 6d no llega ese día, le pide que suspenda el servicio (**Suspend Service**), que entonces no cobra.
+
+Lo urgente: un log de las historias sin eventos nuevos durante 10 minutos, un `ConfigError` o `logs_skipped` en los **Logs**.
+
 ### Rotar credenciales
 
 Se rotan si una pudo filtrarse o si el agente lo pide (ADR-0018 §12). Ninguna pasa por el chat.
@@ -1165,6 +1182,8 @@ Se rotan si una pudo filtrarse o si el agente lo pide (ADR-0018 §12). Ninguna p
    - con `salud`, el informe `health` de la ejecución siguiente de `buoh-operaciones` no lleva la alerta `data_health_storage_unavailable`: con un token rechazado, la salud sale `paused` sin que el paso falle;
    - con `operaciones`, el primer informe `verification` con `due` mayor que 0 termina `completed`, con `read` igual a `due`. Una ejecución que no tuvo nada que leer no prueba el token. La verificación solo lee, y la retención también borra (ver «Operaciones (`buoh-operaciones`)», «Paso 3, `retention`»). Por eso, antes de borrar el viejo, el propietario le manda al agente una captura de la lista de tokens de Cloudflare con el nuevo, con **Object Read & Write** y solo para `buoh-captura`. La captura muestra el permiso del token, no que las claves que tiene Render sean las suyas: eso lo prueba el siguiente borrado de la retención, y un `AccessDenied` ahí se trata como en «El primer borrado».
    - con `lotes`, el primer informe `batch` con alguna petición respondida (`answered` mayor que 0) no lleva ninguna secuencia `failed`. Una ejecución que no escribió nada no prueba el token.
+
+Mientras exista `buoh-historia` (ver «La historia en producción (PR 6e de ADR-0021)»), copia de `buoh-operaciones` los tokens `lotes` y `operaciones` y las contraseñas de `buoh_lotes` y `buoh_publicacion` solo en cada sincronización del Blueprint: después de rotar una, una **Manual Sync** se la da, antes de borrar el token viejo.
 
 El token `agente` se rota igual, con sus dos secretos de Kiro en lugar de las variables de Render.
 

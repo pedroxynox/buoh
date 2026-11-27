@@ -19,6 +19,7 @@ import {
 } from '../postgres/roles.js';
 import { failureReason } from '../source-log/source-event-log.js';
 import {
+  HISTORY_SEQUENCES,
   isLogExpired,
   listCaptureLogs,
   LOG_SEQUENCES,
@@ -200,6 +201,9 @@ export interface OwnerDatabase {
   /**
    * La publicación activa de `production` más antigua (por `published_at_utc` y `publication_id`)
    * que no tiene un resultado en los dos modos en `buoh_datasets.dataset_verifications`, o `null`.
+   * Las de las historias (`HISTORY_SEQUENCES`) van después de todas las demás, para que las nuevas
+   * de las demás secuencias no esperen detrás de los miles que publica el comando de la historia
+   * (precisión del PR 6e de ADR-0021 §9).
    */
   nextPublicationToVerify(): Promise<PublicationToVerify | null>;
   /** Añade el resultado de una verificación a `buoh_datasets.dataset_verifications`, como `buoh_dueno`. */
@@ -494,15 +498,24 @@ export function openOwnerDatabase(
           modes_done: ReplayMode[];
           publication_id: string;
         }>(
-          `SELECT records.dataset_id, records.publication_id::text AS publication_id,
-                  ARRAY(SELECT DISTINCT v.mode FROM ${datasets}.dataset_verifications AS v
-                         WHERE v.publication_id = records.publication_id ORDER BY 1) AS modes_done
+          // Las verificaciones se agrupan una sola vez: con los miles de datasets de las historias,
+          // una subconsulta por publicación recorrería la tabla miles de veces en cada ejecución.
+          `WITH done AS (
+             SELECT publication_id, array_agg(DISTINCT mode ORDER BY mode) AS modes
+               FROM ${datasets}.dataset_verifications GROUP BY publication_id
+           )
+           SELECT records.dataset_id, records.publication_id::text AS publication_id,
+                  COALESCE(done.modes, '{}'::text[]) AS modes_done
              FROM ${datasets}.published_manifest_records AS records
+             LEFT JOIN done ON done.publication_id = records.publication_id
+             LEFT JOIN ${datasets}.dataset_log_ranges AS ranges
+               ON ranges.dataset_id = records.dataset_id
             WHERE records.deployment_environment = 'production' AND records.state = 'active'
-              AND (SELECT count(DISTINCT v.mode) FROM ${datasets}.dataset_verifications AS v
-                    WHERE v.publication_id = records.publication_id) < 2
-            ORDER BY records.published_at_utc, records.publication_id
+              AND COALESCE(cardinality(done.modes), 0) < 2
+            ORDER BY COALESCE(ranges.sequence = ANY($1::text[]), false),
+                     records.published_at_utc, records.publication_id
             LIMIT 1`,
+          [HISTORY_SEQUENCES.map((sequence) => sequence.name)],
         );
         return rows[0] ?? null;
       }),

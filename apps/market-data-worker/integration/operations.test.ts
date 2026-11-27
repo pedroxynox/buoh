@@ -22,6 +22,8 @@ import {
   findActiveLog,
   GOLD_SEQUENCE,
   healthCommand,
+  HISTORY_GOLD_SEQUENCE,
+  HISTORY_R_100_SEQUENCE,
   LOGIN_ROLES,
   loadConfig,
   loadOperationsConfig,
@@ -2125,6 +2127,110 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
         open_events: 1,
         operational_incidents: 1,
       });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it('el paso 7 verifica las publicaciones de las historias después de todas las demás, aunque sean más antiguas, y cada una con los modos que le faltan (precisión del PR 6e de ADR-0021 §9)', async () => {
+    const env = {
+      ...operationsEnvironment(),
+      BUOH_PUBLICACION_POSTGRES_PASSWORD: passwords.publication,
+    };
+    const config = loadOperationsConfig(env);
+    const database = openOwnerDatabase(
+      { ...config, owner: plain(config.owner) },
+      { source: DERIV_SOURCE },
+    );
+    const sql = ready(admin);
+    let next = 70_000;
+    const verify = async (publication: string, dataset: string, mode: string) => {
+      next += 1;
+      await sql.query(
+        `INSERT INTO ${DATASETS_SCHEMA}.dataset_verifications
+           (verification_id, dataset_id, publication_id, mode, status, exit_code, error_code,
+            report_jcs, run_id, verified_at_utc)
+         VALUES ($1, $2, $3, $4, 'passed', 0, NULL, '{}', $5, '2026-01-01T00:00:00.000Z')`,
+        [uuid(next), dataset, publication, mode, uuid(next + 500)],
+      );
+    };
+    /** Un dataset publicado de una secuencia, sintético: solo sus filas, sin objetos. */
+    const publish = async (sequenceName: string, publishedAt: string) => {
+      next += 1;
+      const core = canonicalJson({ fake: next, sequence: sequenceName });
+      const dataset = `sha256:${sha256Hex(core)}`;
+      const publication = uuid(next);
+      await sql.query(
+        `INSERT INTO ${DATASETS_SCHEMA}.datasets (dataset_id, state, source, manifest_core_jcs)
+         VALUES ($1, 'published', $2, $3)`,
+        [dataset, DERIV_SOURCE, core],
+      );
+      await sql.query(
+        `INSERT INTO ${DATASETS_SCHEMA}.published_manifest_records
+           (publication_id, deployment_environment, dataset_id, schema_version,
+            manifest_document_sha256, manifest_object_uri, manifest_object_bytes_sha256,
+            published_at_utc, state)
+         VALUES ($1, 'production', $2, '1.1.0', $3, 'datasets/sintetico', $3, $4, 'active')`,
+        [publication, dataset, 'd'.repeat(64), publishedAt],
+      );
+      await sql.query(
+        `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
+           (dataset_id, publication_id, log_number, first_segment, last_segment, clean,
+            pending_continuity_symbols, open_condition_types, sequence)
+         VALUES ($1, $2, $3, 0, 0, true, '{}', '{}', $4)`,
+        [dataset, publication, 900_000 + next, sequenceName],
+      );
+      return { dataset, publication };
+    };
+    try {
+      // Las publicaciones de las pruebas anteriores quedan verificadas, para empezar sin ninguna.
+      const { rows: pending } = await sql.query<{ dataset_id: string; publication_id: string }>(
+        `SELECT dataset_id, publication_id::text AS publication_id
+           FROM ${DATASETS_SCHEMA}.published_manifest_records WHERE state = 'active'`,
+      );
+      for (const row of pending) {
+        for (const mode of ['verify-only', 'recompute']) {
+          await verify(row.publication_id, row.dataset_id, mode);
+        }
+      }
+      expect(await database.nextPublicationToVerify()).toBeNull();
+
+      // Las dos historias, publicadas antes que las demás, como las publica su comando.
+      const history = await publish(HISTORY_R_100_SEQUENCE.name, '2000-01-01T00:00:00.000Z');
+      const gold = await publish(HISTORY_GOLD_SEQUENCE.name, '2000-01-01T00:00:01.000Z');
+      const candles = await publish(BATCH_CANDLES_SEQUENCE.name, '2000-01-02T00:00:00.000Z');
+      const live = await publish(R_100_SEQUENCE.name, '2000-01-03T00:00:00.000Z');
+      const expectNext = async (
+        target: { dataset: string; publication: string },
+        done: string[],
+      ) => {
+        expect(await database.nextPublicationToVerify()).toEqual({
+          dataset_id: target.dataset,
+          modes_done: done,
+          publication_id: target.publication,
+        });
+      };
+
+      await expectNext(candles, []);
+      await verify(candles.publication, candles.dataset, 'verify-only');
+      await expectNext(candles, ['verify-only']);
+      await verify(candles.publication, candles.dataset, 'recompute');
+      await expectNext(live, []);
+      await verify(live.publication, live.dataset, 'recompute');
+      await expectNext(live, ['recompute']);
+      await verify(live.publication, live.dataset, 'verify-only');
+      // Solo quedan las historias, en el orden en que se publicaron.
+      await expectNext(history, []);
+      for (const mode of ['verify-only', 'recompute']) {
+        await verify(history.publication, history.dataset, mode);
+      }
+      await expectNext(gold, []);
+      // Una verificación repetida no cuenta dos veces: le sigue faltando la recomputación.
+      await verify(gold.publication, gold.dataset, 'verify-only');
+      await verify(gold.publication, gold.dataset, 'verify-only');
+      await expectNext(gold, ['verify-only']);
+      await verify(gold.publication, gold.dataset, 'recompute');
+      expect(await database.nextPublicationToVerify()).toBeNull();
     } finally {
       await database.close();
     }
