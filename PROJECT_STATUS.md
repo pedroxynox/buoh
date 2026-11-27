@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 120
-updated_at_utc: "2026-11-27T03:30:00.000Z"
+status_version: 121
+updated_at_utc: "2026-11-27T06:30:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -38,7 +38,7 @@ Transformar una hipótesis en una estrategia viva, explicable y no ejecutora, pa
 | F2.3 API, cuentas y auditoría | Hecha, con el PR 7c de ADR-0019 | [Evidencia de F2.3](docs/operacion/evidencia-api-f2-3.md) |
 | F2.4 Datos reales en pantalla | Hecha, con el 7b | [Evidencia de F2.4](docs/operacion/evidencia-datos-f2-4.md) |
 | F2.5 Datasets vivos | Hecha, con el PR 6 de ADR-0020 | [Evidencia de los datasets vivos](docs/operacion/evidencia-datasets-f2-5.md) |
-| F2.5b Mercados reales | En curso: hechos los PR 2 a 5 de [ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md), el 5 en seis partes, del 5a al 5f. Siguen las comprobaciones del 5f en producción y los PR 6 a 8 (ADR-0021 §9; «Siguiente tarea autorizada») | [Evidencia del PR 2d](docs/operacion/evidencia-memoria-f2-5b.md) |
+| F2.5b Mercados reales | En curso: hechos los PR 2 a 5 de [ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md), el 5 en seis partes, del 5a al 5f, y el 6a. Siguen el PR 6, del 6b al 6e, y los PR 7 y 8 (ADR-0021 §9; «Siguiente tarea autorizada») | [Evidencia del PR 2d](docs/operacion/evidencia-memoria-f2-5b.md) |
 | F2.6, F2.6b y F2.7 a F2.10 | Sin empezar: las cinco ADR del laboratorio, de ADR-0022 a ADR-0026, están fusionadas | — |
 | F2.11 Puerta de salida | Sin empezar | — |
 
@@ -59,11 +59,10 @@ Cerrar V1, con su prototipo de escritorio, no autoriza la app real de Windows: l
 **Próximos pasos, en orden** (desde el 2026-11-26: plan de Fase 2, §9; [decisiones vigentes](docs/gobierno/decisiones-vigentes.md), «Orden del código desde el 2026-11-26»). El detalle de cada incremento está en su ADR.
 
 1. **2026-12-02 a las 00:00:03 UTC:** vence el log 1, y el agente comprueba su borrado (runbook de ingesta, «Operaciones (`buoh-operaciones`)», «El primer borrado»). Vuelve a contar los objetos de `logs/000002/`, que tienen que ser los 317 068 de la [evidencia de producción de F2.2](docs/operacion/evidencia-produccion-f2-2.md). Ese día, el agente le pide además al propietario el uso de `buoh-operaciones` en la facturación de Render, para saber si el cron job pasa del mínimo de 1 USD al mes con lo que suman los datasets vivos ([evidencia de los datasets vivos](docs/operacion/evidencia-datasets-f2-5.md), «El costo»).
-2. **Los lotes en producción** (PR 5f de [ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §9): tras su despliegue, el agente hace las comprobaciones del runbook de ingesta («Los lotes (PR 5f de ADR-0021)»), empezando por que la primera ejecución de `buoh-operaciones` no da `ConfigError`. Mira además, en los informes del paso 6, cuánto tarda la publicación de un dataset de los lotes (`duration_ms`), que el 5d2 estimó con la de un dataset vivo; si el paso `batch` sigue empezando antes de los 150 s (ADR-0021 §9, precisión del PR 5d2); y el tamaño de las respuestas de `GET /api/v2/datos/datasets` y `GET /api/v2/datos/eventos` con los datasets de los lotes (ADR-0019 §8). Lo registra en el PR siguiente.
-3. **El PR 6 de ADR-0021**, la descarga de la historia.
-4. **Mientras la historia se descarga y se publica:** los PR 2 y 3 de [ADR-0022](docs/arquitectura/adr/0022-modelo-de-estrategia.md), los PR 2 a 4 de [ADR-0024](docs/arquitectura/adr/0024-semantica-del-backtest.md) y los PR 2 a 4 de [ADR-0023](docs/arquitectura/adr/0023-motor-de-investigacion.md). Dónde van los PR 4 y 5 de ADR-0022 lo dice el plan (§9).
-5. **El PR 7 de ADR-0021**, los umbrales y la publicación del oro, en su fecha, sin esperar a los pasos 2 a 4 (ADR-0021 §2): fija los umbrales desde el 2026-12-02 a las 05:09:43.577 UTC, a los 7 días del primer tick del oro, y tiene que estar en producción antes del 2026-12-23, 7 días antes de que venza, hacia el 2026-12-30, el primer log del oro, que se corta el lunes 2026-11-30 (runbook de ingesta, «El oro (PR 3 de ADR-0021)»).
-6. **El PR 8 de ADR-0021**, cuando la historia esté publicada, y después el VPS, el PR 5 de ADR-0023.
+2. **El PR 6 de [ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md)**, la descarga de la historia, del 6b al 6e (ADR-0021 §9, precisión del PR 6a). Deriv guarda 365 días de historia, así que cada día sin descargarla se pierde uno por el principio.
+3. **Mientras la historia se descarga y se publica:** los PR 2 y 3 de [ADR-0022](docs/arquitectura/adr/0022-modelo-de-estrategia.md), los PR 2 a 4 de [ADR-0024](docs/arquitectura/adr/0024-semantica-del-backtest.md) y los PR 2 a 4 de [ADR-0023](docs/arquitectura/adr/0023-motor-de-investigacion.md). Dónde van los PR 4 y 5 de ADR-0022 lo dice el plan (§9).
+4. **El PR 7 de ADR-0021**, los umbrales y la publicación del oro, en su fecha, sin esperar a los pasos 2 y 3 (ADR-0021 §2): fija los umbrales desde el 2026-12-02 a las 05:09:43.577 UTC, a los 7 días del primer tick del oro, y tiene que estar en producción antes del 2026-12-23, 7 días antes de que venza, hacia el 2026-12-30, el primer log del oro, que se corta el lunes 2026-11-30 (runbook de ingesta, «El oro (PR 3 de ADR-0021)»).
+5. **El PR 8 de ADR-0021**, cuando la historia esté publicada, y después el VPS, el PR 5 de ADR-0023.
 
 Cada vez que lee producción, el agente mira también la memoria de `buoh-operaciones` que guarda el paso `memory`, y se la presenta al propietario cuando lo dicen las decisiones vigentes («Memoria medida de `buoh-operaciones`»).
 

@@ -1,6 +1,13 @@
 import { canonicalJson, type ContractDuration, type JsonValue } from '@buoh/contracts';
 
-import type { CandlesProfile, QuotesProfile, SchedulesProfile } from './batch-profile.js';
+import { DATASET_ELEMENT_CEILING } from '../datasets/plan.js';
+import {
+  DERIV_HISTORY_DAYS,
+  type CandlesProfile,
+  type HistoryProfile,
+  type QuotesProfile,
+  type SchedulesProfile,
+} from './batch-profile.js';
 import type { BatchOperation } from './schema-release.js';
 import type { DerivSchemaSet } from './schema-archive.js';
 
@@ -38,23 +45,32 @@ export type BatchRequest =
       readonly symbol: string;
     }
   | {
+      /** Una página de ticks de la historia (PR 6a): sin `granularity`, con `style: ticks`. */
+      readonly count: number;
+      /** Último segundo pedido, incluido: epoch entero en segundos. */
+      readonly end: number;
+      readonly operation: 'ticks_history';
+      /** Primer segundo pedido, incluido: epoch entero en segundos. */
+      readonly start: number;
+      readonly symbol: string;
+    }
+  | {
       /** El día UTC, `AAAA-MM-DD`. */
       readonly date: string;
       readonly operation: 'trading_times';
     };
 
 /**
- * `msg_type` de la respuesta que espera cada petición. Una página de velas responde con `candles`;
- * un error a `ticks_history`, con `ticks_history` y un objeto `error` (reglas 4.0.0, «Un log»).
- * Las páginas de ticks de la historia, del PR 6, responden con `history`: serán otra petición.
+ * `msg_type` de la respuesta que espera una petición. Una página de velas responde con `candles`, y
+ * una de ticks de la historia, con `history`; un error a `ticks_history`, con `ticks_history` y un
+ * objeto `error` (reglas 4.0.0, «Un log»).
  */
-export const EXPECTED_BATCH_MSG_TYPE = {
-  active_symbols: 'active_symbols',
-  contracts_for: 'contracts_for',
-  proposal: 'proposal',
-  ticks_history: 'candles',
-  trading_times: 'trading_times',
-} as const satisfies Record<BatchOperation, string>;
+export function expectedBatchMsgType(request: BatchRequest): string {
+  if (request.operation === 'ticks_history') {
+    return 'granularity' in request ? 'candles' : 'history';
+  }
+  return request.operation;
+}
 
 /** Cuerpo de la petición con su `req_id`. */
 export function batchRequestBody(request: BatchRequest, reqId: number): Record<string, JsonValue> {
@@ -84,15 +100,24 @@ export function batchRequestBody(request: BatchRequest, reqId: number): Record<s
     }
     case 'ticks_history':
       // Como en la captura, el esquema de la petición pide `end` como texto y `start` entero.
-      return {
-        count: request.count,
-        end: String(request.end),
-        granularity: request.granularity,
-        req_id: reqId,
-        start: request.start,
-        style: 'candles',
-        ticks_history: request.symbol,
-      };
+      return 'granularity' in request
+        ? {
+            count: request.count,
+            end: String(request.end),
+            granularity: request.granularity,
+            req_id: reqId,
+            start: request.start,
+            style: 'candles',
+            ticks_history: request.symbol,
+          }
+        : {
+            count: request.count,
+            end: String(request.end),
+            req_id: reqId,
+            start: request.start,
+            style: 'ticks',
+            ticks_history: request.symbol,
+          };
     case 'trading_times':
       return { req_id: reqId, trading_times: request.date };
   }
@@ -216,4 +241,88 @@ export function candleRequests(profile: CandlesProfile, date: string): BatchRequ
       })),
     ),
   ];
+}
+
+/** Un bloque de la historia: su primer segundo y sus peticiones, en el orden en que se piden. */
+export interface HistoryBlock {
+  readonly requests: readonly BatchRequest[];
+  readonly start: number;
+}
+
+const positiveInteger = (value: number): boolean => Number.isSafeInteger(value) && value > 0;
+
+/**
+ * Los bloques de una historia (precisión del PR 6a de ADR-0021 §9), del más antiguo al más
+ * reciente, porque Deriv borra primero lo más antiguo: cada uno, el `trading_times` de su día y sus
+ * tramos contiguos, que no se solapan, con su primer y su último segundo incluidos, hasta
+ * `end_epoch`, donde el último bloque y el último tramo pueden quedar cortos. Lanza si los bloques no
+ * parten el día, si los tramos no parten el bloque o si un bloque puede pasar del techo de un
+ * dataset: sus tramos con `count` ticks como mucho cada uno, y uno por segundo como mucho, más el
+ * horario.
+ */
+export function historyBlocks(profile: HistoryProfile): HistoryBlock[] {
+  const { block_seconds, count, end_epoch, start_epoch, symbol, tranche_seconds } = profile;
+  if (
+    symbol === '' ||
+    !positiveInteger(count) ||
+    !positiveInteger(tranche_seconds) ||
+    !positiveInteger(block_seconds) ||
+    DAY_SECONDS % block_seconds !== 0 ||
+    block_seconds % tranche_seconds !== 0
+  ) {
+    throw new TypeError('Los bloques tienen que partir el día UTC, y los tramos, cada bloque.');
+  }
+  if (
+    (block_seconds / tranche_seconds) * Math.min(count, tranche_seconds) + 1 >
+    DATASET_ELEMENT_CEILING
+  ) {
+    throw new TypeError('Un bloque de la historia no puede pasar del techo de un dataset.');
+  }
+  if (
+    !Number.isSafeInteger(start_epoch) ||
+    !Number.isSafeInteger(end_epoch) ||
+    start_epoch < 0 ||
+    start_epoch % block_seconds !== 0 ||
+    end_epoch < start_epoch
+  ) {
+    throw new TypeError('La historia empieza en un comienzo de bloque y no termina antes.');
+  }
+  const blocks: HistoryBlock[] = [];
+  for (let block = start_epoch; block <= end_epoch; block += block_seconds) {
+    const last = Math.min(block + block_seconds - 1, end_epoch);
+    const requests: BatchRequest[] = [{ date: dayOf(block), operation: 'trading_times' }];
+    for (let start = block; start <= last; start += tranche_seconds) {
+      requests.push({
+        count,
+        end: Math.min(start + tranche_seconds - 1, last),
+        operation: 'ticks_history',
+        start,
+        symbol,
+      });
+    }
+    blocks.push({ requests, start: block });
+  }
+  return blocks;
+}
+
+/** Lo que se deja de margen con el borde de lo que guarda Deriv, que avanza mientras se pide. */
+export const HISTORY_WINDOW_MARGIN_SECONDS = 3_600;
+
+/**
+ * La primera petición de la historia que Deriv todavía guarda a la hora `nowMs`: la primera del
+ * primer bloque que empieza al menos `HISTORY_WINDOW_MARGIN_SECONDS` después del borde de
+ * `DERIV_HISTORY_DAYS` días. Un tramo más antiguo daría los últimos ticks del símbolo, fuera de lo
+ * pedido, que las reglas 4.0.0 rechazan (`history_inconsistent`), así que no se pide. Si no queda
+ * ninguno, el número de peticiones.
+ */
+export function historyRequestsFrom(blocks: readonly HistoryBlock[], nowMs: number): number {
+  const edge = Math.floor(nowMs / 1000) - DERIV_HISTORY_DAYS * DAY_SECONDS;
+  let index = 0;
+  for (const block of blocks) {
+    if (block.start >= edge + HISTORY_WINDOW_MARGIN_SECONDS) {
+      return index;
+    }
+    index += block.requests.length;
+  }
+  return index;
 }
