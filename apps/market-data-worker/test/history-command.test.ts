@@ -6,6 +6,8 @@ import { historyPlan } from '../src/deriv/history-pages.js';
 import { DERIV_SOURCE } from '../src/deriv/profile.js';
 import {
   HISTORY_BLOCK_DEADLINE_MS,
+  HISTORY_LOCK_ATTEMPTS,
+  HISTORY_LOCK_RETRY_MS,
   HISTORY_MAX_FAILURES,
   HISTORY_PACING_MS,
   HISTORY_RATE_LIMIT_WAIT_MS,
@@ -76,7 +78,8 @@ interface LogState {
 
 function world(
   options: {
-    readonly busy?: boolean;
+    /** Cuántos intentos del bloqueo, por secuencia, dan `null`: con `true`, todos. */
+    readonly busy?: boolean | number;
     /**
      * Lo que responde `datasets:publish` a una secuencia sin `--skip`, en lugar de publicar; con
      * `times`, solo esas veces.
@@ -120,12 +123,15 @@ function world(
   const published = new Map<string, number>();
   const index = { value: 0 };
   const locks: { held: boolean }[] = [];
+  const attempts = new Map<string, number>();
   let failures = 0;
   let id = 0;
   const deps: HistoryDependencies = {
     // Como un `SourceLock`: soltarlo lo pierde.
-    acquireLock: () => {
-      if (options.busy === true) {
+    acquireLock: (_config, sequence) => {
+      const tried = (attempts.get(sequence.name) ?? 0) + 1;
+      attempts.set(sequence.name, tried);
+      if (options.busy === true || tried <= Number(options.busy ?? 0)) {
         return Promise.resolve(null);
       }
       const lock = {
@@ -522,11 +528,45 @@ describe('historyCommand: las dos historias, bloque a bloque', () => {
     expect(env.published.get('lotes_historia_r_100')).toBe(2);
   });
 
-  it('con el bloqueo de otro proceso no pide nada, y la configuración no admite variables BUOH_POSTGRES_* ni BUOH_S3_*', async () => {
+  it('con el bloqueo de otro proceso espera unos 10 minutos sin pedir nada, y la configuración no admite variables BUOH_POSTGRES_* ni BUOH_S3_*', async () => {
     const busy = world({ busy: true });
     expect(await busy.run()).toEqual({ exitCode: 1, stderr: null });
     expect(busy.lines.at(-1)).toMatchObject({ reason: 'lock_busy', status: 'failed' });
+    expect(busy.lines.filter((line) => line['event'] === 'history_lock_waiting')).toEqual([
+      { event: 'history_lock_waiting', sequence: 'lotes_historia_r_100' },
+    ]);
+    expect(busy.sleeps).toEqual(
+      Array.from({ length: HISTORY_LOCK_ATTEMPTS - 1 }, () => HISTORY_LOCK_RETRY_MS),
+    );
+    expect(HISTORY_LOCK_RETRY_MS * HISTORY_LOCK_ATTEMPTS).toBe(600_000);
     expect(busy.sent).toEqual([]);
+
+    // Como en un despliegue de Render: la instancia vieja suelta los bloqueos a los pocos segundos, y
+    // la nueva sigue con normalidad.
+    const deploy = world({ busy: 3 });
+    await seedGold(deploy);
+    const old = R_100.firsts[R_100.firsts.length - 10] ?? 0;
+    const last = R_100.requests[old - 1];
+    if (last?.operation !== 'ticks_history') throw new TypeError('no es un tramo');
+    await writeBatchLog({
+      ...deploy.storesOf(logLocation(1, HISTORY_R_100_SEQUENCE)),
+      runs: [
+        {
+          atUtc: '2027-10-29T00:00:00.000Z',
+          texts: [historyPageText('R_100', last.start, last.end, [last.start])],
+        },
+      ],
+    });
+    expect(await deploy.run()).toEqual({ exitCode: 0, stderr: null });
+    expect(deploy.sleeps.slice(0, 6)).toEqual(
+      Array.from({ length: 6 }, () => HISTORY_LOCK_RETRY_MS),
+    );
+    expect(deploy.sleeps[6]).not.toBe(HISTORY_LOCK_RETRY_MS);
+    expect(deploy.lines.filter((line) => line['event'] === 'history_lock_waiting')).toEqual([
+      { event: 'history_lock_waiting', sequence: 'lotes_historia_r_100' },
+      { event: 'history_lock_waiting', sequence: 'lotes_historia_frxxauusd' },
+    ]);
+    expect(deploy.lines.at(-1)).toMatchObject({ event: 'history_finished', status: 'completed' });
 
     const env = world();
     const rest = Object.fromEntries(

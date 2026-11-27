@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
 status_version: 124
-updated_at_utc: "2026-11-27T21:00:00.000Z"
+updated_at_utc: "2026-11-27T20:50:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
