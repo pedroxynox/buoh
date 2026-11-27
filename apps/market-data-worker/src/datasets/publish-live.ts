@@ -1,5 +1,5 @@
 import type { DeploymentEnvironment, PublishedManifestRecord } from '@buoh/contracts';
-import type { DatasetPublication, PipelineProfile } from '@buoh/domain';
+import type { BatchDatasetPublication, DatasetPublication, PipelineProfile } from '@buoh/domain';
 
 import {
   CommitOutcomeUnknownError,
@@ -8,7 +8,12 @@ import {
 } from '../errors.js';
 import type { OperationalRegistry } from '../operational/registry.js';
 import type { DatasetLogRange, DatasetStore, ObjectStore } from '../ports.js';
-import { preparePublication, writePublication } from '../publication.js';
+import {
+  prepareBatchPublication,
+  preparePublication,
+  writePublication,
+  type PrepareBatchPublicationInput,
+} from '../publication.js';
 import type { ReplayReadLimits } from '../replay.js';
 import { failureReason } from '../source-log/source-event-log.js';
 import { DATASETS_PREFIX } from './location.js';
@@ -16,7 +21,15 @@ import type { DatasetPlan } from './plan.js';
 
 // La publicación de un dataset vivo en `buoh_datasets` (ADR-0020 §5, §7 y §9): la del plan que da
 // `planDataset`, con sus derivados en gzip, su fila de rango en el mismo commit y el registro
-// operativo de la publicación. Decide qué segmentos y con qué perfil quien la llama.
+// operativo de la publicación. Decide qué segmentos y con qué perfil quien la llama. Desde el PR
+// 5d2 de ADR-0021 §9, también la de un dataset de los lotes, con el plan de `planBatchDataset` y lo
+// que pide `prepareBatchPublication` (`batch`).
+
+/** Lo que pide la publicación de un dataset de los lotes además de lo común. */
+export type BatchPublicationSource = Pick<
+  PrepareBatchPublicationInput,
+  'connector_version' | 'quality_profile_bytes' | 'source_schema_bytes' | 'source_schema_release'
+>;
 
 /** Los objetos de un dataset que se escriben a la vez, como el borrado de la retención (ADR-0020 §8). */
 export const DATASET_WRITE_CONCURRENCY = 8;
@@ -36,10 +49,14 @@ export interface PublishLiveDatasetInput {
   readonly now: () => string;
   /** Los objetos del bucket, sin prefijo: las claves ya llevan el de `keyPrefix`. */
   readonly objects: ObjectStore;
-  /** El dataset que decidió `planDataset`. */
+  /** El dataset que decidió `planDataset`, o `planBatchDataset` en uno de los lotes. */
   readonly plan: Extract<DatasetPlan, { status: 'due' }>;
-  /** El perfil de publicación del log. */
-  readonly profile: PipelineProfile;
+  /**
+   * Con qué se deriva: el perfil de publicación de un log en vivo (`profile`) o, en uno de los lotes,
+   * su perfil, su esquema de fuente y su conector (`batch`).
+   */
+  readonly source:
+    { readonly batch: BatchPublicationSource } | { readonly profile: PipelineProfile };
   /** UUIDv7 inyectado del intento (ADR-0004 §8, paso 4). */
   readonly publication_id: string;
   /** Reloj UTC inyectado del intento. */
@@ -56,7 +73,7 @@ export interface PublishLiveDatasetInput {
 export type PublishLiveOutcome =
   /** Publicado ahora, con este intento. */
   | {
-      readonly publication: DatasetPublication;
+      readonly publication: BatchDatasetPublication | DatasetPublication;
       readonly range: DatasetLogRange;
       readonly status: 'published';
     }
@@ -149,18 +166,21 @@ export async function publishLiveDataset(
       pending_continuity_symbols: canonical(plan.open.pending_continuity_symbols),
     },
   };
-  const publication = preparePublication({
-    derivedCompression: 'gzip',
+  const common = {
+    derivedCompression: 'gzip' as const,
     environment: input.environment,
     keyPrefix: input.keyPrefix ?? DATASETS_PREFIX,
     ...(input.limits === undefined ? {} : { limits: input.limits }),
     objects: input.objects,
-    profile: input.profile,
     publication_id: input.publication_id,
     published_at_utc: input.published_at_utc,
     segments: plan.segments,
     zlibVersion: input.zlibVersion,
-  });
+  };
+  const publication =
+    'batch' in input.source
+      ? prepareBatchPublication({ ...common, ...input.source.batch })
+      : preparePublication({ ...common, profile: input.source.profile });
 
   const existing = await precondition(() =>
     input.store.findPublishedDataset(publication.dataset_id, input.environment),

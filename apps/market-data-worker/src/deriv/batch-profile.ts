@@ -193,3 +193,12 @@ export function derivBatchLogProfileRow(kind: BatchProfileKind): LogQualityProfi
     quality_profile_sha256: sha256Hex(profileJcs(kind)),
   };
 }
+
+/**
+ * Los símbolos que buscan en `trading_times` las reglas 4.0.0 con el perfil de una clase, como en su
+ * publicación (`buildBatchDatasetPublication`): sus `symbols`, o ninguno en las cotizaciones.
+ */
+export function batchTradingTimesSymbols(kind: BatchProfileKind): readonly string[] {
+  const profile: ProfileHeader & { readonly symbols?: readonly string[] } = PROFILES[kind]();
+  return profile.symbols ?? [];
+}

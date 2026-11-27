@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 
 import type { JsonValue } from '@buoh/contracts';
 import {
+  BATCH_SOURCE_SCHEMA_OPERATIONS,
   CONTRACT_SCHEMA_VERSION,
   compileSourceSchema,
   createCatalogResponseSchema,
@@ -31,16 +32,24 @@ import {
 import {
   DERIV_BATCH_OPERATIONS,
   DERIV_SCHEMA_RELEASE,
+  schemaEntryName,
   type BatchOperation,
   type ExpectedSchemaArchive,
 } from '../deriv/schema-release.js';
 import type { SessionLock } from '../deriv/session.js';
 import { CONNECT_TIMEOUT_MS, type SocketFactory } from '../deriv/socket.js';
+import { ObjectReadError } from '../errors.js';
 import { buildRawSourceFrame } from '../ingestion/raw-first-ingestor.js';
 import type { StartupReads } from '../ingest-startup.js';
 import { cutTimeOf } from '../log-cut.js';
+import { contentKey } from '../object-keys.js';
+import type { ObjectStore } from '../ports.js';
 import { UsageError } from '../replay-args.js';
-import { failureReason, type SourceEventLog } from '../source-log/source-event-log.js';
+import {
+  failureReason,
+  writeVerified,
+  type SourceEventLog,
+} from '../source-log/source-event-log.js';
 import {
   BATCH_SEQUENCES,
   logLocation,
@@ -72,9 +81,10 @@ import {
  * 4. cierra el segmento que una ejecución anterior pudo dejar abierto, al fallar al escribir o al
  *    cortarse, en el log en que escribe y, con un corte, también en el que deja, para que ningún
  *    segmento mezcle dos ejecuciones; si un fallo es del log que deja, la línea da ese log y no hay
- *    corte. Si para entonces ya pasó el plazo, no conecta (`deadline`). Si no, abre una conexión,
- *    escribe su apertura, pide lo que le toca y escribe su cierre (`runBatchExchange`), y cierra el
- *    segmento abierto (`requested`), salvo si una escritura falló.
+ *    corte. Si para entonces ya pasó el plazo, no conecta (`deadline`). Si el log no tiene ninguna
+ *    escritura, guarda antes su esquema de fuente (`storeBatchSourceSchema`; precisión del PR 5d2).
+ *    Después abre una conexión, escribe su apertura, pide lo que le toca y escribe su cierre
+ *    (`runBatchExchange`), y cierra el segmento abierto (`requested`), salvo si una escritura falló.
  *
  * Un límite de peticiones de Deriv (`rate_limit`) o el plazo (`deadline`) paran también las
  * secuencias siguientes (`skipped`); lo que no se pidió lo pide la ejecución siguiente.
@@ -100,6 +110,8 @@ export interface BatchLogHandle {
   /** Libera sus almacenes. */
   close(): Promise<void>;
   readonly log: SourceEventLog;
+  /** Los objetos del log, bajo su prefijo, donde se guarda su esquema de fuente. */
+  readonly objects: ObjectStore;
 }
 
 export interface BatchDependencies {
@@ -342,6 +354,8 @@ async function targetLog(
   | {
       readonly cut: SequenceOutcome['cut'];
       readonly cutBlocked: string | null;
+      /** Si el log en que escribe todavía no tiene ninguna escritura. */
+      readonly empty: boolean;
       readonly log: LogLocation;
       /** Con un corte, el log activo, que deja de escribirse. */
       readonly previous: LogLocation | null;
@@ -354,10 +368,16 @@ async function targetLog(
   }
   const first = await reads.firstWrite(active);
   if (first === null || Date.parse(nowUtc) < Date.parse(cutTimeOf(first))) {
-    return { cut: null, cutBlocked: null, log: active, previous: null };
+    return { cut: null, cutBlocked: null, empty: first === null, log: active, previous: null };
   }
   if (active.number >= MAX_LOG_NUMBER) {
-    return { cut: null, cutBlocked: 'log_number_exhausted', log: active, previous: null };
+    return {
+      cut: null,
+      cutBlocked: 'log_number_exhausted',
+      empty: false,
+      log: active,
+      previous: null,
+    };
   }
   const next = logLocation(active.number + 1, sequence);
   const readiness = await reads.readiness(next);
@@ -365,10 +385,51 @@ async function targetLog(
     ? {
         cut: { from: active.number, to: next.number },
         cutBlocked: null,
+        empty: (await reads.firstWrite(next)) === null,
         log: next,
         previous: active,
       }
-    : { cut: null, cutBlocked: `next_log_${readiness}`, log: active, previous: null };
+    : {
+        cut: null,
+        cutBlocked: `next_log_${readiness}`,
+        empty: false,
+        log: active,
+        previous: null,
+      };
+}
+
+/**
+ * Guarda en los objetos del log su esquema de fuente (precisión del PR 5d2 de ADR-0021 §9): el
+ * esquema de respuesta de cada operación de `BATCH_SOURCE_SCHEMA_ENTRIES`, los bytes que la carga
+ * comprobó contra su SHA-256 fijado, con la clave de ese SHA-256, como `ingest` guarda el de `ticks`
+ * (ADR-0015 §7). Devuelve `null` si quedaron guardados, o el motivo y su detalle saneado:
+ * `source_schema_mismatch` si una clave ya tiene otros bytes, que esperar no arregla, o
+ * `source_schema_unavailable` si el almacén no respondió.
+ */
+async function storeBatchSourceSchema(
+  objects: ObjectStore,
+  schemas: DerivSchemaSet<BatchOperation>,
+  expected: ExpectedSchemaArchive,
+): Promise<{ readonly detail: string; readonly reason: string } | null> {
+  for (const operation of BATCH_SOURCE_SCHEMA_OPERATIONS) {
+    const entry = schemaEntryName(operation, 'response');
+    try {
+      await writeVerified(
+        objects,
+        contentKey(expected.entries_sha256[entry]),
+        schemas.schema(operation, 'response').bytes,
+        'application/json',
+      );
+    } catch (error) {
+      // Como `holdsOtherBytes` de la sesión: con el mismo tamaño o menos, la relectura no
+      // coincide; con más, la lectura limitada a su tamaño la rechaza.
+      return failureReason(error) === 'object_verification_failed' ||
+        (error instanceof ObjectReadError && error.reason === 'too_large')
+        ? { detail: operation, reason: 'source_schema_mismatch' }
+        : { detail: failureReason(error), reason: 'source_schema_unavailable' };
+    }
+  }
+  return null;
 }
 
 interface RunContext {
@@ -451,12 +512,13 @@ async function runSequence(
   try {
     let target: LogLocation;
     let previous: LogLocation | null;
+    let empty: boolean;
     try {
       const found = await targetLog(reads, sequence, deps.now());
       if ('reason' in found) {
         return outcome('failed', { reason: found.reason });
       }
-      ({ cut, previous } = found);
+      ({ cut, empty, previous } = found);
       cutBlocked = found.cutBlocked;
       target = found.log;
       log = target.number;
@@ -514,6 +576,18 @@ async function runSequence(
       // Sin conectar: lo que tardó en abrirse el log ya pasó del plazo.
       context.halt ??= 'deadline';
       return outcome('stopped', { reason: 'deadline' });
+    }
+    if (empty) {
+      // Antes de su primer evento, el log guarda su esquema de fuente: así, todo log de los lotes
+      // con eventos lo tiene, y la publicación lo lee de él (precisión del PR 5d2).
+      const stored = await storeBatchSourceSchema(
+        handle.objects,
+        context.schemas,
+        deps.expected ?? DERIV_SCHEMA_RELEASE,
+      );
+      if (stored !== null) {
+        return outcome('failed', stored);
+      }
     }
     const opened = handle.log;
     const result = await runBatchExchange({

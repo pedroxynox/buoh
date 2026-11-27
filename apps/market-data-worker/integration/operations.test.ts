@@ -9,6 +9,7 @@ import { DERIV_SOURCE } from '../src/deriv/profile.js';
 import {
   API_READER_ROLE,
   API_ROLE,
+  BATCH_CANDLES_SEQUENCE,
   BATCH_QUOTES_SEQUENCE,
   BATCH_ROLE,
   BATCH_SCHEDULES_SEQUENCE,
@@ -61,6 +62,7 @@ import { realScheduler } from '../src/cli/scheduler.js';
 import { derivBatchLogProfileRow } from '../src/deriv/batch-profile.js';
 import { derivLogProfileRow } from '../src/deriv/log-profile.js';
 import { ownMaxRssBytes } from '../src/operations/child.js';
+import { readStoredBatchSourceSchema } from '../src/deriv/stored-source-schema.js';
 import { readLogQualityProfile } from '../src/postgres/log-profile.js';
 import { START, uuid } from '../test/support/connection-harness.js';
 import { contentKey } from '../src/object-keys.js';
@@ -1916,6 +1918,56 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       expect(bytes.byteLength).toBe(Number(segment?.object_size_bytes));
     } finally {
       objects.destroy();
+    }
+
+    // Antes del primer evento de cada log vacío, el comando guardó con buoh_lotes su esquema de
+    // fuente (precisión del PR 5d2 de ADR-0021 §9); el log 1 de las cotizaciones ya tenía una
+    // escritura, así que no lo guarda. buoh_publicacion lee los segmentos, el perfil y el esquema de
+    // cada log de los lotes: sin la marca de su clase, no hay nada que publicar.
+    for (const [sequence, expected] of [
+      [BATCH_SCHEDULES_SEQUENCE, 'found'],
+      [BATCH_QUOTES_SEQUENCE, 'missing'],
+      [BATCH_CANDLES_SEQUENCE, 'found'],
+    ] as const) {
+      const store = new S3ObjectStore(
+        createS3Client(local.s3),
+        local.s3.bucket,
+        logLocation(1, sequence).prefix,
+      );
+      try {
+        expect(
+          (await readStoredBatchSourceSchema(store, BATCH_FIXTURE.expected)).status,
+          sequence.name,
+        ).toBe(expected);
+      } finally {
+        store.destroy();
+      }
+    }
+    for (const name of ['lotes_horarios', 'lotes_velas']) {
+      const published = await publishDatasetCommand(
+        ['--sequence', name],
+        {
+          ...env,
+          BUOH_POSTGRES_PASSWORD: passwords.publication,
+          BUOH_POSTGRES_USER: PUBLICATION_ROLE,
+        },
+        {
+          alert: () => undefined,
+          elapsedMs: () => 0,
+          maxRssBytes: () => 0,
+          nextId: () => uuid((id += 1) + 20_000),
+          now: batchNow,
+          open: (config) =>
+            openPublicationStores(plainConfig(config), { schemas: BATCH_FIXTURE.expected }),
+          schemas: BATCH_FIXTURE.expected,
+          zlibVersion: process.versions.zlib,
+        },
+      );
+      expect(JSON.parse(published.line), name).toMatchObject({
+        sequence: name,
+        status: 'nothing_due',
+      });
+      expect(published.exitCode).toBe(0);
     }
 
     // Con su estado, otra ejecución en la misma media hora no tiene nada que pedir.

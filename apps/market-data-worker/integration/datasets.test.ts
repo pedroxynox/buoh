@@ -841,7 +841,7 @@ describe('publicar en buoh_datasets (ADR-0020 §9)', () => {
           now: () => at.replace(/\.000Z$/u, '.500Z'),
           objects: target,
           plan: due,
-          profile: fixture.profile,
+          source: { profile: fixture.profile },
           publication_id,
           published_at_utc: at,
           registry,

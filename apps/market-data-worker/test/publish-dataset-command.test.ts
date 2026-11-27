@@ -21,6 +21,7 @@ import {
   type PublicationStores,
   type PublishCommandDependencies,
 } from '../src/index.js';
+import type { LogQualityProfileRow } from '../src/deriv/log-profile.js';
 import { createDerivPublicationProfile, DERIV_SOURCE } from '../src/deriv/profile.js';
 import { SOURCE_SCHEMA_ENTRY } from '../src/deriv/schema-release.js';
 import { syntheticSchemas } from './support/connection-harness.js';
@@ -56,6 +57,8 @@ const ENV = {
 interface FakeLog {
   readonly number: number;
   readonly objects: MemoryObjectStore;
+  /** La fila de `log_quality_profile` del log; los de R_100 de estas pruebas no la tienen. */
+  readonly profile?: LogQualityProfileRow | null;
   readonly store: InMemorySourceLogStore;
   lastWriteUtc: string | null;
   readable: boolean;
@@ -133,6 +136,7 @@ function harness(logs: FakeLog[], nowUtc: string) {
           if (found === undefined) throw new TypeError('sin log');
           return logReader({
             objects: found.objects,
+            profile: () => Promise.resolve(found.profile ?? null),
             schemas: fixture.expected,
             source: DERIV_SOURCE,
             store: found.store,
@@ -477,6 +481,7 @@ describe('datasets:publish (ADR-0020 §8, paso 6)', () => {
           log: (location) =>
             logReader({
               objects: location.number === 1 ? one.objects : two.objects,
+              profile: () => Promise.resolve(null),
               schemas: expected,
               source: DERIV_SOURCE,
               store: location.number === 1 ? one.store : two.store,
