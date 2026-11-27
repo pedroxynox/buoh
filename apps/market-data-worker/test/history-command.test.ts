@@ -80,6 +80,8 @@ function world(
   options: {
     /** Cuántos intentos del bloqueo, por secuencia, dan `null`: con `true`, todos. */
     readonly busy?: boolean | number;
+    /** Cuántos intentos del bloqueo, por secuencia, fallan como un `28P01`: con `true`, todos. */
+    readonly lockFails?: boolean | number;
     /**
      * Lo que responde `datasets:publish` a una secuencia sin `--skip`, en lugar de publicar; con
      * `times`, solo esas veces.
@@ -131,6 +133,9 @@ function world(
     acquireLock: (_config, sequence) => {
       const tried = (attempts.get(sequence.name) ?? 0) + 1;
       attempts.set(sequence.name, tried);
+      if (options.lockFails === true || tried <= Number(options.lockFails ?? 0)) {
+        return Promise.reject(Object.assign(new Error('rechazada'), { code: '28P01' }));
+      }
       if (options.busy === true || tried <= Number(options.busy ?? 0)) {
         return Promise.resolve(null);
       }
@@ -528,7 +533,7 @@ describe('historyCommand: las dos historias, bloque a bloque', () => {
     expect(env.published.get('lotes_historia_r_100')).toBe(2);
   });
 
-  it('con el bloqueo de otro proceso espera unos 10 minutos sin pedir nada, y la configuración no admite variables BUOH_POSTGRES_* ni BUOH_S3_*', async () => {
+  it('con el bloqueo de otro proceso, o sin PostgreSQL, espera unos 20 minutos sin pedir nada, y la configuración no admite variables BUOH_POSTGRES_* ni BUOH_S3_*', async () => {
     const busy = world({ busy: true });
     expect(await busy.run()).toEqual({ exitCode: 1, stderr: null });
     expect(busy.lines.at(-1)).toMatchObject({ reason: 'lock_busy', status: 'failed' });
@@ -538,12 +543,28 @@ describe('historyCommand: las dos historias, bloque a bloque', () => {
     expect(busy.sleeps).toEqual(
       Array.from({ length: HISTORY_LOCK_ATTEMPTS - 1 }, () => HISTORY_LOCK_RETRY_MS),
     );
-    expect(HISTORY_LOCK_RETRY_MS * HISTORY_LOCK_ATTEMPTS).toBe(600_000);
+    expect(HISTORY_LOCK_RETRY_MS * HISTORY_LOCK_ATTEMPTS).toBe(1_200_000);
     expect(busy.sent).toEqual([]);
+
+    // Tras rotar la contraseña de buoh_lotes, PostgreSQL la rechaza hasta que buoh-operaciones se
+    // la pone al rol: el bloqueo se reintenta igual, y si no llega, termina con su código.
+    const rejected = world({ lockFails: true });
+    expect(await rejected.run()).toEqual({ exitCode: 1, stderr: null });
+    expect(rejected.lines.at(-1)).toEqual({
+      detail: '28P01',
+      event: 'history_finished',
+      reason: 'lock_unavailable',
+      sequence: 'lotes_historia_r_100',
+      status: 'failed',
+    });
+    expect(rejected.sleeps).toHaveLength(HISTORY_LOCK_ATTEMPTS - 1);
+    expect(rejected.sent).toEqual([]);
 
     // Como en un despliegue de Render: la instancia vieja suelta los bloqueos a los pocos segundos, y
     // la nueva sigue con normalidad.
-    const deploy = world({ busy: 3 });
+    // Dos rechazos y un intento ocupado en cada secuencia: el primer bloqueo se conserva mientras se
+    // espera el segundo.
+    const deploy = world({ busy: 3, lockFails: 2 });
     await seedGold(deploy);
     const old = R_100.firsts[R_100.firsts.length - 10] ?? 0;
     const last = R_100.requests[old - 1];

@@ -75,13 +75,14 @@ export const HISTORY_RETRY_WAIT_MS = 60_000;
 /** Los fallos seguidos de los bloques, o de la última publicación, con los que el proceso para. */
 export const HISTORY_MAX_FAILURES = 10;
 /**
- * Cada cuánto vuelve a intentar un bloqueo que tiene otro proceso, como `ingest`
- * (`STARTUP_LOCK_RETRY_MS`), y cuántas veces: unos 10 minutos. En un despliegue, Render arranca la
- * instancia nueva de `buoh-historia` antes de parar la vieja, que tiene los bloqueos hasta que para
- * (precisión del PR 6e de ADR-0021 §9).
+ * Cada cuánto vuelve a intentar un bloqueo que tiene otro proceso o que PostgreSQL no da, como
+ * `ingest` (`STARTUP_LOCK_RETRY_MS`), y cuántas veces: unos 20 minutos. En un despliegue, Render
+ * arranca la instancia nueva de `buoh-historia` antes de parar la vieja, que tiene los bloqueos hasta
+ * que para; y tras rotar la contraseña de `buoh_lotes`, el rol no la tiene hasta la ejecución
+ * siguiente de `buoh-operaciones` (precisión del PR 6e de ADR-0021 §9).
  */
 export const HISTORY_LOCK_RETRY_MS = 1_000;
-export const HISTORY_LOCK_ATTEMPTS = 600;
+export const HISTORY_LOCK_ATTEMPTS = 1_200;
 
 export const HISTORY_USAGE = 'Uso: history';
 
@@ -405,7 +406,7 @@ function outcomeLine(outcome: SequenceOutcome): Record<string, JsonValue> {
 
 /**
  * `history`: el proceso temporal de la historia. Devuelve 0 cuando las dos historias están pedidas
- * y publicadas; 1 si para por sus fallos, sin los esquemas o sin el bloqueo, que espera unos 10
+ * y publicadas; 1 si para por sus fallos, sin los esquemas o sin el bloqueo, que espera unos 20
  * minutos (`HISTORY_LOCK_ATTEMPTS`); 2 con un error de uso o de configuración, con su línea en stderr.
  */
 export async function historyCommand(
@@ -445,18 +446,20 @@ export async function historyCommand(
     for (const sequence of HISTORY_SEQUENCES) {
       let lock: SessionLock | null = null;
       for (let attempt = 1; lock === null; attempt += 1) {
+        let failure: string | null = null;
         try {
           lock = await deps.acquireLock(config.download, sequence);
         } catch (error) {
-          return finish('failed', {
-            detail: failureReason(error),
-            reason: 'lock_unavailable',
-            sequence: sequence.name,
-          });
+          failure = failureReason(error);
         }
         if (lock === null) {
           if (attempt >= HISTORY_LOCK_ATTEMPTS) {
-            return finish('failed', { reason: 'lock_busy', sequence: sequence.name });
+            return finish(
+              'failed',
+              failure === null
+                ? { reason: 'lock_busy', sequence: sequence.name }
+                : { detail: failure, reason: 'lock_unavailable', sequence: sequence.name },
+            );
           }
           if (attempt === 1) {
             deps.write({ event: 'history_lock_waiting', sequence: sequence.name });
