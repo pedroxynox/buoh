@@ -22,6 +22,7 @@ import {
   findActiveLog,
   GOLD_SEQUENCE,
   healthCommand,
+  HISTORY_CANDLES_SEQUENCE,
   HISTORY_GOLD_SEQUENCE,
   HISTORY_R_100_SEQUENCE,
   LOGIN_ROLES,
@@ -2223,8 +2224,13 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       }
       expect(await database.nextPublicationToVerify()).toBeNull();
 
-      // Las dos historias, publicadas antes que las demás, como las publica su comando.
+      // Las historias, publicadas antes que las demás, como las publica su comando, también la de
+      // las velas (precisión del PR 6d).
       const history = await publish(HISTORY_R_100_SEQUENCE.name, '2000-01-01T00:00:00.000Z');
+      const candleHistory = await publish(
+        HISTORY_CANDLES_SEQUENCE.name,
+        '2000-01-01T00:00:00.500Z',
+      );
       const gold = await publish(HISTORY_GOLD_SEQUENCE.name, '2000-01-01T00:00:01.000Z');
       const candles = await publish(BATCH_CANDLES_SEQUENCE.name, '2000-01-02T00:00:00.000Z');
       const live = await publish(R_100_SEQUENCE.name, '2000-01-03T00:00:00.000Z');
@@ -2263,6 +2269,10 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
       await expectNext(history, []);
       for (const mode of ['verify-only', 'recompute']) {
         await verify(history.publication, history.dataset, mode);
+      }
+      await expectNext(candleHistory, []);
+      for (const mode of ['verify-only', 'recompute']) {
+        await verify(candleHistory.publication, candleHistory.dataset, mode);
       }
       await expectNext(gold, []);
       // Una verificación repetida no cuenta dos veces: le sigue faltando la recomputación.

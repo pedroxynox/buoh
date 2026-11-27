@@ -302,9 +302,16 @@ describe('la historia de las velas (precisión del PR 6d de ADR-0021 §9): un d�
     expect(historyAnswerOf(candlePageText('R_100', start, end), CANDLES.profile)).toBeNull();
     expect(historyAnswerOf(historyPageText('frxXAUUSD', start, end), CANDLES.profile)).toBeNull();
     expect(historyAnswerOf(historyErrorText('frxXAUUSD', start, end), CANDLES.profile)).toBeNull();
+    // Una página, o su error, de velas de otro intervalo, no.
     expect(
       historyAnswerOf(
         candlePageText('frxXAUUSD', start, end).replace('"granularity":60', '"granularity":120'),
+        CANDLES.profile,
+      ),
+    ).toBeNull();
+    expect(
+      historyAnswerOf(
+        candleErrorText('frxXAUUSD', start, end).replace('"granularity":60', '"granularity":120'),
         CANDLES.profile,
       ),
     ).toBeNull();
