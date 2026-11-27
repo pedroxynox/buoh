@@ -20,7 +20,11 @@ import {
 } from '@buoh/domain';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { batchProfileBytes, type BatchProfileKind } from '../src/deriv/batch-profile.js';
+import {
+  batchProfileBytes,
+  derivHistoryProfile,
+  type BatchProfileKind,
+} from '../src/deriv/batch-profile.js';
 import {
   contentKey,
   keyFromUri,
@@ -99,15 +103,28 @@ function segmentsOf(kind: BatchProfileKind): RawSourceFrame[][] {
   }
 }
 
+/**
+ * Un bloque de la historia del oro (precisión del PR 6b de ADR-0021 §9): su horario y una página de
+ * ticks, uno por segundo, sin ninguno de las 12:01:00 a las 12:01:59, 60 s: un tick_gap.
+ */
+function historySegments(): RawSourceFrame[][] {
+  const times = Array.from({ length: 180 }, (_, index) => T + index).filter(
+    (time) => time < T + 60 || time >= T + 120,
+  );
+  const page = `{"echo_req":{"count":1000,"end":"${String(T + 179)}","req_id":2,"start":${String(T)},"style":"ticks","ticks_history":"frxXAUUSD"},"history":{"prices":[${times.map(() => '1').join(',')}],"times":[${times.join(',')}]},"msg_type":"history","pip_size":2,"req_id":2}`;
+  return [[frame(sessionText, NEXT), frame(page, NEXT + 2)]];
+}
+
 function stores() {
   return { metadata: new MemoryMetadataStore(), objects: new MemoryObjectStore() };
 }
 
 async function publish(
   target: ReturnType<typeof stores>,
-  kind: BatchProfileKind,
+  kind: BatchProfileKind | 'history',
   schema = SOURCE_SCHEMA,
 ): Promise<BatchDatasetPublication> {
+  const history = kind === 'history';
   const publication = prepareBatchPublication({
     connector_version: CONNECTOR,
     derivedCompression: 'gzip',
@@ -115,8 +132,10 @@ async function publish(
     objects: target.objects,
     publication_id: '019b76da-cb28-7003-8000-0000000000a1',
     published_at_utc: '2026-11-25T00:10:00.000Z',
-    quality_profile_bytes: batchProfileBytes(kind),
-    segments: segmentsOf(kind),
+    quality_profile_bytes: history
+      ? canonicalJsonBytes(derivHistoryProfile('frxXAUUSD'))
+      : batchProfileBytes(kind),
+    segments: history ? historySegments() : segmentsOf(kind),
     source_schema_bytes: schema,
     source_schema_release: 'synthetic-v1',
     zlibVersion: 'test-zlib',
@@ -201,6 +220,8 @@ describe('data:replay de los datasets de los lotes', () => {
     ['schedules', { contract_offer_count: 1, trading_session_count: 1 }],
     ['quotes', { contract_quote_count: 2 }],
     ['candles', { incident_count: 1, market_candle_count: 2, trading_session_count: 1 }],
+    // Con las reglas 4.1.0 de la historia (precisión del PR 6b de ADR-0021 §9).
+    ['history', { incident_count: 1, normalized_tick_count: 120, trading_session_count: 1 }],
   ] as const)(
     'reproduce y verifica uno de %s sin reloj, aleatoriedad ni red',
     async (kind, counts) => {
@@ -256,6 +277,30 @@ describe('data:replay de los datasets de los lotes', () => {
         code: 'VERSION_UNSUPPORTED',
         details: { fields: ['quality_rule_version'] },
       });
+    }
+  });
+
+  it('ata el esquema de incidencias de las reglas 4.1.0 al 3.1.0, y el 3.1.0 solo a esas reglas', async () => {
+    const target = stores();
+    const history = await publish(target, 'history');
+    expect(history.core.quality_rule_version).toBe('4.1.0');
+    expect(history.core.incident_schema_version).toBe('3.1.0');
+    const candles = await publish(target, 'candles');
+    const historyWithOld = resign(target, history, (core) => ({
+      ...core,
+      incident_schema_version: '3.0.0',
+    }));
+    const candlesWithNew = resign(target, candles, (core) => ({
+      ...core,
+      incident_schema_version: '3.1.0',
+    }));
+    for (const mode of ['verify-only', 'recompute'] as const) {
+      for (const datasetId of [historyWithOld, candlesWithNew]) {
+        expect(await failure(replay(target, datasetId, mode))).toEqual({
+          code: 'VERSION_UNSUPPORTED',
+          details: { fields: ['incident_schema_version'] },
+        });
+      }
     }
   });
 

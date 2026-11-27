@@ -288,4 +288,82 @@ describe('buildBatchDatasetPublication', () => {
     );
     expect(() => buildBatchDatasetPublication(input([]))).toThrow();
   });
+
+  // Precisión del PR 6b de ADR-0021 §9: el perfil de una historia, con su símbolo, su umbral y las
+  // reglas 4.1.0, que buscan en trading_times su símbolo y comprueban sus tramos sin ticks.
+  describe('con el perfil de una historia', () => {
+    const HISTORY = {
+      block_seconds: 14_400,
+      count: 1000,
+      end_epoch: T + 14_399,
+      maximum_tick_gap_ms: 2000,
+      profile_id: 'deriv_options-lotes-v1-historia-synth',
+      quality_rule_version: '4.1.0',
+      source: 'deriv_options',
+      start_epoch: T,
+      symbol: 'SYNTH_GOLD',
+      tranche_seconds: 900,
+    };
+    // Ticks en T, T + 2 y T + 6: de T + 3 a T + 5 no hay ninguno.
+    const ticksText = `{"echo_req":{"end":"${String(T + 7)}","req_id":8,"start":${String(T)},"style":"ticks","ticks_history":"SYNTH_GOLD"},"history":{"prices":[1,1,1],"times":[${String(T)},${String(T + 2)},${String(T + 6)}]},"msg_type":"history","pip_size":2,"req_id":8}`;
+
+    it('publica un core con las reglas 4.1.0 y las incidencias 3.1.0, con su tick_gap', () => {
+      const publication = buildBatchDatasetPublication(
+        input([[frame(sessionText, NEXT), frame(ticksText, NEXT + 1)]], {
+          quality_profile_bytes: profileBytes(HISTORY),
+        }),
+      );
+      const core = publication.manifest.manifest_core;
+      expect([
+        core.quality_rule_version,
+        core.normalizer_version,
+        core.incident_schema_version,
+      ]).toEqual(['4.1.0', '4.1.0', '3.1.0']);
+      expect(publication.derived.sessions.map((session) => session.symbol)).toEqual(['SYNTH_GOLD']);
+      expect(publication.derived.ticks).toHaveLength(3);
+      expect(
+        publication.derived.incidents.map((incident) => [
+          incident.incident_type,
+          incident.schema_version,
+          incident.evidence,
+        ]),
+      ).toEqual([
+        [
+          'tick_gap',
+          '3.1.0',
+          {
+            from_event_time_utc: iso(T + 3),
+            maximum_tick_gap_ms: 2000,
+            to_event_time_utc: iso(T + 5),
+          },
+        ],
+      ]);
+      // Con las reglas 4.0.0 de los demás perfiles, el mismo log no tiene tramos sin ticks.
+      const candles = buildBatchDatasetPublication(
+        input([[frame(sessionText, NEXT), frame(ticksText, NEXT + 1)]]),
+      );
+      expect(candles.manifest.manifest_core.quality_rule_version).toBe('4.0.0');
+      expect(candles.derived.incidents).toEqual([]);
+    });
+
+    it('rechaza un umbral sin símbolo, un símbolo sin umbral o sin las reglas 4.1.0, y las 4.1.0 sin historia', () => {
+      const session = frame(sessionText, NEXT);
+      const without = (key: string) =>
+        Object.fromEntries(Object.entries(HISTORY).filter(([name]) => name !== key));
+      for (const profile of [
+        without('symbol'),
+        without('maximum_tick_gap_ms'),
+        { ...HISTORY, quality_rule_version: '4.0.0' },
+        { ...HISTORY, symbols: ['SYNTH_GOLD'] },
+        { ...PROFILE, quality_rule_version: '4.1.0' },
+        { ...HISTORY, maximum_tick_gap_ms: 1500 },
+      ]) {
+        expect(() =>
+          buildBatchDatasetPublication(
+            input([[session]], { quality_profile_bytes: profileBytes(profile) }),
+          ),
+        ).toThrow();
+      }
+    });
+  });
 });

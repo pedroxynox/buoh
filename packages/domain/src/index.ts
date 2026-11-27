@@ -5,7 +5,10 @@
  * El worker (apps/market-data-worker) le pasa los datos y guarda lo que devuelve.
  */
 export {
+  BATCH_HISTORY_RULE_SET,
   BATCH_RULE_SET,
+  BATCH_RULE_SETS,
+  batchRuleSetFor,
   compareBatchRecords,
   CONTRACTS_FOR_FIELDS_NOT_IN_RELEASE,
   deriveBatchInvalidIncident,
@@ -16,6 +19,7 @@ export {
   type BatchConversion,
   type BatchInvalidReason,
   type BatchResponseSchema,
+  type BatchRuleSet,
 } from './batch-rules.js';
 export {
   BATCH_SOURCE_SCHEMA_OPERATIONS,

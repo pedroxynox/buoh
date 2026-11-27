@@ -39,6 +39,34 @@ export const BATCH_RULE_SET = {
   quality_rule_version: '4.0.0',
 } as const;
 
+/**
+ * Reglas de los lotes 4.1.0 (PR 6b de ADR-0021 §9): las 4.0.0 más el tramo sin ticks de la historia
+ * dentro del horario (`tick_gap`), con el umbral de cada símbolo que da el perfil, y sus incidencias
+ * con el esquema 3.1.0. Las usan los perfiles de la historia; los de los horarios, las cotizaciones y
+ * las velas siguen con las 4.0.0, que no cambian (contratos de dominio, «Versionado y
+ * compatibilidad»).
+ */
+export const BATCH_HISTORY_RULE_SET = {
+  derived_part_records: 5000,
+  incident_schema_version: '3.1.0',
+  normalizer_version: '4.1.0',
+  quality_rule_version: '4.1.0',
+} as const;
+
+/** Un conjunto de reglas de los lotes. */
+export type BatchRuleSet = typeof BATCH_RULE_SET | typeof BATCH_HISTORY_RULE_SET;
+
+/** Los conjuntos de reglas de los lotes, por su `quality_rule_version`. */
+export const BATCH_RULE_SETS: Readonly<Record<string, BatchRuleSet>> = {
+  [BATCH_RULE_SET.quality_rule_version]: BATCH_RULE_SET,
+  [BATCH_HISTORY_RULE_SET.quality_rule_version]: BATCH_HISTORY_RULE_SET,
+};
+
+/** El conjunto de reglas de los lotes de una versión, o `null` si no es de los lotes. */
+export function batchRuleSetFor(version: string): BatchRuleSet | null {
+  return Object.hasOwn(BATCH_RULE_SETS, version) ? (BATCH_RULE_SETS[version] ?? null) : null;
+}
+
 /** El esquema de respuesta de la operación en la release fijada, compilado por quien llama. */
 export interface BatchResponseSchema {
   readonly validate: (value: unknown) => boolean;
@@ -137,13 +165,16 @@ export function parseFrame(frame: RawSourceFrame, msgType: string): JsonNode {
   return root;
 }
 
-export function incidentOf(body: Record<string, unknown>): DataQualityIncident {
+export function incidentOf(
+  body: Record<string, unknown>,
+  rules: BatchRuleSet = BATCH_RULE_SET,
+): DataQualityIncident {
   // `related_refs` vacía salvo que la incidencia nombre otra observación, como una repetida.
   const full = {
     related_refs: [],
     ...body,
-    quality_rule_version: BATCH_RULE_SET.quality_rule_version,
-    schema_version: BATCH_RULE_SET.incident_schema_version,
+    quality_rule_version: rules.quality_rule_version,
+    schema_version: rules.incident_schema_version,
   };
   return dataQualityIncidentSchema.parse({
     ...full,

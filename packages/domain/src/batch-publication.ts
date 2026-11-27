@@ -8,7 +8,13 @@ import {
 } from '@buoh/contracts';
 import { z } from 'zod';
 
-import { BATCH_RULE_SET, relaxContractsForResponseSchema } from './batch-rules.js';
+import {
+  BATCH_HISTORY_RULE_SET,
+  BATCH_RULE_SET,
+  batchRuleSetFor,
+  relaxContractsForResponseSchema,
+  type BatchRuleSet,
+} from './batch-rules.js';
 import { deriveBatchLog, type BatchLogConfig, type DerivedBatchLog } from './batch-series.js';
 import { createCatalogResponseSchema } from './catalog.js';
 import { CANONICALIZATION_VERSION, CONTRACT_SCHEMA_VERSION } from './profile.js';
@@ -27,8 +33,8 @@ import { canonicalJsonBytes } from './serialization.js';
 
 /**
  * La publicación de un dataset de los lotes (ADR-0021 §3; precisión del PR 5d1 de su §9): sus
- * segmentos, derivados con las reglas de los lotes 4.0.0 (`deriveBatchLog`), en un
- * `DatasetManifestCore` 1.1.0, con el perfil de su secuencia y los esquemas de respuesta de la
+ * segmentos, derivados con las reglas de los lotes de su perfil, 4.0.0 o 4.1.0 (`deriveBatchLog`),
+ * en un `DatasetManifestCore` 1.1.0, con el perfil de su secuencia y los esquemas de respuesta de la
  * release fijada como esquema de fuente. Pura.
  */
 
@@ -92,6 +98,8 @@ function batchSourceSchemaDocument(
  * con `relaxCatalogResponseSchema` y `contracts_for` con `relaxContractsForResponseSchema`.
  */
 export function createBatchLogConfig(input: {
+  readonly maximum_tick_gap_ms?: Readonly<Record<string, number>>;
+  readonly quality_rule_version?: BatchRuleSet['quality_rule_version'];
   readonly source_schema_bytes: Uint8Array;
   readonly source_schema_release: string;
   readonly trading_times_symbols: readonly string[];
@@ -114,20 +122,42 @@ export function createBatchLogConfig(input: {
       trading_times: compiled('trading_times'),
     },
     trading_times_symbols: input.trading_times_symbols,
+    ...(input.quality_rule_version === undefined
+      ? {}
+      : { quality_rule_version: input.quality_rule_version }),
+    ...(input.maximum_tick_gap_ms === undefined
+      ? {}
+      : { maximum_tick_gap_ms: input.maximum_tick_gap_ms }),
   };
 }
 
 /**
  * Lo que las reglas de los lotes leen del perfil de una secuencia por lotes: su identidad, sus
  * reglas y, si pide `trading_times`, los símbolos que se buscan en él (`symbols`). El perfil de las
- * cotizaciones no tiene `symbols`: no pide horarios.
+ * cotizaciones no tiene `symbols`: no pide horarios. El de una historia (PR 6b de ADR-0021 §9) tiene
+ * un solo símbolo (`symbol`), que es el que se busca, y su umbral del tramo sin ticks
+ * (`maximum_tick_gap_ms`), con las reglas 4.1.0.
  */
-const batchProfileSchema = z.looseObject({
-  profile_id: z.string().min(1),
-  quality_rule_version: z.literal(BATCH_RULE_SET.quality_rule_version),
-  source: z.string().min(1),
-  symbols: z.array(symbolSchema).optional(),
-});
+const batchProfileSchema = z
+  .looseObject({
+    maximum_tick_gap_ms: z.number().int().positive().optional(),
+    profile_id: z.string().min(1),
+    quality_rule_version: z.enum([
+      BATCH_RULE_SET.quality_rule_version,
+      BATCH_HISTORY_RULE_SET.quality_rule_version,
+    ]),
+    source: z.string().min(1),
+    symbol: symbolSchema.optional(),
+    symbols: z.array(symbolSchema).optional(),
+  })
+  .refine(
+    (profile) =>
+      (profile.symbol === undefined) === (profile.maximum_tick_gap_ms === undefined) &&
+      (profile.symbol === undefined || profile.symbols === undefined) &&
+      (profile.symbol !== undefined) ===
+        (profile.quality_rule_version === BATCH_HISTORY_RULE_SET.quality_rule_version),
+    'Un perfil de historia tiene su símbolo, su umbral y las reglas 4.1.0, y ningún otro los tiene.',
+  );
 
 export interface BatchPublicationInput extends Omit<PublicationInput, 'profile'> {
   readonly connector_version: string;
@@ -145,8 +175,8 @@ export interface BatchDatasetPublication extends Omit<DatasetPublication, 'deriv
 
 /**
  * Construye la publicación de un dataset de los lotes como `buildDatasetPublication` la de uno en
- * vivo: los `source_events` de cada segmento, los registros de las reglas 4.0.0 por rol en partes
- * de `derived_part_records`, el core 1.1.0, el `dataset_id`, los objetos, el documento y el record.
+ * vivo: los `source_events` de cada segmento, los registros de las reglas de los lotes por rol en
+ * partes de `derived_part_records`, el core 1.1.0, el `dataset_id`, los objetos, el documento y el record.
  * Sus símbolos son los de sus registros y sus incidencias; sin ninguno no es publicable.
  */
 export function buildBatchDatasetPublication(
@@ -158,16 +188,22 @@ export function buildBatchDatasetPublication(
   const profileDocument = parseJsonDocument(input.quality_profile_bytes, 'El perfil de los lotes');
   const profile = batchProfileSchema.parse(profileDocument);
   const sourceSchemaDocument = batchSourceSchemaDocument(input.source_schema_bytes);
+  const rules = batchRuleSetFor(profile.quality_rule_version) ?? BATCH_RULE_SET;
   const config = createBatchLogConfig({
+    ...(profile.symbol === undefined || profile.maximum_tick_gap_ms === undefined
+      ? {}
+      : { maximum_tick_gap_ms: { [profile.symbol]: profile.maximum_tick_gap_ms } }),
+    quality_rule_version: rules.quality_rule_version,
     source_schema_bytes: input.source_schema_bytes,
     source_schema_release: input.source_schema_release,
-    trading_times_symbols: profile.symbols ?? [],
+    trading_times_symbols:
+      profile.symbols ?? (profile.symbol === undefined ? [] : [profile.symbol]),
   });
 
   const segments = parseSegments(input.segments);
   const events = segments.flat();
   const derived = deriveBatchLog(events, config);
-  const size = BATCH_RULE_SET.derived_part_records;
+  const size = rules.derived_part_records;
   const sequences = [
     ...segmentSequences(segments),
     ...derivedSequences('normalized_ticks', derived.ticks, size),
@@ -214,16 +250,16 @@ export function buildBatchDatasetPublication(
     event_time_from_utc: derived.ticks[0]?.event_time_utc ?? null,
     event_time_to_utc: derived.ticks.at(-1)?.event_time_utc ?? null,
     incident_count: derived.incidents.length,
-    incident_schema_version: BATCH_RULE_SET.incident_schema_version,
+    incident_schema_version: rules.incident_schema_version,
     logical_artifacts: logicalArtifactsOf(sequences),
     market_candle_count: derived.candles.length,
     market_candle_schema_version: BATCH_RECORD_SCHEMA_VERSIONS.market_candle,
     market_tick_schema_version: BATCH_RECORD_SCHEMA_VERSIONS.market_tick,
     normalized_tick_count: derived.ticks.length,
-    normalizer_version: BATCH_RULE_SET.normalizer_version,
+    normalizer_version: rules.normalizer_version,
     quality_profile_id: profile.profile_id,
     quality_profile_sha256: qualityProfileSha256,
-    quality_rule_version: BATCH_RULE_SET.quality_rule_version,
+    quality_rule_version: rules.quality_rule_version,
     raw_frame_count: events.filter((event) => event.kind === 'raw_source_frame').length,
     schema_version: BATCH_MANIFEST_CORE_SCHEMA_VERSION,
     segment_policy_version: BATCH_SEGMENT_POLICY.version,

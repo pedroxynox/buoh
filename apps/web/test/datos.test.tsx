@@ -443,6 +443,17 @@ describe('los textos de cada dataset', () => {
     expect(datasetIncidents(CANDLES)).toBe(
       '4: 2 tramos sin velas, 1 vela repetida, 1 contrato rechazado',
     );
+    // Los tramos sin ticks de la historia (PR 6b de ADR-0021).
+    expect(
+      datasetIncidents({
+        ...CANDLES,
+        incident_count: 3,
+        incidents: [
+          { incident_type: 'tick_gap', severity: 'error', count: 2 },
+          { incident_type: 'duplicate_exact', severity: 'warning', count: 1 },
+        ],
+      }),
+    ).toBe('3: 2 tramos sin ticks, 1 duplicado exacto');
     const schedules = {
       ...CANDLES,
       batch: {

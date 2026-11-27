@@ -3,6 +3,9 @@ import { createHash } from 'node:crypto';
 import { rawSourceFrameSchema, type RawSourceFrame } from '@buoh/contracts';
 import {
   BATCH_RULE_SET,
+  BATCH_SOURCE_SCHEMA_OPERATIONS,
+  batchSourceSchemaBytes,
+  buildBatchDatasetPublication,
   deriveContractOffer,
   deriveContractQuote,
   deriveHistoryDownloadTicks,
@@ -567,8 +570,10 @@ describe('la historia de un año (ADR-0021 §4)', () => {
       block_seconds: 21_600,
       count: 1000,
       end_epoch: FIRST_LIVE.R_100 - 1,
+      // Un tick cada 2 s: uno que falta ya es un tramo (precisión del PR 6b).
+      maximum_tick_gap_ms: 2000,
       profile_id: 'deriv_options-lotes-v1-historia-r_100',
-      quality_rule_version: '4.0.0',
+      quality_rule_version: '4.1.0',
       source: 'deriv_options',
       // 2025-11-01T00:06:08Z, 365 días antes, va al bloque de 6 horas siguiente.
       start_epoch: utc('2025-11-01T06:00:00Z'),
@@ -579,8 +584,10 @@ describe('la historia de un año (ADR-0021 §4)', () => {
       block_seconds: 14_400,
       count: 1000,
       end_epoch: FIRST_LIVE.frxXAUUSD - 1,
+      // El doble de los 30 s sin ticks de antes del cierre diario (precisión del PR 6b).
+      maximum_tick_gap_ms: 60_000,
       profile_id: 'deriv_options-lotes-v1-historia-frxxauusd',
-      quality_rule_version: '4.0.0',
+      quality_rule_version: '4.1.0',
       source: 'deriv_options',
       // 2025-11-25T05:09:43Z va al bloque de 4 horas siguiente.
       start_epoch: utc('2025-11-25T08:00:00Z'),
@@ -727,5 +734,74 @@ describe('la historia de un año (ADR-0021 §4)', () => {
     expect(() =>
       historyBlocks({ ...derivHistoryProfile('R_100'), block_seconds: 43_200, start_epoch: 0 }),
     ).toThrow(TypeError);
+  });
+});
+
+// Precisión del PR 6b de ADR-0021 §9: el perfil de cada historia lleva las reglas 4.1.0 y el umbral
+// de su símbolo, y la publicación de un dataset de la historia los aplica a sus tramos sin ticks.
+describe('el umbral del tramo sin ticks de cada historia', () => {
+  const OPEN = new TextEncoder().encode(
+    '{"$schema":"http://json-schema.org/draft-04/schema#","type":"object"}',
+  );
+  const sourceSchema = batchSourceSchemaBytes(
+    Object.fromEntries(
+      BATCH_SOURCE_SCHEMA_OPERATIONS.map((operation) => [operation, OPEN]),
+    ) as Parameters<typeof batchSourceSchemaBytes>[0],
+  );
+  /** 2026-11-24T12:00:00Z, un martes: el oro cotiza. */
+  const T = 1_795_521_600;
+  const schedule = (symbol: string) =>
+    `{"echo_req":{"req_id":1,"trading_times":"2026-11-24"},"msg_type":"trading_times","req_id":1,"trading_times":{"markets":[{"name":"x","submarkets":[{"name":"x","symbols":[{"name":"x","times":{"close":["23:59:59"],"open":["00:00:00"]},"underlying_symbol":"${symbol}"}]}]}]}}`;
+  const ticks = (symbol: string, start: number, end: number, times: number[]) =>
+    `{"echo_req":{"count":1000,"end":"${String(end)}","req_id":2,"start":${String(start)},"style":"ticks","ticks_history":"${symbol}"},"history":{"prices":[${times.map(() => '1').join(',')}],"times":[${times.join(',')}]},"msg_type":"history","pip_size":2,"req_id":2}`;
+  const gapsOf = (symbol: 'R_100' | 'frxXAUUSD', times: number[]) =>
+    buildBatchDatasetPublication({
+      connector_version: DERIV_BATCH_CONNECTOR_VERSION,
+      locateManifest: () => 's3://synthetic/manifest',
+      locateObject: (_id, { object_bytes_sha256 }) => `s3://synthetic/${object_bytes_sha256}`,
+      publication_id: '019b76da-a800-7000-8000-0000000000aa',
+      published_at_utc: '2026-11-26T12:10:00.000Z',
+      quality_profile_bytes: new TextEncoder().encode(JSON.stringify(derivHistoryProfile(symbol))),
+      segments: [[frame(schedule(symbol)), frame(ticks(symbol, T, T + 899, times))]],
+      source_schema_bytes: sourceSchema,
+      source_schema_release: 'synthetic-v1',
+    }).derived.incidents.map((incident) => [incident.incident_type, incident.evidence]);
+  const span = (from: number, to: number, step: number) =>
+    Array.from({ length: Math.floor((to - from) / step) + 1 }, (_, index) => from + step * index);
+
+  it('R_100: un tick que falta cada 2 s ya es un tramo', () => {
+    expect(gapsOf('R_100', span(T, T + 898, 2))).toEqual([]);
+    expect(
+      gapsOf(
+        'R_100',
+        span(T, T + 898, 2).filter((time) => time !== T + 100),
+      ),
+    ).toEqual([
+      [
+        'tick_gap',
+        {
+          from_event_time_utc: new Date((T + 99) * 1000).toISOString(),
+          maximum_tick_gap_ms: 2000,
+          to_event_time_utc: new Date((T + 101) * 1000).toISOString(),
+        },
+      ],
+    ]);
+  });
+
+  it('el oro: 59 s sin ticks no son un tramo, y 60 s sí', () => {
+    const before = span(T, T + 100, 1);
+    const after = span(T + 200, T + 899, 1);
+    expect(gapsOf('frxXAUUSD', [...before, ...span(T + 160, T + 899, 1)])).toEqual([]);
+    expect(gapsOf('frxXAUUSD', [...before, ...span(T + 161, T + 899, 1)])).toEqual([
+      [
+        'tick_gap',
+        {
+          from_event_time_utc: new Date((T + 101) * 1000).toISOString(),
+          maximum_tick_gap_ms: 60_000,
+          to_event_time_utc: new Date((T + 160) * 1000).toISOString(),
+        },
+      ],
+    ]);
+    expect(gapsOf('frxXAUUSD', [...before, ...after])).toHaveLength(1);
   });
 });

@@ -24,6 +24,7 @@ const INCIDENT_NAMES: Readonly<Record<IncidentType, readonly [string, string]>> 
   contract_rejected: ['contrato rechazado', 'contratos rechazados'],
   candle_repeated: ['vela repetida', 'velas repetidas'],
   candle_missing: ['tramo sin velas', 'tramos sin velas'],
+  tick_gap: ['tramo sin ticks', 'tramos sin ticks'],
 };
 
 /**

@@ -229,7 +229,7 @@ En `apps/web/out-api`, la sección Datos muestra los datasets publicados de prod
   | Período | la hora UTC de su primer tick y la del último, o «Sin ticks»; en uno de los lotes sin ticks, «Velas de», con la apertura de su primera vela y la de la última, o «Sin ticks ni velas» |
   | Origen | su log y sus segmentos, como «Log 1 · segmentos 0–71» |
   | Registros | cuántos ticks tiene, como «11190 ticks»; en uno de los lotes, los que tiene de ticks, velas, horarios, ofertas de contratos y cotizaciones, como «2879 velas y 1 horario», o «Ninguno» |
-  | Incidencias | cuántas tiene y de qué tipos, como «3: 1 conexión perdida, 2 duplicados exactos», o «Ninguna»; los de los lotes son «tramo sin velas» (`candle_missing`), «vela repetida» (`candle_repeated`) y «contrato rechazado» (`contract_rejected`) |
+  | Incidencias | cuántas tiene y de qué tipos, como «3: 1 conexión perdida, 2 duplicados exactos», o «Ninguna»; los de los lotes son «tramo sin velas» (`candle_missing`), «tramo sin ticks» (`tick_gap`), «vela repetida» (`candle_repeated`) y «contrato rechazado» (`contract_rejected`) |
   | Final | «Limpio», o lo que dejó abierto: la continuidad pendiente de cada símbolo y las condiciones abiertas |
   | Verificación | el último resultado de cada modo: «Comprobación» (`--verify-only`) y «Recálculo», cada uno «Pasó», «Falló» con su código, «Sin resultado» o «Pendiente» si todavía no se verificó, y debajo de cada resultado, en texto, su hora UTC |
   | Identificador | el principio de su `dataset_id` |

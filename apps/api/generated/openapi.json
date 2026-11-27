@@ -2512,7 +2512,8 @@
                                 "source_limit_exceeded",
                                 "contract_rejected",
                                 "candle_repeated",
-                                "candle_missing"
+                                "candle_missing",
+                                "tick_gap"
                               ]
                             },
                             "severity": {

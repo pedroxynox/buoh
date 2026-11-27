@@ -1,5 +1,5 @@
 import { canonicalJson, sha256Hex, type ContractDuration, type JsonValue } from '@buoh/contracts';
-import { BATCH_RULE_SET, utf8 } from '@buoh/domain';
+import { BATCH_HISTORY_RULE_SET, BATCH_RULE_SET, utf8, type BatchRuleSet } from '@buoh/domain';
 
 import type { LogQualityProfileRow } from './log-profile.js';
 import { DERIV_SOURCE } from './profile.js';
@@ -71,6 +71,11 @@ export type HistoryProfile = ProfileHeader & {
   readonly count: number;
   /** El segundo anterior al del primer tick en vivo: así la historia y la captura no se solapan. */
   readonly end_epoch: number;
+  /**
+   * El umbral del tramo sin ticks dentro del horario (precisión del PR 6b de ADR-0021 §9): un tramo
+   * de segundos seguidos sin ticks que dura al menos esto es un `tick_gap` de las reglas 4.1.0.
+   */
+  readonly maximum_tick_gap_ms: number;
   /** El primer comienzo de bloque desde 365 días antes del primer tick en vivo. */
   readonly start_epoch: number;
   readonly symbol: string;
@@ -106,11 +111,40 @@ const FIRST_LIVE_TICK_EPOCH: Readonly<Record<HistorySymbol, number>> = {
  * 900 por tramo de 900 s. Así ningún bloque pasa de 16 000 elementos, el techo de un dataset
  * (`historyBlocks`).
  */
+/**
+ * El umbral del tramo sin ticks de R_100 (precisión del PR 6b de ADR-0021 §9): manda un tick cada
+ * 2 s, así que uno que falta ya es un tramo, como en su captura en vivo (`maximum_event_gap_ms`).
+ * El 2026-11-27, en 4 días de su historia, la separación más larga fue de 2 s en 3 y de 4 s en el
+ * 2026-11-20, con 4 ticks que faltan también en su captura.
+ */
+const R100_MAXIMUM_TICK_GAP_MS = 2_000;
+
+/**
+ * El umbral del tramo sin ticks del oro (precisión del PR 6b de ADR-0021 §9): su ritmo no es fijo.
+ * El 2026-11-27, en 8 días de su historia con ticks, la separación más larga dentro del horario fue
+ * de 10 s como mucho, salvo antes del cierre diario, de 22 a 30 s en 3 días, y una de 61 s a las
+ * 00:05 del 2026-08-12. El umbral es el doble de esos 30 s.
+ */
+const GOLD_MAXIMUM_TICK_GAP_MS = 60_000;
+
 const HISTORY_SHAPE: Readonly<
-  Record<HistorySymbol, { block_seconds: number; name: string; tranche_seconds: number }>
+  Record<
+    HistorySymbol,
+    { block_seconds: number; maximum_tick_gap_ms: number; name: string; tranche_seconds: number }
+  >
 > = {
-  R_100: { block_seconds: 21_600, name: 'historia-r_100', tranche_seconds: 1_800 },
-  frxXAUUSD: { block_seconds: 14_400, name: 'historia-frxxauusd', tranche_seconds: 900 },
+  R_100: {
+    block_seconds: 21_600,
+    maximum_tick_gap_ms: R100_MAXIMUM_TICK_GAP_MS,
+    name: 'historia-r_100',
+    tranche_seconds: 1_800,
+  },
+  frxXAUUSD: {
+    block_seconds: 14_400,
+    maximum_tick_gap_ms: GOLD_MAXIMUM_TICK_GAP_MS,
+    name: 'historia-frxxauusd',
+    tranche_seconds: 900,
+  },
 };
 
 const minutes = (duration: number): ContractDuration => ({ duration, duration_unit: 'm' });
@@ -174,9 +208,9 @@ function realMarkets(): string[] {
   ];
 }
 
-const header = (name: string): ProfileHeader => ({
+const header = (name: string, rules: BatchRuleSet = BATCH_RULE_SET): ProfileHeader => ({
   profile_id: `${DERIV_SOURCE}-lotes-v1-${name}`,
-  quality_rule_version: BATCH_RULE_SET.quality_rule_version,
+  quality_rule_version: rules.quality_rule_version,
   source: DERIV_SOURCE,
 });
 
@@ -234,10 +268,11 @@ export function derivHistoryProfile(symbol: HistorySymbol): HistoryProfile {
   const first = FIRST_LIVE_TICK_EPOCH[symbol];
   const from = first - DERIV_HISTORY_DAYS * DAY_SECONDS;
   return {
-    ...header(shape.name),
+    ...header(shape.name, BATCH_HISTORY_RULE_SET),
     block_seconds: shape.block_seconds,
     count: 1000,
     end_epoch: first - 1,
+    maximum_tick_gap_ms: shape.maximum_tick_gap_ms,
     start_epoch: Math.ceil(from / shape.block_seconds) * shape.block_seconds,
     symbol,
     tranche_seconds: shape.tranche_seconds,

@@ -37,7 +37,7 @@ export interface StoredDatasetVerification {
 /**
  * Cuántas incidencias de un tipo y una gravedad tiene el dataset (`dataset_quality_incidents`), con
  * todos los tipos de `DataQualityIncident`, también los de los lotes: `contract_rejected`,
- * `candle_repeated` y `candle_missing`.
+ * `candle_repeated`, `candle_missing` y `tick_gap`.
  */
 export interface StoredDatasetIncidentCount {
   readonly incident_type: DataQualityIncidentType;

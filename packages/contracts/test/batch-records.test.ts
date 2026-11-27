@@ -518,7 +518,7 @@ describe('los tipos de DataQualityIncident (PR 5e de ADR-0021)', () => {
     );
     // Las `quality_flags` de MarketTick y MarketCandle siguen con los nueve de antes.
     expect(publicContracts.qualityIncidentTypeSchema.options).toHaveLength(9);
-    for (const type of ['contract_rejected', 'candle_repeated', 'candle_missing']) {
+    for (const type of ['contract_rejected', 'candle_repeated', 'candle_missing', 'tick_gap']) {
       expect(publicContracts.qualityIncidentTypeSchema.safeParse(type).success).toBe(false);
       expect(publicContracts.dataQualityIncidentTypeSchema.safeParse(type).success).toBe(true);
     }
@@ -548,10 +548,12 @@ describe('DataQualityIncident 3.0.0 y contract_rejected', () => {
     incident_id: `sha256:${sha256(canonicalizeJson(body) ?? '')}`,
   });
 
-  it('acepta un rechazo de multiplicador con su ID y solo con el esquema 3.0.0', () => {
+  it('acepta un rechazo de multiplicador con su ID y solo con los esquemas 3.0.0 y 3.1.0', () => {
     expect(publicContracts.dataQualityIncidentSchema.safeParse(withId(rejectedBody)).success).toBe(
       true,
     );
+    const later = { ...rejectedBody, quality_rule_version: '4.1.0', schema_version: '3.1.0' };
+    expect(publicContracts.dataQualityIncidentSchema.safeParse(withId(later)).success).toBe(true);
     for (const version of ['1.0.0', '2.0.0']) {
       const body = { ...rejectedBody, schema_version: version };
       expect(publicContracts.dataQualityIncidentSchema.safeParse(withId(body)).success).toBe(false);
@@ -663,5 +665,53 @@ describe('candle_missing', () => {
     expect(accepts(body({ from: '2026-11-21T10:00:30.000Z' }))).toBe(false);
     expect(accepts(body({ to: '2026-11-21T10:03:00.001Z' }))).toBe(false);
     expect(accepts(body({ from: '2026-11-21T10:04:00.000Z' }))).toBe(false);
+  });
+});
+
+// Precisión del PR 6b de ADR-0021 §9: un tramo de segundos sin ticks de la historia dentro del
+// horario que dura al menos el umbral de su símbolo.
+describe('tick_gap', () => {
+  const body = (overrides: {
+    from?: string;
+    maximum?: number;
+    severity?: string;
+    to?: string;
+    version?: string;
+  }) => ({
+    evidence: {
+      from_event_time_utc: overrides.from ?? '2026-11-21T10:00:01.000Z',
+      maximum_tick_gap_ms: overrides.maximum ?? 2000,
+      to_event_time_utc: overrides.to ?? '2026-11-21T10:00:03.000Z',
+    },
+    incident_type: 'tick_gap',
+    observed_at_utc: '2026-11-22T00:00:01.250Z',
+    observed_ref: OBSERVATION,
+    quality_rule_version: '4.1.0',
+    related_refs: [OTHER_OBSERVATION],
+    schema_version: overrides.version ?? '3.1.0',
+    severity: overrides.severity ?? 'error',
+    source: 'deriv_options',
+    symbol: 'SYNTH_100',
+  });
+  const accepts = (value: Record<string, unknown>) =>
+    publicContracts.dataQualityIncidentSchema.safeParse({
+      ...value,
+      incident_id: `sha256:${sha256(canonicalizeJson(value) ?? '')}`,
+    }).success;
+
+  it('es un error de segundos enteros, del primero al último sin ticks, que llega al umbral, solo con 3.1.0', () => {
+    expect(accepts(body({}))).toBe(true);
+    // Dos segundos sin ticks con un umbral de 2 s: el más corto que cuenta.
+    expect(accepts(body({ to: '2026-11-21T10:00:02.000Z' }))).toBe(true);
+    // Un segundo no llega al umbral de 2 s, y sí al de 1 s.
+    expect(accepts(body({ to: '2026-11-21T10:00:01.000Z' }))).toBe(false);
+    expect(accepts(body({ maximum: 1000, to: '2026-11-21T10:00:01.000Z' }))).toBe(true);
+    expect(accepts(body({ severity: 'warning' }))).toBe(false);
+    expect(accepts(body({ version: '3.0.0' }))).toBe(false);
+    expect(accepts(body({ from: '2026-11-21T10:00:01.500Z' }))).toBe(false);
+    expect(accepts(body({ to: '2026-11-21T10:00:03.001Z' }))).toBe(false);
+    expect(accepts(body({ from: '2026-11-21T10:00:04.000Z' }))).toBe(false);
+    expect(accepts(body({ maximum: 0 }))).toBe(false);
+    expect(accepts(body({ maximum: 1500 }))).toBe(false);
   });
 });

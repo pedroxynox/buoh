@@ -26,9 +26,13 @@ import {
  * `symbol = null` en `invalid_source_frame` (reglas de calidad 2.0.0). 3.0.0, la de las reglas de
  * los lotes (4.0.0), suma `contract_rejected` y también admite `symbol = null` en
  * `invalid_source_frame`; desde el PR 4d de ADR-0021, también `candle_repeated`, y desde el 5d1,
- * `candle_missing`. Otra versión se rechaza.
+ * `candle_missing`. 3.1.0, la de las reglas de los lotes 4.1.0 (PR 6b de ADR-0021), es la 3.0.0
+ * con `tick_gap`, que solo existe con ella. Otra versión se rechaza.
  */
-export const INCIDENT_SCHEMA_VERSIONS = ['1.0.0', '2.0.0', '3.0.0'] as const;
+export const INCIDENT_SCHEMA_VERSIONS = ['1.0.0', '2.0.0', '3.0.0', '3.1.0'] as const;
+
+/** Las versiones de las reglas de los lotes: las que admiten sus tipos propios. */
+const BATCH_INCIDENT_SCHEMA_VERSIONS: ReadonlySet<string> = new Set(['3.0.0', '3.1.0']);
 
 const incidentBase = {
   schema_version: z.enum(INCIDENT_SCHEMA_VERSIONS),
@@ -116,7 +120,7 @@ const persistenceUnavailableSchema = z.strictObject({
 /**
  * Un rechazo de `proposal` a un multiplicador: Deriv no acepta ese multiplicador en ese mercado
  * (contratos de dominio, «Semántica ejecutable de las reglas de los lotes 4.0.0»; ADR-0024 §4). El
- * contrato pedido sale de `echo_req`. Solo con el esquema de incidencias 3.0.0.
+ * contrato pedido sale de `echo_req`. Solo con los esquemas de incidencias 3.0.0 y 3.1.0.
  */
 const contractRejectedSchema = z.strictObject({
   ...incidentBase,
@@ -132,7 +136,7 @@ const contractRejectedSchema = z.strictObject({
 /**
  * Una vela de Deriv que llega otra vez, en otra página, para el mismo símbolo y minuto. Cuenta la
  * primera; la repetida no es un registro. Las dos huellas son iguales si la repetición es exacta
- * (`warning`) y distintas si Deriv mandó otros precios (`error`). Solo con el esquema 3.0.0.
+ * (`warning`) y distintas si Deriv mandó otros precios (`error`). Solo con los esquemas 3.0.0 y 3.1.0.
  */
 const candleRepeatedSchema = z.strictObject({
   ...incidentBase,
@@ -148,7 +152,7 @@ const candleRepeatedSchema = z.strictObject({
  * Un tramo de minutos seguidos dentro del horario de su mercado sin vela de 1 minuto: la apertura de
  * la primera vela que falta y la de la última, las dos incluidas. Deriv no da velas sin ticks, así
  * que son minutos sin datos registrados (ADR-0024 §5). Siempre `error`, como `event_gap_unresolved`.
- * Solo con el esquema 3.0.0.
+ * Solo con los esquemas 3.0.0 y 3.1.0.
  */
 const candleMissingSchema = z.strictObject({
   ...incidentBase,
@@ -157,6 +161,23 @@ const candleMissingSchema = z.strictObject({
   evidence: z.strictObject({
     from_open_time_utc: utcTimestampMsSchema,
     to_open_time_utc: utcTimestampMsSchema,
+  }),
+});
+/**
+ * Un tramo de segundos seguidos dentro del horario de su mercado sin ticks de la historia que dura
+ * al menos `maximum_tick_gap_ms`, el umbral del símbolo en el perfil: el primer segundo sin ticks y
+ * el último, los dos incluidos. Así, entre dos ticks, la separación pasa del umbral. Es un intervalo
+ * sin datos registrados (ADR-0024 §5), nunca se rellena. Siempre `error`, como `candle_missing`.
+ * Solo con el esquema 3.1.0 (PR 6b de ADR-0021).
+ */
+const tickGapSchema = z.strictObject({
+  ...incidentBase,
+  incident_type: z.literal('tick_gap'),
+  symbol: symbolSchema,
+  evidence: z.strictObject({
+    from_event_time_utc: utcTimestampMsSchema,
+    to_event_time_utc: utcTimestampMsSchema,
+    maximum_tick_gap_ms: nonNegativeIntegerSchema,
   }),
 });
 const sourceLimitExceededSchema = z.strictObject({
@@ -185,6 +206,7 @@ export const dataQualityIncidentStructuralSchema = z
     contractRejectedSchema,
     candleRepeatedSchema,
     candleMissingSchema,
+    tickGapSchema,
   ])
   .meta({ id: 'DataQualityIncident', title: 'DataQualityIncident' });
 
@@ -293,10 +315,10 @@ export const dataQualityIncidentSchema = dataQualityIncidentStructuralSchema.sup
         }
         break;
       case 'contract_rejected':
-        if (value.schema_version !== '3.0.0') {
+        if (!BATCH_INCIDENT_SCHEMA_VERSIONS.has(value.schema_version)) {
           context.addIssue({
             code: 'custom',
-            message: 'contract_rejected requiere el esquema de incidencias 3.0.0.',
+            message: 'contract_rejected requiere el esquema de incidencias 3.0.0 o 3.1.0.',
             path: ['schema_version'],
           });
         }
@@ -312,10 +334,10 @@ export const dataQualityIncidentSchema = dataQualityIncidentStructuralSchema.sup
         }
         break;
       case 'candle_repeated': {
-        if (value.schema_version !== '3.0.0') {
+        if (!BATCH_INCIDENT_SCHEMA_VERSIONS.has(value.schema_version)) {
           context.addIssue({
             code: 'custom',
-            message: 'candle_repeated requiere el esquema de incidencias 3.0.0.',
+            message: 'candle_repeated requiere el esquema de incidencias 3.0.0 o 3.1.0.',
             path: ['schema_version'],
           });
         }
@@ -332,10 +354,10 @@ export const dataQualityIncidentSchema = dataQualityIncidentStructuralSchema.sup
         break;
       }
       case 'candle_missing': {
-        if (value.schema_version !== '3.0.0') {
+        if (!BATCH_INCIDENT_SCHEMA_VERSIONS.has(value.schema_version)) {
           context.addIssue({
             code: 'custom',
-            message: 'candle_missing requiere el esquema de incidencias 3.0.0.',
+            message: 'candle_missing requiere el esquema de incidencias 3.0.0 o 3.1.0.',
             path: ['schema_version'],
           });
         }
@@ -357,6 +379,41 @@ export const dataQualityIncidentSchema = dataQualityIncidentStructuralSchema.sup
         }
         break;
       }
+      case 'tick_gap': {
+        if (value.schema_version !== '3.1.0') {
+          context.addIssue({
+            code: 'custom',
+            message: 'tick_gap requiere el esquema de incidencias 3.1.0.',
+            path: ['schema_version'],
+          });
+        }
+        if (value.severity !== 'error') {
+          context.addIssue({
+            code: 'custom',
+            message: 'tick_gap es siempre error.',
+            path: ['severity'],
+          });
+        }
+        const from = Date.parse(value.evidence.from_event_time_utc);
+        const to = Date.parse(value.evidence.to_event_time_utc);
+        const maximum = value.evidence.maximum_tick_gap_ms;
+        if (
+          from % 1000 !== 0 ||
+          to % 1000 !== 0 ||
+          from > to ||
+          maximum === 0 ||
+          maximum % 1000 !== 0 ||
+          to - from + 1000 < maximum
+        ) {
+          context.addIssue({
+            code: 'custom',
+            message:
+              'El tramo sin ticks va de un segundo entero a otro, sin invertirse, y dura al menos su umbral, de segundos enteros.',
+            path: ['evidence'],
+          });
+        }
+        break;
+      }
       case 'duplicate_exact':
       case 'persistence_unavailable':
         break;
@@ -365,8 +422,9 @@ export const dataQualityIncidentSchema = dataQualityIncidentStructuralSchema.sup
 );
 
 /**
- * Todos los tipos de `DataQualityIncident`: los de `qualityIncidentTypeSchema` y los que solo da el
- * esquema 3.0.0 de los lotes (`contract_rejected`, `candle_repeated` y `candle_missing`). Es el tipo
+ * Todos los tipos de `DataQualityIncident`: los de `qualityIncidentTypeSchema` y los que solo dan
+ * los esquemas 3.0.0 y 3.1.0 de los lotes (`contract_rejected`, `candle_repeated`, `candle_missing`
+ * y `tick_gap`). Es el tipo
  * de una incidencia de un dataset (`dataset_quality_incidents`). `qualityIncidentTypeSchema` no
  * cambia: es también el de las `quality_flags` de `MarketTick` y `MarketCandle`, y sumarle estos
  * cambiaría esos contratos.
@@ -376,6 +434,7 @@ export const dataQualityIncidentTypeSchema = z.enum([
   'contract_rejected',
   'candle_repeated',
   'candle_missing',
+  'tick_gap',
 ]);
 
 export { qualityIncidentTypeSchema };

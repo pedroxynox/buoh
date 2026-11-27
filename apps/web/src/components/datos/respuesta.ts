@@ -46,6 +46,7 @@ const INCIDENT_TYPES = {
   contract_rejected: true,
   candle_repeated: true,
   candle_missing: true,
+  tick_gap: true,
 } as const satisfies Record<Incident['incident_type'], true>;
 
 const SEVERITIES = {

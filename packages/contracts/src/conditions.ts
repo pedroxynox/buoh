@@ -217,6 +217,7 @@ function getExpectedConditionKey(
     case 'invalid_source_frame':
     case 'out_of_order':
     case 'source_time_conflict':
+    case 'tick_gap':
       failContext({
         code: 'CONDITION_NOT_STATEFUL',
         context: { incident_type: incident.incident_type },

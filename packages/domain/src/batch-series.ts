@@ -14,6 +14,9 @@ import {
 } from '@buoh/contracts';
 
 import {
+  BATCH_HISTORY_RULE_SET,
+  BATCH_RULE_SET,
+  batchRuleSetFor,
   commonFailure,
   compareBatchRecords,
   deriveBatchInvalidIncident,
@@ -27,6 +30,7 @@ import {
   stringOf,
   type BatchConversion,
   type BatchResponseSchema,
+  type BatchRuleSet,
 } from './batch-rules.js';
 import { deriveCatalogSnapshot, type CatalogResponseSchema } from './catalog.js';
 import { readHistoryTicks } from './history-ticks.js';
@@ -40,12 +44,14 @@ import {
 } from './normalizer.js';
 
 /**
- * Las velas y los ticks de la historia de las reglas de los lotes 4.0.0, y la clasificación de los
- * frames de un log de los lotes (contratos de dominio, «Semántica ejecutable de las reglas de los
- * lotes 4.0.0»; ADR-0021 §3 y §4, PR 4d de su §9). Todo es puro.
+ * Las velas y los ticks de la historia de las reglas de los lotes 4.0.0, los tramos sin ticks de las
+ * 4.1.0 y la clasificación de los frames de un log de los lotes (contratos de dominio, «Semántica
+ * ejecutable de las reglas de los lotes 4.0.0» y «… 4.1.0»; ADR-0021 §3 y §4, PR 4d y PR 6b de su
+ * §9). Todo es puro.
  */
 
 const CANDLE_SECONDS = 60;
+const SECOND_MS = 1000;
 const CANDLE_REQUEST_KEYS = new Set([
   'count',
   'end',
@@ -252,8 +258,15 @@ export function deriveHistoryDownloadTicks(
 
 // --- el log ------------------------------------------------------------------------------------
 
-/** Los esquemas de respuesta de la release fijada que compila quien llama, y los símbolos del perfil. */
+/**
+ * Los esquemas de respuesta de la release fijada que compila quien llama, y lo que dice el perfil:
+ * los símbolos que se buscan en `trading_times`, sus reglas (las 4.0.0 si no lo dice) y, con las
+ * 4.1.0, el umbral del tramo sin ticks de cada símbolo de la historia (`maximum_tick_gap_ms`, en
+ * segundos enteros). Un símbolo sin umbral no se comprueba.
+ */
 export interface BatchLogConfig {
+  readonly maximum_tick_gap_ms?: Readonly<Record<string, number>>;
+  readonly quality_rule_version?: BatchRuleSet['quality_rule_version'];
   readonly schemas: {
     readonly active_symbols: CatalogResponseSchema;
     readonly contracts_for: BatchResponseSchema;
@@ -262,6 +275,35 @@ export interface BatchLogConfig {
     readonly trading_times: BatchResponseSchema;
   };
   readonly trading_times_symbols: readonly string[];
+}
+
+/**
+ * Las reglas y los umbrales de una configuración. Un umbral es un número positivo de segundos
+ * enteros, en milisegundos, y solo lo admiten las reglas 4.1.0.
+ */
+function rulesOf(config: BatchLogConfig): {
+  readonly rules: BatchRuleSet;
+  readonly thresholds: ReadonlyMap<string, number>;
+} {
+  const rules = batchRuleSetFor(config.quality_rule_version ?? BATCH_RULE_SET.quality_rule_version);
+  if (rules === null) {
+    throw new TypeError(`Las reglas ${String(config.quality_rule_version)} no son de los lotes.`);
+  }
+  const thresholds = new Map(Object.entries(config.maximum_tick_gap_ms ?? {}));
+  if (
+    thresholds.size > 0 &&
+    rules.quality_rule_version !== BATCH_HISTORY_RULE_SET.quality_rule_version
+  ) {
+    throw new TypeError(
+      `maximum_tick_gap_ms solo va con las reglas ${BATCH_HISTORY_RULE_SET.quality_rule_version}.`,
+    );
+  }
+  for (const [symbol, maximum] of thresholds) {
+    if (!Number.isSafeInteger(maximum) || maximum <= 0 || maximum % SECOND_MS !== 0) {
+      throw new TypeError(`El umbral de ${symbol} no es un número positivo de segundos enteros.`);
+    }
+  }
+  return { rules, thresholds };
 }
 
 /** Lo que derivan las reglas de los lotes de un log: cada clase en su orden canónico. */
@@ -302,12 +344,29 @@ function candlePageOf(root: JsonNode, frame: RawSourceFrame): CandlePage | null 
     : { ...request, frame };
 }
 
+/** Una página de ticks de la historia pedida: su petición, de `echo_req`, y el frame que la respondió. */
+type TickPage = CandlePage;
+
+/**
+ * La página de ticks que responde un frame, válido o no, si su `echo_req` es una petición de ticks
+ * de la historia del paso de los lotes (la de `deriveHistoryDownloadTicks`); si no, `null`.
+ */
+function tickPageOf(root: JsonNode, frame: RawSourceFrame): TickPage | null {
+  const echo = getMember(root, 'echo_req');
+  const request = pageRequestOf(echo, TICKS_REQUEST_KEYS);
+  const style = getMember(echo, 'style');
+  return request === null || (style !== undefined && stringOf(style) !== 'ticks')
+    ? null
+    : { ...request, frame };
+}
+
 /**
  * Convierte un frame de un log de los lotes según su `msg_type`. Un frame que no es JSON da
  * `payload_not_json`, y uno que no responde a una operación de los lotes, `unexpected_msg_type`. Un
  * error a `ticks_history`, que Deriv manda con `msg_type` `ticks_history`, da `source_error_response`.
  * La respuesta `active_symbols` válida no da registro: el raw la conserva. Con una respuesta a una
- * página de velas, válida o no, da también la página pedida (`page`).
+ * página de velas o de ticks de la historia, válida o no, da también la página pedida (`page` o
+ * `tickPage`).
  */
 function convertFrame(
   frame: RawSourceFrame,
@@ -315,6 +374,7 @@ function convertFrame(
 ): BatchConversion<unknown> & {
   readonly kind: keyof Omit<DerivedBatchLog, 'incidents'> | null;
   readonly page?: CandlePage | null;
+  readonly tickPage?: TickPage | null;
 } {
   let root: JsonNode;
   try {
@@ -345,7 +405,11 @@ function convertFrame(
         page: candlePageOf(root, frame),
       };
     case 'history':
-      return { ...deriveHistoryDownloadTicks(frame, schemas.ticks_history), kind: 'ticks' };
+      return {
+        ...deriveHistoryDownloadTicks(frame, schemas.ticks_history),
+        kind: 'ticks',
+        tickPage: tickPageOf(root, frame),
+      };
     case 'active_symbols': {
       const catalog = deriveCatalogSnapshot(frame, schemas.active_symbols);
       return catalog.ok
@@ -364,6 +428,7 @@ function convertFrame(
           kind: null,
           page: candlePageOf(root, frame),
           records: [],
+          tickPage: tickPageOf(root, frame),
         };
       }
       break;
@@ -394,13 +459,9 @@ function candleGaps(
   pages: readonly CandlePage[],
   candles: readonly MarketCandle[],
   sessions: readonly TradingSession[],
+  rules: BatchRuleSet,
 ): DataQualityIncident[] {
-  const latest = new Map<string, Map<string, TradingSession>>();
-  for (const session of [...sessions].sort(compareBatchRecords)) {
-    const days = latest.get(session.symbol) ?? new Map<string, TradingSession>();
-    days.set(session.trading_date, session);
-    latest.set(session.symbol, days);
-  }
+  const latest = latestSessions(sessions);
   const present = new Set(
     candles.map((candle) => `${candle.symbol} ${String(Date.parse(candle.open_time_utc))}`),
   );
@@ -440,21 +501,24 @@ function candleGaps(
       const { page } = minutes.get(first) ?? { page: null };
       if (page !== null) {
         incidents.push(
-          incidentOf({
-            evidence: {
-              from_open_time_utc: new Date(first).toISOString(),
-              to_open_time_utc: new Date(missing[end] ?? first).toISOString(),
+          incidentOf(
+            {
+              evidence: {
+                from_open_time_utc: new Date(first).toISOString(),
+                to_open_time_utc: new Date(missing[end] ?? first).toISOString(),
+              },
+              incident_type: 'candle_missing',
+              observed_at_utc: page.frame.received_at_utc,
+              observed_ref: page.frame.observation_id,
+              related_refs: [
+                ...new Set(run.flatMap((item) => (item ? [item.session.observation_id] : []))),
+              ].sort(compareText),
+              severity: 'error',
+              source: page.frame.source,
+              symbol,
             },
-            incident_type: 'candle_missing',
-            observed_at_utc: page.frame.received_at_utc,
-            observed_ref: page.frame.observation_id,
-            related_refs: [
-              ...new Set(run.flatMap((item) => (item ? [item.session.observation_id] : []))),
-            ].sort(compareText),
-            severity: 'error',
-            source: page.frame.source,
-            symbol,
-          }),
+            rules,
+          ),
         );
       }
       start = end + 1;
@@ -463,11 +527,165 @@ function candleGaps(
   return incidents;
 }
 
+/** Por símbolo y día, el último `TradingSession` recibido, en el orden canónico de los horarios. */
+function latestSessions(
+  sessions: readonly TradingSession[],
+): Map<string, Map<string, TradingSession>> {
+  const latest = new Map<string, Map<string, TradingSession>>();
+  for (const session of [...sessions].sort(compareBatchRecords)) {
+    const days = latest.get(session.symbol) ?? new Map<string, TradingSession>();
+    days.set(session.trading_date, session);
+    latest.set(session.symbol, days);
+  }
+  return latest;
+}
+
+/** Los segundos seguidos, los dos incluidos, que una página pide dentro de un intervalo del horario. */
+interface TickPiece {
+  readonly from: number;
+  readonly order: number;
+  readonly page: TickPage;
+  readonly session: TradingSession;
+  readonly to: number;
+}
+
 /**
- * Las reglas de los lotes 4.0.0 sobre los source events de un log, en su orden: cada respuesta da
- * sus registros y sus incidencias, y los eventos de conexión no dan nada. Una página de velas
+ * Los tramos sin ticks de la historia dentro del horario (precisión del PR 6b de ADR-0021 §9;
+ * ADR-0024 §5). Un segundo está pedido si una página de ticks respondida, válida o no, lo pide,
+ * desde su `start` hasta su `end`; si ya había terminado al recibirse, y si cae entero dentro de un
+ * intervalo del horario de su símbolo y su día, el último `TradingSession` recibido para ese día en
+ * los mismos eventos, los del dataset. Los segundos pedidos seguidos forman un tramo comprobado, y
+ * dentro de él, cada tramo de segundos seguidos sin ticks que dura al menos el umbral de su símbolo
+ * da un `tick_gap`: así, entre dos ticks, la separación pasa del umbral, como en la captura. El
+ * `observed_ref` es la última página que pidió su primer segundo, y los `related_refs`, los
+ * horarios que usó. Un símbolo sin umbral, o un segundo sin horario de su día, no se comprueba.
+ */
+function tickGaps(
+  pages: readonly TickPage[],
+  ticks: readonly MarketTick[],
+  sessions: readonly TradingSession[],
+  thresholds: ReadonlyMap<string, number>,
+  rules: BatchRuleSet,
+): DataQualityIncident[] {
+  if (thresholds.size === 0) {
+    return [];
+  }
+  const latest = latestSessions(sessions);
+  const pieces = new Map<string, TickPiece[]>();
+  pages.forEach((page, order) => {
+    if (!thresholds.has(page.symbol)) {
+      return;
+    }
+    const last = Math.min(
+      page.end,
+      Math.floor(Date.parse(page.frame.received_at_utc) / SECOND_MS) - 1,
+    );
+    const list = pieces.get(page.symbol) ?? [];
+    pieces.set(page.symbol, list);
+    for (const session of latest.get(page.symbol)?.values() ?? []) {
+      for (const interval of session.intervals) {
+        const from = Math.max(page.start, Math.ceil(Date.parse(interval.opens_at_utc) / SECOND_MS));
+        const to = Math.min(last, Math.floor(Date.parse(interval.closes_at_utc) / SECOND_MS) - 1);
+        if (from <= to) {
+          list.push({ from, order, page, session, to });
+        }
+      }
+    }
+  });
+  const seconds = new Map<string, number[]>();
+  for (const tick of ticks) {
+    const list = seconds.get(tick.symbol) ?? [];
+    list.push(Math.floor(Date.parse(tick.event_time_utc) / SECOND_MS));
+    seconds.set(tick.symbol, list);
+  }
+
+  const incidents: DataQualityIncident[] = [];
+  for (const [symbol, list] of pieces) {
+    const minimum = (thresholds.get(symbol) ?? 0) / SECOND_MS;
+    const times = [...new Set(seconds.get(symbol) ?? [])].sort((left, right) => left - right);
+    const ordered = [...list].sort((left, right) => left.from - right.from || left.to - right.to);
+    const windows: [number, number][] = [];
+    for (const piece of ordered) {
+      const current = windows.at(-1);
+      if (current !== undefined && piece.from <= current[1] + 1) {
+        current[1] = Math.max(current[1], piece.to);
+      } else {
+        windows.push([piece.from, piece.to]);
+      }
+    }
+    const gaps: [number, number][] = [];
+    let index = 0;
+    for (const [from, to] of windows) {
+      while (index < times.length && (times[index] ?? 0) < from) {
+        index += 1;
+      }
+      let previous = from - 1;
+      for (; index < times.length && (times[index] ?? 0) <= to; index += 1) {
+        const time = times[index] ?? 0;
+        if (time - previous - 1 >= minimum) {
+          gaps.push([previous + 1, time - 1]);
+        }
+        previous = time;
+      }
+      if (to - previous >= minimum) {
+        gaps.push([previous + 1, to]);
+      }
+    }
+    for (const [first, lastSecond] of gaps) {
+      let signer: TickPiece | null = null;
+      const used = new Set<string>();
+      for (const piece of ordered) {
+        if (piece.from <= first && first <= piece.to && (signer?.order ?? -1) < piece.order) {
+          signer = piece;
+        }
+        if (piece.from <= lastSecond && first <= piece.to) {
+          used.add(piece.session.observation_id);
+        }
+      }
+      if (signer === null) {
+        continue;
+      }
+      incidents.push(
+        incidentOf(
+          {
+            evidence: {
+              from_event_time_utc: new Date(first * SECOND_MS).toISOString(),
+              maximum_tick_gap_ms: minimum * SECOND_MS,
+              to_event_time_utc: new Date(lastSecond * SECOND_MS).toISOString(),
+            },
+            incident_type: 'tick_gap',
+            observed_at_utc: signer.page.frame.received_at_utc,
+            observed_ref: signer.page.frame.observation_id,
+            related_refs: [...used].sort(compareText),
+            severity: 'error',
+            source: signer.page.frame.source,
+            symbol,
+          },
+          rules,
+        ),
+      );
+    }
+  }
+  return incidents;
+}
+
+/** La incidencia con las versiones de otras reglas de los lotes, y su ID de nuevo. */
+function restamped(incident: DataQualityIncident, rules: BatchRuleSet): DataQualityIncident {
+  if (incident.quality_rule_version === rules.quality_rule_version) {
+    return incident;
+  }
+  const body: Record<string, unknown> = { ...incident };
+  delete body['incident_id'];
+  return incidentOf(body, rules);
+}
+
+/**
+ * Las reglas de los lotes, 4.0.0 o 4.1.0, sobre los source events de un log, en su orden: cada
+ * respuesta da sus registros y sus incidencias, y los eventos de conexión no dan nada. Una página de velas
  * respondida deja además un `candle_missing` por cada tramo sin velas dentro del horario
- * (`candleGaps`). Una vela o un tick que
+ * (`candleGaps`) y, con las reglas 4.1.0, una página de ticks de la historia, un `tick_gap` por
+ * cada tramo sin ticks dentro del horario que llega al umbral de su símbolo (`tickGaps`); con esas
+ * reglas, todas las incidencias llevan el esquema 3.1.0. Una vela o un tick que
  * llegan otra vez, en otra página, no son un registro, porque cuenta el primero: la vela deja
  * `candle_repeated`, y el tick, `duplicate_exact` si es igual o `source_time_conflict` si tiene el
  * mismo instante con otro precio, con la observación del primero en `related_refs`. Se compara solo
@@ -485,6 +703,8 @@ export function deriveBatchLog(
   const quotes: ContractQuote[] = [];
   const incidents: DataQualityIncident[] = [];
   const pages: CandlePage[] = [];
+  const tickPages: TickPage[] = [];
+  const { rules, thresholds } = rulesOf(config);
   const firstCandle = new Map<string, MarketCandle>();
   const firstTickByFingerprint = new Map<string, MarketTick>();
   const firstTickByTime = new Map<string, MarketTick>();
@@ -506,6 +726,9 @@ export function deriveBatchLog(
     incidents.push(...converted.incidents);
     if (converted.page) {
       pages.push(converted.page);
+    }
+    if (converted.tickPage) {
+      tickPages.push(converted.tickPage);
     }
     switch (converted.kind) {
       case 'candles':
@@ -579,10 +802,11 @@ export function deriveBatchLog(
         break;
     }
   }
-  incidents.push(...candleGaps(pages, candles, sessions));
+  incidents.push(...candleGaps(pages, candles, sessions, rules));
+  incidents.push(...tickGaps(tickPages, ticks, sessions, thresholds, rules));
   return {
     candles: candles.sort(compareCandles),
-    incidents: incidents.sort(compareIncidents),
+    incidents: incidents.map((incident) => restamped(incident, rules)).sort(compareIncidents),
     offers: offers.sort(compareBatchRecords),
     quotes: quotes.sort(compareBatchRecords),
     sessions: sessions.sort(compareBatchRecords),
