@@ -76,7 +76,8 @@ export const HISTORY_RETRY_WAIT_MS = 60_000;
 export const HISTORY_MAX_FAILURES = 10;
 /**
  * Cada cuánto vuelve a intentar un bloqueo que tiene otro proceso o que PostgreSQL no da, como
- * `ingest` (`STARTUP_LOCK_RETRY_MS`), y cuántas veces: unos 20 minutos. En un despliegue, Render
+ * `ingest` (`STARTUP_LOCK_RETRY_MS`), y cuántas veces: unos 20 minutos si cada intento responde
+ * enseguida, y hasta unas 2 horas si cada uno agota los 5 s de conexión. En un despliegue, Render
  * arranca la instancia nueva de `buoh-historia` antes de parar la vieja, que tiene los bloqueos hasta
  * que para; y tras rotar la contraseña de `buoh_lotes`, el rol no la tiene hasta la ejecución
  * siguiente de `buoh-operaciones` (precisión del PR 6e de ADR-0021 §9).
@@ -406,8 +407,8 @@ function outcomeLine(outcome: SequenceOutcome): Record<string, JsonValue> {
 
 /**
  * `history`: el proceso temporal de la historia. Devuelve 0 cuando las dos historias están pedidas
- * y publicadas; 1 si para por sus fallos, sin los esquemas o sin el bloqueo, que espera unos 20
- * minutos (`HISTORY_LOCK_ATTEMPTS`); 2 con un error de uso o de configuración, con su línea en stderr.
+ * y publicadas; 1 si para por sus fallos, sin los esquemas o sin el bloqueo, que intenta
+ * `HISTORY_LOCK_ATTEMPTS` veces; 2 con un error de uso o de configuración, con su línea en stderr.
  */
 export async function historyCommand(
   argv: readonly string[],
@@ -445,6 +446,7 @@ export async function historyCommand(
   try {
     for (const sequence of HISTORY_SEQUENCES) {
       let lock: SessionLock | null = null;
+      let waiting = '';
       for (let attempt = 1; lock === null; attempt += 1) {
         let failure: string | null = null;
         try {
@@ -453,16 +455,19 @@ export async function historyCommand(
           failure = failureReason(error);
         }
         if (lock === null) {
+          // El motivo del último intento: el que se espera y, al final, el del proceso.
+          const why: Record<string, JsonValue> =
+            failure === null
+              ? { reason: 'lock_busy', sequence: sequence.name }
+              : { detail: failure, reason: 'lock_unavailable', sequence: sequence.name };
           if (attempt >= HISTORY_LOCK_ATTEMPTS) {
-            return finish(
-              'failed',
-              failure === null
-                ? { reason: 'lock_busy', sequence: sequence.name }
-                : { detail: failure, reason: 'lock_unavailable', sequence: sequence.name },
-            );
+            return finish('failed', why);
           }
-          if (attempt === 1) {
-            deps.write({ event: 'history_lock_waiting', sequence: sequence.name });
+          // Una línea al empezar a esperar y otra cada vez que cambia el motivo.
+          const key = JSON.stringify(why);
+          if (key !== waiting) {
+            waiting = key;
+            deps.write({ event: 'history_lock_waiting', ...why });
           }
           await deps.sleep(HISTORY_LOCK_RETRY_MS);
         }

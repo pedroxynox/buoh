@@ -82,6 +82,8 @@ function world(
     readonly busy?: boolean | number;
     /** Cuántos intentos del bloqueo, por secuencia, fallan como un `28P01`: con `true`, todos. */
     readonly lockFails?: boolean | number;
+    /** La única secuencia cuyos intentos fallan, si se da. */
+    readonly lockFailsSequence?: string;
     /**
      * Lo que responde `datasets:publish` a una secuencia sin `--skip`, en lugar de publicar; con
      * `times`, solo esas veces.
@@ -133,7 +135,9 @@ function world(
     acquireLock: (_config, sequence) => {
       const tried = (attempts.get(sequence.name) ?? 0) + 1;
       attempts.set(sequence.name, tried);
-      if (options.lockFails === true || tried <= Number(options.lockFails ?? 0)) {
+      const fails =
+        options.lockFailsSequence === undefined || options.lockFailsSequence === sequence.name;
+      if (fails && (options.lockFails === true || tried <= Number(options.lockFails ?? 0))) {
         return Promise.reject(Object.assign(new Error('rechazada'), { code: '28P01' }));
       }
       if (options.busy === true || tried <= Number(options.busy ?? 0)) {
@@ -288,7 +292,7 @@ function world(
     }
     return result;
   };
-  return { lines, published, publishes, run, sent, sleeps, storesOf };
+  return { lines, locks, published, publishes, run, sent, sleeps, storesOf };
 }
 
 /** Las respuestas de la historia: los horarios, y las páginas de ticks, con un tick en su inicio. */
@@ -538,7 +542,7 @@ describe('historyCommand: las dos historias, bloque a bloque', () => {
     expect(await busy.run()).toEqual({ exitCode: 1, stderr: null });
     expect(busy.lines.at(-1)).toMatchObject({ reason: 'lock_busy', status: 'failed' });
     expect(busy.lines.filter((line) => line['event'] === 'history_lock_waiting')).toEqual([
-      { event: 'history_lock_waiting', sequence: 'lotes_historia_r_100' },
+      { event: 'history_lock_waiting', reason: 'lock_busy', sequence: 'lotes_historia_r_100' },
     ]);
     expect(busy.sleeps).toEqual(
       Array.from({ length: HISTORY_LOCK_ATTEMPTS - 1 }, () => HISTORY_LOCK_RETRY_MS),
@@ -547,18 +551,38 @@ describe('historyCommand: las dos historias, bloque a bloque', () => {
     expect(busy.sent).toEqual([]);
 
     // Tras rotar la contraseña de buoh_lotes, PostgreSQL la rechaza hasta que buoh-operaciones se
-    // la pone al rol: el bloqueo se reintenta igual, y si no llega, termina con su código.
-    const rejected = world({ lockFails: true });
+    // la pone al rol: el bloqueo se reintenta igual, y si no llega, termina con su código. Aquí falla
+    // el del oro, con el de R_100 ya tomado, que se suelta al terminar.
+    const rejected = world({ lockFails: true, lockFailsSequence: 'lotes_historia_frxxauusd' });
     expect(await rejected.run()).toEqual({ exitCode: 1, stderr: null });
     expect(rejected.lines.at(-1)).toEqual({
       detail: '28P01',
       event: 'history_finished',
       reason: 'lock_unavailable',
+      sequence: 'lotes_historia_frxxauusd',
+      status: 'failed',
+    });
+    expect(rejected.lines.filter((line) => line['event'] === 'history_lock_waiting')).toEqual([
+      {
+        detail: '28P01',
+        event: 'history_lock_waiting',
+        reason: 'lock_unavailable',
+        sequence: 'lotes_historia_frxxauusd',
+      },
+    ]);
+    expect(rejected.sleeps).toHaveLength(HISTORY_LOCK_ATTEMPTS - 1);
+    expect(rejected.locks.map((lock) => lock.held)).toEqual([false]);
+    expect(rejected.sent).toEqual([]);
+
+    // El motivo final es el del último intento: un rechazo anterior no lo cambia.
+    const late = world({ busy: true, lockFails: 2 });
+    expect(await late.run()).toEqual({ exitCode: 1, stderr: null });
+    expect(late.lines.at(-1)).toEqual({
+      event: 'history_finished',
+      reason: 'lock_busy',
       sequence: 'lotes_historia_r_100',
       status: 'failed',
     });
-    expect(rejected.sleeps).toHaveLength(HISTORY_LOCK_ATTEMPTS - 1);
-    expect(rejected.sent).toEqual([]);
 
     // Como en un despliegue de Render: la instancia vieja suelta los bloqueos a los pocos segundos, y
     // la nueva sigue con normalidad.
@@ -583,10 +607,13 @@ describe('historyCommand: las dos historias, bloque a bloque', () => {
       Array.from({ length: 6 }, () => HISTORY_LOCK_RETRY_MS),
     );
     expect(deploy.sleeps[6]).not.toBe(HISTORY_LOCK_RETRY_MS);
-    expect(deploy.lines.filter((line) => line['event'] === 'history_lock_waiting')).toEqual([
-      { event: 'history_lock_waiting', sequence: 'lotes_historia_r_100' },
-      { event: 'history_lock_waiting', sequence: 'lotes_historia_frxxauusd' },
-    ]);
+    // Una línea al empezar a esperar y otra cuando cambia el motivo, en cada secuencia.
+    expect(deploy.lines.filter((line) => line['event'] === 'history_lock_waiting')).toEqual(
+      ['lotes_historia_r_100', 'lotes_historia_frxxauusd'].flatMap((sequence) => [
+        { detail: '28P01', event: 'history_lock_waiting', reason: 'lock_unavailable', sequence },
+        { event: 'history_lock_waiting', reason: 'lock_busy', sequence },
+      ]),
+    );
     expect(deploy.lines.at(-1)).toMatchObject({ event: 'history_finished', status: 'completed' });
 
     const env = world();
