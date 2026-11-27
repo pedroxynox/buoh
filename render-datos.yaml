@@ -192,6 +192,11 @@ services:
       # proceso de datasets:publish. Render la genera al crear la variable.
       - key: BUOH_PUBLICACION_POSTGRES_PASSWORD
         generateValue: true
+      # La contraseña de buoh_lotes, el rol de los lotes (ADR-0021 §3), desde el PR 5f de su §9. Solo
+      # la usa este servicio: el paso 1 crea el rol y se la pone, y el paso batch se la da al proceso
+      # de los lotes. Render la genera al crear la variable.
+      - key: BUOH_LOTES_POSTGRES_PASSWORD
+        generateValue: true
       # Token salud de R2, de solo lectura, para el proceso de data:health (ADR-0018 §10).
       - key: BUOH_SALUD_S3_ENDPOINT
         sync: false
@@ -214,6 +219,19 @@ services:
         sync: false
       - key: BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY
         sync: false
+      # Token lotes de R2, de lectura y escritura, para el proceso de los lotes (ADR-0021 §3). Como el
+      # Blueprint ya existe, Render no pide el endpoint ni las claves: el propietario los pega en el
+      # servicio (runbook de ingesta, «Los lotes (PR 5f de ADR-0021)»).
+      - key: BUOH_LOTES_S3_ENDPOINT
+        sync: false
+      - key: BUOH_LOTES_S3_REGION
+        value: auto
+      - key: BUOH_LOTES_S3_BUCKET
+        value: buoh-captura
+      - key: BUOH_LOTES_S3_ACCESS_KEY_ID
+        sync: false
+      - key: BUOH_LOTES_S3_SECRET_ACCESS_KEY
+        sync: false
       # Los símbolos capturados en vivo, cada uno con su secuencia de logs: los pasos trabajan con
       # los logs de cada uno (ADR-0021 §1). Los mismos del --symbol de buoh-ingesta; el oro, desde el
       # PR 3 de ADR-0021 §9.
@@ -225,7 +243,10 @@ services:
     runtime: node
     plan: 0.5c-512mb
     region: virginia
-    # Una sola instancia: las sesiones y los límites viven en su memoria (ADR-0019 §1 y §2).
+    # Una sola instancia: la espera por nombre y dirección, el límite por dirección, el límite
+    # general y el límite por nombre de un nombre que no existe viven en su memoria (ADR-0019 §1).
+    # Las sesiones están en PostgreSQL (§2), y el límite por nombre y el tope de 100 de una cuenta
+    # que existe salen de la base (§1).
     numInstances: 1
     # La ruta de salud de Render: 200 cuando el proceso responde y tiene sus migraciones (ADR-0019 §7).
     healthCheckPath: /api/salud
