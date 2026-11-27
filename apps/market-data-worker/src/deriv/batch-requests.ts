@@ -358,8 +358,8 @@ export const HISTORY_WINDOW_MARGIN_SECONDS = 3_600;
  * primer bloque que empieza al menos `HISTORY_WINDOW_MARGIN_SECONDS` después del borde de
  * `DERIV_HISTORY_DAYS` días. Un tramo más antiguo daría los últimos ticks del símbolo, fuera de lo
  * pedido, que las reglas 4.0.0 rechazan (`history_inconsistent`), así que no se pide; con las velas,
- * Deriv da las últimas 1000, que hacen la página `candles_inconsistent` (precisión del PR 6e de
- * ADR-0021 §9). Si no queda ninguno, el número de peticiones.
+ * Deriv da las últimas 1000, que hacen la página `candles_inconsistent` (la sonda del 2026-11-27,
+ * supuesto 1 del PR #156). Si no queda ninguno, el número de peticiones.
  */
 export function historyRequestsFrom(blocks: readonly HistoryBlock[], nowMs: number): number {
   const edge = Math.floor(nowMs / 1000) - DERIV_HISTORY_DAYS * DAY_SECONDS;

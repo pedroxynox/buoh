@@ -415,8 +415,8 @@ export function batchTradingTimesSymbols(kind: BatchProfileKind): readonly strin
 /**
  * Lo que la configuración de las reglas de los lotes (`createBatchLogConfig`) lee del perfil de una
  * clase, además de su esquema de fuente, como en su publicación (`buildBatchDatasetPublication`):
- * sus símbolos de `trading_times`, sus reglas y, en una historia, el umbral del tramo sin ticks de su
- * símbolo (precisión del PR 6b de ADR-0021 §9).
+ * sus símbolos de `trading_times`, sus reglas y, en una historia de ticks, el umbral del tramo sin
+ * ticks de su símbolo (precisión del PR 6b de ADR-0021 §9).
  */
 export function batchLogConfigOptions(kind: BatchProfileKind): {
   readonly maximum_tick_gap_ms?: Readonly<Record<string, number>>;
