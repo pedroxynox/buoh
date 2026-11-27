@@ -1,16 +1,17 @@
 /**
- * La forma de la respuesta de `GET /api/v1/datos/eventos` (`DataEvents`), comprobada en el navegador
- * antes de dibujarla (ADR-0019 §5 y §8; CONTRIBUTING, «Reglas de implementación»). Como las de la
- * salud y de Mercados, no usa los esquemas de `@buoh/contracts`, cuya entrada principal carga módulos
- * de Node, y repite sus reglas: objetos estrictos, los valores y formatos de cada campo, y las reglas
- * entre campos (los logs de mayor a menor, los eventos del más nuevo al más viejo y, salvo las
- * publicaciones, de un log leído, la lista cortada solo si está llena, el motivo solo en una resolución y la clave de cada condición).
- * Lo que no pasa es una respuesta inesperada, nunca un evento inventado. `test/auditoria.test.tsx`
- * la contrasta con el esquema.
+ * La forma de la respuesta de `GET /api/v2/datos/eventos` (`DataEvents`), comprobada en el navegador
+ * antes de dibujarla (ADR-0019 §5 y §8; ADR-0021 §5; CONTRIBUTING, «Reglas de implementación»). Como
+ * las de la salud y de Mercados, no usa los esquemas de `@buoh/contracts`, cuya entrada principal
+ * carga módulos de Node, y repite sus reglas: objetos estrictos, los valores y formatos de cada
+ * campo, y las reglas entre campos (las secuencias por su nombre y sin repetir, cada una con algún
+ * log o algún evento; en cada una, los logs de mayor a menor, los eventos del más nuevo al más viejo
+ * y, salvo las publicaciones, de un log leído, y la lista cortada solo si está llena; el motivo solo
+ * en una resolución y la clave de cada condición). Lo que no pasa es una respuesta inesperada, nunca
+ * un evento inventado. `test/auditoria.test.tsx` la contrasta con el esquema.
  */
-import type { DataEvent, DataEvents } from '@buoh/contracts';
+import type { DataEvent, DataEvents, DataEventsSequence } from '@buoh/contracts';
 
-/** Cuántos eventos trae como mucho (`DATA_EVENTS_LIMIT` de los contratos). */
+/** Cuántos eventos trae como mucho de cada secuencia (`DATA_EVENTS_LIMIT` de los contratos). */
 export const DATA_EVENTS_LIMIT = 200;
 
 /** El mayor número de un log de producción: seis cifras (ADR-0018 §6). */
@@ -23,6 +24,8 @@ const DERIVED_ID = /^sha256:[0-9a-f]{64}$/u;
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const CONDITION_KEY =
   /^(?:connection_lost|event_gap_unresolved|persistence_unavailable|source_limit_exceeded):sha256:[0-9a-f]{64}$/u;
+/** El nombre de una secuencia de logs (`dataset_log_ranges.sequence`; ADR-0021 §1). */
+const SEQUENCE = /^[A-Za-z0-9_]{1,64}$/u;
 /** Un código saneado, como el motivo de una incidencia o de una resolución. */
 const CODE = /^[A-Za-z0-9_.-]{1,64}$/u;
 
@@ -74,11 +77,13 @@ const CONDITION_TYPES = {
 } as const satisfies Record<ConditionEvent['condition_type'], true>;
 
 /** Los campos de cada objeto del contrato, que son estrictos: ni uno de más ni uno de menos. */
-const RESPONSE_KEYS = [
+const RESPONSE_KEYS = ['sequences'] as const satisfies readonly (keyof DataEvents)[];
+const SEQUENCE_KEYS = [
   'events',
   'logs',
+  'sequence',
   'truncated',
-] as const satisfies readonly (keyof DataEvents)[];
+] as const satisfies readonly (keyof DataEventsSequence)[];
 const BASE_KEYS = ['at_utc', 'kind', 'log', 'source'] as const;
 const CATALOG_KEYS = [
   ...BASE_KEYS,
@@ -233,13 +238,14 @@ function isEvent(value: unknown): value is DataEvent {
   }
 }
 
-/** La respuesta como `DataEvents` si cumple el contrato, o `null`. */
-export function readDataEvents(value: unknown): DataEvents | null {
-  if (!isRecord(value) || !hasExactly(value, RESPONSE_KEYS)) {
-    return null;
+/** Los eventos de una secuencia, si cumplen el contrato. */
+function isSequence(value: unknown): value is DataEventsSequence {
+  if (!isRecord(value) || !hasExactly(value, SEQUENCE_KEYS)) {
+    return false;
   }
-  const { events, logs, truncated } = value;
+  const { events, logs, sequence, truncated } = value;
   if (
+    !matches(SEQUENCE, sequence) ||
     !Array.isArray(logs) ||
     !logs.every(isLog) ||
     !Array.isArray(events) ||
@@ -247,18 +253,34 @@ export function readDataEvents(value: unknown): DataEvents | null {
     !events.every(isEvent) ||
     typeof truncated !== 'boolean'
   ) {
-    return null;
+    return false;
   }
-  const valid =
-    // Los logs van de mayor a menor, sin repetir; solo se corta una lista llena; cada evento que no
-    // es una publicación es de un log leído (las publicaciones no vencen: ADR-0020 §10), y van del
-    // más nuevo al más viejo.
+  // Algún log o algún evento; los logs van de mayor a menor, sin repetir; solo se corta una lista
+  // llena; cada evento que no es una publicación es de un log leído (las publicaciones no vencen:
+  // ADR-0020 §10), y van del más nuevo al más viejo.
+  return (
+    (logs.length > 0 || events.length > 0) &&
     logs.every((log, index) => index === 0 || log < (logs[index - 1] ?? 0)) &&
     (!truncated || events.length === DATA_EVENTS_LIMIT) &&
     events.every(
       (event, index) =>
         (event.kind === 'publication' || logs.includes(event.log)) &&
         (index === 0 || (events[index - 1]?.at_utc ?? '') >= event.at_utc),
-    );
-  return valid ? (value as unknown as DataEvents) : null;
+    )
+  );
+}
+
+/** La respuesta como `DataEvents` si cumple el contrato, o `null`. */
+export function readDataEvents(value: unknown): DataEvents | null {
+  if (!isRecord(value) || !hasExactly(value, RESPONSE_KEYS)) {
+    return null;
+  }
+  const { sequences } = value;
+  if (!Array.isArray(sequences) || !sequences.every(isSequence)) {
+    return null;
+  }
+  // Por su nombre, en el orden de las unidades UTF-16, y sin repetir.
+  const names = sequences.map((group) => group.sequence);
+  const sorted = names.every((name, index) => index === 0 || (names[index - 1] ?? '') < name);
+  return sorted ? (value as unknown as DataEvents) : null;
 }

@@ -38,14 +38,21 @@ export interface StoredCatalogVersion {
 }
 
 /**
- * Una publicación de `buoh_datasets`: su `PublishedManifestRecord`, la fuente de su dataset y el log
- * del que salió (`dataset_log_ranges`).
+ * Una publicación de `buoh_datasets`: su `PublishedManifestRecord`, la fuente de su dataset y la
+ * secuencia y el log de los que salió (`dataset_log_ranges`; ADR-0021 §1).
  */
 export interface StoredPublication {
   readonly source: string;
   readonly record: PublishedManifestRecord;
+  readonly sequence: string;
   readonly log: number;
 }
+
+/**
+ * El formato del nombre de una secuencia, el que admite `dataset_log_ranges.sequence` (migración
+ * `0002_secuencias` de `buoh_datasets`).
+ */
+export const SEQUENCE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/u;
 
 type IncidentOf<T extends DataQualityIncident['incident_type']> = Extract<
   DataQualityIncident,
@@ -78,8 +85,8 @@ export interface ReadDatasetPublicationsInput {
   readonly source: string;
   /** Solo las publicaciones de este entorno (`published_manifest_records.deployment_environment`). */
   readonly environment: DeploymentEnvironment;
-  /** Cuántas lee como mucho: las más recientes. */
-  readonly limit: number;
+  /** Cuántas lee como mucho de cada secuencia: las más recientes (ADR-0021 §5). */
+  readonly limitPerSequence: number;
 }
 
 /**
@@ -104,6 +111,7 @@ interface CatalogRow {
 }
 
 interface PublicationRow {
+  sequence: string;
   log_number: number;
   source: string;
   schema_version: string;
@@ -195,12 +203,19 @@ function catalogVersionOf(row: CatalogRow): StoredCatalogVersion {
 }
 
 function publicationOf(row: PublicationRow): StoredPublication {
-  const { log_number: log, source, ...columns } = row;
+  const { log_number: log, sequence, source, ...columns } = row;
   const parsed = publishedManifestRecordSchema.safeParse(columns);
-  if (!parsed.success || !Number.isSafeInteger(log) || log < 1 || log > MAX_LOG_NUMBER) {
+  if (
+    !parsed.success ||
+    !Number.isSafeInteger(log) ||
+    log < 1 ||
+    log > MAX_LOG_NUMBER ||
+    typeof sequence !== 'string' ||
+    !SEQUENCE_NAME_PATTERN.test(sequence)
+  ) {
     throw new DataEventIntegrityError();
   }
-  return { log, record: parsed.data, source };
+  return { log, record: parsed.data, sequence, source };
 }
 
 function operationalIncidentOf(row: OperationalIncidentRow): StoredDataIncident {
@@ -386,9 +401,11 @@ export async function readLastActiveDatasetId(
 }
 
 /**
- * Las publicaciones de los datasets (ADR-0020 §10): las `limit` más recientes de `source` en
- * `environment` de `buoh_datasets.published_manifest_records`, cada una con el log de su dataset
- * (`dataset_log_ranges`) y comprobada contra su contrato. Sin el esquema `buoh_datasets`, que crea
+ * Las publicaciones de los datasets (ADR-0020 §10): de cada secuencia, las `limitPerSequence` más
+ * recientes de `source` en `environment` de `buoh_datasets.published_manifest_records`, para que
+ * las de una secuencia no tapen las de otra (ADR-0021 §5), cada una con la secuencia y el log de su
+ * dataset (`dataset_log_ranges`) y comprobada contra su contrato. Van por secuencia y, dentro de
+ * ella, de la más nueva a la más vieja. Sin el esquema `buoh_datasets`, que crea
  * `buoh-operaciones` antes de la primera publicación, no hay ninguna; con el esquema y sin una de
  * sus tablas, rechaza con el error de PostgreSQL, como sin privilegios (`42501`). Lanza `DataEventIntegrityError`
  * si una fila no pasa esas comprobaciones. No escribe nada, y nombra el esquema en cada tabla, para
@@ -398,22 +415,31 @@ export async function readDatasetPublications(
   pool: Pick<Pool, 'query'>,
   input: ReadDatasetPublicationsInput,
 ): Promise<StoredPublication[]> {
-  if (!Number.isSafeInteger(input.limit) || input.limit < 1) {
+  if (!Number.isSafeInteger(input.limitPerSequence) || input.limitPerSequence < 1) {
     throw new TypeError('El límite de publicaciones es un entero positivo.');
   }
   const schema = pg.escapeIdentifier(DATASETS_SCHEMA);
   try {
+    // El puesto de cada publicación en su secuencia, de la más nueva a la más vieja: así el límite
+    // es por secuencia, en una sola consulta.
     const { rows } = await pool.query<PublicationRow>(
-      `SELECT g.log_number, d.source, r.schema_version, r.publication_id::text AS publication_id,
-              r.dataset_id, r.manifest_document_sha256, r.manifest_object_uri,
-              r.manifest_object_bytes_sha256, r.published_at_utc, r.state
-         FROM ${schema}.published_manifest_records r
-         JOIN ${schema}.datasets d USING (dataset_id)
-         JOIN ${schema}.dataset_log_ranges g USING (dataset_id)
-        WHERE d.source = $1 AND r.deployment_environment = $2
-        ORDER BY r.published_at_utc DESC, r.publication_id DESC
-        LIMIT $3`,
-      [input.source, input.environment, input.limit],
+      `SELECT sequence, log_number, source, schema_version, publication_id, dataset_id,
+              manifest_document_sha256, manifest_object_uri, manifest_object_bytes_sha256,
+              published_at_utc, state
+         FROM (SELECT g.sequence, g.log_number, d.source, r.schema_version,
+                      r.publication_id::text AS publication_id, r.dataset_id,
+                      r.manifest_document_sha256, r.manifest_object_uri,
+                      r.manifest_object_bytes_sha256, r.published_at_utc, r.state,
+                      row_number() OVER (PARTITION BY g.sequence
+                                         ORDER BY r.published_at_utc DESC,
+                                                  r.publication_id DESC) AS rank
+                 FROM ${schema}.published_manifest_records r
+                 JOIN ${schema}.datasets d USING (dataset_id)
+                 JOIN ${schema}.dataset_log_ranges g USING (dataset_id)
+                WHERE d.source = $1 AND r.deployment_environment = $2) ranked
+        WHERE rank <= $3
+        ORDER BY sequence, rank`,
+      [input.source, input.environment, input.limitPerSequence],
     );
     return rows.map(publicationOf);
   } catch (error) {

@@ -168,7 +168,7 @@ describe('variante servida por la API (out-api)', () => {
     // El título de la tabla ficticia del escritorio no aparece en la variante real.
     expect(text).not.toContain('Incidencias de calidad');
     const calling = files(OUT_API, '.js').filter((script) =>
-      readFileSync(script, 'utf8').includes('/api/v1/datos/datasets'),
+      readFileSync(script, 'utf8').includes('/api/v2/datos/datasets'),
     );
     expect(calling.length).toBeGreaterThan(0);
   });
@@ -180,7 +180,7 @@ describe('variante servida por la API (out-api)', () => {
     expect(text).toContain('Cargando los eventos de datos');
     // El título de la tabla ficticia del escritorio no aparece en la variante real.
     expect(text).not.toContain('Datos y estrategias');
-    for (const path of ['/api/v1/auditoria', '/api/v1/datos/eventos']) {
+    for (const path of ['/api/v1/auditoria', '/api/v2/datos/eventos']) {
       const calling = files(OUT_API, '.js').filter((script) =>
         readFileSync(script, 'utf8').includes(path),
       );

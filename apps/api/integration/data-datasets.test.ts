@@ -23,8 +23,8 @@ import { apiRoutes } from '../src/routes.js';
 
 /**
  * Los datasets publicados de la sección Datos (ADR-0020 §10) contra el PostgreSQL local, sin TLS:
- * `GET /api/v1/datos/datasets` con el pool de lectura de la API y el código del worker por la ruta
- * `lectura`. El superusuario hace de `buoh-operaciones` y de la publicación: crea `buoh_datasets` con
+ * `GET /api/v2/datos/datasets` con el pool de lectura de la API y el código del worker por la ruta
+ * `lectura`, agrupados por secuencia (ADR-0021 §5). El superusuario hace de `buoh-operaciones` y de la publicación: crea `buoh_datasets` con
  * sus migraciones, le da a un rol de prueba lo que tiene `buoh_lectura` y guarda los datasets, sus
  * incidencias, sus rangos y sus verificaciones con sus filas. Las sesiones son falsas.
  *
@@ -77,7 +77,7 @@ const sessions: SessionService = {
   flushPendingFailures: () => Promise.resolve(),
 };
 
-/** `GET /api/v1/datos/datasets` con sesión y el pool de lectura `pool`. */
+/** `GET /api/v2/datos/datasets` con sesión y el pool de lectura `pool`. */
 async function getDatasets(pool: Pool = ready(reader)) {
   const lines: ApiLogLine[] = [];
   let n = 0;
@@ -107,7 +107,7 @@ async function getDatasets(pool: Pool = ready(reader)) {
   try {
     const response = await app.inject({
       method: 'GET',
-      url: '/api/v1/datos/datasets',
+      url: '/api/v2/datos/datasets',
       headers: { cookie: `${SESSION_COOKIE_NAME}=${SID}` },
     });
     return { body: response.json<unknown>(), lines, status: response.statusCode };
@@ -141,10 +141,22 @@ async function resetDatasets({ migrated = true } = {}): Promise<void> {
   );
 }
 
-/** El primer segmento del dataset siguiente de cada log. */
-const nextSegment = new Map<number, number>();
+/** El primer segmento del dataset siguiente de cada log de cada secuencia. */
+const nextSegment = new Map<string, number>();
+
+/** Los conteos de un core 1.1.0, el de un dataset de los lotes (ADR-0021 §3). */
+interface BatchCounts {
+  readonly candles: number;
+  readonly sessions: number;
+  readonly offers: number;
+  readonly quotes: number;
+}
 
 interface DatasetInput {
+  /** La secuencia del log (`dataset_log_ranges.sequence`); sin ella, R_100. */
+  readonly sequence?: string;
+  /** Con ellos, un core 1.1.0 de los lotes, sin ticks; sin ellos, uno 1.0.0 de la captura. */
+  readonly batch?: BatchCounts;
   readonly log: number;
   readonly published: string;
   readonly environment?: string;
@@ -168,28 +180,58 @@ function manifestCore(input: {
   readonly period: readonly [string, string] | null;
   readonly ticks: number;
   readonly incidents: number;
+  readonly batch?: BatchCounts | undefined;
 }): JsonValue {
+  const { batch } = input;
+  // Los roles en su orden canónico; los de los lotes, solo en un core 1.1.0.
   const counts = {
     source_events: input.ticks + 4,
     normalized_ticks: input.ticks,
+    ...(batch === undefined
+      ? {}
+      : {
+          market_candles: batch.candles,
+          trading_sessions: batch.sessions,
+          contract_offers: batch.offers,
+          contract_quotes: batch.quotes,
+        }),
     quality_incidents: input.incidents,
     operational_conditions: 0,
   } as const;
+  const batchFields =
+    batch === undefined
+      ? {}
+      : {
+          market_candle_schema_version: '1.0.0',
+          trading_session_schema_version: '1.0.0',
+          contract_offer_schema_version: '1.0.0',
+          contract_quote_schema_version: '1.0.0',
+          candle_time_from_utc: batch.candles === 0 ? null : '2026-11-26T00:00:00.000Z',
+          candle_time_to_utc: batch.candles === 0 ? null : '2026-11-26T23:59:00.000Z',
+          market_candle_count: batch.candles,
+          trading_session_count: batch.sessions,
+          contract_offer_count: batch.offers,
+          contract_quote_count: batch.quotes,
+        };
   return {
-    schema_version: '1.0.0',
+    ...batchFields,
+    schema_version: batch === undefined ? '1.0.0' : '1.1.0',
     canonicalization_version: 'RFC8785',
     source: SOURCE,
     source_schema_release: 'synthetic-deriv-1',
     source_schema_sha256: sha256('esquema'),
-    connector_version: 'deriv-options-ws-1.1.0',
+    connector_version: batch === undefined ? 'deriv-options-ws-1.1.0' : 'deriv-options-lotes-1.0.0',
     normalizer_version: '3.0.0',
-    quality_rule_version: '3.0.0',
-    quality_profile_id: 'deriv_options-publication-v1-R_100',
+    quality_rule_version: batch === undefined ? '3.0.0' : '4.0.0',
+    quality_profile_id:
+      batch === undefined
+        ? 'deriv_options-publication-v1-R_100'
+        : 'deriv_options-lotes-v1-cotizaciones',
     quality_profile_sha256: sha256('perfil'),
-    segment_policy_version: '1.0.0',
+    segment_policy_version: batch === undefined ? '1.0.0' : '2.0.0',
     source_event_schema_version: '1.0.0',
     market_tick_schema_version: '1.0.0',
-    incident_schema_version: '2.0.0',
+    incident_schema_version: batch === undefined ? '2.0.0' : '3.0.0',
     condition_event_schema_version: '1.0.0',
     symbols: ['R_100'],
     event_time_from_utc: input.period?.[0] ?? null,
@@ -216,23 +258,29 @@ function manifestCore(input: {
  */
 async function publishDataset(input: DatasetInput) {
   const id = nextUuid();
-  const ticks = input.ticks ?? (input.period === null ? 0 : 5000);
+  const batch = input.batch;
+  const ticks = input.ticks ?? (input.period === null || batch !== undefined ? 0 : 5000);
   const incidents = input.incidents ?? [];
   const core = manifestCore({
+    batch,
     id,
     incidents: incidents.length,
     period:
       input.period === undefined
-        ? ['2026-11-01T00:00:00.000Z', '2026-11-01T05:59:58.000Z']
+        ? batch === undefined
+          ? ['2026-11-01T00:00:00.000Z', '2026-11-01T05:59:58.000Z']
+          : null
         : input.period,
     ticks,
   });
   const text = input.coreText?.(core) ?? canonicalJson(core);
   const datasetId = `sha256:${sha256(text)}`;
   const publicationId = nextUuid();
-  const first = nextSegment.get(input.log) ?? 0;
+  const sequenceName = input.sequence ?? 'R_100';
+  const key = `${sequenceName}:${String(input.log)}`;
+  const first = nextSegment.get(key) ?? 0;
   const last = first + (input.segments ?? 72) - 1;
-  nextSegment.set(input.log, last + 1);
+  nextSegment.set(key, last + 1);
   const pending = [...(input.pending ?? [])];
   const open = [...(input.open ?? [])];
   const clean = pending.length === 0 && !open.includes('connection_lost');
@@ -265,8 +313,8 @@ async function publishDataset(input: DatasetInput) {
       `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
          (dataset_id, publication_id, sequence, log_number, first_segment, last_segment, clean,
           pending_continuity_symbols, open_condition_types)
-       VALUES ($1, $2, 'R_100', $3, $4, $5, $6, $7, $8)`,
-      [datasetId, publicationId, input.log, first, last, clean, pending, open],
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [datasetId, publicationId, sequenceName, input.log, first, last, clean, pending, open],
     );
     await client.query('COMMIT');
   } catch (error) {
@@ -350,16 +398,16 @@ afterAll(async () => {
   }
 });
 
-describe('GET /api/v1/datos/datasets contra PostgreSQL (ADR-0020 §10)', () => {
+describe('GET /api/v2/datos/datasets contra PostgreSQL (ADR-0020 §10; ADR-0021 §5)', () => {
   it('sin el esquema buoh_datasets, como antes de la primera publicación, ningún dataset', async () => {
     await resetDatasets({ migrated: false });
     expect(await getDatasets()).toMatchObject({
-      body: { datasets: [], truncated: false },
+      body: { sequences: [] },
       status: 200,
     });
     await resetDatasets();
     expect(await getDatasets()).toMatchObject({
-      body: { datasets: [], truncated: false },
+      body: { sequences: [] },
       status: 200,
     });
   });
@@ -421,12 +469,14 @@ describe('GET /api/v1/datos/datasets contra PostgreSQL (ADR-0020 §10)', () => {
     const response = await getDatasets();
     expect(response.status).toBe(200);
     const body = dataDatasetsSchema.parse(response.body);
-    expect(body.truncated).toBe(false);
-    expect(body.datasets.map((dataset) => dataset.dataset_id)).toEqual([
+    expect(body.sequences.map((group) => group.sequence)).toEqual(['R_100']);
+    const live = body.sequences[0];
+    expect(live?.truncated).toBe(false);
+    expect(live?.datasets.map((dataset) => dataset.dataset_id)).toEqual([
       second.datasetId,
       first.datasetId,
     ]);
-    expect(body.datasets[1]).toEqual({
+    expect(live?.datasets[1]).toEqual({
       dataset_id: first.datasetId,
       publication_id: first.publicationId,
       published_at_utc: '2026-11-14T12:21:23.290Z',
@@ -464,8 +514,9 @@ describe('GET /api/v1/datos/datasets contra PostgreSQL (ADR-0020 §10)', () => {
           error_code: null,
         },
       },
+      batch: null,
     });
-    expect(body.datasets[0]).toMatchObject({
+    expect(live?.datasets[0]).toMatchObject({
       first_segment: 72,
       last_segment: 142,
       event_time_from_utc: null,
@@ -480,24 +531,155 @@ describe('GET /api/v1/datos/datasets contra PostgreSQL (ADR-0020 §10)', () => {
     await resetDatasets();
   });
 
-  it(`con ${String(DATA_DATASETS_LIMIT)} datasets, la lista entera; con más, los más recientes y cortada`, async () => {
+  it(`con ${String(DATA_DATASETS_LIMIT)} datasets en una secuencia, su lista entera; con más, los más recientes y cortada, sin tapar los de otra secuencia (ADR-0021 §5)`, async () => {
     const published = (index: number) =>
       new Date(Date.parse('2026-11-20T00:00:00.000Z') + index * 1000).toISOString();
+    const quotes = { candles: 0, offers: 0, quotes: 763, sessions: 0 };
+    // Uno de R_100, más viejo que todos los de las cotizaciones.
+    const live = await publishDataset({ log: 3, published: published(-1), segments: 72 });
     for (let index = 0; index < DATA_DATASETS_LIMIT; index += 1) {
-      await publishDataset({ log: 3, published: published(index), segments: 1 });
+      await publishDataset({
+        batch: quotes,
+        log: 1,
+        published: published(index),
+        segments: 1,
+        sequence: 'lotes_cotizaciones',
+      });
     }
     const exact = dataDatasetsSchema.parse((await getDatasets()).body);
-    expect(exact.datasets).toHaveLength(DATA_DATASETS_LIMIT);
-    expect(exact.truncated).toBe(false);
-    // Dos más que el límite: se ven los más nuevos, del último al tercero.
+    expect(exact.sequences.map((group) => [group.sequence, group.datasets.length])).toEqual([
+      ['R_100', 1],
+      ['lotes_cotizaciones', DATA_DATASETS_LIMIT],
+    ]);
+    expect(exact.sequences.map((group) => group.truncated)).toEqual([false, false]);
+    // Dos más que el límite: se ven los más nuevos, del último al tercero, y el de R_100 sigue.
     for (const index of [DATA_DATASETS_LIMIT, DATA_DATASETS_LIMIT + 1]) {
-      await publishDataset({ log: 3, published: published(index), segments: 1 });
+      await publishDataset({
+        batch: quotes,
+        log: 1,
+        published: published(index),
+        segments: 1,
+        sequence: 'lotes_cotizaciones',
+      });
     }
     const cut = dataDatasetsSchema.parse((await getDatasets()).body);
-    expect(cut.truncated).toBe(true);
-    expect(cut.datasets).toHaveLength(DATA_DATASETS_LIMIT);
-    expect(cut.datasets[0]?.published_at_utc).toBe(published(DATA_DATASETS_LIMIT + 1));
-    expect(cut.datasets.at(-1)?.published_at_utc).toBe(published(2));
+    const [r100, batch] = cut.sequences;
+    expect(r100?.datasets.map((dataset) => dataset.dataset_id)).toEqual([live.datasetId]);
+    expect(r100?.truncated).toBe(false);
+    expect(batch?.sequence).toBe('lotes_cotizaciones');
+    expect(batch?.truncated).toBe(true);
+    expect(batch?.datasets).toHaveLength(DATA_DATASETS_LIMIT);
+    expect(batch?.datasets[0]?.published_at_utc).toBe(published(DATA_DATASETS_LIMIT + 1));
+    expect(batch?.datasets.at(-1)?.published_at_utc).toBe(published(2));
+    await resetDatasets();
+  });
+
+  it('un dataset de los lotes, con su core 1.1.0, sus velas, horarios, ofertas y cotizaciones y las incidencias de los lotes (candle_missing, candle_repeated y contract_rejected)', async () => {
+    const candles = await publishDataset({
+      batch: { candles: 2879, offers: 0, quotes: 0, sessions: 7 },
+      incidents: [
+        ['candle_missing', 'error'],
+        ['candle_repeated', 'warning'],
+        ['candle_repeated', 'error'],
+      ],
+      log: 1,
+      published: '2026-11-27T00:05:00.000Z',
+      segments: 5,
+      sequence: 'lotes_velas',
+    });
+    const schedules = await publishDataset({
+      batch: { candles: 0, offers: 8, quotes: 0, sessions: 16 },
+      log: 1,
+      published: '2026-11-27T00:10:00.000Z',
+      segments: 3,
+      sequence: 'lotes_horarios',
+    });
+    const quotes = await publishDataset({
+      batch: { candles: 0, offers: 0, quotes: 760, sessions: 0 },
+      incidents: [['contract_rejected', 'warning']],
+      log: 1,
+      published: '2026-11-27T03:05:00.000Z',
+      segments: 36,
+      sequence: 'lotes_cotizaciones',
+      verifications: [
+        ['verify-only', 'passed', null],
+        ['recompute', 'passed', null],
+      ],
+    });
+    const response = await getDatasets();
+    expect(response.status).toBe(200);
+    const body = dataDatasetsSchema.parse(response.body);
+    expect(body.sequences.map((group) => group.sequence)).toEqual([
+      'lotes_cotizaciones',
+      'lotes_horarios',
+      'lotes_velas',
+    ]);
+    const [quotesGroup, schedulesGroup, candlesGroup] = body.sequences;
+    expect(candlesGroup?.datasets).toEqual([
+      expect.objectContaining({
+        dataset_id: candles.datasetId,
+        log: 1,
+        first_segment: 0,
+        last_segment: 4,
+        event_time_from_utc: null,
+        event_time_to_utc: null,
+        normalized_tick_count: 0,
+        incident_count: 3,
+        quality_rule_version: '4.0.0',
+        clean: true,
+        incidents: [
+          { incident_type: 'candle_missing', severity: 'error', count: 1 },
+          { incident_type: 'candle_repeated', severity: 'error', count: 1 },
+          { incident_type: 'candle_repeated', severity: 'warning', count: 1 },
+        ],
+        batch: {
+          candle_time_from_utc: '2026-11-26T00:00:00.000Z',
+          candle_time_to_utc: '2026-11-26T23:59:00.000Z',
+          market_candle_count: 2879,
+          trading_session_count: 7,
+          contract_offer_count: 0,
+          contract_quote_count: 0,
+        },
+      }),
+    ]);
+    expect(schedulesGroup?.datasets[0]).toMatchObject({
+      dataset_id: schedules.datasetId,
+      batch: {
+        candle_time_from_utc: null,
+        candle_time_to_utc: null,
+        market_candle_count: 0,
+        trading_session_count: 16,
+        contract_offer_count: 8,
+        contract_quote_count: 0,
+      },
+    });
+    expect(quotesGroup?.datasets[0]).toMatchObject({
+      dataset_id: quotes.datasetId,
+      incidents: [{ incident_type: 'contract_rejected', severity: 'warning', count: 1 }],
+      batch: { contract_quote_count: 760, market_candle_count: 0 },
+      verifications: { verify_only: { status: 'passed' }, recompute: { status: 'passed' } },
+    });
+    await resetDatasets();
+  });
+
+  it('una secuencia que no tiene el formato de su nombre es internal con DatasetIntegrityError', async () => {
+    await resetDatasets();
+    // La columna lo comprueba: se quita su restricción, como un error de programación.
+    await ready(admin).query(
+      `ALTER TABLE ${DATASETS_SCHEMA}.dataset_log_ranges DROP CONSTRAINT IF EXISTS dataset_log_ranges_sequence_check`,
+    );
+    await publishDataset({
+      log: 1,
+      published: '2026-11-14T12:00:00.000Z',
+      sequence: 'lotes-velas',
+    });
+    const response = await getDatasets();
+    expect(response.status).toBe(500);
+    expect(response.lines).toContainEqual({
+      event: 'api_error',
+      request_id: '00000000-0000-4000-8000-000000000000',
+      error: 'DatasetIntegrityError',
+    });
     await resetDatasets();
   });
 

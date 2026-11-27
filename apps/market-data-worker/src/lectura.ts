@@ -39,6 +39,7 @@ export {
   logNumberOf,
   MAX_LOG_NUMBER,
   productionLogConfigErrors,
+  R_100_SEQUENCE,
   readCaptureLog,
   selectActiveLog,
   withLog,

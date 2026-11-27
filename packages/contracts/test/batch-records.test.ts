@@ -508,6 +508,23 @@ describe('JSON Schema de los registros de los lotes', () => {
   });
 });
 
+describe('los tipos de DataQualityIncident (PR 5e de ADR-0021)', () => {
+  it('dataQualityIncidentTypeSchema son exactamente los tipos de la unión, y qualityIncidentTypeSchema no cambia', () => {
+    const types = publicContracts.dataQualityIncidentSchema.options.map(
+      (option) => option.shape.incident_type.value,
+    );
+    expect([...publicContracts.dataQualityIncidentTypeSchema.options].sort()).toEqual(
+      [...types].sort(),
+    );
+    // Las `quality_flags` de MarketTick y MarketCandle siguen con los nueve de antes.
+    expect(publicContracts.qualityIncidentTypeSchema.options).toHaveLength(9);
+    for (const type of ['contract_rejected', 'candle_repeated', 'candle_missing']) {
+      expect(publicContracts.qualityIncidentTypeSchema.safeParse(type).success).toBe(false);
+      expect(publicContracts.dataQualityIncidentTypeSchema.safeParse(type).success).toBe(true);
+    }
+  });
+});
+
 describe('DataQualityIncident 3.0.0 y contract_rejected', () => {
   const rejectedBody = {
     evidence: {

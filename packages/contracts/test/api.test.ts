@@ -39,6 +39,7 @@ const TOTP_URI = `otpauth://totp/buoh:pedro?secret=${TOTP_SECRET}&issuer=buoh&al
 function accepts(schema: { safeParse(value: unknown): { success: boolean } }, value: unknown) {
   return schema.safeParse(value).success;
 }
+const acceptsValue = accepts;
 
 describe('ApiError', () => {
   it('acepta cada código sin campos propios con el identificador de la petición', () => {
@@ -799,10 +800,38 @@ describe('DataEvents (ADR-0019 §5 y §8)', () => {
     events: [resolved, opened, incident, limit, response, catalog, publication],
     truncated: false,
   };
+  // Las reglas de cada secuencia, con la de R_100 como única secuencia (ADR-0021 §5).
+  const accepts = (schema: typeof dataEventsSchema, value: Record<string, unknown>) =>
+    acceptsValue(schema, { sequences: [{ sequence: 'R_100', ...value }] });
+
+  it('agrupa por secuencia: sin repetir, por su nombre, y cada una con algún log o algún evento (ADR-0021 §5)', () => {
+    const batch = {
+      sequence: 'lotes_velas',
+      logs: [],
+      events: [{ ...publication, log: 1 }],
+      truncated: false,
+    };
+    const r100 = { sequence: 'R_100', ...events };
+    expect(acceptsValue(dataEventsSchema, { sequences: [] })).toBe(true);
+    expect(acceptsValue(dataEventsSchema, { sequences: [r100, batch] })).toBe(true);
+    for (const value of [
+      { sequences: [batch, r100] },
+      { sequences: [r100, r100] },
+      { sequences: [{ ...batch, events: [] }] },
+      { sequences: [{ ...batch, sequence: 'lotes-velas' }] },
+      { sequences: [{ ...batch, sequence: '' }] },
+      { sequences: [{ ...batch, extra: 1 }] },
+      { ...events },
+      { sequences: [r100], logs: [] },
+    ]) {
+      expect(acceptsValue(dataEventsSchema, value), JSON.stringify(value).slice(0, 300)).toBe(
+        false,
+      );
+    }
+  });
 
   it('acepta las cuatro clases de evento, del más nuevo al más viejo, y las listas vacías', () => {
     expect(accepts(dataEventsSchema, events)).toBe(true);
-    expect(accepts(dataEventsSchema, { logs: [], events: [], truncated: false })).toBe(true);
     expect(accepts(dataEventsSchema, { logs: [4], events: [], truncated: false })).toBe(true);
     const full = Array.from({ length: DATA_EVENTS_LIMIT }, () => catalog);
     expect(accepts(dataEventsSchema, { logs: [3], events: full, truncated: true })).toBe(true);
@@ -937,6 +966,7 @@ describe('DataDatasets (ADR-0020 §10)', () => {
       verify_only: verification,
       recompute: { ...verification, verified_at_utc: '2026-11-14T12:21:46.868Z' },
     },
+    batch: null,
   };
   const older = {
     ...dataset,
@@ -964,10 +994,102 @@ describe('DataDatasets (ADR-0020 §10)', () => {
     },
   };
   const response = { datasets: [dataset, older], truncated: false };
+  // Las reglas de cada secuencia, con la de R_100 como única secuencia (ADR-0021 §5).
+  const accepts = (schema: typeof dataDatasetsSchema, value: Record<string, unknown>) =>
+    acceptsValue(schema, { sequences: [{ sequence: 'R_100', ...value }] });
+  // Un día de velas de los lotes, con su horario y una vela que falta (core 1.1.0).
+  const candles = {
+    ...dataset,
+    dataset_id: `sha256:${hex('3')}`,
+    publication_id: '019b76da-a800-7000-8000-000000000043',
+    symbols: ['frxEURUSD', 'frxXAUUSD'],
+    log: 1,
+    first_segment: 0,
+    last_segment: 0,
+    event_time_from_utc: null,
+    event_time_to_utc: null,
+    source_event_count: 19,
+    raw_frame_count: 15,
+    normalized_tick_count: 0,
+    incident_count: 3,
+    condition_event_count: 0,
+    quality_rule_version: '4.0.0',
+    quality_profile_id: 'deriv_options-lotes-v1-velas',
+    incidents: [
+      { incident_type: 'candle_missing', severity: 'error', count: 1 },
+      { incident_type: 'candle_repeated', severity: 'warning', count: 1 },
+      { incident_type: 'contract_rejected', severity: 'warning', count: 1 },
+    ],
+    batch: {
+      candle_time_from_utc: '2026-11-26T00:00:00.000Z',
+      candle_time_to_utc: '2026-11-26T23:59:00.000Z',
+      market_candle_count: 2879,
+      trading_session_count: 2,
+      contract_offer_count: 0,
+      contract_quote_count: 0,
+    },
+  };
 
-  it('acepta los datasets del más nuevo al más viejo, la lista vacía y una lista llena cortada', () => {
+  it('agrupa por secuencia: sin repetir, por su nombre, sin grupos vacíos y cada dataset una vez (ADR-0021 §5)', () => {
+    const r100 = { sequence: 'R_100', ...response };
+    const batch = { sequence: 'lotes_velas', datasets: [candles], truncated: false };
+    expect(acceptsValue(dataDatasetsSchema, { sequences: [] })).toBe(true);
+    expect(acceptsValue(dataDatasetsSchema, { sequences: [r100, batch] })).toBe(true);
+    for (const value of [
+      { sequences: [batch, r100] },
+      { sequences: [batch, batch] },
+      { sequences: [{ ...batch, datasets: [] }] },
+      {
+        sequences: [r100, { ...batch, datasets: [{ ...candles, dataset_id: dataset.dataset_id }] }],
+      },
+      { sequences: [{ ...batch, sequence: 'lotes velas' }] },
+      { sequences: [{ ...batch, extra: 1 }] },
+      { ...response },
+    ]) {
+      expect(acceptsValue(dataDatasetsSchema, value), JSON.stringify(value).slice(0, 300)).toBe(
+        false,
+      );
+    }
+  });
+
+  it('un dataset de los lotes: los tipos de incidencia de los lotes y el período de sus velas, null exactamente sin velas', () => {
+    const one = (value: Record<string, unknown>) => ({ datasets: [value], truncated: false });
+    expect(accepts(dataDatasetsSchema, one(candles))).toBe(true);
+    const quotes = {
+      ...candles,
+      incident_count: 0,
+      incidents: [],
+      batch: {
+        candle_time_from_utc: null,
+        candle_time_to_utc: null,
+        market_candle_count: 0,
+        trading_session_count: 0,
+        contract_offer_count: 0,
+        contract_quote_count: 763,
+      },
+    };
+    expect(accepts(dataDatasetsSchema, one(quotes))).toBe(true);
+    for (const value of [
+      { ...quotes, batch: { ...quotes.batch, market_candle_count: 1 } },
+      { ...candles, batch: { ...candles.batch, candle_time_to_utc: null } },
+      {
+        ...candles,
+        batch: {
+          ...candles.batch,
+          candle_time_from_utc: candles.batch.candle_time_to_utc,
+          candle_time_to_utc: candles.batch.candle_time_from_utc,
+        },
+      },
+      { ...candles, batch: { ...candles.batch, contract_quote_count: -1 } },
+      { ...candles, batch: { ...candles.batch, extra: 1 } },
+      { ...candles, batch: undefined },
+    ]) {
+      expect(accepts(dataDatasetsSchema, one(value)), JSON.stringify(value.batch)).toBe(false);
+    }
+  });
+
+  it('acepta los datasets del más nuevo al más viejo y una lista llena cortada', () => {
     expect(accepts(dataDatasetsSchema, response)).toBe(true);
-    expect(accepts(dataDatasetsSchema, { datasets: [], truncated: false })).toBe(true);
     const full = Array.from({ length: DATA_DATASETS_LIMIT }, (_, index) => ({
       ...dataset,
       dataset_id: `sha256:${index.toString(16).padStart(64, '0')}`,

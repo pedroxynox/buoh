@@ -251,10 +251,10 @@ const DATOS_SALUD = {
 
 const DATOS_EVENTOS = {
   method: 'GET',
-  url: '/api/v1/datos/eventos',
+  url: '/api/v2/datos/eventos',
   operationId: 'getDatosEventos',
   summary:
-    'Los eventos de datos más recientes de los logs que no han vencido: versiones del catálogo, publicaciones, incidencias y condiciones, del más nuevo al más viejo (ADR-0019 §5 y §8).',
+    'Los eventos de datos más recientes de los logs que no han vencido, agrupados por secuencia: versiones del catálogo, publicaciones, incidencias y condiciones, del más nuevo al más viejo (ADR-0019 §5 y §8; ADR-0021 §5).',
   querystring: NO_QUERY,
   responses: { 200: dataEventsSchema },
   errors: {
@@ -265,10 +265,10 @@ const DATOS_EVENTOS = {
 
 const DATOS_DATASETS = {
   method: 'GET',
-  url: '/api/v1/datos/datasets',
+  url: '/api/v2/datos/datasets',
   operationId: 'getDatosDatasets',
   summary:
-    'Los datasets publicados más recientes, del más nuevo al más viejo: su período, sus conteos, cómo terminaron, sus incidencias y la última verificación de cada modo, leídos de buoh_datasets (ADR-0020 §10).',
+    'Los datasets publicados más recientes, agrupados por secuencia y del más nuevo al más viejo: su período, sus conteos, cómo terminaron, sus incidencias y la última verificación de cada modo, leídos de buoh_datasets (ADR-0020 §10; ADR-0021 §5).',
   querystring: NO_QUERY,
   responses: { 200: dataDatasetsSchema },
   errors: {

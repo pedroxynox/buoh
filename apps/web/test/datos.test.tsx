@@ -4,7 +4,12 @@
  * vista en cada estado, sin controles para cambiar nada; y la lectura de la API, sin el token CSRF.
  * Los datasets son sintéticos, con la forma de los que publicó producción.
  */
-import { dataDatasetsSchema, type DataDataset, type DataDatasets } from '@buoh/contracts';
+import {
+  dataDatasetsSchema,
+  type DataDataset,
+  type DataDatasets,
+  type DataDatasetsSequence,
+} from '@buoh/contracts';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -18,6 +23,9 @@ import {
   datasetEnd,
   datasetIncidents,
   datasetPeriod,
+  datasetRecords,
+  sequenceInterval,
+  sequenceTitle,
   verificationText,
 } from '../src/components/datos/datasets';
 import { DATA_DATASETS_LIMIT, readDataDatasets } from '../src/components/datos/respuesta';
@@ -57,6 +65,7 @@ const CLEAN = {
     },
     recompute: { status: 'passed', verified_at_utc: '2026-11-14T12:21:46.868Z', error_code: null },
   },
+  batch: null,
 } satisfies DataDataset;
 
 const OPEN = {
@@ -84,39 +93,104 @@ const OPEN = {
   },
 } satisfies DataDataset;
 
-const DATASETS: DataDatasets = { datasets: [CLEAN, OPEN], truncated: false };
+/** Un día de velas de los lotes (core 1.1.0), con su horario y las incidencias de los lotes. */
+const CANDLES = {
+  ...CLEAN,
+  dataset_id: `sha256:${hex('3')}`,
+  publication_id: '019b76da-a800-7000-8000-000000000043',
+  published_at_utc: '2026-11-27T00:05:00.000Z',
+  symbols: ['frxEURUSD', 'frxXAUUSD'],
+  first_segment: 0,
+  last_segment: 4,
+  event_time_from_utc: null,
+  event_time_to_utc: null,
+  source_event_count: 19,
+  raw_frame_count: 15,
+  normalized_tick_count: 0,
+  incident_count: 4,
+  condition_event_count: 0,
+  quality_rule_version: '4.0.0',
+  quality_profile_id: 'deriv_options-lotes-v1-velas',
+  incidents: [
+    { incident_type: 'candle_missing', severity: 'error', count: 2 },
+    { incident_type: 'candle_repeated', severity: 'warning', count: 1 },
+    { incident_type: 'contract_rejected', severity: 'warning', count: 1 },
+  ],
+  batch: {
+    candle_time_from_utc: '2026-11-26T00:00:00.000Z',
+    candle_time_to_utc: '2026-11-26T23:59:00.000Z',
+    market_candle_count: 2879,
+    trading_session_count: 1,
+    contract_offer_count: 0,
+    contract_quote_count: 0,
+  },
+} satisfies DataDataset;
+
+/** Una secuencia con esos datasets y sin cortar. */
+const group = (sequence: string, datasets: DataDataset[]): DataDatasetsSequence => ({
+  sequence,
+  datasets,
+  truncated: false,
+});
+/** Solo R_100, con esos datasets. */
+const inR100 = (...datasets: Record<string, unknown>[]) => ({
+  sequences: [{ sequence: 'R_100', datasets, truncated: false }],
+});
+
+const LIVE = group('R_100', [CLEAN, OPEN]);
+const DATASETS: DataDatasets = { sequences: [LIVE, group('lotes_velas', [CANDLES])] };
+const FULL = {
+  sequence: 'R_100',
+  datasets: Array.from({ length: DATA_DATASETS_LIMIT }, (_, index) => ({
+    ...CLEAN,
+    dataset_id: `sha256:${index.toString(16).padStart(64, '0')}`,
+  })),
+  truncated: true,
+};
 
 describe('la respuesta de los datasets, como el contrato', () => {
   const samples: unknown[] = [
     DATASETS,
-    { datasets: [], truncated: false },
+    { sequences: [] },
+    { sequences: [FULL] },
     {
-      datasets: Array.from({ length: DATA_DATASETS_LIMIT }, (_, index) => ({
-        ...CLEAN,
-        dataset_id: `sha256:${index.toString(16).padStart(64, '0')}`,
-      })),
-      truncated: true,
-    },
-    {
-      datasets: [
+      sequences: [
         {
-          ...CLEAN,
-          verifications: {
-            verify_only: {
-              status: 'incomplete',
-              verified_at_utc: CLEAN.published_at_utc,
-              error_code: null,
+          sequence: 'lotes_cotizaciones',
+          truncated: false,
+          datasets: [
+            {
+              ...CANDLES,
+              incident_count: 0,
+              incidents: [],
+              batch: {
+                ...CANDLES.batch,
+                candle_time_from_utc: null,
+                candle_time_to_utc: null,
+                market_candle_count: 0,
+                trading_session_count: 0,
+                contract_quote_count: 760,
+              },
             },
-            recompute: {
-              status: 'incomplete',
-              verified_at_utc: CLEAN.published_at_utc,
-              error_code: 'CHILD_TIMEOUT',
-            },
-          },
+          ],
         },
       ],
-      truncated: false,
     },
+    inR100({
+      ...CLEAN,
+      verifications: {
+        verify_only: {
+          status: 'incomplete',
+          verified_at_utc: CLEAN.published_at_utc,
+          error_code: null,
+        },
+        recompute: {
+          status: 'incomplete',
+          verified_at_utc: CLEAN.published_at_utc,
+          error_code: 'CHILD_TIMEOUT',
+        },
+      },
+    }),
   ];
 
   it('acepta lo que acepta el esquema', () => {
@@ -127,11 +201,32 @@ describe('la respuesta de los datasets, como el contrato', () => {
   });
 
   it('rechaza, como el esquema, cada regla entre campos', () => {
-    const one = (value: Record<string, unknown>) => ({ datasets: [value], truncated: false });
+    const one = (value: Record<string, unknown>) => inR100(value);
     const invalid: unknown[] = [
-      { ...DATASETS, datasets: [OPEN, CLEAN] },
-      { ...DATASETS, truncated: true },
-      { datasets: [CLEAN, CLEAN], truncated: false },
+      inR100(OPEN, CLEAN),
+      { sequences: [{ ...LIVE, truncated: true }] },
+      inR100(CLEAN, CLEAN),
+      // Las secuencias por su nombre, sin repetir y sin vacías, y cada dataset una vez.
+      { sequences: [...DATASETS.sequences].reverse() },
+      { sequences: [LIVE, LIVE] },
+      { sequences: [group('R_100', [])] },
+      { sequences: [LIVE, group('lotes_velas', [{ ...CANDLES, dataset_id: CLEAN.dataset_id }])] },
+      { sequences: [{ ...LIVE, sequence: 'lotes velas' }] },
+      { sequences: [{ ...LIVE, extra: 1 }] },
+      { datasets: [CLEAN], truncated: false },
+      // El período de las velas, null exactamente sin velas y en orden.
+      one({ ...CANDLES, batch: { ...CANDLES.batch, candle_time_to_utc: null } }),
+      one({ ...CANDLES, batch: { ...CANDLES.batch, market_candle_count: 0 } }),
+      one({
+        ...CANDLES,
+        batch: {
+          ...CANDLES.batch,
+          candle_time_from_utc: CANDLES.batch.candle_time_to_utc,
+          candle_time_to_utc: CANDLES.batch.candle_time_from_utc,
+        },
+      }),
+      one({ ...CANDLES, batch: { ...CANDLES.batch, extra: 1 } }),
+      one({ ...CLEAN, batch: undefined }),
       one({ ...CLEAN, first_segment: 72 }),
       one({ ...CLEAN, event_time_to_utc: null }),
       one({ ...CLEAN, normalized_tick_count: 0 }),
@@ -174,11 +269,15 @@ describe('la respuesta de los datasets, como el contrato', () => {
       one({ ...CLEAN, log: 1_000_000 }),
       one({ ...CLEAN, extra: 1 }),
       {
-        datasets: Array.from({ length: DATA_DATASETS_LIMIT + 1 }, (_, index) => ({
-          ...CLEAN,
-          dataset_id: `sha256:${index.toString(16).padStart(64, '0')}`,
-        })),
-        truncated: true,
+        sequences: [
+          {
+            ...FULL,
+            datasets: Array.from({ length: DATA_DATASETS_LIMIT + 1 }, (_, index) => ({
+              ...CLEAN,
+              dataset_id: `sha256:${index.toString(16).padStart(64, '0')}`,
+            })),
+          },
+        ],
       },
     ];
     for (const value of invalid) {
@@ -225,6 +324,8 @@ describe('la respuesta de los datasets, como el contrato', () => {
     'connection_lost',
     'duplicate_exact',
     'event_gap_unresolved',
+    'candle_missing',
+    'lotes_velas',
     'info',
     'warning',
     'STORAGE_OBJECT_MISMATCH',
@@ -331,6 +432,55 @@ describe('los textos de cada dataset', () => {
       }),
     ).toBe('Sin resultado');
   });
+
+  it('en un dataset de los lotes: el período de sus velas, sus registros y las incidencias de los lotes', () => {
+    expect(datasetRecords(CLEAN)).toBe('11190 ticks');
+    expect(datasetRecords({ ...OPEN, normalized_tick_count: 1 })).toBe('1 tick');
+    expect(datasetPeriod(CANDLES)).toBe(
+      'Velas de 26 nov 2026, 00:00:00 UTC – 26 nov 2026, 23:59:00 UTC',
+    );
+    expect(datasetRecords(CANDLES)).toBe('2879 velas y 1 horario');
+    expect(datasetIncidents(CANDLES)).toBe(
+      '4: 2 tramos sin velas, 1 vela repetida, 1 contrato rechazado',
+    );
+    const schedules = {
+      ...CANDLES,
+      batch: {
+        ...CANDLES.batch,
+        candle_time_from_utc: null,
+        candle_time_to_utc: null,
+        market_candle_count: 0,
+        trading_session_count: 16,
+        contract_offer_count: 8,
+      },
+    };
+    expect(datasetPeriod(schedules)).toBe('Sin ticks ni velas');
+    expect(datasetRecords(schedules)).toBe('16 horarios y 8 ofertas de contratos');
+    expect(
+      datasetRecords({
+        ...schedules,
+        batch: { ...schedules.batch, trading_session_count: 0, contract_offer_count: 0 },
+      }),
+    ).toBe('Ninguno');
+    expect(
+      datasetRecords({
+        ...schedules,
+        batch: { ...schedules.batch, contract_offer_count: 1, contract_quote_count: 1 },
+      }),
+    ).toBe('16 horarios, 1 oferta de contratos y 1 cotización');
+  });
+
+  it('el nombre y el intervalo de cada secuencia; una que la web no conoce, con su nombre y sin intervalo', () => {
+    expect(sequenceTitle('R_100')).toBe('R_100 en vivo');
+    expect(sequenceTitle('lotes_velas')).toBe('Lotes: velas de 1 minuto');
+    expect(sequenceTitle('lotes_nuevos')).toBe('lotes_nuevos');
+    expect(sequenceTitle('toString')).toBe('toString');
+    expect(sequenceInterval('lotes_cotizaciones')).toBe(
+      'Cada dataset tiene unas 3 horas de cotizaciones, cortadas cada 3 horas desde la medianoche UTC.',
+    );
+    expect(sequenceInterval('frxXAUUSD')).toBeNull();
+    expect(sequenceInterval('lotes_nuevos')).toBeNull();
+  });
 });
 
 describe('la vista de los datasets publicados', () => {
@@ -339,12 +489,23 @@ describe('la vista de los datasets publicados', () => {
 
   const READ_AT = '2026-11-14T15:50:12.345Z';
 
-  it('con datasets: una fila por dataset, con la fuente, los símbolos, las reglas, el intervalo, cuánto se guardan y la hora de la lectura', () => {
+  it('con datasets: una tabla por secuencia y una fila por dataset, con la fuente, los símbolos, las reglas, el intervalo, cuánto se guardan y la hora de la lectura', () => {
     const html = render({ kind: 'ready', data: DATASETS, readAtUtc: READ_AT });
-    expect(html.match(/<tr>/gu)?.length).toBe(DATASETS.datasets.length + 1);
+    // Dos tablas, cada una con su cabecera: 2 + 1 filas de datasets.
+    expect(html.match(/<tr>/gu)?.length).toBe(3 + 2);
+    expect(html.match(/<table/gu)?.length).toBe(2);
+    expect(html.indexOf('<h3>R_100 en vivo</h3>')).toBeGreaterThan(-1);
+    expect(html.indexOf('<h3>Lotes: velas de 1 minuto</h3>')).toBeGreaterThan(
+      html.indexOf('<h3>R_100 en vivo</h3>'),
+    );
+    expect(html).toContain('2879 velas y 1 horario');
+    expect(html).toContain('2 tramos sin velas');
+    expect(html).toContain(
+      'Cada dataset tiene un día de velas de 1 minuto, cortado a la medianoche UTC, con el horario de ese día.',
+    );
     expect(html).toContain('14 nov 2026, 12:21:23 UTC');
     expect(html).toContain('Log 1 · segmentos 0–71');
-    expect(html).toContain('11190');
+    expect(html).toContain('11190 ticks');
     expect(html).toContain('Limpio');
     expect(html).toContain('Falló: STORAGE_OBJECT_MISMATCH');
     // La hora de cada verificación, en texto a la vista, no en un atributo.
@@ -355,7 +516,8 @@ describe('la vista de los datasets publicados', () => {
     expect(html).toContain('sha256:111111111111');
     expect(html).toContain('Deriv');
     expect(html).toContain('R_100');
-    expect(html).toContain('reglas 3.0.0');
+    expect(html).toContain('reglas 3.0.0, 4.0.0');
+    expect(html).toContain('Símbolos: R_100, frxEURUSD, frxXAUUSD');
     expect(html).toContain(
       'Cada dataset tiene unas 6 horas de captura, cortadas cerca de las 00:00, 06:00, 12:00 o 18:00 UTC, y uno nuevo suele llegar poco después de esas horas.',
     );
@@ -371,16 +533,14 @@ describe('la vista de los datasets publicados', () => {
   it('con la lista cortada, lo dice', () => {
     const html = render({
       kind: 'ready',
-      data: {
-        datasets: Array.from({ length: DATA_DATASETS_LIMIT }, (_, index) => ({
-          ...CLEAN,
-          dataset_id: `sha256:${index.toString(16).padStart(64, '0')}`,
-        })),
-        truncated: true,
-      },
+      data: { sequences: [FULL, group('lotes_velas', [CANDLES])] },
       readAtUtc: READ_AT,
     });
-    expect(html).toContain(`Se muestran los ${String(DATA_DATASETS_LIMIT)} más recientes`);
+    // Solo en la secuencia cortada.
+    expect(html.match(/más recientes: hay otros más viejos/gu)?.length).toBe(1);
+    expect(
+      html.indexOf(`Se muestran los ${String(DATA_DATASETS_LIMIT)} más recientes`),
+    ).toBeLessThan(html.indexOf('<h3>Lotes: velas de 1 minuto</h3>'));
   });
 
   it('cargando, vacío y con un error, con el enlace para iniciar sesión si falta', () => {
@@ -390,7 +550,7 @@ describe('la vista de los datasets publicados', () => {
     // Vacío: por qué y qué hacer (concepto de interfaz §5).
     const empty = render({
       kind: 'ready',
-      data: { datasets: [], truncated: false },
+      data: { sequences: [] },
       readAtUtc: READ_AT,
     });
     expect(empty).toContain(
@@ -450,12 +610,12 @@ describe('la lectura de los datasets, sin el token CSRF', () => {
   it('GET al mismo origen, sin cuerpo ni token; sin la forma del contrato, «unexpected»', async () => {
     const requests = stubFetch(200, DATASETS);
     await expect(api.dataDatasets()).resolves.toEqual(DATASETS);
-    expect(requests[0]?.path).toBe('/api/v1/datos/datasets');
+    expect(requests[0]?.path).toBe('/api/v2/datos/datasets');
     expect(requests[0]?.init?.method).toBe('GET');
     expect(requests[0]?.init?.credentials).toBe('same-origin');
     expect(JSON.stringify(requests[0]?.init?.headers ?? {})).not.toMatch(/csrf/iu);
     expect(requests[0]?.init?.body).toBeUndefined();
-    stubFetch(200, { ...DATASETS, datasets: [OPEN, CLEAN] });
+    stubFetch(200, { sequences: [group('R_100', [OPEN, CLEAN])] });
     await expect(api.dataDatasets()).rejects.toMatchObject({ failure: { code: 'unexpected' } });
   });
 
