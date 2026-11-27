@@ -85,11 +85,11 @@ Lo que no llega por la suscripción en vivo entra por peticiones sueltas al mism
 - **`ContractOffer`** (precisión del PR 4b): de `contracts_for`, cuáles de los cuatro tipos de contrato ofrece un mercado y, en sube/baja, la duración mínima y la máxima de cada vencimiento, sin los multiplicadores, porque los que publica no siempre son los que acepta `proposal`: en los siete mercados reales no lo eran (§3). Qué multiplicadores se ofrecen lo dicen las cotizaciones, y un rechazo de `proposal` queda como incidencia de las reglas de los lotes, con el contrato pedido (ADR-0024 §4).
 - Los roles de los artefactos de un dataset suman los de esos datos. Las reglas de calidad de los lotes son un conjunto propio, con sus vectores sintéticos. Cada cambio de contrato sube su versión según los contratos de dominio.
 
-**La descarga de la historia.** `buoh-operaciones` la hace por partes, unas 100 páginas por ejecución como mucho:
+**La descarga de la historia.** `buoh-operaciones` la hace por partes, unas 100 páginas por ejecución como mucho (unas 25, por el límite de Deriv y el ritmo de los lotes; precisión del PR 6a de §9):
 
 - los ticks de R_100 y del oro desde un año antes de su primer tick en vivo hasta ese tick, que para R_100 es el del log 1, del 2026-11-01, por tramos contiguos que no se solapan, pedidos con `start` y `end`; así la historia y la captura no se solapan. Esa hora es un parámetro del perfil de cada historia, que el agente lee de la captura con su acceso (runbook de ingesta, «Acceso del agente»), así que el paso no necesita leer la captura ni `buoh_datasets`;
 - las velas de 1 minuto del último año de los siete mercados, y el horario de cada día de ese año;
-- la descarga tarda unos 2 días (estimación), y su publicación, con un dataset por ejecución detrás de las secuencias en vivo, al menos unos 9 días.
+- la descarga tarda unos 2 días (estimación), y su publicación, con un dataset por ejecución detrás de las secuencias en vivo, al menos unos 9 días. (Precisión del PR 6a de §9: la descarga, unos 9 días, y la publicación del oro, con los turnos de hoy, unas 5 semanas, y cada historia empieza como mucho 365 días antes de que se pida su primer tramo.)
 
 Un tramo sin ticks, o con menos de los esperados, dentro del horario de su mercado queda como incidencia: nunca se rellena. Un tick repetido entre páginas es una incidencia, y el primero cuenta. Como la historia y la captura son de la misma fuente, un mismo tick tiene la misma huella en las dos. Para el PR 6, el agente descarga desde el sandbox un día ya capturado de R_100, sin guardarlo, y comprueba con su acceso que sus ticks coinciden con los de la captura; ese día no entra en ninguna secuencia.
 
