@@ -6,6 +6,8 @@ import { historyPlan } from '../src/deriv/history-pages.js';
 import { DERIV_SOURCE } from '../src/deriv/profile.js';
 import {
   HISTORY_BLOCK_DEADLINE_MS,
+  HISTORY_LOCK_ATTEMPTS,
+  HISTORY_LOCK_RETRY_MS,
   HISTORY_MAX_FAILURES,
   HISTORY_PACING_MS,
   HISTORY_RATE_LIMIT_WAIT_MS,
@@ -76,7 +78,12 @@ interface LogState {
 
 function world(
   options: {
-    readonly busy?: boolean;
+    /** Cuántos intentos del bloqueo, por secuencia, dan `null`: con `true`, todos. */
+    readonly busy?: boolean | number;
+    /** Cuántos intentos del bloqueo, por secuencia, fallan como un `28P01`: con `true`, todos. */
+    readonly lockFails?: boolean | number;
+    /** La única secuencia cuyos intentos fallan, si se da. */
+    readonly lockFailsSequence?: string;
     /**
      * Lo que responde `datasets:publish` a una secuencia sin `--skip`, en lugar de publicar; con
      * `times`, solo esas veces.
@@ -120,12 +127,20 @@ function world(
   const published = new Map<string, number>();
   const index = { value: 0 };
   const locks: { held: boolean }[] = [];
+  const attempts = new Map<string, number>();
   let failures = 0;
   let id = 0;
   const deps: HistoryDependencies = {
     // Como un `SourceLock`: soltarlo lo pierde.
-    acquireLock: () => {
-      if (options.busy === true) {
+    acquireLock: (_config, sequence) => {
+      const tried = (attempts.get(sequence.name) ?? 0) + 1;
+      attempts.set(sequence.name, tried);
+      const fails =
+        options.lockFailsSequence === undefined || options.lockFailsSequence === sequence.name;
+      if (fails && (options.lockFails === true || tried <= Number(options.lockFails ?? 0))) {
+        return Promise.reject(Object.assign(new Error('rechazada'), { code: '28P01' }));
+      }
+      if (options.busy === true || tried <= Number(options.busy ?? 0)) {
         return Promise.resolve(null);
       }
       const lock = {
@@ -277,7 +292,7 @@ function world(
     }
     return result;
   };
-  return { lines, published, publishes, run, sent, sleeps, storesOf };
+  return { lines, locks, published, publishes, run, sent, sleeps, storesOf };
 }
 
 /** Las respuestas de la historia: los horarios, y las páginas de ticks, con un tick en su inicio. */
@@ -522,11 +537,84 @@ describe('historyCommand: las dos historias, bloque a bloque', () => {
     expect(env.published.get('lotes_historia_r_100')).toBe(2);
   });
 
-  it('con el bloqueo de otro proceso no pide nada, y la configuración no admite variables BUOH_POSTGRES_* ni BUOH_S3_*', async () => {
+  it('con el bloqueo de otro proceso, o sin PostgreSQL, espera unos 20 minutos sin pedir nada, y la configuración no admite variables BUOH_POSTGRES_* ni BUOH_S3_*', async () => {
     const busy = world({ busy: true });
     expect(await busy.run()).toEqual({ exitCode: 1, stderr: null });
     expect(busy.lines.at(-1)).toMatchObject({ reason: 'lock_busy', status: 'failed' });
+    expect(busy.lines.filter((line) => line['event'] === 'history_lock_waiting')).toEqual([
+      { event: 'history_lock_waiting', reason: 'lock_busy', sequence: 'lotes_historia_r_100' },
+    ]);
+    expect(busy.sleeps).toEqual(
+      Array.from({ length: HISTORY_LOCK_ATTEMPTS - 1 }, () => HISTORY_LOCK_RETRY_MS),
+    );
+    expect(HISTORY_LOCK_RETRY_MS * HISTORY_LOCK_ATTEMPTS).toBe(1_200_000);
     expect(busy.sent).toEqual([]);
+
+    // Tras rotar la contraseña de buoh_lotes, PostgreSQL la rechaza hasta que buoh-operaciones se
+    // la pone al rol: el bloqueo se reintenta igual, y si no llega, termina con su código. Aquí falla
+    // el del oro, con el de R_100 ya tomado, que se suelta al terminar.
+    const rejected = world({ lockFails: true, lockFailsSequence: 'lotes_historia_frxxauusd' });
+    expect(await rejected.run()).toEqual({ exitCode: 1, stderr: null });
+    expect(rejected.lines.at(-1)).toEqual({
+      detail: '28P01',
+      event: 'history_finished',
+      reason: 'lock_unavailable',
+      sequence: 'lotes_historia_frxxauusd',
+      status: 'failed',
+    });
+    expect(rejected.lines.filter((line) => line['event'] === 'history_lock_waiting')).toEqual([
+      {
+        detail: '28P01',
+        event: 'history_lock_waiting',
+        reason: 'lock_unavailable',
+        sequence: 'lotes_historia_frxxauusd',
+      },
+    ]);
+    expect(rejected.sleeps).toHaveLength(HISTORY_LOCK_ATTEMPTS - 1);
+    expect(rejected.locks.map((lock) => lock.held)).toEqual([false]);
+    expect(rejected.sent).toEqual([]);
+
+    // El motivo final es el del último intento: un rechazo anterior no lo cambia.
+    const late = world({ busy: true, lockFails: 2 });
+    expect(await late.run()).toEqual({ exitCode: 1, stderr: null });
+    expect(late.lines.at(-1)).toEqual({
+      event: 'history_finished',
+      reason: 'lock_busy',
+      sequence: 'lotes_historia_r_100',
+      status: 'failed',
+    });
+
+    // Como en un despliegue de Render: la instancia vieja suelta los bloqueos a los pocos segundos, y
+    // la nueva sigue con normalidad.
+    // Dos rechazos y un intento ocupado en cada secuencia: el primer bloqueo se conserva mientras se
+    // espera el segundo.
+    const deploy = world({ busy: 3, lockFails: 2 });
+    await seedGold(deploy);
+    const old = R_100.firsts[R_100.firsts.length - 10] ?? 0;
+    const last = R_100.requests[old - 1];
+    if (last?.operation !== 'ticks_history') throw new TypeError('no es un tramo');
+    await writeBatchLog({
+      ...deploy.storesOf(logLocation(1, HISTORY_R_100_SEQUENCE)),
+      runs: [
+        {
+          atUtc: '2027-10-29T00:00:00.000Z',
+          texts: [historyPageText('R_100', last.start, last.end, [last.start])],
+        },
+      ],
+    });
+    expect(await deploy.run()).toEqual({ exitCode: 0, stderr: null });
+    expect(deploy.sleeps.slice(0, 6)).toEqual(
+      Array.from({ length: 6 }, () => HISTORY_LOCK_RETRY_MS),
+    );
+    expect(deploy.sleeps[6]).not.toBe(HISTORY_LOCK_RETRY_MS);
+    // Una línea al empezar a esperar y otra cuando cambia el motivo, en cada secuencia.
+    expect(deploy.lines.filter((line) => line['event'] === 'history_lock_waiting')).toEqual(
+      ['lotes_historia_r_100', 'lotes_historia_frxxauusd'].flatMap((sequence) => [
+        { detail: '28P01', event: 'history_lock_waiting', reason: 'lock_unavailable', sequence },
+        { event: 'history_lock_waiting', reason: 'lock_busy', sequence },
+      ]),
+    );
+    expect(deploy.lines.at(-1)).toMatchObject({ event: 'history_finished', status: 'completed' });
 
     const env = world();
     const rest = Object.fromEntries(

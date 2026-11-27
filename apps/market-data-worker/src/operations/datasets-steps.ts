@@ -802,7 +802,8 @@ function classifyReplay(
 
 /**
  * Paso 7 (ADR-0020 §8): para la publicación activa de `production` más antigua sin resultado en los
- * dos modos, `data:replay` en un proceso aparte, con `buoh_salud` y el token `salud`, primero con
+ * dos modos, con las de las historias después de las demás (`nextPublicationToVerify`; precisión del
+ * PR 6e de ADR-0021 §9), `data:replay` en un proceso aparte, con `buoh_salud` y el token `salud`, primero con
  * `--verify-only` y después en recomputación, los modos que le falten, los dos dentro de los 60 s
  * del paso. Guarda cada resultado en `buoh_datasets.dataset_verifications`, como `buoh_dueno`:
  *

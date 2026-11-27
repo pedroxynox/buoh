@@ -238,6 +238,113 @@ services:
       - key: BUOH_OPERACIONES_SIMBOLOS
         value: R_100,frxXAUUSD
 
+  # El proceso temporal de la historia (ADR-0021 §9, precisión del PR 6e; decisiones vigentes,
+  # «Proceso temporal de la historia»): descarga y publica el año de ticks de R_100 y del oro, y se
+  # borra al terminar (runbook de ingesta, «La historia en producción (PR 6e de ADR-0021)»). Render lo
+  # cobra por segundo, unos 0,01 USD por hora.
+  - type: worker
+    name: buoh-historia
+    runtime: node
+    plan: 0.5c-512mb
+    region: virginia
+    # Una sola instancia: los dos bloqueos de las historias los toma un solo proceso.
+    numInstances: 1
+    buildCommand: >-
+      npx --yes pnpm@12.14.0 install --frozen-lockfile --filter "@buoh/market-data-worker..." &&
+      npx --yes pnpm@12.14.0 --filter "@buoh/market-data-worker..." run build
+    # Con los tamaños de V8 de WORKER_NODE_FLAGS. Terminado con 0, todo pedido y publicado, el
+    # servicio espera sin hacer nada a que lo borren, en lugar de que Render lo reinicie una y otra
+    # vez; con 1, Render lo reinicia y el proceso sigue desde el log.
+    startCommand: node --max-semi-space-size=1 --max-old-space-size=256 apps/market-data-worker/dist/cli/history.js && exec sleep infinity
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - apps/market-data-worker/**
+        - packages/contracts/**
+        - packages/domain/**
+        - package.json
+        - pnpm-lock.yaml
+        - pnpm-workspace.yaml
+        - .npmrc
+        - .node-version
+        - tsconfig.base.json
+        - render-datos.yaml
+      ignoredPaths:
+        - apps/market-data-worker/test/**
+        - apps/market-data-worker/integration/**
+        - packages/contracts/test/**
+        - packages/domain/test/**
+        - '**/*.md'
+    # Ninguna credencial nueva ni la dueña (precisión del PR 6c): las de buoh_lotes y el token lotes,
+    # y las de buoh_publicacion y el token operaciones, copiadas de buoh-operaciones en cada
+    # sincronización del Blueprint. Así el propietario no pega nada.
+    envVars:
+      - key: BUOH_DEPLOYMENT_ENVIRONMENT
+        value: production
+      - key: BUOH_HISTORIA_POSTGRES_HOST
+        fromDatabase:
+          name: buoh-postgres
+          property: host
+      - key: BUOH_HISTORIA_POSTGRES_PORT
+        fromDatabase:
+          name: buoh-postgres
+          property: port
+      - key: BUOH_HISTORIA_POSTGRES_DB
+        fromDatabase:
+          name: buoh-postgres
+          property: database
+      # Dirección interna, con un certificado autofirmado: cifrado sin verificarlo (ADR-0018 §9).
+      - key: BUOH_HISTORIA_POSTGRES_SSLMODE
+        value: require
+      - key: BUOH_LOTES_POSTGRES_PASSWORD
+        fromService:
+          type: cron
+          name: buoh-operaciones
+          envVarKey: BUOH_LOTES_POSTGRES_PASSWORD
+      - key: BUOH_LOTES_S3_ENDPOINT
+        fromService:
+          type: cron
+          name: buoh-operaciones
+          envVarKey: BUOH_LOTES_S3_ENDPOINT
+      - key: BUOH_LOTES_S3_REGION
+        value: auto
+      - key: BUOH_LOTES_S3_BUCKET
+        value: buoh-captura
+      - key: BUOH_LOTES_S3_ACCESS_KEY_ID
+        fromService:
+          type: cron
+          name: buoh-operaciones
+          envVarKey: BUOH_LOTES_S3_ACCESS_KEY_ID
+      - key: BUOH_LOTES_S3_SECRET_ACCESS_KEY
+        fromService:
+          type: cron
+          name: buoh-operaciones
+          envVarKey: BUOH_LOTES_S3_SECRET_ACCESS_KEY
+      - key: BUOH_PUBLICACION_POSTGRES_PASSWORD
+        fromService:
+          type: cron
+          name: buoh-operaciones
+          envVarKey: BUOH_PUBLICACION_POSTGRES_PASSWORD
+      - key: BUOH_OPERACIONES_S3_ENDPOINT
+        fromService:
+          type: cron
+          name: buoh-operaciones
+          envVarKey: BUOH_OPERACIONES_S3_ENDPOINT
+      - key: BUOH_OPERACIONES_S3_REGION
+        value: auto
+      - key: BUOH_OPERACIONES_S3_BUCKET
+        value: buoh-captura
+      - key: BUOH_OPERACIONES_S3_ACCESS_KEY_ID
+        fromService:
+          type: cron
+          name: buoh-operaciones
+          envVarKey: BUOH_OPERACIONES_S3_ACCESS_KEY_ID
+      - key: BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY
+        fromService:
+          type: cron
+          name: buoh-operaciones
+          envVarKey: BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY
+
   - type: web
     name: buoh-api
     runtime: node

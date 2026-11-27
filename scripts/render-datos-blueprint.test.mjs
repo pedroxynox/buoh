@@ -5,7 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 // Blueprint del sistema de datos de producción (ADR-0018 §2 y §3): la base, `buoh-ingesta` y
-// `buoh-operaciones`, sus planes, sus comandos y de dónde sale cada variable. El repositorio no tiene
+// `buoh-operaciones`, desde el PR 6e de ADR-0021 §9 `buoh-historia`, sus planes, sus comandos y de dónde sale cada variable. El repositorio no tiene
 // un lector de YAML, así que `parseBlueprint` lee el subconjunto que deja Prettier y rechaza el
 // resto con su línea: la prueba nunca da por bueno un archivo que no entiende. Lo que el código
 // espera (las variables de cada servicio y los tamaños de V8) se lee de las fuentes del worker.
@@ -226,6 +226,7 @@ function expectedBuildFilter(appDirs) {
 const SERVICE_APPS = {
   'buoh-ingesta': ['apps/market-data-worker'],
   'buoh-operaciones': ['apps/market-data-worker', 'apps/api'],
+  'buoh-historia': ['apps/market-data-worker'],
   'buoh-api': ['apps/api', 'apps/web', 'apps/market-data-worker'],
 };
 
@@ -261,7 +262,7 @@ const service = (name) => {
 };
 const variables = (name) => new Map(service(name).envVars.map((item) => [item.key, item]));
 
-test('define la base, buoh-ingesta, buoh-operaciones y buoh-api, y nada más (ADR-0018 §2; ADR-0019 §10)', () => {
+test('define la base, buoh-ingesta, buoh-operaciones, buoh-historia y buoh-api, y nada más (ADR-0018 §2; ADR-0019 §10; ADR-0021 §9, PR 6e)', () => {
   assert.deepEqual(Object.keys(blueprint).sort(), ['databases', 'services']);
   assert.deepEqual(
     blueprint.databases.map((item) => item.name),
@@ -272,6 +273,7 @@ test('define la base, buoh-ingesta, buoh-operaciones y buoh-api, y nada más (AD
     [
       ['worker', 'buoh-ingesta'],
       ['cron', 'buoh-operaciones'],
+      ['worker', 'buoh-historia'],
       ['web', 'buoh-api'],
     ],
   );
@@ -306,7 +308,7 @@ test('la base: Basic-256mb con 5 GB, PostgreSQL 18, sin autoescalado, en virgini
   );
 });
 
-test('los tres servicios: Node, Starter, en virginia, sin disco y desplegados tras CI (§1 y §2; ADR-0019 §10)', () => {
+test('los cuatro servicios: Node, Starter, en virginia, sin disco y desplegados tras CI (§1 y §2; ADR-0019 §10)', () => {
   const common = [
     'autoDeployTrigger',
     'buildCommand',
@@ -327,6 +329,10 @@ test('los tres servicios: Node, Starter, en virginia, sin disco y desplegados tr
   );
   assert.deepEqual(Object.keys(service('buoh-operaciones')).sort(), [...common, 'schedule'].sort());
   assert.deepEqual(
+    Object.keys(service('buoh-historia')).sort(),
+    [...common, 'numInstances'].sort(),
+  );
+  assert.deepEqual(
     Object.keys(service('buoh-api')).sort(),
     [...common, 'healthCheckPath', 'numInstances'].sort(),
   );
@@ -340,6 +346,8 @@ test('los tres servicios: Node, Starter, en virginia, sin disco y desplegados tr
   assert.equal(service('buoh-ingesta').numInstances, 1);
   assert.equal(service('buoh-ingesta').maxShutdownDelaySeconds, 60);
   assert.equal(service('buoh-operaciones').schedule, '*/5 * * * *');
+  // Los dos bloqueos de las historias, en un solo proceso (precisión del PR 6c de ADR-0021 §9).
+  assert.equal(service('buoh-historia').numInstances, 1);
   // La API: una instancia (límites en memoria, ADR-0019 §1) y su ruta de salud (§7 y §10).
   assert.equal(service('buoh-api').numInstances, 1);
   assert.equal(service('buoh-api').healthCheckPath, '/api/salud');
@@ -354,6 +362,7 @@ test('cada servicio compila sus apps y paquetes con el Node y el pnpm fijados', 
     return `npx --yes ${pnpm} install --frozen-lockfile ${spec} && npx --yes ${pnpm} ${spec} run build`;
   };
   assert.equal(service('buoh-ingesta').buildCommand, build('@buoh/market-data-worker'));
+  assert.equal(service('buoh-historia').buildCommand, build('@buoh/market-data-worker'));
   // buoh-operaciones compila también la API, que migra en su paso 1 (ADR-0019 §7 y §14).
   assert.equal(
     service('buoh-operaciones').buildCommand,
@@ -373,13 +382,19 @@ test('arrancan con Node directamente y sus tamaños de V8 delante, sin pnpm (ADR
     worker('ingest', ' --live --symbol R_100 --symbol frxXAUUSD'),
   );
   assert.equal(service('buoh-operaciones').startCommand, worker('operations'));
+  // La historia, y al terminar con 0 el servicio espera a que lo borren, sin que Render lo reinicie;
+  // con 1 lo reinicia, y el proceso sigue desde el log (precisión del PR 6e de ADR-0021 §9).
+  assert.equal(
+    service('buoh-historia').startCommand,
+    `${worker('history')} && exec sleep infinity`,
+  );
   const apiFlags = apiNodeFlags();
   assert.deepEqual(apiFlags, ['--max-semi-space-size=1', '--max-old-space-size=256']);
   assert.equal(
     service('buoh-api').startCommand,
     `node ${apiFlags.join(' ')} apps/api/dist/cli/serve.js`,
   );
-  for (const cli of ['ingest', 'operations']) {
+  for (const cli of ['ingest', 'operations', 'history']) {
     assert.ok(existsSync(join(root, `apps/market-data-worker/src/cli/${cli}.ts`)), cli);
   }
   assert.ok(existsSync(join(root, 'apps/api/src/cli/serve.ts')));
@@ -561,6 +576,73 @@ test('buoh-operaciones: las variables de loadOperationsConfig, con la credencial
   }
   assert.equal(vars.get('BUOH_DEPLOYMENT_ENVIRONMENT').value, 'production');
   assert.equal(vars.get('BUOH_DUENO_POSTGRES_SSLMODE').value, 'require');
+});
+
+test('buoh-historia: las variables de loadHistoryConfig, copiadas de buoh-operaciones, sin la dueña ni ninguna BUOH_POSTGRES_* ni BUOH_S3_* (precisión de los PR 6c y 6e de ADR-0021 §9)', () => {
+  const expected = schemaKeys(
+    'apps/market-data-worker/src/history/config.ts',
+    'const historyEnvironmentSchema',
+  );
+  const vars = variables('buoh-historia');
+  assert.equal(vars.size, service('buoh-historia').envVars.length, 'sin claves repetidas');
+  assert.deepEqual([...vars.keys()].sort(), expected.sort());
+  for (const key of vars.keys()) {
+    assert.doesNotMatch(key, /^BUOH_(?:DUENO|POSTGRES|S3)_/, key);
+  }
+  for (const [key, property] of [
+    ['BUOH_HISTORIA_POSTGRES_HOST', 'host'],
+    ['BUOH_HISTORIA_POSTGRES_PORT', 'port'],
+    ['BUOH_HISTORIA_POSTGRES_DB', 'database'],
+  ]) {
+    assert.deepEqual(vars.get(key).fromDatabase, { name: 'buoh-postgres', property }, key);
+  }
+  const values = Object.fromEntries(
+    [...vars.values()].filter((item) => 'value' in item).map((item) => [item.key, item.value]),
+  );
+  assert.deepEqual(values, {
+    BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+    BUOH_HISTORIA_POSTGRES_SSLMODE: 'require',
+    BUOH_LOTES_S3_BUCKET: 'buoh-captura',
+    BUOH_LOTES_S3_REGION: 'auto',
+    BUOH_OPERACIONES_S3_BUCKET: 'buoh-captura',
+    BUOH_OPERACIONES_S3_REGION: 'auto',
+  });
+  // Ninguna credencial nueva: cada contraseña y cada parte de los dos tokens es la variable del
+  // mismo nombre de buoh-operaciones, que tiene las mismas fuentes que allí.
+  const operations = variables('buoh-operaciones');
+  const copied = [
+    'BUOH_LOTES_POSTGRES_PASSWORD',
+    'BUOH_PUBLICACION_POSTGRES_PASSWORD',
+    ...['LOTES', 'OPERACIONES'].flatMap((token) =>
+      ['ENDPOINT', 'ACCESS_KEY_ID', 'SECRET_ACCESS_KEY'].map((part) => `BUOH_${token}_S3_${part}`),
+    ),
+  ];
+  for (const key of copied) {
+    assert.deepEqual(
+      vars.get(key).fromService,
+      { envVarKey: key, name: 'buoh-operaciones', type: 'cron' },
+      key,
+    );
+    assert.ok(operations.has(key), key);
+    assert.equal(
+      sourceOf(operations.get(key)),
+      key.endsWith('_PASSWORD') ? 'generateValue' : 'sync',
+      key,
+    );
+  }
+  assert.deepEqual(
+    [...vars.values()]
+      .filter((item) => 'fromService' in item)
+      .map((item) => item.key)
+      .sort(),
+    copied.sort(),
+  );
+  for (const token of ['LOTES', 'OPERACIONES']) {
+    for (const part of ['BUCKET', 'REGION']) {
+      const key = `BUOH_${token}_S3_${part}`;
+      assert.equal(vars.get(key).value, operations.get(key).value, key);
+    }
+  }
 });
 
 test('buoh-api: las variables de la API en production, con buoh_api, la contraseña de buoh_api_lectura, el token api y las tres claves (ADR-0019 §8 y §10)', () => {
