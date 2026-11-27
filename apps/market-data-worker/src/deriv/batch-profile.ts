@@ -105,13 +105,6 @@ const FIRST_LIVE_TICK_EPOCH: Readonly<Record<HistorySymbol, number>> = {
 };
 
 /**
- * Los tramos y los bloques de cada historia. Una página trae como mucho `count` ticks, los últimos
- * del tramo (el 2026-11-27 Deriv dio 2000 con `count` de 5000 y 1000 con 1000), y un tick por
- * segundo como mucho: R_100 manda uno cada 2 s, 900 por tramo de 1800 s, y el oro uno por segundo,
- * 900 por tramo de 900 s. Así ningún bloque pasa de 16 000 elementos, el techo de un dataset
- * (`historyBlocks`).
- */
-/**
  * El umbral del tramo sin ticks de R_100 (precisión del PR 6b de ADR-0021 §9): manda un tick cada
  * 2 s, así que uno que falta ya es un tramo, como en su captura en vivo (`maximum_event_gap_ms`).
  * El 2026-11-27, en 4 días de su historia, la separación más larga fue de 2 s en 3 y de 4 s en el
@@ -127,6 +120,13 @@ const R100_MAXIMUM_TICK_GAP_MS = 2_000;
  */
 const GOLD_MAXIMUM_TICK_GAP_MS = 60_000;
 
+/**
+ * Los tramos y los bloques de cada historia. Una página trae como mucho `count` ticks, los últimos
+ * del tramo (el 2026-11-27 Deriv dio 2000 con `count` de 5000 y 1000 con 1000), y un tick por
+ * segundo como mucho: R_100 manda uno cada 2 s, 900 por tramo de 1800 s, y el oro uno por segundo,
+ * 900 por tramo de 900 s. Así ningún bloque pasa de 16 000 elementos, el techo de un dataset
+ * (`historyBlocks`).
+ */
 const HISTORY_SHAPE: Readonly<
   Record<
     HistorySymbol,

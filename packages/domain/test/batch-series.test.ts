@@ -958,6 +958,21 @@ describe('los tramos sin ticks de la historia dentro del horario', () => {
     ]);
   });
 
+  it('un tramo que cruza el borde entre dos datasets se mide en cada uno hasta su borde', () => {
+    const session = allDay();
+    const gold = { ...history, maximum_tick_gap_ms: { SYNTH_100: 60_000 } };
+    // Sin ticks de T + 141 a T + 219, 79 s, entre dos bloques: 39 s en el primero y 40 en el segundo.
+    const first = page(T, T + 179, every2(T, T + 140));
+    const second = page(T + 180, T + 359, every2(T + 220, T + 358), T + 86_401);
+    forbidAmbientEffects();
+    expect(gaps([session, first, second], gold)).toEqual([
+      gapOf(first, T + 141, T + 219, [session], 60_000),
+    ]);
+    // Cada dataset se reproduce solo: ninguno de los dos trozos llega a 60 s.
+    expect(gaps([session, first], gold)).toEqual([]);
+    expect(gaps([session, second], gold)).toEqual([]);
+  });
+
   it('no espera los segundos que no habían terminado al recibir la página', () => {
     const session = allDay();
     // Recibida a T + 30.5: comprueba hasta T + 29, que tiene su tick.
