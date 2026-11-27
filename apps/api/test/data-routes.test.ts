@@ -364,6 +364,18 @@ const EVENTS: DataEvents = {
 };
 
 describe('GET /api/v2/datos/eventos (ADR-0019 §5 y §8; ADR-0021 §5)', () => {
+  it('los eventos y los datasets ya no responden en /api/v1/: sus mensajes cambiaron y están en /api/v2/ (ADR-0019 §6)', async () => {
+    for (const url of ['/api/v1/datos/eventos', '/api/v1/datos/datasets']) {
+      const { app, calls } = appWithReader({
+        datasets: () => Promise.resolve(DATASETS),
+        events: () => Promise.resolve(EVENTS),
+      });
+      expectError(await app.inject({ method: 'GET', url, headers: COOKIE }), 404, 'not_found');
+      expect(calls, url).not.toContain('events');
+      expect(calls, url).not.toContain('datasets');
+    }
+  });
+
   it('con sesión devuelve los eventos de datos, con las cabeceras del JSON y la cuenta en el registro', async () => {
     const { app, calls, lines } = appWithReader({ events: () => Promise.resolve(EVENTS) });
     const response = await app.inject({ method: 'GET', url: EVENTS_URL, headers: COOKIE });
