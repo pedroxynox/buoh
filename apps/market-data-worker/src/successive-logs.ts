@@ -100,11 +100,35 @@ export const BATCH_CANDLES_SEQUENCE: LogSequence = Object.freeze({
 });
 
 /**
+ * La secuencia por lotes de la historia de R_100 (ADR-0021 §4; precisión del PR 6c de su §9): un
+ * año de ticks, por bloques, con el perfil `deriv_options-lotes-v1-historia-r_100`. La escribe el
+ * comando de la historia (`history`), no el paso de los lotes de `buoh-operaciones`.
+ */
+export const HISTORY_R_100_SEQUENCE: LogSequence = Object.freeze({
+  name: 'lotes_historia_r_100',
+  prefixStem: 'logs/lotes_historia_r_100/',
+  schemaStem: 'buoh_lotes_historia_r_100_log_',
+  kind: 'batch',
+});
+
+/**
+ * La secuencia por lotes de la historia del oro, con el perfil
+ * `deriv_options-lotes-v1-historia-frxxauusd`, como la de R_100.
+ */
+export const HISTORY_GOLD_SEQUENCE: LogSequence = Object.freeze({
+  name: 'lotes_historia_frxxauusd',
+  prefixStem: 'logs/lotes_historia_frxxauusd/',
+  schemaStem: 'buoh_lotes_historia_frxxauusd_log_',
+  kind: 'batch',
+});
+
+/**
  * Las secuencias que existen (ADR-0021 §1: «su PR fija los nombres exactos»). Es una tabla fija, y
  * no una regla sobre el símbolo, para que dos símbolos que solo difieren en mayúsculas nunca
  * compartan un esquema ni un prefijo: una secuencia nueva entra aquí con su PR, y una prueba
  * comprueba que ninguna comparte su nombre, su esquema ni su prefijo con otra. Primero las de los
- * símbolos en vivo y después las de los lotes; las dos historias llegan con el PR 6 de ADR-0021 §9.
+ * símbolos en vivo y después las de los lotes, con las dos historias del PR 6c de ADR-0021 §9 al
+ * final.
  */
 export const LOG_SEQUENCES: readonly LogSequence[] = Object.freeze([
   R_100_SEQUENCE,
@@ -112,6 +136,8 @@ export const LOG_SEQUENCES: readonly LogSequence[] = Object.freeze([
   BATCH_SCHEDULES_SEQUENCE,
   BATCH_QUOTES_SEQUENCE,
   BATCH_CANDLES_SEQUENCE,
+  HISTORY_R_100_SEQUENCE,
+  HISTORY_GOLD_SEQUENCE,
 ]);
 
 /** Las secuencias de los símbolos en vivo, en el orden de `LOG_SEQUENCES`. */
@@ -119,9 +145,31 @@ export const LIVE_SEQUENCES: readonly LogSequence[] = Object.freeze(
   LOG_SEQUENCES.filter((sequence) => sequence.kind === 'live'),
 );
 
-/** Las secuencias por lotes (ADR-0021 §3), en el orden de `LOG_SEQUENCES`. */
+/**
+ * Las secuencias por lotes (ADR-0021 §3), en el orden de `LOG_SEQUENCES`: `buoh-operaciones`
+ * prepara sus logs con `buoh_lotes` como escritor, y les deja su informe final.
+ */
 export const BATCH_SEQUENCES: readonly LogSequence[] = Object.freeze(
   LOG_SEQUENCES.filter((sequence) => sequence.kind === 'batch'),
+);
+
+/**
+ * Las dos historias (precisión del PR 6c de ADR-0021 §9), en el orden de `LOG_SEQUENCES`: las
+ * descarga y las publica el comando de la historia, en un proceso temporal, y no las vueltas de
+ * `buoh-operaciones` (decisiones vigentes, «Proceso temporal de la historia»).
+ */
+export const HISTORY_SEQUENCES: readonly LogSequence[] = Object.freeze([
+  HISTORY_R_100_SEQUENCE,
+  HISTORY_GOLD_SEQUENCE,
+]);
+
+/**
+ * Las secuencias por lotes que van por vueltas (PR 5 de ADR-0021 §9): las que pide el paso de los
+ * lotes de `buoh-operaciones` y publica su paso 6 por turnos. Son todas las de los lotes salvo las
+ * historias.
+ */
+export const ROUND_BATCH_SEQUENCES: readonly LogSequence[] = Object.freeze(
+  BATCH_SEQUENCES.filter((sequence) => !HISTORY_SEQUENCES.includes(sequence)),
 );
 
 /**

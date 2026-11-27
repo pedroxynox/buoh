@@ -10,7 +10,7 @@ import { DERIV_SOURCE } from './profile.js';
  * (las de los lotes 4.0.0). Sus bytes son su JCS, y cambiar una lista, la apuesta o el ritmo crea
  * otro perfil, con otro `profile_id` (§3: «La lista y la apuesta van en el perfil»). La historia de
  * R_100 y la del oro, las otras dos secuencias por lotes, tienen sus perfiles desde el PR 6a
- * (`derivHistoryProfile`), y sus secuencias llegan con otra parte del PR 6.
+ * (`derivHistoryProfile`), con las reglas 4.1.0 desde el 6b, y sus secuencias desde el 6c.
  */
 
 /**
@@ -19,8 +19,33 @@ import { DERIV_SOURCE } from './profile.js';
  */
 export const DERIV_BATCH_CONNECTOR_VERSION = 'deriv-options-lotes-1.0.0';
 
-/** Las clases de las secuencias por lotes que tienen perfil desde el PR 5. */
-export type BatchProfileKind = 'candles' | 'quotes' | 'schedules';
+/**
+ * Las clases de las secuencias por lotes con perfil: las tres de las vueltas del PR 5 y, desde el
+ * PR 6c de ADR-0021 §9, las dos historias (`HistoryProfileKind`).
+ */
+export type BatchProfileKind = RoundProfileKind | HistoryProfileKind;
+
+/** Las clases de las secuencias por lotes que van por vueltas (PR 5 de ADR-0021 §9). */
+export type RoundProfileKind = 'candles' | 'quotes' | 'schedules';
+
+/** Las clases de las dos historias (precisión del PR 6c de ADR-0021 §9). */
+export type HistoryProfileKind = 'history_frxxauusd' | 'history_r_100';
+
+/** La clase de la historia de cada símbolo. */
+export const HISTORY_PROFILE_KINDS: Readonly<Record<HistorySymbol, HistoryProfileKind>> = {
+  R_100: 'history_r_100',
+  frxXAUUSD: 'history_frxxauusd',
+};
+
+/** Si la clase es la de una historia. */
+export function isHistoryProfileKind(kind: BatchProfileKind): kind is HistoryProfileKind {
+  return kind === 'history_frxxauusd' || kind === 'history_r_100';
+}
+
+/** El perfil de la historia de una clase de historia. */
+export function historyProfileOf(kind: HistoryProfileKind): HistoryProfile {
+  return derivHistoryProfile(kind === 'history_r_100' ? 'R_100' : 'frxXAUUSD');
+}
 
 /** Un mercado de las cotizaciones, con lo que se le pide en cada vuelta. */
 export interface QuoteMarket {
@@ -281,6 +306,8 @@ export function derivHistoryProfile(symbol: HistorySymbol): HistoryProfile {
 
 const PROFILES = {
   candles: derivCandlesProfile,
+  history_frxxauusd: () => derivHistoryProfile('frxXAUUSD'),
+  history_r_100: () => derivHistoryProfile('R_100'),
   quotes: derivQuotesProfile,
   schedules: derivSchedulesProfile,
 } as const satisfies Record<BatchProfileKind, () => ProfileHeader>;
@@ -304,10 +331,37 @@ export function derivBatchLogProfileRow(kind: BatchProfileKind): LogQualityProfi
 }
 
 /**
- * Los símbolos que buscan en `trading_times` las reglas 4.0.0 con el perfil de una clase, como en su
- * publicación (`buildBatchDatasetPublication`): sus `symbols`, o ninguno en las cotizaciones.
+ * Los símbolos que buscan en `trading_times` las reglas de los lotes con el perfil de una clase,
+ * como en su publicación (`buildBatchDatasetPublication`): sus `symbols`, el `symbol` de una
+ * historia, o ninguno en las cotizaciones.
  */
 export function batchTradingTimesSymbols(kind: BatchProfileKind): readonly string[] {
-  const profile: ProfileHeader & { readonly symbols?: readonly string[] } = PROFILES[kind]();
-  return profile.symbols ?? [];
+  const profile: ProfileHeader & {
+    readonly symbol?: string;
+    readonly symbols?: readonly string[];
+  } = PROFILES[kind]();
+  return profile.symbols ?? (profile.symbol === undefined ? [] : [profile.symbol]);
+}
+
+/**
+ * Lo que la configuración de las reglas de los lotes (`createBatchLogConfig`) lee del perfil de una
+ * clase, además de su esquema de fuente, como en su publicación (`buildBatchDatasetPublication`):
+ * sus símbolos de `trading_times`, sus reglas y, en una historia, el umbral del tramo sin ticks de su
+ * símbolo (precisión del PR 6b de ADR-0021 §9).
+ */
+export function batchLogConfigOptions(kind: BatchProfileKind): {
+  readonly maximum_tick_gap_ms?: Readonly<Record<string, number>>;
+  readonly quality_rule_version: BatchRuleSet['quality_rule_version'];
+  readonly trading_times_symbols: readonly string[];
+} {
+  const trading_times_symbols = batchTradingTimesSymbols(kind);
+  if (!isHistoryProfileKind(kind)) {
+    return { quality_rule_version: BATCH_RULE_SET.quality_rule_version, trading_times_symbols };
+  }
+  const profile = historyProfileOf(kind);
+  return {
+    maximum_tick_gap_ms: { [profile.symbol]: profile.maximum_tick_gap_ms },
+    quality_rule_version: BATCH_HISTORY_RULE_SET.quality_rule_version,
+    trading_times_symbols,
+  };
 }

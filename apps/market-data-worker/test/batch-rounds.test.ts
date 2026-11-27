@@ -10,6 +10,8 @@ import {
   BATCH_QUOTES_SEQUENCE,
   BATCH_SCHEDULES_SEQUENCE,
   GOLD_SEQUENCE,
+  HISTORY_GOLD_SEQUENCE,
+  HISTORY_R_100_SEQUENCE,
   R_100_SEQUENCE,
 } from '../src/index.js';
 
@@ -143,5 +145,11 @@ describe('batchRound: lo que rechaza', () => {
     expect(batchProfileKindOf(BATCH_SCHEDULES_SEQUENCE)).toBe('schedules');
     expect(batchProfileKindOf(BATCH_QUOTES_SEQUENCE)).toBe('quotes');
     expect(batchProfileKindOf(BATCH_CANDLES_SEQUENCE)).toBe('candles');
+    // Las historias tienen perfil, pero no van por vueltas (precisión del PR 6c de ADR-0021 §9).
+    expect(batchProfileKindOf(HISTORY_R_100_SEQUENCE)).toBe('history_r_100');
+    expect(batchProfileKindOf(HISTORY_GOLD_SEQUENCE)).toBe('history_frxxauusd');
+    for (const sequence of [HISTORY_R_100_SEQUENCE, HISTORY_GOLD_SEQUENCE]) {
+      expect(() => batchRound(sequence, '2026-11-26T10:00:00.000Z', null)).toThrow(TypeError);
+    }
   });
 });

@@ -489,6 +489,12 @@ describe('los textos de cada dataset', () => {
     expect(sequenceInterval('lotes_cotizaciones')).toBe(
       'Cada dataset tiene unas 3 horas de cotizaciones, cortadas cada 3 horas desde la medianoche UTC.',
     );
+    expect(sequenceTitle('lotes_historia_frxxauusd')).toBe(
+      'Historia: oro (frxXAUUSD), un año de ticks',
+    );
+    expect(sequenceInterval('lotes_historia_r_100')).toBe(
+      'Cada dataset tiene un bloque de hasta 6 horas de ticks del año anterior a la captura en vivo, con el horario de su día.',
+    );
     expect(sequenceInterval('frxXAUUSD')).toBeNull();
     expect(sequenceInterval('lotes_nuevos')).toBeNull();
   });

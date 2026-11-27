@@ -5,12 +5,15 @@ import { createBatchLogConfig } from '@buoh/domain';
 
 import { ConfigError, loadConfig, type WorkerConfig } from '../config.js';
 import {
+  batchLogConfigOptions,
   batchProfileBytes,
-  batchTradingTimesSymbols,
   DERIV_BATCH_CONNECTOR_VERSION,
   derivBatchLogProfileRow,
+  historyProfileOf,
+  isHistoryProfileKind,
   type BatchProfileKind,
 } from '../deriv/batch-profile.js';
+import { historyPlan } from '../deriv/history-pages.js';
 import { batchProfileKindOf } from '../deriv/batch-rounds.js';
 import type { LogQualityProfileRow } from '../deriv/log-profile.js';
 import { createDerivPublicationProfileFromSourceSchema, DERIV_SOURCE } from '../deriv/profile.js';
@@ -50,7 +53,7 @@ import {
   type LogLocation,
   type LogSequence,
 } from '../successive-logs.js';
-import { batchElementsOf, planBatchDataset } from './batch-plan.js';
+import { batchElementsOf, planBatchDataset, planHistoryDataset } from './batch-plan.js';
 import { DATASETS_SCHEMA } from './location.js';
 import { planDataset, type DatasetPlan } from './plan.js';
 import { publishLiveDataset, type PublishLiveDatasetInput } from './publish-live.js';
@@ -392,17 +395,22 @@ async function logDerivation(
     throw new NotDerivableError(`source_schema_${schema.status}`);
   }
   const config = createBatchLogConfig({
+    ...batchLogConfigOptions(args.profile),
     source_schema_bytes: schema.bytes,
     source_schema_release: schemas.release,
-    trading_times_symbols: batchTradingTimesSymbols(args.profile),
   });
+  const kind = args.profile;
+  const elementsOf = (events: readonly SourceEvent[]) => batchElementsOf(events, config);
+  let plan: LogDerivation['plan'];
+  if (isHistoryProfileKind(kind)) {
+    // Una historia, un bloque por dataset (precisión del PR 6c de ADR-0021 §9).
+    const history = historyPlan(historyProfileOf(kind));
+    plan = (input) => planHistoryDataset({ ...input, elementsOf, plan: history });
+  } else {
+    plan = (input) => planBatchDataset({ ...input, elementsOf, kind });
+  }
   return {
-    plan: (input) =>
-      planBatchDataset({
-        ...input,
-        elementsOf: (events) => batchElementsOf(events, config),
-        kind: args.profile,
-      }),
+    plan,
     source: {
       batch: {
         connector_version: DERIV_BATCH_CONNECTOR_VERSION,

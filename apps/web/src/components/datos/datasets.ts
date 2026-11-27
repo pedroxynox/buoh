@@ -37,6 +37,8 @@ const SEQUENCE_NAMES: Readonly<Record<string, string>> = {
   lotes_horarios: 'Lotes: horarios y contratos',
   lotes_cotizaciones: 'Lotes: cotizaciones',
   lotes_velas: 'Lotes: velas de 1 minuto',
+  lotes_historia_r_100: 'Historia: R_100, un año de ticks',
+  lotes_historia_frxxauusd: 'Historia: oro (frxXAUUSD), un año de ticks',
 };
 
 /**
@@ -52,6 +54,10 @@ const SEQUENCE_INTERVALS: Readonly<Record<string, string>> = {
     'Cada dataset tiene unas 3 horas de cotizaciones, cortadas cada 3 horas desde la medianoche UTC.',
   lotes_velas:
     'Cada dataset tiene un día de velas de 1 minuto, cortado a la medianoche UTC, con el horario de ese día.',
+  lotes_historia_r_100:
+    'Cada dataset tiene un bloque de hasta 6 horas de ticks del año anterior a la captura en vivo, con el horario de su día.',
+  lotes_historia_frxxauusd:
+    'Cada dataset tiene un bloque de hasta 4 horas de ticks del año anterior a la captura en vivo, con el horario de su día.',
 };
 
 /** El nombre de la secuencia, o su nombre tal cual si la web no la conoce. */

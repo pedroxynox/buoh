@@ -77,6 +77,8 @@ export interface BatchRun {
  * source events.
  */
 export async function writeBatchLog(input: {
+  /** Sin el cierre de la última ejecución ni el de su segmento, como un proceso que murió. */
+  readonly leaveOpen?: boolean;
   readonly objects: ObjectStore;
   readonly runs: readonly BatchRun[];
   readonly store: SourceLogStore;
@@ -89,7 +91,8 @@ export async function writeBatchLog(input: {
     zlibVersion: 'test-zlib',
   });
   const events: SourceEvent[] = [];
-  for (const run of input.runs) {
+  for (const [runIndex, run] of input.runs.entries()) {
+    const open = input.leaveOpen === true && runIndex === input.runs.length - 1;
     const at = Date.parse(run.atUtc);
     const iso = (offsetMs: number) => new Date(at + offsetMs).toISOString();
     const connection = nextId();
@@ -109,6 +112,9 @@ export async function writeBatchLog(input: {
     for (const [index, text] of run.texts.entries()) {
       await append({ ...batchFrame(text, iso((index + 1) * 1000)), connection_id: connection });
     }
+    if (open) {
+      break;
+    }
     await append({
       affected_symbols: [],
       closure_type: 'requested',
@@ -124,3 +130,23 @@ export async function writeBatchLog(input: {
   }
   return events;
 }
+
+/**
+ * Una página de ticks de la historia de `symbol` (precisión del PR 6a de ADR-0021 §9), de `start` a
+ * `end`, con un tick en cada segundo de `epochs`, como responde Deriv con `style: ticks`.
+ */
+export const historyPageText = (
+  symbol: string,
+  start: number,
+  end: number,
+  epochs: readonly number[] = [],
+) =>
+  `{"echo_req":{"count":1000,"end":"${String(end)}","req_id":2,"start":${String(start)},"style":"ticks","ticks_history":"${symbol}"},"history":{"prices":[${epochs.map(() => '1').join(',')}],"times":[${epochs.join(',')}]},"msg_type":"history","pip_size":2,"req_id":2}`;
+
+/** Un `RateLimit` de Deriv a una página de ticks de la historia. */
+export const historyRateLimitText = (symbol: string, start: number, end: number) =>
+  `{"echo_req":{"count":1000,"end":"${String(end)}","req_id":3,"start":${String(start)},"style":"ticks","ticks_history":"${symbol}"},"error":{"code":"RateLimit","message":"x"},"msg_type":"ticks_history","req_id":3}`;
+
+/** Un error de Deriv que no es `RateLimit` a una página de ticks de la historia: cuenta como respondida. */
+export const historyErrorText = (symbol: string, start: number, end: number) =>
+  `{"echo_req":{"count":1000,"end":"${String(end)}","req_id":3,"start":${String(start)},"style":"ticks","ticks_history":"${symbol}"},"error":{"code":"InputValidationFailed","message":"x"},"msg_type":"ticks_history","req_id":3}`;
