@@ -41,15 +41,16 @@ import { loadHistoryConfig, type HistoryConfig } from './config.js';
  * descarga y la publica (decisiones vigentes, «Proceso temporal de la historia»). En `production`,
  * con el bloqueo de las dos historias durante todo el proceso:
  *
- * 1. sigue cada historia desde su log (`historyResumeIndex`): después de la última petición
- *    respondida que guarda, sin volver a pedir ninguna; sin ninguna, desde el primer bloque que
- *    Deriv todavía guarda (`historyRequestsFrom`);
+ * 1. sigue cada historia desde su log (`historyResumeIndex`): después de la última página
+ *    respondida que guarda, y del horario que le siguió, sin volver a pedir ninguna página; sin
+ *    ninguna, desde el primer bloque que Deriv todavía guarda (`historyRequestsFrom`);
  * 2. pide un bloque cada vez, el más antiguo de las dos, porque Deriv borra primero lo más antiguo,
  *    al ritmo que permite Deriv, una petición cada `HISTORY_PACING_MS`, con lo mismo que el comando
  *    de los lotes (`runSequence`): su log, su corte, su esquema de fuente, raw primero, y el
  *    segmento cerrado al terminar. Un bloque que empieza lo pide desde el primer bloque que Deriv
- *    todavía guarda, y uno que sigue a medias, sin cortar el log, para que cada bloque vaya entero en
- *    un log;
+ *    todavía guarda. El log solo se corta al empezar un bloque, y solo si lo último del log es un
+ *    bloque terminado (`clean`): así cada bloque va entero en un log, y ningún log termina con algo
+ *    que no es un bloque;
  * 3. publica cada bloque terminado sin esperar turnos: lanza `datasets:publish --sequence` en un
  *    proceso aparte, con `buoh_publicacion` y el token `operaciones`, uno cada vez y mientras sigue
  *    pidiendo, hasta que no queda nada que publicar (`planHistoryDataset`: un bloque por dataset);
@@ -107,6 +108,12 @@ export interface HistoryDependencies extends Omit<BatchDependencies, 'deadlineMs
 
 /** Lo que el comando lleva de cada historia. */
 interface HistoryState {
+  /**
+   * Si lo último que escribió en su log es un bloque terminado, o nada: solo entonces el bloque
+   * siguiente puede pasar al log siguiente. Después de un intento que no terminó, que pudo escribir
+   * su conexión o un `RateLimit`, el bloque sigue en ese log.
+   */
+  clean: boolean;
   /** Fallos seguidos de sus bloques. */
   failures: number;
   /** La primera petición que falta pedir. */
@@ -139,7 +146,7 @@ function planOf(sequence: LogSequence): HistoryPlan {
 
 /**
  * La primera petición que falta pedir de una historia, desde su log, o `null` si su log no tiene
- * ningún tramo respondido. Antes de leer cada log, cierra el segmento que pudo dejar abierto un
+ * ningún tramo respondido, y si lo último del log es un bloque terminado o nada (`clean`). Antes de leer cada log, cierra el segmento que pudo dejar abierto un
  * proceso anterior, como `runSequence`, para leer también lo que escribió. Lee los logs del activo
  * hacia atrás, y en cada uno los segmentos desde el último, hasta el primero con un tramo
  * respondido; las respuestas que siguen, de ese log o de otro posterior, también cuentan, como el
@@ -151,7 +158,8 @@ async function resumeIndex(
   state: HistoryState,
   lock: SessionLock,
 ): Promise<
-  { readonly next: number | null } | { readonly detail: string; readonly reason: string }
+  | { readonly clean: boolean; readonly next: number | null }
+  | { readonly detail: string; readonly reason: string }
 > {
   const { config } = context;
   const reads = deps.openReads(config, state.sequence);
@@ -161,6 +169,8 @@ async function resumeIndex(
       return { detail: 'none', reason: 'log_not_prepared' };
     }
     let later: HistoryAnswer[] = [];
+    // Si ya se leyó algún segmento con eventos después del del último tramo.
+    let trailing = false;
     for (let number = active.number; number >= 1; number -= 1) {
       const location = logLocation(number, state.sequence);
       if ((await reads.firstWrite(location)) === null) {
@@ -177,25 +187,29 @@ async function resumeIndex(
         const rows = await segments.closed(0);
         const tail: HistoryAnswer[] = [];
         for (const row of [...rows].reverse()) {
-          const answers = historyAnswersIn(
-            await segments.read(row.segment_index),
-            state.plan.profile,
-          );
+          const events = await segments.read(row.segment_index);
+          const answers = historyAnswersIn(events, state.plan.profile);
           tail.unshift(...answers);
           if (answers.some((answer) => answer.kind === 'tranche')) {
-            break;
+            later = [...tail, ...later];
+            const next = historyResumeIndex(state.plan, later);
+            // Limpio si este segmento, el último con eventos, termina con un bloque.
+            const own = historyResumeIndex(state.plan, answers);
+            const block = own === null ? -1 : blockOfRequest(state.plan, own - 1);
+            const clean =
+              !trailing &&
+              own !== null &&
+              (state.plan.firsts[block + 1] ?? state.plan.requests.length) === own;
+            return { clean, next };
           }
+          trailing ||= events.length > 0;
         }
         later = [...tail, ...later];
-        const next = historyResumeIndex(state.plan, later);
-        if (next !== null) {
-          return { next };
-        }
       } finally {
         await segments.close().catch(() => undefined);
       }
     }
-    return { next: null };
+    return { clean: !trailing, next: null };
   } catch (error) {
     return { detail: failureReason(error), reason: 'log_unavailable' };
   } finally {
@@ -459,11 +473,18 @@ export async function historyCommand(
 
     const states: HistoryState[] = [];
     for (const sequence of HISTORY_SEQUENCES) {
-      const state: HistoryState = { failures: 0, next: 0, plan: planOf(sequence), sequence };
+      const state: HistoryState = {
+        clean: false,
+        failures: 0,
+        next: 0,
+        plan: planOf(sequence),
+        sequence,
+      };
       let failures = 0;
       for (;;) {
         const resumed = await resumeIndex(context, deps, state, held(sequence));
         if ('next' in resumed) {
+          state.clean = resumed.clean;
           state.next =
             resumed.next ?? historyRequestsFrom(state.plan.blocks, Date.parse(deps.now()));
           break;
@@ -527,10 +548,11 @@ export async function historyCommand(
           until,
         },
         null,
-        { allowCut: startsBlock, keepLock: true },
+        { allowCut: startsBlock && state.clean, keepLock: true },
       );
       deps.write(outcomeLine(outcome));
       state.next = outcome.next;
+      state.clean = outcome.status === 'completed';
       if (outcome.status === 'completed') {
         state.failures = 0;
         publisher.request(state.sequence);

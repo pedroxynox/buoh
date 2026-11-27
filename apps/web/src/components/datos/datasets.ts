@@ -55,9 +55,9 @@ const SEQUENCE_INTERVALS: Readonly<Record<string, string>> = {
   lotes_velas:
     'Cada dataset tiene un día de velas de 1 minuto, cortado a la medianoche UTC, con el horario de ese día.',
   lotes_historia_r_100:
-    'Cada dataset tiene un bloque de 6 horas de ticks del año anterior a la captura en vivo, con el horario de su día.',
+    'Cada dataset tiene un bloque de hasta 6 horas de ticks del año anterior a la captura en vivo, con el horario de su día.',
   lotes_historia_frxxauusd:
-    'Cada dataset tiene un bloque de 4 horas de ticks del año anterior a la captura en vivo, con el horario de su día.',
+    'Cada dataset tiene un bloque de hasta 4 horas de ticks del año anterior a la captura en vivo, con el horario de su día.',
 };
 
 /** El nombre de la secuencia, o su nombre tal cual si la web no la conoce. */

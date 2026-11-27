@@ -77,6 +77,8 @@ export interface BatchRun {
  * source events.
  */
 export async function writeBatchLog(input: {
+  /** Sin el cierre de la última ejecución ni el de su segmento, como un proceso que murió. */
+  readonly leaveOpen?: boolean;
   readonly objects: ObjectStore;
   readonly runs: readonly BatchRun[];
   readonly store: SourceLogStore;
@@ -89,7 +91,8 @@ export async function writeBatchLog(input: {
     zlibVersion: 'test-zlib',
   });
   const events: SourceEvent[] = [];
-  for (const run of input.runs) {
+  for (const [runIndex, run] of input.runs.entries()) {
+    const open = input.leaveOpen === true && runIndex === input.runs.length - 1;
     const at = Date.parse(run.atUtc);
     const iso = (offsetMs: number) => new Date(at + offsetMs).toISOString();
     const connection = nextId();
@@ -108,6 +111,9 @@ export async function writeBatchLog(input: {
     });
     for (const [index, text] of run.texts.entries()) {
       await append({ ...batchFrame(text, iso((index + 1) * 1000)), connection_id: connection });
+    }
+    if (open) {
+      break;
     }
     await append({
       affected_symbols: [],

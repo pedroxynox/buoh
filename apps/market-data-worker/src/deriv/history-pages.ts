@@ -160,8 +160,9 @@ export function blockOfRequest(plan: HistoryPlan, index: number): number {
 /**
  * La primera petición que falta pedir, desde las respuestas del final del log en su orden, o `null`
  * si no tienen ningún tramo de la historia. Sigue a la del último tramo respondido y, si después
- * llegó la respuesta del horario que le seguía, a la de ese horario: así ninguna página ni ningún
- * horario se piden dos veces.
+ * llegó la respuesta del horario que le seguía, a la de ese horario: así ninguna página se pide dos
+ * veces, ni ningún horario después de una página. Sin ninguna página, el horario del primer bloque se
+ * puede pedir otra vez, y cuenta el último del día (reglas 4.1.0).
  */
 export function historyResumeIndex(
   plan: HistoryPlan,

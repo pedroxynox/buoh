@@ -43,8 +43,11 @@ const historyEnvironmentSchema = z.object({
   BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY: nonEmpty,
 });
 
-/** Las variables que lee el worker y que el proceso no tiene. */
-const WORKER_VARIABLES = /^BUOH_(?:POSTGRES|S3)_/u;
+/**
+ * Las variables que el proceso no tiene: las que lee el worker, que solo da a `datasets:publish`, y
+ * las de la credencial dueña, que no recibe.
+ */
+const REJECTED_VARIABLES = /^BUOH_(?:DUENO|POSTGRES|S3)_/u;
 
 export interface HistoryConfig {
   /** La del log de cada historia: `buoh_lotes` y el token `lotes`, como `batch` (`loadBatchConfig`). */
@@ -55,8 +58,8 @@ export interface HistoryConfig {
 
 /**
  * Lee la configuración del comando de la historia de `env`. Una variable inválida o ausente, o una
- * `BUOH_POSTGRES_*` o `BUOH_S3_*` presente, lanza un solo `ConfigError` con los nombres, nunca los
- * valores.
+ * `BUOH_POSTGRES_*`, `BUOH_S3_*` o `BUOH_DUENO_*` presente, lanza un solo `ConfigError` con los
+ * nombres, nunca los valores.
  */
 export function loadHistoryConfig(
   env: Readonly<Record<string, string | undefined>>,
@@ -66,7 +69,7 @@ export function loadHistoryConfig(
     parsed.success ? [] : parsed.error.issues.map((issue) => String(issue.path[0])),
   );
   for (const [name, value] of Object.entries(env)) {
-    if (value !== undefined && WORKER_VARIABLES.test(name)) {
+    if (value !== undefined && REJECTED_VARIABLES.test(name)) {
       rejected.add(name);
     }
   }

@@ -77,8 +77,19 @@ interface LogState {
 function world(
   options: {
     readonly busy?: boolean;
-    /** Lo que responde `datasets:publish` a una secuencia sin `--skip`, en lugar de publicar. */
-    readonly failPublication?: { readonly reason: string; readonly sequence: string };
+    /**
+     * Lo que responde `datasets:publish` a una secuencia sin `--skip`, en lugar de publicar; con
+     * `times`, solo esas veces.
+     */
+    readonly failPublication?: {
+      readonly reason: string;
+      readonly sequence: string;
+      readonly times?: number;
+    };
+    /** Pierde los bloqueos al terminar el primer bloque. */
+    readonly loseLock?: boolean;
+    /** Las migraciones pendientes de los logs de cada secuencia. */
+    readonly pending?: Partial<Record<string, readonly string[]>>;
     readonly logs?: Partial<Record<string, Partial<LogState> | null>>;
     readonly respond?: Respond;
   } = {},
@@ -106,6 +117,8 @@ function world(
   const publishes: { args: readonly string[]; env: Readonly<Record<string, string>> }[] = [];
   const published = new Map<string, number>();
   const index = { value: 0 };
+  const locks: { held: boolean }[] = [];
+  let failures = 0;
   let id = 0;
   const deps: HistoryDependencies = {
     // Como un `SourceLock`: soltarlo lo pierde.
@@ -120,6 +133,7 @@ function world(
           return Promise.resolve();
         },
       };
+      locks.push(lock);
       return Promise.resolve(lock);
     },
     connect: (input) =>
@@ -165,7 +179,7 @@ function world(
               sequence === HISTORY_R_100_SEQUENCE ? 'history_r_100' : 'history_frxxauusd',
             ),
           ),
-        pendingMigrations: () => Promise.resolve([]),
+        pendingMigrations: () => Promise.resolve(options.pending?.[sequence.name] ?? []),
         readiness: () => Promise.resolve(state?.nextReadiness ?? 'not_prepared'),
       };
     },
@@ -188,7 +202,12 @@ function world(
       // Publica un dataset por cada bloque terminado que todavía no publicó.
       const sequence = args[1] ?? '';
       const fail = options.failPublication;
-      if (fail?.sequence === sequence && !args.includes('--skip')) {
+      if (
+        fail?.sequence === sequence &&
+        !args.includes('--skip') &&
+        (fail.times === undefined || failures < fail.times)
+      ) {
+        failures += 1;
         return Promise.resolve({
           exitCode: 1,
           stderr: '',
@@ -223,6 +242,11 @@ function world(
     },
     write: (line) => {
       lines.push(line);
+      if (options.loseLock === true && line['event'] === 'history_block') {
+        for (const lock of locks) {
+          lock.held = false;
+        }
+      }
     },
   };
   const run = async (env: Record<string, string> = ENV) => {
@@ -411,7 +435,7 @@ describe('historyCommand: las dos historias, bloque a bloque', () => {
     }
   });
 
-  it('un RateLimit espera y vuelve a pedir esa página; un bloque que falla se repite, y a los diez fallos seguidos el proceso para', async () => {
+  it('un RateLimit espera y vuelve a pedir esa página; sin el log de una historia, lo busca otra vez a los 60 s, y a la décima vez el proceso para', async () => {
     let limited = false;
     const env = world({
       respond: (request, at) => {
@@ -489,5 +513,173 @@ describe('historyCommand: las dos historias, bloque a bloque', () => {
     expect(result.stderr).toContain('BUOH_POSTGRES_USER');
     expect(result.stderr).not.toContain(ENV.BUOH_PUBLICACION_POSTGRES_PASSWORD);
     expect(HISTORY_BLOCK_DEADLINE_MS).toBeGreaterThan(17 * HISTORY_PACING_MS + 15_000);
+  });
+});
+
+describe('historyCommand: lo que para, lo que se repite y el corte', () => {
+  it('las esperas y los límites son los medidos y los de la precisión del PR 6c', () => {
+    expect(HISTORY_PACING_MS).toBe(2_100);
+    expect(HISTORY_RATE_LIMIT_WAIT_MS).toBe(60_000);
+    expect(HISTORY_RETRY_WAIT_MS).toBe(60_000);
+    expect(HISTORY_MAX_FAILURES).toBe(10);
+  });
+
+  it('un proceso que murió con un segmento abierto: lo cierra antes de leerlo y sigue sin pedir otra vez sus páginas', async () => {
+    const env = world();
+    const page = (index: number) => {
+      const request = GOLD.requests[index];
+      if (request?.operation !== 'ticks_history') throw new TypeError('no es un tramo');
+      return historyPageText('frxXAUUSD', request.start, request.end, [request.start]);
+    };
+    const date = GOLD.requests[GOLD_LAST];
+    if (date?.operation !== 'trading_times') throw new TypeError('no es un horario');
+    await writeBatchLog({
+      ...env.storesOf(logLocation(1, HISTORY_GOLD_SEQUENCE)),
+      leaveOpen: true,
+      runs: [
+        {
+          atUtc: '2027-10-31T15:00:00.000Z',
+          texts: [sessionText(date.date), page(GOLD_LAST + 1), page(GOLD_LAST + 2)],
+        },
+      ],
+    });
+    expect(await env.run()).toEqual({ exitCode: 0, stderr: null });
+    expect(env.lines[0]).toMatchObject({ sequences: [{}, { next: GOLD_LAST + 3 }] });
+    expect(env.sent.filter(({ request }) => request['ticks_history'] === 'frxXAUUSD')).toHaveLength(
+      GOLD.requests.length - GOLD_LAST - 3,
+    );
+  });
+
+  it('un bloque que falla espera 60 s y se repite, y a los diez fallos seguidos el proceso para', async () => {
+    const env = world({ pending: { lotes_historia_r_100: ['0003_pendiente'] } });
+    await seedGold(env);
+    expect(await env.run()).toEqual({ exitCode: 1, stderr: null });
+    const blocks = env.lines.filter((line) => line['event'] === 'history_block');
+    expect(blocks).toHaveLength(HISTORY_MAX_FAILURES);
+    for (const line of blocks) {
+      expect(line).toMatchObject({ reason: 'migrations_pending', status: 'failed' });
+    }
+    expect(env.sleeps).toEqual(
+      Array.from({ length: HISTORY_MAX_FAILURES - 1 }, () => HISTORY_RETRY_WAIT_MS),
+    );
+    expect(env.lines.at(-1)).toEqual({
+      event: 'history_finished',
+      reason: 'migrations_pending',
+      sequence: 'lotes_historia_r_100',
+      status: 'failed',
+    });
+  });
+
+  it('sin el bloqueo, otro proceso pudo escribir: para antes del bloque siguiente', async () => {
+    const env = world({ loseLock: true });
+    await seedGold(env);
+    expect(await env.run()).toEqual({ exitCode: 1, stderr: null });
+    expect(env.lines.filter((line) => line['event'] === 'history_block')).toHaveLength(1);
+    expect(env.lines.at(-1)).toEqual({
+      event: 'history_finished',
+      reason: 'source_lock_lost',
+      sequence: 'lotes_historia_r_100',
+      status: 'failed',
+    });
+  });
+
+  it('una publicación que falla se repite; un log que repetir no cambia se deja, por cualquiera de sus cuatro motivos', async () => {
+    const env = world({
+      failPublication: {
+        reason: 'storage_unavailable',
+        sequence: 'lotes_historia_r_100',
+        times: 3,
+      },
+    });
+    await seedGold(env);
+    expect(await env.run()).toEqual({ exitCode: 0, stderr: null });
+    expect(env.published.get('lotes_historia_r_100')).toBe(2);
+    expect(
+      env.lines.filter(
+        (line) => line['event'] === 'history_publication' && line['status'] === 'failed',
+      ),
+    ).toHaveLength(3);
+    // El proceso de publicación recibe solo buoh_publicacion y el token operaciones.
+    expect(env.publishes[0]?.env).toEqual({
+      BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
+      BUOH_POSTGRES_DB: 'buoh',
+      BUOH_POSTGRES_HOST: 'pg-sintetico.invalid',
+      BUOH_POSTGRES_PASSWORD: ENV.BUOH_PUBLICACION_POSTGRES_PASSWORD,
+      BUOH_POSTGRES_PORT: '5432',
+      BUOH_POSTGRES_SSLMODE: 'verify-full',
+      BUOH_POSTGRES_USER: 'buoh_publicacion',
+      BUOH_S3_ACCESS_KEY_ID: ENV.BUOH_OPERACIONES_S3_ACCESS_KEY_ID,
+      BUOH_S3_BUCKET: ENV.BUOH_OPERACIONES_S3_BUCKET,
+      BUOH_S3_ENDPOINT: ENV.BUOH_OPERACIONES_S3_ENDPOINT,
+      BUOH_S3_REGION: ENV.BUOH_OPERACIONES_S3_REGION,
+      BUOH_S3_SECRET_ACCESS_KEY: ENV.BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY,
+    });
+
+    // Una que falla siempre: a los diez fallos seguidos, después de pedirlo todo, el proceso para.
+    const failing = world({
+      failPublication: { reason: 'storage_unavailable', sequence: 'lotes_historia_r_100' },
+    });
+    await seedGold(failing);
+    expect(await failing.run()).toEqual({ exitCode: 1, stderr: null });
+    expect(failing.lines.at(-1)).toEqual({
+      event: 'history_finished',
+      reason: 'publication_failed',
+      status: 'failed',
+    });
+
+    for (const reason of [
+      'publication_conflict',
+      'publication_limit_exceeded',
+      'publication_not_derivable',
+      'publication_segment_too_large',
+    ]) {
+      const stopped = world({ failPublication: { reason, sequence: 'lotes_historia_r_100' } });
+      await seedGold(stopped);
+      expect(await stopped.run(), reason).toEqual({ exitCode: 1, stderr: null });
+      expect(stopped.lines.at(-1), reason).toMatchObject({
+        reason: 'logs_skipped',
+        skipped: [{ log: 1, sequence: 'lotes_historia_r_100' }],
+      });
+    }
+  });
+
+  it('un bloque que empieza después de la hora de corte pasa al log siguiente, salvo si el log no termina con un bloque', async () => {
+    const due = { first: '2027-10-20T00:00:00.000Z', nextReadiness: 'ready' as const };
+    const env = world({ logs: { lotes_historia_r_100: due } });
+    await seedGold(env);
+    expect(await env.run()).toEqual({ exitCode: 0, stderr: null });
+    const r100 = (lines: readonly Record<string, unknown>[]) =>
+      lines
+        .filter(
+          (line) =>
+            line['event'] === 'history_block' && line['sequence'] === 'lotes_historia_r_100',
+        )
+        .map((line) => [line['log'], line['cut']]);
+    expect(r100(env.lines)).toEqual([
+      [2, { from: 1, to: 2 }],
+      [2, { from: 1, to: 2 }],
+    ]);
+
+    // El log 1 termina con una conexión sin respuestas, de un intento que no terminó: el bloque
+    // sigue en él, y el siguiente ya pasa al log 2.
+    const junk = world({ logs: { lotes_historia_r_100: due } });
+    await seedGold(junk);
+    await writeBatchLog({
+      ...junk.storesOf(logLocation(1, HISTORY_R_100_SEQUENCE)),
+      runs: [{ atUtc: '2027-10-31T15:00:00.000Z', texts: [] }],
+    });
+    expect(await junk.run()).toEqual({ exitCode: 0, stderr: null });
+    expect(r100(junk.lines)).toEqual([
+      [1, null],
+      [2, { from: 1, to: 2 }],
+    ]);
+  });
+
+  it('la configuración no admite la credencial dueña', async () => {
+    const env = world();
+    const result = await env.run({ ...ENV, BUOH_DUENO_POSTGRES_PASSWORD: 'duena-sintetica-01234' });
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain('BUOH_DUENO_POSTGRES_PASSWORD');
+    expect(result.stderr).not.toContain('duena-sintetica-01234');
   });
 });
