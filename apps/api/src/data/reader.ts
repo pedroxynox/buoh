@@ -7,11 +7,14 @@ import {
   type DataEvents,
   type DataHealth,
   type DeploymentEnvironment,
+  isBatchManifestCore,
 } from '@buoh/contracts';
 import {
+  DatasetIntegrityError,
   DERIV_SOURCE,
   isLogExpired,
   listCaptureLogs,
+  R_100_SEQUENCE,
   readDatasetPublications,
   readLatestStoredHealth,
   readLogDataEvents,
@@ -42,16 +45,18 @@ export interface DataReader {
   health(): Promise<DataHealth>;
   /**
    * Los eventos de datos de los logs que no han vencido (`DataEvents`): las versiones del catálogo,
-   * las incidencias y las condiciones, y las publicaciones de este entorno de `buoh_datasets`, que no
-   * vencen (ADR-0020 §10), los `DATA_EVENTS_LIMIT` más recientes. Rechaza con el error de PostgreSQL si no responde, con `DataEventIntegrityError`
-   * si una fila no pasa sus comprobaciones, y con `LogsUnreadableError` si hay logs y el rol no
-   * puede leer ninguno.
+   * las incidencias y las condiciones de los logs de R_100, y las publicaciones de este entorno de
+   * `buoh_datasets`, que no vencen (ADR-0020 §10), agrupados por secuencia, los
+   * `DATA_EVENTS_LIMIT` más recientes de cada una (ADR-0021 §5). Rechaza con el error de PostgreSQL
+   * si no responde, con `DataEventIntegrityError` si una fila no pasa sus comprobaciones, y con
+   * `LogsUnreadableError` si hay logs y el rol no puede leer ninguno.
    */
   events(): Promise<DataEvents>;
   /**
-   * Los datasets publicados en este entorno (`DataDatasets`, ADR-0020 §10), de `buoh_datasets`, los
-   * `DATA_DATASETS_LIMIT` más recientes, con su período, sus conteos, cómo terminaron, sus
-   * incidencias y la última verificación de cada modo. No lee R2. Sin el esquema, ninguno. Rechaza
+   * Los datasets publicados en este entorno (`DataDatasets`, ADR-0020 §10), de `buoh_datasets`,
+   * agrupados por secuencia, los `DATA_DATASETS_LIMIT` más recientes de cada una (ADR-0021 §5), con
+   * su período, sus conteos, cómo terminaron, sus incidencias, la última verificación de cada modo
+   * y, en los de los lotes, sus velas, horarios, ofertas y cotizaciones. No lee R2. Sin el esquema, ninguno. Rechaza
    * con el error de PostgreSQL si no responde o no se puede leer el esquema, y con
    * `DatasetIntegrityError` si una fila no pasa sus comprobaciones.
    */
@@ -270,52 +275,115 @@ function datasetOf(stored: StoredPublishedDataset): DataDataset {
       recompute:
         stored.verifications.recompute === null ? null : { ...stored.verifications.recompute },
     },
+    batch: batchOf(core),
   };
+}
+
+/**
+ * Lo que solo tiene un core 1.1.0, el de un dataset de los lotes (ADR-0021 §3), o `null` con uno
+ * 1.0.0. El contrato del core pone esos campos exactamente en un 1.1.0.
+ */
+function batchOf(core: StoredPublishedDataset['core']): DataDataset['batch'] {
+  if (!isBatchManifestCore(core)) {
+    return null;
+  }
+  const batch = {
+    candle_time_from_utc: core.candle_time_from_utc,
+    candle_time_to_utc: core.candle_time_to_utc,
+    market_candle_count: core.market_candle_count,
+    trading_session_count: core.trading_session_count,
+    contract_offer_count: core.contract_offer_count,
+    contract_quote_count: core.contract_quote_count,
+  };
+  // `readPublishedDatasets` ya validó el core, así que esto no pasa; si pasara, no se inventa nada.
+  if (Object.values(batch).some((value) => value === undefined)) {
+    throw new DatasetIntegrityError();
+  }
+  return batch as NonNullable<DataDataset['batch']>;
+}
+
+/** Lo que va en cada secuencia, en el orden en que llega. */
+function groupBy<T>(items: readonly T[], sequenceOf: (item: T) => string): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const sequence = sequenceOf(item);
+    const group = groups.get(sequence);
+    if (group === undefined) {
+      groups.set(sequence, [item]);
+    } else {
+      group.push(item);
+    }
+  }
+  return groups;
+}
+
+/** Por el nombre de la secuencia, en el orden de las unidades UTF-16, como pide el contrato. */
+function bySequenceName<T>([a]: readonly [string, T], [b]: readonly [string, T]): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 export function createDataReader(deps: DataReaderDeps): DataReader {
   return {
     datasets: async () => {
-      // Uno más que el límite: así se sabe si quedan otros fuera.
+      // De cada secuencia, uno más que el límite: así se sabe si quedan otros fuera.
       const stored = await readPublishedDatasets(deps.pool, {
         source: DERIV_SOURCE,
         environment: deps.environment,
-        limit: DATA_DATASETS_LIMIT + 1,
+        limitPerSequence: DATA_DATASETS_LIMIT + 1,
       });
+      const groups = [...groupBy(stored, (dataset) => dataset.sequence)].sort(bySequenceName);
       return {
-        datasets: stored.slice(0, DATA_DATASETS_LIMIT).map(datasetOf),
-        truncated: stored.length > DATA_DATASETS_LIMIT,
+        sequences: groups.map(([sequence, datasets]) => ({
+          sequence,
+          datasets: datasets.slice(0, DATA_DATASETS_LIMIT).map(datasetOf),
+          truncated: datasets.length > DATA_DATASETS_LIMIT,
+        })),
       };
     },
     events: async () => {
+      // Los logs que se leen son los de R_100 (`listCaptureLogs`; ADR-0019 §8, precisión del PR 3
+      // de ADR-0021), así que sus eventos van en esa secuencia.
       const logs = await readableCaptureLogs(deps);
       const now = new Date(deps.clock()).toISOString();
       const read = logs
         .filter((log) => log.readable && !isLogExpired(log, now))
         .map((log) => log.location)
         .sort((a, b) => b.number - a.number);
-      const events: DataEvent[] = [];
+      const fromLogs: DataEvent[] = [];
       for (const log of read) {
         // Una fila más que el límite en cada clase: así se sabe si quedan otras fuera.
         const stored = await readLogDataEvents(deps.pool, log, {
           source: DERIV_SOURCE,
           limit: DATA_EVENTS_LIMIT + 1,
         });
-        events.push(...eventsOf(log.number, stored));
+        fromLogs.push(...eventsOf(log.number, stored));
       }
       // Las publicaciones salen de `buoh_datasets`, también las de un log que ya venció: los
-      // datasets no vencen (ADR-0020 §6 y §10).
+      // datasets no vencen (ADR-0020 §6 y §10). Cada una va en la secuencia de su dataset, y de
+      // cada secuencia se leen una más que el límite (ADR-0021 §5).
       const publications = await readDatasetPublications(deps.pool, {
         source: DERIV_SOURCE,
         environment: deps.environment,
-        limit: DATA_EVENTS_LIMIT + 1,
+        limitPerSequence: DATA_EVENTS_LIMIT + 1,
       });
-      events.push(...publications.map(publicationEvent));
-      events.sort(newestFirst);
+      const groups = groupBy(publications, (publication) => publication.sequence);
+      const live = R_100_SEQUENCE.name;
+      const sequences = new Map<string, DataEvent[]>(
+        [...groups].map(([sequence, list]) => [sequence, list.map(publicationEvent)]),
+      );
+      if (read.length > 0 || fromLogs.length > 0) {
+        sequences.set(live, [...fromLogs, ...(sequences.get(live) ?? [])]);
+      }
       return {
-        logs: read.map((log) => log.number),
-        events: events.slice(0, DATA_EVENTS_LIMIT),
-        truncated: events.length > DATA_EVENTS_LIMIT,
+        sequences: [...sequences].sort(bySequenceName).map(([sequence, events]) => {
+          events.sort(newestFirst);
+          return {
+            sequence,
+            logs: sequence === live ? read.map((log) => log.number) : [],
+            events: events.slice(0, DATA_EVENTS_LIMIT),
+            truncated: events.length > DATA_EVENTS_LIMIT,
+          };
+        }),
       };
     },
     health: async () => {

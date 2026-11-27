@@ -1,17 +1,19 @@
 /**
- * La forma de la respuesta de `GET /api/v1/datos/datasets` (`DataDatasets`), comprobada en el
- * navegador antes de dibujarla (ADR-0020 §10; CONTRIBUTING, «Reglas de implementación»). Como las de
- * la salud, de Mercados y de la Auditoría, no usa los esquemas de `@buoh/contracts`, cuya entrada
- * principal carga módulos de Node, y repite sus reglas: objetos estrictos, los valores y formatos de
- * cada campo, y las reglas entre campos (los datasets del más nuevo al más viejo y sin repetir, la
- * lista cortada solo si está llena, los segmentos y el período en orden, el período `null`
- * exactamente sin ticks, las listas en orden y sin repetir, «limpio» como dice su regla, las
- * incidencias que suman su conteo y el código de cada verificación). Lo que no pasa es una respuesta
- * inesperada, nunca un dataset inventado. `test/datos.test.tsx` la contrasta con el esquema.
+ * La forma de la respuesta de `GET /api/v2/datos/datasets` (`DataDatasets`), comprobada en el
+ * navegador antes de dibujarla (ADR-0020 §10; ADR-0021 §5; CONTRIBUTING, «Reglas de
+ * implementación»). Como las de la salud, de Mercados y de la Auditoría, no usa los esquemas de
+ * `@buoh/contracts`, cuya entrada principal carga módulos de Node, y repite sus reglas: objetos
+ * estrictos, los valores y formatos de cada campo, y las reglas entre campos (las secuencias por su
+ * nombre y sin repetir, cada una con algún dataset, cada dataset una vez, los de cada secuencia del
+ * más nuevo al más viejo, la lista cortada solo si está llena, los segmentos y el período en orden,
+ * el período `null` exactamente sin ticks y el de las velas exactamente sin velas, las listas en
+ * orden y sin repetir, «limpio» como dice su regla, las incidencias que suman su conteo y el código
+ * de cada verificación). Lo que no pasa es una respuesta inesperada, nunca un dataset inventado.
+ * `test/datos.test.tsx` la contrasta con el esquema.
  */
-import type { DataDataset, DataDatasets } from '@buoh/contracts';
+import type { DataDataset, DataDatasets, DataDatasetsSequence } from '@buoh/contracts';
 
-/** Cuántos datasets trae como mucho (`DATA_DATASETS_LIMIT` de los contratos). */
+/** Cuántos datasets trae como mucho de cada secuencia (`DATA_DATASETS_LIMIT` de los contratos). */
 export const DATA_DATASETS_LIMIT = 200;
 
 /** El mayor número de un log de producción: seis cifras (ADR-0018 §6). */
@@ -22,11 +24,14 @@ const UTC_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const DATASET_ID = /^sha256:[0-9a-f]{64}$/u;
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const RULE_VERSION = /^\d+\.\d+\.\d+$/u;
+/** El nombre de una secuencia de logs (`dataset_log_ranges.sequence`; ADR-0021 §1). */
+const SEQUENCE = /^[A-Za-z0-9_]{1,64}$/u;
 /** El código saneado de un fallo de `data:replay` (`ReplayErrorCode`). */
 const REPLAY_CODE = /^[A-Z][A-Z0-9_]{0,62}$/u;
 
 type Incident = DataDataset['incidents'][number];
 type Verification = NonNullable<DataDataset['verifications']['verify_only']>;
+type Batch = NonNullable<DataDataset['batch']>;
 
 const INCIDENT_TYPES = {
   invalid_source_frame: true,
@@ -38,6 +43,9 @@ const INCIDENT_TYPES = {
   event_gap_unresolved: true,
   persistence_unavailable: true,
   source_limit_exceeded: true,
+  contract_rejected: true,
+  candle_repeated: true,
+  candle_missing: true,
 } as const satisfies Record<Incident['incident_type'], true>;
 
 const SEVERITIES = {
@@ -61,7 +69,12 @@ const STATUSES = {
 } as const satisfies Record<Verification['status'], true>;
 
 /** Los campos de cada objeto del contrato, que son estrictos: ni uno de más ni uno de menos. */
-const RESPONSE_KEYS = ['datasets', 'truncated'] as const satisfies readonly (keyof DataDatasets)[];
+const RESPONSE_KEYS = ['sequences'] as const satisfies readonly (keyof DataDatasets)[];
+const SEQUENCE_KEYS = [
+  'sequence',
+  'datasets',
+  'truncated',
+] as const satisfies readonly (keyof DataDatasetsSequence)[];
 const DATASET_KEYS = [
   'dataset_id',
   'publication_id',
@@ -85,7 +98,16 @@ const DATASET_KEYS = [
   'open_condition_types',
   'incidents',
   'verifications',
+  'batch',
 ] as const satisfies readonly (keyof DataDataset)[];
+const BATCH_KEYS = [
+  'candle_time_from_utc',
+  'candle_time_to_utc',
+  'market_candle_count',
+  'trading_session_count',
+  'contract_offer_count',
+  'contract_quote_count',
+] as const satisfies readonly (keyof Batch)[];
 const INCIDENT_KEYS = [
   'incident_type',
   'severity',
@@ -176,6 +198,33 @@ function isVerification(value: unknown): value is Verification | null {
   );
 }
 
+/** Lo de un dataset de los lotes, o `null`: el período de las velas, null exactamente sin velas. */
+function isBatch(value: unknown): value is Batch | null {
+  if (value === null) {
+    return true;
+  }
+  if (
+    !isRecord(value) ||
+    !hasExactly(value, BATCH_KEYS) ||
+    !(value.candle_time_from_utc === null || isUtc(value.candle_time_from_utc)) ||
+    !(value.candle_time_to_utc === null || isUtc(value.candle_time_to_utc)) ||
+    !isCount(value.market_candle_count) ||
+    !isCount(value.trading_session_count) ||
+    !isCount(value.contract_offer_count) ||
+    !isCount(value.contract_quote_count)
+  ) {
+    return false;
+  }
+  const from = value.candle_time_from_utc;
+  const to = value.candle_time_to_utc;
+  const none = value.market_candle_count === 0;
+  return (
+    none === (from === null) &&
+    none === (to === null) &&
+    (from === null || to === null || from <= to)
+  );
+}
+
 function isDataset(value: unknown): value is DataDataset {
   if (!isRecord(value) || !hasExactly(value, DATASET_KEYS)) {
     return false;
@@ -208,7 +257,8 @@ function isDataset(value: unknown): value is DataDataset {
     !isRecord(verifications) ||
     !hasExactly(verifications, VERIFICATIONS_KEYS) ||
     !isVerification(verifications.verify_only) ||
-    !isVerification(verifications.recompute)
+    !isVerification(verifications.recompute) ||
+    !isBatch(value.batch)
   ) {
     return false;
   }
@@ -234,28 +284,44 @@ function isDataset(value: unknown): value is DataDataset {
   );
 }
 
+/** Los datasets de una secuencia, si cumplen el contrato. */
+function isSequence(value: unknown): value is DataDatasetsSequence {
+  if (!isRecord(value) || !hasExactly(value, SEQUENCE_KEYS)) {
+    return false;
+  }
+  const { datasets, sequence, truncated } = value;
+  if (
+    !matches(SEQUENCE, sequence) ||
+    !Array.isArray(datasets) ||
+    datasets.length === 0 ||
+    datasets.length > DATA_DATASETS_LIMIT ||
+    !datasets.every(isDataset) ||
+    typeof truncated !== 'boolean'
+  ) {
+    return false;
+  }
+  // Solo se corta una lista llena, y va del más nuevo al más viejo.
+  return (
+    (!truncated || datasets.length === DATA_DATASETS_LIMIT) &&
+    datasets.every(
+      (dataset, index) =>
+        index === 0 || (datasets[index - 1]?.published_at_utc ?? '') >= dataset.published_at_utc,
+    )
+  );
+}
+
 /** La respuesta como `DataDatasets` si cumple el contrato, o `null`. */
 export function readDataDatasets(value: unknown): DataDatasets | null {
   if (!isRecord(value) || !hasExactly(value, RESPONSE_KEYS)) {
     return null;
   }
-  const { datasets, truncated } = value;
-  if (
-    !Array.isArray(datasets) ||
-    datasets.length > DATA_DATASETS_LIMIT ||
-    !datasets.every(isDataset) ||
-    typeof truncated !== 'boolean'
-  ) {
+  const { sequences } = value;
+  if (!Array.isArray(sequences) || !sequences.every(isSequence)) {
     return null;
   }
-  const ids = new Set(datasets.map((dataset) => dataset.dataset_id));
+  const ids = sequences.flatMap((group) => group.datasets.map((dataset) => dataset.dataset_id));
   const valid =
-    // Solo se corta una lista llena; cada dataset sale una vez, del más nuevo al más viejo.
-    (!truncated || datasets.length === DATA_DATASETS_LIMIT) &&
-    ids.size === datasets.length &&
-    datasets.every(
-      (dataset, index) =>
-        index === 0 || (datasets[index - 1]?.published_at_utc ?? '') >= dataset.published_at_utc,
-    );
+    // Las secuencias por su nombre, sin repetir, y cada dataset una vez.
+    isSortedUnique(sequences.map((group) => group.sequence)) && new Set(ids).size === ids.length;
   return valid ? (value as unknown as DataDatasets) : null;
 }

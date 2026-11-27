@@ -1,13 +1,14 @@
 import {
   conditionTypeSchema,
+  dataQualityIncidentTypeSchema,
   datasetManifestCoreSchema,
   deriveDatasetId,
   isSortedUnique,
-  qualityIncidentTypeSchema,
   severitySchema,
   symbolSchema,
   utcTimestampMsSchema,
   uuidV7Schema,
+  type DataQualityIncidentType,
   type DatasetManifestCore,
   type DeploymentEnvironment,
   type JsonValue,
@@ -17,9 +18,11 @@ import type { z } from 'zod';
 
 import { DATASETS_SCHEMA } from '../datasets/location.js';
 import { MAX_LOG_NUMBER } from '../successive-logs.js';
+import { SEQUENCE_NAME_PATTERN } from './data-events.js';
 
 // Los datasets publicados para la sección Datos (ADR-0020 §10): de `buoh_datasets`, cada dataset por
-// su publicación activa, con su `DatasetManifestCore`, su rango de `dataset_log_ranges`, sus
+// su publicación activa, con su `DatasetManifestCore` (1.0.0 en vivo o 1.1.0 de los lotes), su
+// secuencia y su rango de `dataset_log_ranges`, sus
 // incidencias por tipo y gravedad y la última verificación de cada modo. Lo escriben la publicación
 // y `buoh-operaciones`; aquí solo se lee, con el esquema en cada tabla, para un pool cuyas sesiones
 // no lo tienen en el `search_path`, como el de la API. No lee R2.
@@ -31,9 +34,13 @@ export interface StoredDatasetVerification {
   readonly error_code: string | null;
 }
 
-/** Cuántas incidencias de un tipo y una gravedad tiene el dataset (`dataset_quality_incidents`). */
+/**
+ * Cuántas incidencias de un tipo y una gravedad tiene el dataset (`dataset_quality_incidents`), con
+ * todos los tipos de `DataQualityIncident`, también los de los lotes: `contract_rejected`,
+ * `candle_repeated` y `candle_missing`.
+ */
 export interface StoredDatasetIncidentCount {
-  readonly incident_type: z.infer<typeof qualityIncidentTypeSchema>;
+  readonly incident_type: DataQualityIncidentType;
   readonly severity: z.infer<typeof severitySchema>;
   readonly count: number;
 }
@@ -43,7 +50,10 @@ export interface StoredPublishedDataset {
   readonly dataset_id: string;
   readonly publication_id: string;
   readonly published_at_utc: string;
+  /** Un core 1.0.0, el de la captura en vivo, o 1.1.0, el de los lotes (ADR-0021 §3). */
   readonly core: DatasetManifestCore;
+  /** La secuencia del log del dataset (`dataset_log_ranges.sequence`; ADR-0021 §1). */
+  readonly sequence: string;
   readonly log: number;
   readonly first_segment: number;
   readonly last_segment: number;
@@ -61,14 +71,17 @@ export interface ReadPublishedDatasetsInput {
   readonly source: string;
   /** Solo los publicados en este entorno (`published_manifest_records.deployment_environment`). */
   readonly environment: DeploymentEnvironment;
-  /** Cuántos lee como mucho: los publicados más recientemente. */
-  readonly limit: number;
+  /**
+   * Cuántos lee como mucho de cada secuencia: los publicados más recientemente, para que los de los
+   * lotes no tapen los de la captura en vivo (ADR-0021 §5).
+   */
+  readonly limitPerSequence: number;
 }
 
 /**
  * Una fila de un dataset publicado que no pasa sus comprobaciones: un `manifest_core` que no es JSON,
  * que no cumple su contrato, un identificador que no es el SHA-256 del JCS de su núcleo, otra
- * fuente, un dataset activo sin su fila de rango, un rango, una incidencia o una verificación que no
+ * fuente, un dataset activo sin su fila de rango, una secuencia, un rango, una incidencia o una verificación que no
  * tienen sus formatos, unos símbolos pendientes o unos tipos de condición abiertos sin orden o
  * repetidos, o unas incidencias que no suman el `incident_count` de su núcleo. No repite nada de su
  * contenido.
@@ -96,6 +109,7 @@ interface DatasetRow {
   dataset_id: string;
   source: string;
   manifest_core_jcs: string;
+  sequence: string | null;
   log_number: number | null;
   first_segment: number | null;
   last_segment: number | null;
@@ -134,6 +148,7 @@ type StoredDatasetRange = Pick<
   | 'log'
   | 'open_condition_types'
   | 'pending_continuity_symbols'
+  | 'sequence'
 >;
 
 /**
@@ -143,10 +158,12 @@ type StoredDatasetRange = Pick<
  * en null y no pasa: es un error de programación (ADR-0020 §9), y la lista no lo omite en silencio.
  */
 function rangeOf(row: DatasetRow): StoredDatasetRange {
-  const { clean, first_segment: first, last_segment: last, log_number: log } = row;
+  const { clean, first_segment: first, last_segment: last, log_number: log, sequence } = row;
   const pending = row.pending_continuity_symbols;
   const open = row.open_condition_types;
   if (
+    typeof sequence !== 'string' ||
+    !SEQUENCE_NAME_PATTERN.test(sequence) ||
     !isLogNumber(log) ||
     !isSegment(first) ||
     !isSegment(last) ||
@@ -168,6 +185,7 @@ function rangeOf(row: DatasetRow): StoredDatasetRange {
     log,
     open_condition_types: open as StoredPublishedDataset['open_condition_types'],
     pending_continuity_symbols: pending,
+    sequence,
   };
 }
 
@@ -221,9 +239,10 @@ async function schemaMissing(pool: Pick<Pool, 'query'>, error: unknown): Promise
 }
 
 /**
- * Los datasets publicados (ADR-0020 §10): los `limit` de `source` en `environment` con la publicación
- * activa más reciente, de la más nueva a la más vieja, cada uno con su núcleo, su rango, sus
- * incidencias por tipo y gravedad, en orden, y la última verificación de cada modo de esa
+ * Los datasets publicados (ADR-0020 §10): de cada secuencia (ADR-0021 §5), los `limitPerSequence`
+ * de `source` en `environment` con la publicación activa más reciente, por secuencia y, dentro de
+ * ella, de la más nueva a la más vieja, cada uno con su núcleo, 1.0.0 o 1.1.0, su secuencia, su
+ * rango, sus incidencias por tipo y gravedad, en orden, y la última verificación de cada modo de esa
  * publicación (por `verification_id`, un UUIDv7), o `null` si no tiene. Sin el esquema
  * `buoh_datasets`, ninguno; con el esquema, un fallo al leerlo, como sin privilegios (`42501`) o sin
  * una de sus tablas, rechaza con el error de PostgreSQL. Lanza `DatasetIntegrityError` si una fila no
@@ -234,7 +253,7 @@ export async function readPublishedDatasets(
   pool: Pick<Pool, 'query'>,
   input: ReadPublishedDatasetsInput,
 ): Promise<StoredPublishedDataset[]> {
-  if (!Number.isSafeInteger(input.limit) || input.limit < 1) {
+  if (!Number.isSafeInteger(input.limitPerSequence) || input.limitPerSequence < 1) {
     throw new TypeError('El límite de datasets es un entero positivo.');
   }
   const schema = pg.escapeIdentifier(DATASETS_SCHEMA);
@@ -242,17 +261,28 @@ export async function readPublishedDatasets(
   let incidents: IncidentRow[];
   let verifications: VerificationRow[];
   try {
+    // El puesto de cada dataset en su secuencia, del más nuevo al más viejo: así el límite es por
+    // secuencia, en una sola consulta. Un dataset sin su fila de rango queda con la secuencia en
+    // null, en su propio grupo, y no pasa sus comprobaciones.
     ({ rows: datasets } = await pool.query<DatasetRow>(
-      `SELECT r.publication_id::text AS publication_id, r.published_at_utc, d.dataset_id, d.source,
-              d.manifest_core_jcs, g.log_number, g.first_segment, g.last_segment, g.clean,
-              g.pending_continuity_symbols, g.open_condition_types
-         FROM ${schema}.published_manifest_records r
-         JOIN ${schema}.datasets d USING (dataset_id)
-         LEFT JOIN ${schema}.dataset_log_ranges g USING (dataset_id)
-        WHERE d.source = $1 AND r.deployment_environment = $2 AND r.state = 'active'
-        ORDER BY r.published_at_utc DESC, r.publication_id DESC
-        LIMIT $3`,
-      [input.source, input.environment, input.limit],
+      `SELECT publication_id, published_at_utc, dataset_id, source, manifest_core_jcs, sequence,
+              log_number, first_segment, last_segment, clean, pending_continuity_symbols,
+              open_condition_types
+         FROM (SELECT r.publication_id::text AS publication_id, r.published_at_utc, d.dataset_id,
+                      d.source, d.manifest_core_jcs, g.sequence, g.log_number, g.first_segment,
+                      g.last_segment, g.clean, g.pending_continuity_symbols,
+                      g.open_condition_types,
+                      row_number() OVER (PARTITION BY g.sequence
+                                         ORDER BY r.published_at_utc DESC,
+                                                  r.publication_id DESC) AS rank
+                 FROM ${schema}.published_manifest_records r
+                 JOIN ${schema}.datasets d USING (dataset_id)
+                 LEFT JOIN ${schema}.dataset_log_ranges g USING (dataset_id)
+                WHERE d.source = $1 AND r.deployment_environment = $2
+                  AND r.state = 'active') ranked
+        WHERE rank <= $3
+        ORDER BY sequence, rank`,
+      [input.source, input.environment, input.limitPerSequence],
     ));
     const ids = datasets.map((row) => row.dataset_id);
     const publications = datasets.map((row) => row.publication_id);
@@ -287,7 +317,7 @@ export async function readPublishedDatasets(
     const own = incidents
       .filter((item) => item.dataset_id === row.dataset_id)
       .map((item): StoredDatasetIncidentCount => {
-        const type = qualityIncidentTypeSchema.safeParse(item.incident_type);
+        const type = dataQualityIncidentTypeSchema.safeParse(item.incident_type);
         const severity = severitySchema.safeParse(item.severity);
         if (!type.success || !severity.success || !Number.isSafeInteger(item.count)) {
           throw new DatasetIntegrityError();
@@ -321,6 +351,7 @@ export async function readPublishedDatasets(
       pending_continuity_symbols: range.pending_continuity_symbols,
       publication_id: row.publication_id,
       published_at_utc: row.published_at_utc,
+      sequence: range.sequence,
       verifications: { recompute: latest('recompute'), verify_only: latest('verify-only') },
     };
   });

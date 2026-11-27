@@ -5,7 +5,12 @@
  * lectura de la API, sin el token CSRF. Los eventos son sintéticos, con la forma de los que guardó
  * producción.
  */
-import { dataEventsSchema, type DataEvent, type DataEvents } from '@buoh/contracts';
+import {
+  dataEventsSchema,
+  type DataEvent,
+  type DataEvents,
+  type DataEventsSequence,
+} from '@buoh/contracts';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -97,25 +102,40 @@ const PUBLICATION = {
   state: 'active',
 } satisfies DataEvent;
 
-const EVENTS: DataEvents = {
+/** Los eventos de R_100, sin el nombre de su secuencia. */
+const LIVE = {
   logs: [4, 3, 2],
   events: [RESOLVED, OPENED, PERSISTENCE, LIMIT, RESPONSE, CATALOG, PUBLICATION],
   truncated: false,
-};
+} satisfies Omit<DataEventsSequence, 'sequence'>;
+
+/** Solo la secuencia de R_100, con esos logs y eventos (ADR-0021 §5). */
+const inR100 = (value: Record<string, unknown>) => ({
+  sequences: [{ sequence: 'R_100', ...value }],
+});
+
+/** Con la publicación de un dataset de los lotes, en su secuencia, sin logs leídos. */
+const BATCH = {
+  sequence: 'lotes_velas',
+  logs: [],
+  events: [{ ...PUBLICATION, log: 1, at_utc: '2026-11-27T00:05:00.000Z' }],
+  truncated: false,
+} satisfies DataEventsSequence;
+const EVENTS: DataEvents = { sequences: [{ sequence: 'R_100', ...LIVE }, BATCH] };
 
 describe('la respuesta de los eventos de datos, como el contrato', () => {
   const samples: unknown[] = [
     EVENTS,
-    { logs: [], events: [], truncated: false },
-    { logs: [4, 3], events: [], truncated: false },
-    {
+    { sequences: [] },
+    inR100({ logs: [4, 3], events: [], truncated: false }),
+    inR100({
       logs: [3],
       events: Array.from({ length: DATA_EVENTS_LIMIT }, () => CATALOG),
       truncated: true,
-    },
+    }),
     // Una publicación de un log que ya no se lee: los datasets no vencen (ADR-0020 §10).
-    { logs: [4], events: [{ ...PUBLICATION, log: 1 }], truncated: false },
-    { logs: [], events: [{ ...PUBLICATION, log: 1 }], truncated: false },
+    inR100({ logs: [4], events: [{ ...PUBLICATION, log: 1 }], truncated: false }),
+    inR100({ logs: [], events: [{ ...PUBLICATION, log: 1 }], truncated: false }),
   ];
 
   it('acepta lo que acepta el esquema', () => {
@@ -127,26 +147,39 @@ describe('la respuesta de los eventos de datos, como el contrato', () => {
 
   it('el mayor número de log es el del contrato', () => {
     for (const log of [999_999, 1_000_000]) {
-      const value = { logs: [log], events: [{ ...CATALOG, log }], truncated: false };
+      const value = inR100({ logs: [log], events: [{ ...CATALOG, log }], truncated: false });
       expect(readDataEvents(value) !== null, String(log)).toBe(
         dataEventsSchema.safeParse(value).success,
       );
     }
-    expect(readDataEvents({ logs: [999_999], events: [], truncated: false })).not.toBeNull();
+    expect(
+      readDataEvents(inR100({ logs: [999_999], events: [], truncated: false })),
+    ).not.toBeNull();
   });
 
   it('rechaza, como el esquema, cada regla entre campos', () => {
+    const grouped: unknown[] = [
+      // Las secuencias por su nombre, sin repetir, cada una con algún log o algún evento.
+      { sequences: [...EVENTS.sequences].reverse() },
+      { sequences: [BATCH, BATCH] },
+      { sequences: [{ ...BATCH, events: [] }] },
+      { sequences: [{ ...BATCH, sequence: 'lotes-velas' }] },
+      { sequences: [{ ...BATCH, extra: 1 }] },
+      { ...EVENTS, extra: 1 },
+      // La forma de `/api/v1/`, sin secuencias.
+      LIVE,
+    ];
     const invalid: unknown[] = [
       // Del más viejo al más nuevo.
-      { ...EVENTS, events: [...EVENTS.events].reverse() },
+      { ...LIVE, events: [...LIVE.events].reverse() },
       // Un evento que no es una publicación, de un log que no se leyó.
-      { ...EVENTS, logs: [4] },
+      { ...LIVE, logs: [4] },
       { logs: [4], events: [{ ...CATALOG, log: 1 }], truncated: false },
       // Los logs sin orden, o repetidos.
-      { ...EVENTS, logs: [2, 3, 4] },
-      { ...EVENTS, logs: [4, 3, 3, 2] },
+      { ...LIVE, logs: [2, 3, 4] },
+      { ...LIVE, logs: [4, 3, 3, 2] },
       // Una lista cortada que no está llena, o más larga que el límite.
-      { ...EVENTS, truncated: true },
+      { ...LIVE, truncated: true },
       {
         logs: [3],
         events: Array.from({ length: DATA_EVENTS_LIMIT + 1 }, () => CATALOG),
@@ -158,25 +191,28 @@ describe('la respuesta de los eventos de datos, como el contrato', () => {
         truncated: false,
       },
       // Una apertura con motivo, una resolución sin él, o la clave de otro tipo.
-      { ...EVENTS, events: [{ ...OPENED, resolution_reason: 'persistence_restored' }] },
-      { ...EVENTS, events: [{ ...RESOLVED, resolution_reason: null }] },
+      { ...LIVE, events: [{ ...OPENED, resolution_reason: 'persistence_restored' }] },
+      { ...LIVE, events: [{ ...RESOLVED, resolution_reason: null }] },
       {
-        ...EVENTS,
+        ...LIVE,
         events: [{ ...OPENED, condition_key: `source_limit_exceeded:sha256:${hex('d')}` }],
       },
       // Un motivo que no es un código, una clase o un tipo que no existen, un campo de más.
       {
-        ...EVENTS,
+        ...LIVE,
         events: [
           { ...PERSISTENCE, evidence: { stage: 'raw_object_write', reason: 'con espacio' } },
         ],
       },
-      { ...EVENTS, events: [{ ...CATALOG, kind: 'otra' }] },
-      { ...EVENTS, events: [{ ...PERSISTENCE, incident_type: 'duplicate_exact' }] },
-      { ...EVENTS, events: [{ ...PUBLICATION, extra: 1 }] },
-      { ...EVENTS, extra: 1 },
+      { ...LIVE, events: [{ ...CATALOG, kind: 'otra' }] },
+      { ...LIVE, events: [{ ...PERSISTENCE, incident_type: 'duplicate_exact' }] },
+      { ...LIVE, events: [{ ...PUBLICATION, extra: 1 }] },
+      { ...LIVE, extra: 1 },
     ];
-    for (const value of invalid) {
+    for (const value of [
+      ...grouped,
+      ...(invalid as Record<string, unknown>[]).map((item) => inR100(item)),
+    ]) {
       expect(dataEventsSchema.safeParse(value).success, JSON.stringify(value)).toBe(false);
       expect(readDataEvents(value), JSON.stringify(value)).toBeNull();
     }
@@ -218,6 +254,7 @@ describe('la respuesta de los eventos de datos, como el contrato', () => {
     'condition',
     'catalog_version',
     'publication',
+    'lotes_velas',
     'persistence_unavailable',
     'source_limit_exceeded',
     'invalid_source_frame',
@@ -356,7 +393,13 @@ describe('la vista de los eventos de datos', () => {
 
   it('con eventos: una fila por evento, la gravedad de las incidencias, los logs leídos y cuánto se guardan', () => {
     const html = render({ kind: 'ready', data: EVENTS });
-    expect(html.match(/<tr>/gu)?.length).toBe(EVENTS.events.length + 1);
+    // Una tabla por secuencia, cada una con su cabecera.
+    expect(html.match(/<table/gu)?.length).toBe(2);
+    expect(html.match(/<tr>/gu)?.length).toBe(LIVE.events.length + BATCH.events.length + 2);
+    expect(html.indexOf('<h3>Lotes: velas de 1 minuto</h3>')).toBeGreaterThan(
+      html.indexOf('<h3>R_100 en vivo</h3>'),
+    );
+    expect(html).toContain('Sus eventos son las publicaciones de sus datasets.');
     expect(html).toContain('Condición resuelta: Persistencia no disponible');
     expect(html).toContain('ServiceUnavailable');
     expect(html).toContain('9 nov 2026, 14:00:00 UTC');
@@ -373,11 +416,11 @@ describe('la vista de los eventos de datos', () => {
   it('con la lista cortada y solo publicaciones, sin logs leídos, también dice el corte', () => {
     const html = render({
       kind: 'ready',
-      data: {
+      data: inR100({
         logs: [],
         events: Array.from({ length: DATA_EVENTS_LIMIT }, () => ({ ...PUBLICATION, log: 1 })),
         truncated: true,
-      },
+      }) as DataEvents,
     });
     expect(html).toContain(`Se muestran los ${String(DATA_EVENTS_LIMIT)} más recientes`);
     expect(html).not.toContain('Se leyó');
@@ -387,22 +430,32 @@ describe('la vista de los eventos de datos', () => {
     const html = render({
       kind: 'ready',
       data: {
-        logs: [3],
-        events: Array.from({ length: DATA_EVENTS_LIMIT }, () => CATALOG),
-        truncated: true,
+        sequences: [
+          {
+            sequence: 'R_100',
+            logs: [3],
+            events: Array.from({ length: DATA_EVENTS_LIMIT }, () => CATALOG),
+            truncated: true,
+          },
+          BATCH,
+        ],
       },
     });
     expect(html).toContain('Se leyó el log 3.');
-    expect(html).toContain(`Se muestran los ${String(DATA_EVENTS_LIMIT)} más recientes`);
+    // Solo en la secuencia cortada.
+    expect(html.match(/más recientes: hay otros más viejos/gu)?.length).toBe(1);
   });
 
   it('vacía, dice por qué: sin logs, o con logs sin eventos', () => {
-    expect(render({ kind: 'ready', data: { logs: [], events: [], truncated: false } })).toContain(
+    expect(render({ kind: 'ready', data: { sequences: [] } })).toContain(
       'Todavía no hay ningún log de la captura.',
     );
-    expect(render({ kind: 'ready', data: { logs: [4], events: [], truncated: false } })).toContain(
-      'Los logs guardados no tienen eventos de datos.',
-    );
+    expect(
+      render({
+        kind: 'ready',
+        data: inR100({ logs: [4], events: [], truncated: false }) as DataEvents,
+      }),
+    ).toContain('Los logs guardados no tienen eventos de datos.');
   });
 
   it('cargando, y con un fallo, su texto fijo y, sin sesión, el enlace para iniciarla', () => {
@@ -450,12 +503,12 @@ describe('la lectura de los eventos de datos, sin el token CSRF', () => {
   it('GET al mismo origen, sin cuerpo ni token; sin la forma del contrato, «unexpected»', async () => {
     const requests = stubFetch(200, EVENTS);
     await expect(api.dataEvents()).resolves.toEqual(EVENTS);
-    expect(requests[0]?.path).toBe('/api/v1/datos/eventos');
+    expect(requests[0]?.path).toBe('/api/v2/datos/eventos');
     expect(requests[0]?.init?.method).toBe('GET');
     expect(requests[0]?.init?.credentials).toBe('same-origin');
     expect(JSON.stringify(requests[0]?.init?.headers ?? {})).not.toMatch(/csrf/iu);
     expect(requests[0]?.init?.body).toBeUndefined();
-    stubFetch(200, { ...EVENTS, logs: [4] });
+    stubFetch(200, inR100({ ...LIVE, logs: [4] }));
     await expect(api.dataEvents()).rejects.toMatchObject({ failure: { code: 'unexpected' } });
   });
 

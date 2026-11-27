@@ -364,5 +364,20 @@ export const dataQualityIncidentSchema = dataQualityIncidentStructuralSchema.sup
   },
 );
 
+/**
+ * Todos los tipos de `DataQualityIncident`: los de `qualityIncidentTypeSchema` y los que solo da el
+ * esquema 3.0.0 de los lotes (`contract_rejected`, `candle_repeated` y `candle_missing`). Es el tipo
+ * de una incidencia de un dataset (`dataset_quality_incidents`). `qualityIncidentTypeSchema` no
+ * cambia: es también el de las `quality_flags` de `MarketTick` y `MarketCandle`, y sumarle estos
+ * cambiaría esos contratos.
+ */
+export const dataQualityIncidentTypeSchema = z.enum([
+  ...qualityIncidentTypeSchema.options,
+  'contract_rejected',
+  'candle_repeated',
+  'candle_missing',
+]);
+
 export { qualityIncidentTypeSchema };
 export type DataQualityIncident = z.infer<typeof dataQualityIncidentSchema>;
+export type DataQualityIncidentType = z.infer<typeof dataQualityIncidentTypeSchema>;

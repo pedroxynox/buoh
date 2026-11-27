@@ -9,6 +9,7 @@ import {
   type DataDatasets,
   type DataEvent,
   type DataEvents,
+  type DataEventsSequence,
   type DataHealth,
 } from '@buoh/contracts';
 import type { LightMyRequestResponse } from 'fastify';
@@ -27,7 +28,7 @@ import {
 } from './support.js';
 
 // Las lecturas de solo PostgreSQL (ADR-0019 §8): `GET /api/v1/datos/salud` y
-// `GET /api/v1/datos/eventos`, con un lector y un servicio de sesiones falsos. Necesitan una sesión,
+// `GET /api/v2/datos/eventos` y `GET /api/v2/datos/datasets`, con un lector y un servicio de sesiones falsos. Necesitan una sesión,
 // renuevan su inactividad solo con el token CSRF, responden `not_ready` sin la credencial de lectura
 // y validan la salida con `DataHealth` y `DataEvents`. La lectura contra PostgreSQL está en
 // integration/data.test.ts y en integration/data-events.test.ts.
@@ -277,7 +278,7 @@ describe('GET /api/v1/datos/salud (ADR-0019 §8)', () => {
   });
 });
 
-const EVENTS_URL = '/api/v1/datos/eventos';
+const EVENTS_URL = '/api/v2/datos/eventos';
 
 const hex = (digit: string) => digit.repeat(64);
 
@@ -296,7 +297,8 @@ const CATALOG_VERSION: DataEvent = {
  * Lo que guardó producción el 2026-11-09 en el log 3, con identificadores inventados: una escritura
  * en R2 que falló, la condición que abrió y su resolución, y una versión del catálogo del log 2.
  */
-const EVENTS: DataEvents = {
+const LIVE_EVENTS: DataEventsSequence = {
+  sequence: 'R_100',
   logs: [4, 3, 2],
   events: [
     {
@@ -338,8 +340,42 @@ const EVENTS: DataEvents = {
   ],
   truncated: false,
 };
+/** Con la publicación de un dataset de los lotes, en su secuencia (ADR-0021 §5). */
+const EVENTS: DataEvents = {
+  sequences: [
+    LIVE_EVENTS,
+    {
+      sequence: 'lotes_velas',
+      logs: [],
+      events: [
+        {
+          kind: 'publication',
+          log: 1,
+          at_utc: '2026-11-27T00:05:00.000Z',
+          source: 'deriv_options',
+          dataset_id: `sha256:${hex('9')}`,
+          publication_id: '019b76da-a800-7000-8000-000000000099',
+          state: 'active',
+        },
+      ],
+      truncated: false,
+    },
+  ],
+};
 
-describe('GET /api/v1/datos/eventos (ADR-0019 §5 y §8)', () => {
+describe('GET /api/v2/datos/eventos (ADR-0019 §5 y §8; ADR-0021 §5)', () => {
+  it('los eventos y los datasets ya no responden en /api/v1/: sus mensajes cambiaron y están en /api/v2/ (ADR-0019 §6)', async () => {
+    for (const url of ['/api/v1/datos/eventos', '/api/v1/datos/datasets']) {
+      const { app, calls } = appWithReader({
+        datasets: () => Promise.resolve(DATASETS),
+        events: () => Promise.resolve(EVENTS),
+      });
+      expectError(await app.inject({ method: 'GET', url, headers: COOKIE }), 404, 'not_found');
+      expect(calls, url).not.toContain('events');
+      expect(calls, url).not.toContain('datasets');
+    }
+  });
+
   it('con sesión devuelve los eventos de datos, con las cabeceras del JSON y la cuenta en el registro', async () => {
     const { app, calls, lines } = appWithReader({ events: () => Promise.resolve(EVENTS) });
     const response = await app.inject({ method: 'GET', url: EVENTS_URL, headers: COOKIE });
@@ -364,13 +400,18 @@ describe('GET /api/v1/datos/eventos (ADR-0019 §5 y §8)', () => {
 
   it('también sin ningún log, con logs sin eventos y con una lista cortada', async () => {
     const full: DataEvents = {
-      logs: [2],
-      events: Array.from({ length: DATA_EVENTS_LIMIT }, () => CATALOG_VERSION),
-      truncated: true,
+      sequences: [
+        {
+          sequence: 'R_100',
+          logs: [2],
+          events: Array.from({ length: DATA_EVENTS_LIMIT }, () => CATALOG_VERSION),
+          truncated: true,
+        },
+      ],
     };
     for (const events of [
-      { logs: [], events: [], truncated: false },
-      { logs: [4, 3], events: [], truncated: false },
+      { sequences: [] },
+      { sequences: [{ sequence: 'R_100', logs: [4, 3], events: [], truncated: false }] },
       full,
     ] satisfies DataEvents[]) {
       const { app } = appWithReader({ events: () => Promise.resolve(events) });
@@ -452,10 +493,12 @@ describe('GET /api/v1/datos/eventos (ADR-0019 §5 y §8)', () => {
     });
     expect(response.body).not.toContain('fila con datos');
 
-    // Del más viejo al más nuevo, o de un log que no se leyó, no cumple el contrato.
+    // Del más viejo al más nuevo, de un log que no se leyó o con las secuencias sin orden, no
+    // cumple el contrato.
     for (const invalid of [
-      { ...EVENTS, events: [...EVENTS.events].reverse() },
-      { ...EVENTS, logs: [4, 3] },
+      { sequences: [{ ...LIVE_EVENTS, events: [...LIVE_EVENTS.events].reverse() }] },
+      { sequences: [{ ...LIVE_EVENTS, logs: [4, 3] }] },
+      { sequences: [...EVENTS.sequences].reverse() },
     ]) {
       const app = appWithReader({ events: () => Promise.resolve(invalid) });
       expectError(
@@ -477,7 +520,7 @@ describe('GET /api/v1/datos/eventos (ADR-0019 §5 y §8)', () => {
   });
 });
 
-const DATASETS_URL = '/api/v1/datos/datasets';
+const DATASETS_URL = '/api/v2/datos/datasets';
 const DATASET: DataDataset = {
   dataset_id: `sha256:${'1'.repeat(64)}`,
   publication_id: '019b76da-a800-7000-8000-000000000042',
@@ -508,10 +551,41 @@ const DATASET: DataDataset = {
     },
     recompute: null,
   },
+  batch: null,
 };
-const DATASETS: DataDatasets = { datasets: [DATASET], truncated: false };
+/** Un día de velas de los lotes, con su core 1.1.0 y las incidencias de los lotes. */
+const CANDLES: DataDataset = {
+  ...DATASET,
+  dataset_id: `sha256:${'2'.repeat(64)}`,
+  publication_id: '019b76da-a800-7000-8000-000000000043',
+  symbols: ['frxXAUUSD'],
+  event_time_from_utc: null,
+  event_time_to_utc: null,
+  normalized_tick_count: 0,
+  incident_count: 2,
+  quality_rule_version: '4.0.0',
+  quality_profile_id: 'deriv_options-lotes-v1-velas',
+  incidents: [
+    { incident_type: 'candle_missing', severity: 'error', count: 1 },
+    { incident_type: 'candle_repeated', severity: 'warning', count: 1 },
+  ],
+  batch: {
+    candle_time_from_utc: '2026-11-26T00:00:00.000Z',
+    candle_time_to_utc: '2026-11-26T21:59:00.000Z',
+    market_candle_count: 1319,
+    trading_session_count: 1,
+    contract_offer_count: 0,
+    contract_quote_count: 0,
+  },
+};
+const DATASETS: DataDatasets = {
+  sequences: [
+    { sequence: 'R_100', datasets: [DATASET], truncated: false },
+    { sequence: 'lotes_velas', datasets: [CANDLES], truncated: false },
+  ],
+};
 
-describe('GET /api/v1/datos/datasets (ADR-0020 §10)', () => {
+describe('GET /api/v2/datos/datasets (ADR-0020 §10; ADR-0021 §5)', () => {
   it('con sesión devuelve los datasets publicados, con las cabeceras del JSON y la cuenta en el registro', async () => {
     const { app, calls, lines } = appWithReader({ datasets: () => Promise.resolve(DATASETS) });
     const response = await app.inject({ method: 'GET', url: DATASETS_URL, headers: COOKIE });
@@ -536,13 +610,18 @@ describe('GET /api/v1/datos/datasets (ADR-0020 §10)', () => {
 
   it('también sin ningún dataset y con una lista cortada', async () => {
     const full: DataDatasets = {
-      datasets: Array.from({ length: DATA_DATASETS_LIMIT }, (_, index) => ({
-        ...DATASET,
-        dataset_id: `sha256:${index.toString(16).padStart(64, '0')}`,
-      })),
-      truncated: true,
+      sequences: [
+        {
+          sequence: 'R_100',
+          datasets: Array.from({ length: DATA_DATASETS_LIMIT }, (_, index) => ({
+            ...DATASET,
+            dataset_id: `sha256:${index.toString(16).padStart(64, '0')}`,
+          })),
+          truncated: true,
+        },
+      ],
     };
-    for (const datasets of [{ datasets: [], truncated: false }, full] satisfies DataDatasets[]) {
+    for (const datasets of [{ sequences: [] }, full] satisfies DataDatasets[]) {
       const { app } = appWithReader({ datasets: () => Promise.resolve(datasets) });
       const response = await app.inject({ method: 'GET', url: DATASETS_URL, headers: COOKIE });
       expect(response.statusCode).toBe(200);
@@ -592,15 +671,18 @@ describe('GET /api/v1/datos/datasets (ADR-0020 §10)', () => {
       error: 'DatasetIntegrityError',
     });
     expect(response.body).not.toContain('fila con datos');
-    const invalid = appWithReader({
-      datasets: () =>
-        Promise.resolve({ datasets: [{ ...DATASET, incident_count: 2 }], truncated: false }),
-    });
-    expectError(
-      await invalid.app.inject({ method: 'GET', url: DATASETS_URL, headers: COOKIE }),
-      500,
-      'internal',
-    );
+    for (const sequences of [
+      [{ sequence: 'R_100', datasets: [{ ...DATASET, incident_count: 2 }], truncated: false }],
+      [...DATASETS.sequences].reverse(),
+      [{ sequence: 'R_100', datasets: [], truncated: false }],
+    ]) {
+      const invalid = appWithReader({ datasets: () => Promise.resolve({ sequences }) });
+      expectError(
+        await invalid.app.inject({ method: 'GET', url: DATASETS_URL, headers: COOKIE }),
+        500,
+        'internal',
+      );
+    }
   });
 
   it('no admite parámetros de consulta', async () => {

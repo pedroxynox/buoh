@@ -5,6 +5,8 @@ import {
   DATA_EVENTS_LIMIT,
   dataEventsSchema,
   deriveEventId,
+  type DataEvents,
+  type DataEventsSequence,
   type DataQualityIncident,
   type JsonValue,
   type OperationalConditionEvent,
@@ -34,7 +36,7 @@ import { apiRoutes } from '../src/routes.js';
 
 /**
  * Los eventos de datos (ADR-0019 §5 y §8) contra el PostgreSQL local, sin TLS:
- * `GET /api/v1/datos/eventos` con el pool de lectura de la API y el código del worker por la ruta
+ * `GET /api/v2/datos/eventos` con el pool de lectura de la API y el código del worker por la ruta
  * `lectura`. El superusuario hace de `buoh-operaciones` y de la captura: crea los logs con las
  * migraciones del worker, le da a un rol de prueba lo que tiene `buoh_lectura` y guarda los eventos,
  * las incidencias y las condiciones con los almacenes del worker, y el catálogo y las publicaciones
@@ -90,7 +92,7 @@ const sessions: SessionService = {
   flushPendingFailures: () => Promise.resolve(),
 };
 
-/** `GET /api/v1/datos/eventos` con sesión, el pool de lectura `pool` y la hora `now`. */
+/** `GET /api/v2/datos/eventos` con sesión, el pool de lectura `pool` y la hora `now`. */
 async function getEvents(pool: Pool = ready(reader), now = NOW) {
   const lines: ApiLogLine[] = [];
   let n = 0;
@@ -120,7 +122,7 @@ async function getEvents(pool: Pool = ready(reader), now = NOW) {
   try {
     const response = await app.inject({
       method: 'GET',
-      url: '/api/v1/datos/eventos',
+      url: '/api/v2/datos/eventos',
       headers: { cookie: `${SESSION_COOKIE_NAME}=${SID}` },
     });
     return { body: response.json<unknown>(), lines, status: response.statusCode };
@@ -253,7 +255,7 @@ async function resetDatasets({ migrated = true } = {}): Promise<void> {
 }
 
 /** El primer segmento del dataset siguiente de cada log en `buoh_datasets`. */
-const nextSegment = new Map<number, number>();
+const nextSegment = new Map<string, number>();
 
 /**
  * Un dataset del log `log` publicado en `environment` en `buoh_datasets`, con su
@@ -265,11 +267,13 @@ async function datasetPublication(
   environment: string,
   published: string,
   publicationId = nextUuid(),
+  sequenceName = 'R_100',
 ): Promise<{ readonly datasetId: string; readonly publicationId: string }> {
-  const core = `{"log":${String(log)},"publicacion":"${published}","entorno":"${environment}"}`;
+  const core = `{"secuencia":"${sequenceName}","log":${String(log)},"publicacion":"${published}","entorno":"${environment}"}`;
   const datasetId = `sha256:${sha256(core)}`;
-  const first = nextSegment.get(log) ?? 0;
-  nextSegment.set(log, first + 6);
+  const key = `${sequenceName}:${String(log)}`;
+  const first = nextSegment.get(key) ?? 0;
+  nextSegment.set(key, first + 6);
   const client = await ready(admin).connect();
   try {
     await client.query('BEGIN');
@@ -291,8 +295,8 @@ async function datasetPublication(
       `INSERT INTO ${DATASETS_SCHEMA}.dataset_log_ranges
          (dataset_id, publication_id, sequence, log_number, first_segment, last_segment, clean,
           pending_continuity_symbols, open_condition_types)
-       VALUES ($1, $2, 'R_100', $3, $4, $5, true, '{}', '{}')`,
-      [datasetId, publicationId, log, first, first + 5],
+       VALUES ($1, $2, $3, $4, $5, $6, true, '{}', '{}')`,
+      [datasetId, publicationId, sequenceName, log, first, first + 5],
     );
     await client.query('COMMIT');
   } catch (error) {
@@ -302,6 +306,21 @@ async function datasetPublication(
     client.release();
   }
   return { datasetId, publicationId };
+}
+
+/**
+ * La secuencia de R_100 de la respuesta, la de los logs que se leen, o la de una sin logs ni
+ * eventos si no está (ADR-0021 §5).
+ */
+function r100(body: DataEvents): DataEventsSequence {
+  return (
+    body.sequences.find((group) => group.sequence === 'R_100') ?? {
+      sequence: 'R_100',
+      logs: [],
+      events: [],
+      truncated: false,
+    }
+  );
 }
 
 /** Un documento con su identificador derivado, como los del dominio. */
@@ -359,10 +378,10 @@ afterAll(async () => {
   }
 });
 
-describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () => {
+describe('GET /api/v2/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8; ADR-0021 §5)', () => {
   it('sin ningún log, ningún evento', async () => {
     expect(await getEvents()).toMatchObject({
-      body: { logs: [], events: [], truncated: false },
+      body: { sequences: [] },
       status: 200,
     });
   });
@@ -459,7 +478,7 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
 
     const response = await getEvents();
     expect(response.status).toBe(200);
-    const body = dataEventsSchema.parse(response.body);
+    const body = r100(dataEventsSchema.parse(response.body));
     expect(body.logs).toEqual([3, 2]);
     expect(body.truncated).toBe(false);
     expect(body.events.map((event) => [event.kind, event.log, event.at_utc])).toEqual([
@@ -524,7 +543,7 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
     const old = await datasetPublication(1, 'test', '2026-10-09T12:00:00.000Z');
     const recent = await datasetPublication(2, 'test', '2026-11-07T00:00:00.000Z');
     await datasetPublication(2, 'production', '2026-11-07T00:00:01.000Z');
-    const body = dataEventsSchema.parse((await getEvents()).body);
+    const body = r100(dataEventsSchema.parse((await getEvents()).body));
     expect(body.logs).toEqual([3, 2]);
     const publications = body.events.filter((event) => event.kind === 'publication');
     expect(publications).toEqual([
@@ -560,7 +579,9 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
     const without = await getEvents();
     expect(without.status).toBe(200);
     expect(
-      dataEventsSchema.parse(without.body).events.filter((event) => event.kind === 'publication'),
+      r100(dataEventsSchema.parse(without.body)).events.filter(
+        (event) => event.kind === 'publication',
+      ),
     ).toEqual([]);
     // Con el esquema y sin una de sus tablas, no se calla: internal, como sin privilegios.
     await resetDatasets();
@@ -579,7 +600,7 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
     for (let index = 0; index < DATA_EVENTS_LIMIT; index += 1) {
       await datasetPublication(2, 'test', published(index));
     }
-    const exact = dataEventsSchema.parse((await getEvents(ready(reader), at)).body);
+    const exact = r100(dataEventsSchema.parse((await getEvents(ready(reader), at)).body));
     expect(exact.logs).toEqual([]);
     expect(exact.events).toHaveLength(DATA_EVENTS_LIMIT);
     expect(exact.truncated).toBe(false);
@@ -587,10 +608,62 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
     for (const index of [DATA_EVENTS_LIMIT, DATA_EVENTS_LIMIT + 1]) {
       await datasetPublication(2, 'test', published(index));
     }
-    const cut = dataEventsSchema.parse((await getEvents(ready(reader), at)).body);
+    const cut = r100(dataEventsSchema.parse((await getEvents(ready(reader), at)).body));
     expect(cut.truncated).toBe(true);
     expect(cut.events[0]).toMatchObject({ at_utc: published(DATA_EVENTS_LIMIT + 1) });
     expect(cut.events.at(-1)).toMatchObject({ at_utc: published(2) });
+    await resetDatasets();
+  });
+
+  it('cada secuencia tiene sus eventos y su corte: las publicaciones de los lotes no tapan los eventos de R_100 (ADR-0021 §5)', async () => {
+    // Los logs 2 y 3 de las pruebas anteriores siguen sin vencer, con sus eventos de R_100.
+    const before = r100(dataEventsSchema.parse((await getEvents()).body));
+    expect(before.logs).toEqual([3, 2]);
+    const published = (index: number) =>
+      new Date(Date.parse('2026-11-12T12:00:00.000Z') + index * 1000).toISOString();
+    // Más nuevas que todos los eventos de R_100, y dos más que el límite.
+    for (let index = 0; index < DATA_EVENTS_LIMIT + 2; index += 1) {
+      await datasetPublication(1, 'test', published(index), undefined, 'lotes_cotizaciones');
+    }
+    const r100Publication = await datasetPublication(3, 'test', '2026-11-09T00:00:00.000Z');
+    const body = dataEventsSchema.parse((await getEvents()).body);
+    expect(body.sequences.map((group) => group.sequence)).toEqual(['R_100', 'lotes_cotizaciones']);
+    const [live, batch] = body.sequences;
+    // R_100 conserva sus logs y todos sus eventos, con su publicación entre ellos.
+    expect(live?.logs).toEqual([3, 2]);
+    expect(live?.truncated).toBe(false);
+    expect(live?.events).toHaveLength(before.events.length + 1);
+    expect(live?.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'publication',
+        publication_id: r100Publication.publicationId,
+      }),
+    );
+    // Los lotes, sin logs leídos: sus publicaciones, las más recientes y cortadas.
+    expect(batch?.logs).toEqual([]);
+    expect(batch?.truncated).toBe(true);
+    expect(batch?.events).toHaveLength(DATA_EVENTS_LIMIT);
+    expect(batch?.events.every((event) => event.kind === 'publication' && event.log === 1)).toBe(
+      true,
+    );
+    expect(batch?.events[0]).toMatchObject({ at_utc: published(DATA_EVENTS_LIMIT + 1) });
+    expect(batch?.events.at(-1)).toMatchObject({ at_utc: published(2) });
+    await resetDatasets();
+  });
+
+  it('una publicación de una secuencia sin el formato de su nombre es internal, con DataEventIntegrityError', async () => {
+    // La columna lo comprueba: se quita su restricción, como un error de programación.
+    await ready(admin).query(
+      `ALTER TABLE ${DATASETS_SCHEMA}.dataset_log_ranges DROP CONSTRAINT IF EXISTS dataset_log_ranges_sequence_check`,
+    );
+    await datasetPublication(1, 'test', '2026-11-08T00:00:00.000Z', undefined, 'lotes-velas');
+    const response = await getEvents();
+    expect(response.status).toBe(500);
+    expect(response.lines).toContainEqual({
+      event: 'api_error',
+      request_id: '00000000-0000-4000-8000-000000000000',
+      error: 'DataEventIntegrityError',
+    });
     await resetDatasets();
   });
 
@@ -621,7 +694,7 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
     for (let version = 1; version <= DATA_EVENTS_LIMIT; version += 1) {
       await catalogVersion(log4, version, received(version));
     }
-    const exact = dataEventsSchema.parse((await getEvents(ready(reader), at)).body);
+    const exact = r100(dataEventsSchema.parse((await getEvents(ready(reader), at)).body));
     expect(exact.logs).toEqual([4]);
     expect(exact.events).toHaveLength(DATA_EVENTS_LIMIT);
     expect(exact.truncated).toBe(false);
@@ -630,7 +703,7 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
     for (const version of [DATA_EVENTS_LIMIT + 1, DATA_EVENTS_LIMIT + 2]) {
       await catalogVersion(log4, version, received(version));
     }
-    const cut = dataEventsSchema.parse((await getEvents(ready(reader), at)).body);
+    const cut = r100(dataEventsSchema.parse((await getEvents(ready(reader), at)).body));
     expect(cut.events).toHaveLength(DATA_EVENTS_LIMIT);
     expect(cut.truncated).toBe(true);
     expect(cut.events[0]).toMatchObject({
@@ -671,7 +744,7 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
 
   /**
    * Un log nuevo, el único sin vencer a la hora `at`, con una fila de `operational_incidents` con
-   * el identificador `id` y el documento `jcs`: `GET /api/v1/datos/eventos` a esa hora.
+   * el identificador `id` y el documento `jcs`: `GET /api/v2/datos/eventos` a esa hora.
    */
   async function eventsWithRow(number: number, at: string, id: string, jcs: string) {
     const schema = await createLog(number);
@@ -717,7 +790,7 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
     return schema;
   }
 
-  /** `GET /api/v1/datos/eventos` un minuto después de `at`. */
+  /** `GET /api/v2/datos/eventos` un minuto después de `at`. */
   const eventsAt = (at: string) => getEvents(ready(reader), Date.parse(at) + 60_000);
 
   it('un log que el rol no puede leer no cuenta, como uno que se está preparando', async () => {
@@ -729,7 +802,7 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
     await heartbeat(unreadable, at);
     const response = await eventsAt(at);
     expect(response.status).toBe(200);
-    expect(dataEventsSchema.parse(response.body)).toMatchObject({
+    expect(r100(dataEventsSchema.parse(response.body))).toMatchObject({
       logs: [7],
       events: [{ kind: 'catalog_version', log: 7 }],
       truncated: false,
@@ -879,7 +952,7 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
       await catalogVersion(newer, version, time(1000 + version));
     }
     expect(older).toBe(logLocation(14).schema);
-    const result = dataEventsSchema.parse((await eventsAt(at)).body);
+    const result = r100(dataEventsSchema.parse((await eventsAt(at)).body));
     expect(result.logs).toEqual([15, 14]);
     expect(result.truncated).toBe(true);
     expect(result.events).toHaveLength(DATA_EVENTS_LIMIT);
@@ -894,5 +967,15 @@ describe('GET /api/v1/datos/eventos contra PostgreSQL (ADR-0019 §5 y §8)', () 
     expect(result.events[0]).toMatchObject({ kind: 'catalog_version', version: 10 });
     expect(result.events[10]).toMatchObject({ at_utc: time(298) });
     expect(result.events.at(-1)).toMatchObject({ at_utc: time(20) });
+  });
+
+  it('con logs de R_100 sin eventos ni publicaciones, su secuencia está, con sus logs y sin eventos', async () => {
+    const at = '2029-01-01T00:00:00.000Z';
+    await liveLog(20, at);
+    const response = await eventsAt(at);
+    expect(response.status).toBe(200);
+    expect(dataEventsSchema.parse(response.body)).toEqual({
+      sequences: [{ sequence: 'R_100', logs: [20], events: [], truncated: false }],
+    });
   });
 });

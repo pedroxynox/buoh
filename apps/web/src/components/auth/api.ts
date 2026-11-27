@@ -181,7 +181,7 @@ export const api = {
    * token CSRF, como la salud. Una respuesta sin la forma de `DataEvents` es `unexpected`.
    */
   dataEvents: async (): Promise<DataEvents> => {
-    const events = readDataEvents(await request<unknown>('GET', '/api/v1/datos/eventos'));
+    const events = readDataEvents(await request<unknown>('GET', '/api/v2/datos/eventos'));
     if (events === null) {
       throw new ApiCallError({ code: 'unexpected' });
     }
@@ -192,7 +192,7 @@ export const api = {
    * Una respuesta sin la forma de `DataDatasets` es `unexpected`.
    */
   dataDatasets: async (): Promise<DataDatasets> => {
-    const datasets = readDataDatasets(await request<unknown>('GET', '/api/v1/datos/datasets'));
+    const datasets = readDataDatasets(await request<unknown>('GET', '/api/v2/datos/datasets'));
     if (datasets === null) {
       throw new ApiCallError({ code: 'unexpected' });
     }

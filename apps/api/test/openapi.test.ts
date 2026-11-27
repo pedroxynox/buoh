@@ -125,8 +125,8 @@ describe('buildOpenApiDocument', () => {
       '503',
     ]);
     expect(statuses('/api/v1/datos/salud', 'get')).toEqual(['200', '400', '401', '500', '503']);
-    expect(statuses('/api/v1/datos/eventos', 'get')).toEqual(['200', '400', '401', '500', '503']);
-    expect(statuses('/api/v1/datos/datasets', 'get')).toEqual(['200', '400', '401', '500', '503']);
+    expect(statuses('/api/v2/datos/eventos', 'get')).toEqual(['200', '400', '401', '500', '503']);
+    expect(statuses('/api/v2/datos/datasets', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/datos/grafico', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v2/datos/catalogo', 'get')).toEqual(['200', '400', '401', '500', '503']);
     expect(statuses('/api/v1/enlace', 'post')).toEqual([
@@ -325,17 +325,28 @@ describe('buildOpenApiDocument', () => {
       action: 'opened',
       resolution_reason: null,
     };
-    const list = { logs: [3], events: [condition, incident], truncated: false };
-    expect(events(list)).toBe(true);
-    expect(events({ logs: [], events: [], truncated: false })).toBe(true);
-    expect(events({ ...list, events: [{ ...incident, incident_type: 'duplicate_exact' }] })).toBe(
+    const list = { sequence: 'R_100', logs: [3], events: [condition, incident], truncated: false };
+    const grouped = (group: Record<string, unknown>) => events({ sequences: [group] });
+    expect(grouped(list)).toBe(true);
+    expect(events({ sequences: [] })).toBe(true);
+    expect(grouped({ ...list, events: [{ ...incident, incident_type: 'duplicate_exact' }] })).toBe(
       false,
     );
     expect(
-      events({ ...list, events: [{ ...incident, evidence: { stage: 'raw_object_write' } }] }),
+      grouped({ ...list, events: [{ ...incident, evidence: { stage: 'raw_object_write' } }] }),
     ).toBe(false);
-    expect(events({ ...list, events: [{ ...condition, kind: 'otra' }] })).toBe(false);
-    expect(events({ ...list, extra: 1 })).toBe(false);
+    expect(grouped({ ...list, events: [{ ...condition, kind: 'otra' }] })).toBe(false);
+    expect(grouped({ ...list, extra: 1 })).toBe(false);
+    expect(grouped({ ...list, sequence: 'lotes velas' })).toBe(false);
+    // `/api/v2/`: agrupados por secuencia (ADR-0021 §5); la forma de `/api/v1/` no vale.
+    expect(events({ logs: [3], events: [condition, incident], truncated: false })).toBe(false);
+
+    const datasets = validatorFor('DataDatasets');
+    expect(datasets({ sequences: [] })).toBe(true);
+    expect(datasets({ datasets: [], truncated: false })).toBe(false);
+    expect(datasets({ sequences: [{ sequence: 'R_100', datasets: [], truncated: false }] })).toBe(
+      false,
+    );
   });
 
   it('el gráfico declara sus horas como un parámetro de consulta obligatorio, de 1 a la ventana máxima', () => {

@@ -1,11 +1,11 @@
 import { z } from 'zod';
 
 import { auditEventStructuralSchema } from './audit.js';
+import { dataQualityIncidentTypeSchema } from './data-quality.js';
 import {
   conditionTypeSchema,
   limitUnitSchema,
   persistenceStageSchema,
-  qualityIncidentTypeSchema,
   severitySchema,
   sourceResourceSchema,
 } from './enums.js';
@@ -533,12 +533,20 @@ export const dataCatalogSchema = z
   .meta({ id: 'DataCatalog', title: 'DataCatalog' });
 
 /**
- * Cuántos eventos de datos devuelve como mucho `GET /api/v1/datos/eventos`, los más recientes
- * (ADR-0019 §8). Producción guarda unos 110 a la semana (2026-11-12), así que caben los de unas dos.
+ * Cuántos eventos de datos devuelve como mucho `GET /api/v2/datos/eventos` de cada secuencia, los
+ * más recientes (ADR-0019 §8; ADR-0021 §5). Producción guarda unos 110 a la semana en los logs de
+ * R_100 (2026-11-12), así que caben los de unas dos.
  */
 export const DATA_EVENTS_LIMIT = 200;
 
 const logNumberSchema = z.number().int().min(1).max(MAX_LOG_NUMBER);
+
+/**
+ * El nombre de una secuencia de logs (ADR-0021 §1), como lo guarda `dataset_log_ranges.sequence`:
+ * el símbolo de una secuencia en vivo, como `R_100` o `frxXAUUSD`, o el nombre de una por lotes,
+ * como `lotes_velas`. Con el mismo formato que admite esa columna.
+ */
+const logSequenceNameSchema = z.string().regex(/^[A-Za-z0-9_]{1,64}$/u);
 const positiveCountSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 
 /** Lo que llevan todos los eventos de datos: el log donde está, su hora UTC y su fuente. */
@@ -630,49 +638,75 @@ const dataEventSchema = z.discriminatedUnion('kind', [
 ]);
 
 /**
- * La respuesta de `GET /api/v1/datos/eventos` (ADR-0019 §5 y §8): los eventos de datos que guardan
- * los logs que no han vencido, para la sección Auditoría. Siguen en su log y se borran con él, a los
- * 30 días de su última escritura (ADR-0018 §7). Las publicaciones, desde el 6b de F2.4, salen de
- * `buoh_datasets` y no vencen (ADR-0020 §6 y §10).
- * - `logs`: los logs leídos, de mayor a menor número, sin repetir. Cada evento que no es una
- *   publicación es de uno de ellos.
+ * Los eventos de datos de una secuencia de logs (ADR-0021 §5):
+ * - `sequence`: su nombre.
+ * - `logs`: sus logs leídos, de mayor a menor número, sin repetir. Cada evento que no es una
+ *   publicación es de uno de ellos. Hoy solo se leen los de R_100 (ADR-0019 §8), así que en las
+ *   demás secuencias está vacía y sus eventos son las publicaciones de sus datasets.
  * - `events`: los `DATA_EVENTS_LIMIT` más recientes como mucho, del más nuevo al más viejo.
  * - `truncated`: si quedaron fuera otros más viejos.
  */
+const dataEventsSequenceSchema = z.strictObject({
+  sequence: logSequenceNameSchema,
+  logs: z.array(logNumberSchema),
+  events: z.array(dataEventSchema).max(DATA_EVENTS_LIMIT),
+  truncated: z.boolean(),
+});
+
+/**
+ * La respuesta de `GET /api/v2/datos/eventos` (ADR-0019 §5 y §8; ADR-0021 §5): los eventos de datos
+ * que guardan los logs que no han vencido, para la sección Auditoría, agrupados por la secuencia de
+ * su log, para que los de unas secuencias no tapen los de otras. Siguen en su log y se borran con
+ * él, a los 30 días de su última escritura (ADR-0018 §7). Las publicaciones, desde el 6b de F2.4,
+ * salen de `buoh_datasets` y no vencen (ADR-0020 §6 y §10), cada una en la secuencia de su dataset.
+ * Las secuencias van por su nombre, en el orden de las unidades UTF-16 y sin repetir, y solo está la
+ * que tiene algún log leído o algún evento. Desde el PR 5e de ADR-0021 sustituye a
+ * `GET /api/v1/datos/eventos`, que no nombraba la secuencia (ADR-0019 §6).
+ */
 export const dataEventsSchema = z
-  .strictObject({
-    logs: z.array(logNumberSchema),
-    events: z.array(dataEventSchema).max(DATA_EVENTS_LIMIT),
-    truncated: z.boolean(),
-  })
+  .strictObject({ sequences: z.array(dataEventsSequenceSchema) })
   .superRefine((value, context) => {
     const issue = (message: string, path: readonly (number | string)[]) => {
       context.addIssue({ code: 'custom', message, path: [...path] });
     };
-    if (value.logs.some((log, index) => index > 0 && log >= (value.logs[index - 1] ?? 0))) {
-      issue('Los logs van de mayor a menor, sin repetir.', ['logs']);
+    if (!isSortedUnique(value.sequences.map((group) => group.sequence))) {
+      issue('Las secuencias van por su nombre, sin repetir.', ['sequences']);
     }
-    if (value.truncated && value.events.length < DATA_EVENTS_LIMIT) {
-      issue('Solo se corta una lista llena.', ['truncated']);
-    }
-    for (const [index, event] of value.events.entries()) {
-      if (event.kind !== 'publication' && !value.logs.includes(event.log)) {
-        issue('Cada evento que no es una publicación es de un log leído.', [
-          'events',
-          index,
-          'log',
-        ]);
+    for (const [at, group] of value.sequences.entries()) {
+      const path = (...rest: (number | string)[]) => ['sequences', at, ...rest];
+      if (group.logs.length === 0 && group.events.length === 0) {
+        issue('Cada secuencia tiene algún log leído o algún evento.', path());
       }
-      const previous = value.events[index - 1];
-      if (previous !== undefined && previous.at_utc < event.at_utc) {
-        issue('Los eventos van del más nuevo al más viejo.', ['events', index, 'at_utc']);
+      if (group.logs.some((log, index) => index > 0 && log >= (group.logs[index - 1] ?? 0))) {
+        issue('Los logs van de mayor a menor, sin repetir.', path('logs'));
       }
-      if (event.kind === 'condition') {
-        if ((event.resolution_reason !== null) !== (event.action === 'resolved')) {
-          issue('Solo una resolución lleva su motivo.', ['events', index, 'resolution_reason']);
+      if (group.truncated && group.events.length < DATA_EVENTS_LIMIT) {
+        issue('Solo se corta una lista llena.', path('truncated'));
+      }
+      for (const [index, event] of group.events.entries()) {
+        if (event.kind !== 'publication' && !group.logs.includes(event.log)) {
+          issue(
+            'Cada evento que no es una publicación es de un log leído.',
+            path('events', index, 'log'),
+          );
         }
-        if (!event.condition_key.startsWith(`${event.condition_type}:sha256:`)) {
-          issue('La clave es la de su tipo de condición.', ['events', index, 'condition_key']);
+        const previous = group.events[index - 1];
+        if (previous !== undefined && previous.at_utc < event.at_utc) {
+          issue('Los eventos van del más nuevo al más viejo.', path('events', index, 'at_utc'));
+        }
+        if (event.kind === 'condition') {
+          if ((event.resolution_reason !== null) !== (event.action === 'resolved')) {
+            issue(
+              'Solo una resolución lleva su motivo.',
+              path('events', index, 'resolution_reason'),
+            );
+          }
+          if (!event.condition_key.startsWith(`${event.condition_type}:sha256:`)) {
+            issue(
+              'La clave es la de su tipo de condición.',
+              path('events', index, 'condition_key'),
+            );
+          }
         }
       }
     }
@@ -682,8 +716,9 @@ export const dataEventsSchema = z
 // --- F2.4, 6b: los datasets publicados (ADR-0020 §10) ---
 
 /**
- * Cuántos datasets devuelve como mucho `GET /api/v1/datos/datasets`, los más recientes. Producción
- * publica unos 4 al día (ADR-0020 §7), así que caben los de unos 50 días.
+ * Cuántos datasets devuelve como mucho `GET /api/v2/datos/datasets` de cada secuencia, los más
+ * recientes (ADR-0021 §5). R_100 publica unos 4 al día (ADR-0020 §7), así que caben los de unos 50
+ * días, y las cotizaciones de los lotes, 8 al día (ADR-0021 §9, precisión del PR 5d2), unos 25.
  */
 export const DATA_DATASETS_LIMIT = 200;
 
@@ -701,19 +736,38 @@ const datasetVerificationSchema = z.strictObject({
   error_code: replayErrorCodeSchema.nullable(),
 });
 
-/** Cuántas incidencias de calidad de un tipo y una gravedad tiene un dataset. */
+/**
+ * Cuántas incidencias de calidad de un tipo y una gravedad tiene un dataset, con todos los tipos de
+ * `DataQualityIncident`, también los de los lotes (`contract_rejected`, `candle_repeated` y
+ * `candle_missing`).
+ */
 const datasetIncidentCountSchema = z.strictObject({
-  incident_type: qualityIncidentTypeSchema,
+  incident_type: dataQualityIncidentTypeSchema,
   severity: severitySchema,
   count: positiveCountSchema,
+});
+
+/**
+ * Lo que solo tiene un dataset de los lotes, de su `DatasetManifestCore` 1.1.0 (ADR-0021 §3 y §4):
+ * el período de sus velas, por su hora de apertura (`null` sin velas), y cuántas velas, horarios,
+ * ofertas de contratos y cotizaciones tiene.
+ */
+const batchDatasetSchema = z.strictObject({
+  candle_time_from_utc: utcTimestampMsSchema.nullable(),
+  candle_time_to_utc: utcTimestampMsSchema.nullable(),
+  market_candle_count: nonNegativeIntegerSchema,
+  trading_session_count: nonNegativeIntegerSchema,
+  contract_offer_count: nonNegativeIntegerSchema,
+  contract_quote_count: nonNegativeIntegerSchema,
 });
 
 /**
  * Un dataset publicado de `buoh_datasets`, por su publicación activa (ADR-0020 §5 y §10): su
  * identificador, su publicación, su fuente y sus símbolos, su log y sus segmentos, su período
  * (`null` sin ticks) y sus conteos, los de su `DatasetManifestCore`; sus reglas y su perfil; cómo
- * terminó (`dataset_log_ranges`); sus incidencias, por tipo y gravedad; y la última verificación de
- * cada modo, o `null` si todavía no tiene.
+ * terminó (`dataset_log_ranges`); sus incidencias, por tipo y gravedad; la última verificación de
+ * cada modo, o `null` si todavía no tiene; y lo que solo tiene un dataset de los lotes (`batch`), o
+ * `null` con un core 1.0.0, el de la captura en vivo.
  */
 const publishedDatasetSchema = z.strictObject({
   dataset_id: datasetIdSchema,
@@ -741,104 +795,146 @@ const publishedDatasetSchema = z.strictObject({
     verify_only: datasetVerificationSchema.nullable(),
     recompute: datasetVerificationSchema.nullable(),
   }),
+  batch: batchDatasetSchema.nullable(),
 });
 
 /**
- * La respuesta de `GET /api/v1/datos/datasets` (ADR-0020 §10): los datasets publicados del entorno
- * de la API, para la sección Datos, del más nuevo al más viejo por su publicación. No vencen
- * (ADR-0020 §6). `truncated` dice si quedaron fuera otros más viejos, así que solo puede ser `true`
+ * Los datasets de una secuencia de logs (ADR-0021 §5), del más nuevo al más viejo por su
+ * publicación. `truncated` dice si quedaron fuera otros más viejos, así que solo puede ser `true`
  * con la lista llena.
  */
+const dataDatasetsSequenceSchema = z.strictObject({
+  sequence: logSequenceNameSchema,
+  datasets: z.array(publishedDatasetSchema).min(1).max(DATA_DATASETS_LIMIT),
+  truncated: z.boolean(),
+});
+
+/**
+ * La respuesta de `GET /api/v2/datos/datasets` (ADR-0020 §10; ADR-0021 §5): los datasets publicados
+ * del entorno de la API, para la sección Datos, agrupados por la secuencia de su log, para que los
+ * de los lotes no tapen los de la captura en vivo. No vencen (ADR-0020 §6). Las secuencias van por
+ * su nombre, en el orden de las unidades UTF-16 y sin repetir, solo las que tienen algún dataset, y
+ * cada dataset sale una vez. Desde el PR 5e de ADR-0021 sustituye a `GET /api/v1/datos/datasets`,
+ * que no nombraba la secuencia ni conocía los datasets de los lotes (ADR-0019 §6).
+ */
 export const dataDatasetsSchema = z
-  .strictObject({
-    datasets: z.array(publishedDatasetSchema).max(DATA_DATASETS_LIMIT),
-    truncated: z.boolean(),
-  })
+  .strictObject({ sequences: z.array(dataDatasetsSequenceSchema) })
   .superRefine((value, context) => {
     const issue = (message: string, path: readonly (number | string)[]) => {
       context.addIssue({ code: 'custom', message, path: [...path] });
     };
-    if (value.truncated && value.datasets.length < DATA_DATASETS_LIMIT) {
-      issue('Solo se corta una lista llena.', ['truncated']);
+    if (!isSortedUnique(value.sequences.map((group) => group.sequence))) {
+      issue('Las secuencias van por su nombre, sin repetir.', ['sequences']);
     }
     const ids = new Set<string>();
-    for (const [index, dataset] of value.datasets.entries()) {
-      const at = (field: string) => ['datasets', index, field];
-      if (ids.has(dataset.dataset_id)) {
-        issue('Cada dataset sale una vez.', at('dataset_id'));
-      }
-      ids.add(dataset.dataset_id);
-      const previous = value.datasets[index - 1];
-      if (previous !== undefined && previous.published_at_utc < dataset.published_at_utc) {
-        issue('Los datasets van del más nuevo al más viejo.', at('published_at_utc'));
-      }
-      if (dataset.last_segment < dataset.first_segment) {
-        issue('El último segmento no va antes del primero.', at('last_segment'));
-      }
-      const noRange = dataset.event_time_from_utc === null && dataset.event_time_to_utc === null;
-      const partialRange =
-        (dataset.event_time_from_utc === null) !== (dataset.event_time_to_utc === null);
-      if (partialRange || (dataset.normalized_tick_count === 0) !== noRange) {
-        issue('El período es null exactamente cuando no hay ticks.', at('event_time_from_utc'));
-      }
-      if (
-        dataset.event_time_from_utc !== null &&
-        dataset.event_time_to_utc !== null &&
-        dataset.event_time_from_utc > dataset.event_time_to_utc
-      ) {
-        issue('El período va en orden.', at('event_time_to_utc'));
-      }
-      if (dataset.raw_frame_count > dataset.source_event_count) {
-        issue('Los frames crudos son source events.', at('raw_frame_count'));
-      }
-      for (const field of [
-        'symbols',
-        'pending_continuity_symbols',
-        'open_condition_types',
-      ] as const) {
-        if (!isSortedUnique(dataset[field])) {
-          issue('Va en orden y sin repetir.', at(field));
-        }
-      }
-      const clean =
-        dataset.pending_continuity_symbols.length === 0 &&
-        !dataset.open_condition_types.includes('connection_lost');
-      if (dataset.clean !== clean) {
-        issue('Limpio es sin continuidad pendiente ni connection_lost abierta.', at('clean'));
-      }
-      const keys = dataset.incidents.map((item) => `${item.incident_type} ${item.severity}`);
-      if (!isSortedUnique(keys)) {
-        issue('Las incidencias van por tipo y gravedad, sin repetir.', at('incidents'));
-      }
-      const total = dataset.incidents.reduce((sum, item) => sum + item.count, 0);
-      if (total !== dataset.incident_count) {
-        issue('Las incidencias suman incident_count.', at('incidents'));
-      }
-      for (const mode of ['verify_only', 'recompute'] as const) {
-        const result = dataset.verifications[mode];
-        if (result === null) {
-          continue;
-        }
-        if (result.status === 'passed' && result.error_code !== null) {
-          issue('Una verificación que pasó no lleva código.', [
-            'datasets',
-            index,
-            'verifications',
-            mode,
-          ]);
-        }
-        if (result.status === 'failed' && result.error_code === null) {
-          issue('Una verificación que falló lleva su código.', [
-            'datasets',
-            index,
-            'verifications',
-            mode,
-          ]);
-        }
-      }
+    for (const [at, group] of value.sequences.entries()) {
+      checkDatasetsGroup(group, ids, (message, path) => {
+        issue(message, ['sequences', at, ...path]);
+      });
     }
   })
   .meta({ id: 'DataDatasets', title: 'DataDatasets' });
+
+/** Las reglas de los datasets de una secuencia; `ids` lleva los de las anteriores. */
+function checkDatasetsGroup(
+  value: z.infer<typeof dataDatasetsSequenceSchema>,
+  ids: Set<string>,
+  issue: (message: string, path: readonly (number | string)[]) => void,
+): void {
+  if (value.truncated && value.datasets.length < DATA_DATASETS_LIMIT) {
+    issue('Solo se corta una lista llena.', ['truncated']);
+  }
+  for (const [index, dataset] of value.datasets.entries()) {
+    const at = (field: string) => ['datasets', index, field];
+    const { batch } = dataset;
+    if (batch !== null) {
+      const candleFrom = batch.candle_time_from_utc;
+      const candleTo = batch.candle_time_to_utc;
+      const noCandles = batch.market_candle_count === 0;
+      if (noCandles !== (candleFrom === null) || noCandles !== (candleTo === null)) {
+        issue('El período de las velas es null exactamente cuando no hay velas.', [
+          ...at('batch'),
+          'candle_time_from_utc',
+        ]);
+      }
+      if (candleFrom !== null && candleTo !== null && candleFrom > candleTo) {
+        issue('El período de las velas va en orden.', [...at('batch'), 'candle_time_to_utc']);
+      }
+    }
+    if (ids.has(dataset.dataset_id)) {
+      issue('Cada dataset sale una vez.', at('dataset_id'));
+    }
+    ids.add(dataset.dataset_id);
+    const previous = value.datasets[index - 1];
+    if (previous !== undefined && previous.published_at_utc < dataset.published_at_utc) {
+      issue('Los datasets van del más nuevo al más viejo.', at('published_at_utc'));
+    }
+    if (dataset.last_segment < dataset.first_segment) {
+      issue('El último segmento no va antes del primero.', at('last_segment'));
+    }
+    const noRange = dataset.event_time_from_utc === null && dataset.event_time_to_utc === null;
+    const partialRange =
+      (dataset.event_time_from_utc === null) !== (dataset.event_time_to_utc === null);
+    if (partialRange || (dataset.normalized_tick_count === 0) !== noRange) {
+      issue('El período es null exactamente cuando no hay ticks.', at('event_time_from_utc'));
+    }
+    if (
+      dataset.event_time_from_utc !== null &&
+      dataset.event_time_to_utc !== null &&
+      dataset.event_time_from_utc > dataset.event_time_to_utc
+    ) {
+      issue('El período va en orden.', at('event_time_to_utc'));
+    }
+    if (dataset.raw_frame_count > dataset.source_event_count) {
+      issue('Los frames crudos son source events.', at('raw_frame_count'));
+    }
+    for (const field of [
+      'symbols',
+      'pending_continuity_symbols',
+      'open_condition_types',
+    ] as const) {
+      if (!isSortedUnique(dataset[field])) {
+        issue('Va en orden y sin repetir.', at(field));
+      }
+    }
+    const clean =
+      dataset.pending_continuity_symbols.length === 0 &&
+      !dataset.open_condition_types.includes('connection_lost');
+    if (dataset.clean !== clean) {
+      issue('Limpio es sin continuidad pendiente ni connection_lost abierta.', at('clean'));
+    }
+    const keys = dataset.incidents.map((item) => `${item.incident_type} ${item.severity}`);
+    if (!isSortedUnique(keys)) {
+      issue('Las incidencias van por tipo y gravedad, sin repetir.', at('incidents'));
+    }
+    const total = dataset.incidents.reduce((sum, item) => sum + item.count, 0);
+    if (total !== dataset.incident_count) {
+      issue('Las incidencias suman incident_count.', at('incidents'));
+    }
+    for (const mode of ['verify_only', 'recompute'] as const) {
+      const result = dataset.verifications[mode];
+      if (result === null) {
+        continue;
+      }
+      if (result.status === 'passed' && result.error_code !== null) {
+        issue('Una verificación que pasó no lleva código.', [
+          'datasets',
+          index,
+          'verifications',
+          mode,
+        ]);
+      }
+      if (result.status === 'failed' && result.error_code === null) {
+        issue('Una verificación que falló lleva su código.', [
+          'datasets',
+          index,
+          'verifications',
+          mode,
+        ]);
+      }
+    }
+  }
+}
 
 // --- F2.4: las preferencias de la cuenta (F2-UI-001) ---
 
@@ -881,9 +977,11 @@ export type DataChart = z.infer<typeof dataChartSchema>;
 export type DataChartGap = DataChart['gaps'][number];
 export type DataCatalog = z.infer<typeof dataCatalogSchema>;
 export type DataEvents = z.infer<typeof dataEventsSchema>;
-export type DataEvent = DataEvents['events'][number];
+export type DataEventsSequence = DataEvents['sequences'][number];
+export type DataEvent = DataEventsSequence['events'][number];
 export type DataDatasets = z.infer<typeof dataDatasetsSchema>;
-export type DataDataset = DataDatasets['datasets'][number];
+export type DataDatasetsSequence = DataDatasets['sequences'][number];
+export type DataDataset = DataDatasetsSequence['datasets'][number];
 export type Theme = z.infer<typeof themeSchema>;
 export type AccountPreferences = z.infer<typeof accountPreferencesSchema>;
 export type PreferencesRequest = z.infer<typeof preferencesRequestSchema>;

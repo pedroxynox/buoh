@@ -51,7 +51,9 @@ export {
   type DataEvent,
   type DataDataset,
   type DataDatasets,
+  type DataDatasetsSequence,
   type DataEvents,
+  type DataEventsSequence,
   type DataHealth,
   type LinkPurpose,
   type LinkSecret,
@@ -103,9 +105,11 @@ export {
 export { contractQuoteSchema, type ContractQuote } from './contract-quote.js';
 export {
   dataQualityIncidentSchema,
+  dataQualityIncidentTypeSchema,
   INCIDENT_SCHEMA_VERSIONS,
   qualityIncidentTypeSchema,
   type DataQualityIncident,
+  type DataQualityIncidentType,
 } from './data-quality.js';
 export { validateDatasetConsistency, type DatasetConsistencyInput } from './dataset-consistency.js';
 export {
