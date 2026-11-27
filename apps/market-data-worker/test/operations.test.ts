@@ -5102,7 +5102,7 @@ describe('buoh-operaciones por secuencia (ADR-0021 §1, precisión del PR 2b)', 
 });
 
 describe('las secuencias por lotes en el paso 1 (ADR-0021 §3, precisión del PR 5b de su §9)', () => {
-  /** La contraseña de `buoh_lotes`, que el Blueprint le dará a `buoh-operaciones` con el PR 5f. */
+  /** La contraseña de `buoh_lotes`, que el Blueprint le da a `buoh-operaciones` desde el PR 5f. */
   const BATCH_PASSWORD = 'lotes-sintetica-0123456789';
   const BATCH_CONFIG = loadOperationsConfig({
     ...ENV,
@@ -5308,7 +5308,7 @@ describe('las secuencias por lotes en el paso 1 (ADR-0021 §3, precisión del PR
 });
 
 describe('los pasos de los lotes (ADR-0021 §3, precisión del PR 5c2 de su §9)', () => {
-  /** La contraseña de `buoh_lotes` y el token `lotes`, que el Blueprint le dará con el PR 5f. */
+  /** La contraseña de `buoh_lotes` y el token `lotes`, que `buoh-operaciones` tiene desde el PR 5f. */
   const LOTES_ENV = {
     BUOH_LOTES_POSTGRES_PASSWORD: 'lotes-sintetica-0123456789',
     BUOH_LOTES_S3_ACCESS_KEY_ID: 'clave-lotes-sintetica',

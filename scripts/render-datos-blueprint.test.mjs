@@ -340,7 +340,7 @@ test('los tres servicios: Node, Starter, en virginia, sin disco y desplegados tr
   assert.equal(service('buoh-ingesta').numInstances, 1);
   assert.equal(service('buoh-ingesta').maxShutdownDelaySeconds, 60);
   assert.equal(service('buoh-operaciones').schedule, '*/5 * * * *');
-  // La API: una instancia (sesiones y límites en memoria) y su ruta de salud (ADR-0019 §7 y §10).
+  // La API: una instancia (límites en memoria, ADR-0019 §1) y su ruta de salud (§7 y §10).
   assert.equal(service('buoh-api').numInstances, 1);
   assert.equal(service('buoh-api').healthCheckPath, '/api/salud');
 });
@@ -497,31 +497,6 @@ test('buoh-ingesta: las variables de ingest en production, con buoh_ingesta y el
   }
 });
 
-test('buoh-operaciones: las variables que admite y que el Blueprint todavía no le da son opcionales y no están en él (precisiones de los PR 5b y 5c2 de ADR-0021 §9)', () => {
-  const pending = schemaEntries(
-    'apps/market-data-worker/src/operations/config.ts',
-    'const pendingEnvironmentSchema',
-  );
-  // La contraseña de buoh_lotes y el token lotes llegan al Blueprint con el PR 5f, que los pasa al
-  // otro objeto.
-  assert.deepEqual(
-    pending.map(([key]) => key),
-    [
-      'BUOH_LOTES_POSTGRES_PASSWORD',
-      'BUOH_LOTES_S3_ACCESS_KEY_ID',
-      'BUOH_LOTES_S3_BUCKET',
-      'BUOH_LOTES_S3_ENDPOINT',
-      'BUOH_LOTES_S3_REGION',
-      'BUOH_LOTES_S3_SECRET_ACCESS_KEY',
-    ],
-  );
-  const vars = variables('buoh-operaciones');
-  for (const [key, schema] of pending) {
-    assert.match(schema, /\.optional\(\),$/, key);
-    assert.ok(!vars.has(key), key);
-  }
-});
-
 test('buoh-operaciones: las variables de loadOperationsConfig, con la credencial dueña y sin ninguna BUOH_POSTGRES_* ni BUOH_S3_* (§8, §10, §11 y §12)', () => {
   const expected = schemaKeys(
     'apps/market-data-worker/src/operations/config.ts',
@@ -571,10 +546,13 @@ test('buoh-operaciones: las variables de loadOperationsConfig, con la credencial
     'BUOH_SALUD_POSTGRES_PASSWORD',
     'BUOH_AGENTE_POSTGRES_PASSWORD',
     'BUOH_PUBLICACION_POSTGRES_PASSWORD',
+    // La de buoh_lotes, desde el PR 5f de ADR-0021 §9, que pone en marcha los lotes (§3).
+    'BUOH_LOTES_POSTGRES_PASSWORD',
   ]) {
     assert.equal(sourceOf(vars.get(key)), 'generateValue', key);
   }
-  for (const token of ['SALUD', 'OPERACIONES']) {
+  // El token lotes, también desde el PR 5f: el endpoint y las claves los pega el propietario.
+  for (const token of ['SALUD', 'OPERACIONES', 'LOTES']) {
     for (const part of ['ENDPOINT', 'ACCESS_KEY_ID', 'SECRET_ACCESS_KEY']) {
       assert.equal(sourceOf(vars.get(`BUOH_${token}_S3_${part}`)), 'sync', `${token} ${part}`);
     }

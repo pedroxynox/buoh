@@ -64,6 +64,21 @@ const operationsEnvironmentSchema = z.object({
    * crea `buoh_datasets` y el rol, y corren los pasos 6 y 7; sin ella, no toca los datasets.
    */
   BUOH_PUBLICACION_POSTGRES_PASSWORD: rolePassword.optional(),
+  /**
+   * La contraseña de `buoh_lotes` (ADR-0021 §3), que Render genera en el propio servicio
+   * (`generateValue`) desde el PR 5f de su §9, el que pone en marcha los lotes, y las del token
+   * `lotes`, que el propietario pega en el servicio. Hasta el 5f iban en un objeto aparte, para que
+   * la prueba del Blueprint no las pidiera, como la de `buoh_api` hasta el PR 6 de ADR-0019 §14.
+   * Son opcionales, como la de `buoh_publicacion`: con la contraseña, el paso 1 crea el rol y
+   * prepara los logs de las secuencias por lotes; con ella y el token, corren los pasos de los
+   * lotes. Las del token van las cinco o ninguna (`BATCH_OBJECT_VARIABLES`).
+   */
+  BUOH_LOTES_POSTGRES_PASSWORD: rolePassword.optional(),
+  BUOH_LOTES_S3_ACCESS_KEY_ID: nonEmpty.optional(),
+  BUOH_LOTES_S3_BUCKET: bucket.optional(),
+  BUOH_LOTES_S3_ENDPOINT: z.url().optional(),
+  BUOH_LOTES_S3_REGION: nonEmpty.optional(),
+  BUOH_LOTES_S3_SECRET_ACCESS_KEY: nonEmpty.optional(),
   /** El token `salud` de R2, de solo lectura, para el proceso de `data:health` (§10). */
   BUOH_SALUD_S3_ACCESS_KEY_ID: nonEmpty,
   BUOH_SALUD_S3_BUCKET: bucket,
@@ -100,26 +115,6 @@ const operationsEnvironmentSchema = z.object({
   BUOH_OPERACIONES_S3_ENDPOINT: z.url(),
   BUOH_OPERACIONES_S3_REGION: nonEmpty,
   BUOH_OPERACIONES_S3_SECRET_ACCESS_KEY: nonEmpty,
-});
-
-/**
- * Las variables que el servicio admite y que su Blueprint todavía no le da: la contraseña de
- * `buoh_lotes` (ADR-0021 §3), que Render generará en el propio servicio (`generateValue`) con el PR
- * 5f de su §9, el que pone en marcha los lotes, y, desde el PR 5c2, las del token `lotes`. Son
- * opcionales, como la de `buoh_publicacion`: con la contraseña, el paso 1 crea el rol y prepara los
- * logs de las secuencias por lotes; con ella y el token, corren los pasos de los lotes. Las del
- * token van las cinco o ninguna. Van en otro objeto para que la prueba del Blueprint, que compara
- * las variables de `render-datos.yaml` con las del primero, no las pida antes; esa prueba exige que
- * cada una sea opcional y que el Blueprint no la tenga. El 5f las pasa al primero, como el PR 6 de
- * ADR-0019 §14 hizo con la de `buoh_api`.
- */
-const pendingEnvironmentSchema = z.object({
-  BUOH_LOTES_POSTGRES_PASSWORD: rolePassword.optional(),
-  BUOH_LOTES_S3_ACCESS_KEY_ID: nonEmpty.optional(),
-  BUOH_LOTES_S3_BUCKET: bucket.optional(),
-  BUOH_LOTES_S3_ENDPOINT: z.url().optional(),
-  BUOH_LOTES_S3_REGION: nonEmpty.optional(),
-  BUOH_LOTES_S3_SECRET_ACCESS_KEY: nonEmpty.optional(),
 });
 
 /** Las variables del token `lotes`, que van juntas. */
@@ -197,11 +192,8 @@ export function loadOperationsConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): OperationsConfig {
   const parsed = operationsEnvironmentSchema.safeParse(env);
-  const pending = pendingEnvironmentSchema.safeParse(env);
   const rejected = new Set(
-    [parsed, pending].flatMap((result) =>
-      result.success ? [] : result.error.issues.map((issue) => String(issue.path[0])),
-    ),
+    parsed.success ? [] : parsed.error.issues.map((issue) => String(issue.path[0])),
   );
   for (const [name, value] of Object.entries(env)) {
     if (value !== undefined && WORKER_VARIABLES.test(name)) {
@@ -216,29 +208,28 @@ export function loadOperationsConfig(
       }
     }
   }
-  if (!parsed.success || !pending.success || rejected.size > 0) {
+  if (!parsed.success || rejected.size > 0) {
     throw new ConfigError([...rejected].sort());
   }
   const value = parsed.data;
-  const lotes = pending.data;
   return {
     apiPassword: value.BUOH_API_POSTGRES_PASSWORD ?? null,
     apiReaderPassword: value.BUOH_API_LECTURA_POSTGRES_PASSWORD ?? null,
     batchObjects:
-      lotes.BUOH_LOTES_S3_ACCESS_KEY_ID === undefined ||
-      lotes.BUOH_LOTES_S3_BUCKET === undefined ||
-      lotes.BUOH_LOTES_S3_ENDPOINT === undefined ||
-      lotes.BUOH_LOTES_S3_REGION === undefined ||
-      lotes.BUOH_LOTES_S3_SECRET_ACCESS_KEY === undefined
+      value.BUOH_LOTES_S3_ACCESS_KEY_ID === undefined ||
+      value.BUOH_LOTES_S3_BUCKET === undefined ||
+      value.BUOH_LOTES_S3_ENDPOINT === undefined ||
+      value.BUOH_LOTES_S3_REGION === undefined ||
+      value.BUOH_LOTES_S3_SECRET_ACCESS_KEY === undefined
         ? null
         : {
-            accessKeyId: lotes.BUOH_LOTES_S3_ACCESS_KEY_ID,
-            bucket: lotes.BUOH_LOTES_S3_BUCKET,
-            endpoint: lotes.BUOH_LOTES_S3_ENDPOINT,
-            region: lotes.BUOH_LOTES_S3_REGION,
-            secretAccessKey: lotes.BUOH_LOTES_S3_SECRET_ACCESS_KEY,
+            accessKeyId: value.BUOH_LOTES_S3_ACCESS_KEY_ID,
+            bucket: value.BUOH_LOTES_S3_BUCKET,
+            endpoint: value.BUOH_LOTES_S3_ENDPOINT,
+            region: value.BUOH_LOTES_S3_REGION,
+            secretAccessKey: value.BUOH_LOTES_S3_SECRET_ACCESS_KEY,
           },
-    batchPassword: lotes.BUOH_LOTES_POSTGRES_PASSWORD ?? null,
+    batchPassword: value.BUOH_LOTES_POSTGRES_PASSWORD ?? null,
     codeVersion: CODE_VERSION.test(env['RENDER_GIT_COMMIT'] ?? '')
       ? (env['RENDER_GIT_COMMIT'] ?? null)
       : null,
