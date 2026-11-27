@@ -90,6 +90,8 @@ function world(
     readonly loseLock?: boolean;
     /** Las migraciones pendientes de los logs de cada secuencia. */
     readonly pending?: Partial<Record<string, readonly string[]>>;
+    /** Si el log siguiente está preparado, en cada momento; por defecto, el de `logs`. */
+    readonly readiness?: () => LogReadiness;
     readonly logs?: Partial<Record<string, Partial<LogState> | null>>;
     readonly respond?: Respond;
   } = {},
@@ -171,8 +173,23 @@ function world(
           const written = (await storesOf(log).store.readLogState(DERIV_SOURCE)).firstEventTimeUtc;
           return log.number === 1 ? (state?.first ?? written) : written;
         },
-        locateLog: () =>
-          Promise.resolve(state === null ? null : logLocation(state.active, sequence)),
+        // El activo es el de mayor número con escrituras, como en `findActiveLog`.
+        locateLog: async () => {
+          if (state === null) {
+            return null;
+          }
+          let number = state.active;
+          for (let next = state.active + 1; next <= 5; next += 1) {
+            const found = stores.get(logLocation(next, sequence).schema);
+            if (
+              found !== undefined &&
+              (await found.store.readLogState(DERIV_SOURCE)).firstEventTimeUtc !== null
+            ) {
+              number = next;
+            }
+          }
+          return logLocation(number, sequence);
+        },
         logProfile: () =>
           Promise.resolve(
             derivBatchLogProfileRow(
@@ -180,7 +197,8 @@ function world(
             ),
           ),
         pendingMigrations: () => Promise.resolve(options.pending?.[sequence.name] ?? []),
-        readiness: () => Promise.resolve(state?.nextReadiness ?? 'not_prepared'),
+        readiness: () =>
+          Promise.resolve(options.readiness?.() ?? state?.nextReadiness ?? 'not_prepared'),
       };
     },
     openSegments: (_config, log) => {
@@ -297,6 +315,14 @@ async function seedGold(env: ReturnType<typeof world>): Promise<void> {
     ],
   });
 }
+
+/** Lo que hizo cada bloque de R_100: su estado, su log y su corte. */
+const r100Blocks = (lines: readonly Record<string, unknown>[]) =>
+  lines
+    .filter(
+      (line) => line['event'] === 'history_block' && line['sequence'] === 'lotes_historia_r_100',
+    )
+    .map((line) => [line['status'], line['log'], line['cut']]);
 
 const sequenceOf = (request: Record<string, unknown>) =>
   request['ticks_history'] ?? `trading_times:${String(request['trading_times'])}`;
@@ -657,7 +683,7 @@ describe('historyCommand: lo que para, lo que se repite y el corte', () => {
         .map((line) => [line['log'], line['cut']]);
     expect(r100(env.lines)).toEqual([
       [2, { from: 1, to: 2 }],
-      [2, { from: 1, to: 2 }],
+      [2, null],
     ]);
 
     // El log 1 termina con una conexión sin respuestas, de un intento que no terminó: el bloque
@@ -673,6 +699,70 @@ describe('historyCommand: lo que para, lo que se repite y el corte', () => {
       [1, null],
       [2, { from: 1, to: 2 }],
     ]);
+  });
+
+  it('un intento que dejó un RateLimit al empezar un bloque no corta al repetirse: el bloque sigue en ese log, y el siguiente corta', async () => {
+    let limited = false;
+    let ready = false;
+    const env = world({
+      logs: { lotes_historia_r_100: { first: '2027-10-20T00:00:00.000Z' } },
+      // El log 2 queda preparado mientras tanto.
+      readiness: () => (ready ? 'ready' : 'not_prepared'),
+      respond: (request, at) => {
+        if (!limited && request['trading_times'] !== undefined) {
+          limited = true;
+          ready = true;
+          const { req_id: reqId, ...echo } = request;
+          return {
+            echo_req: { ...echo, req_id: reqId },
+            error: { code: 'RateLimit', message: 'x' },
+            msg_type: 'trading_times',
+            req_id: reqId,
+          };
+        }
+        return historyAnswer(request, at);
+      },
+    });
+    await seedGold(env);
+    expect(await env.run()).toEqual({ exitCode: 0, stderr: null });
+    expect(r100Blocks(env.lines)).toEqual([
+      ['stopped', 1, null],
+      ['completed', 1, null],
+      ['completed', 2, { from: 1, to: 2 }],
+    ]);
+  });
+
+  it('al seguir, corta en el bloque siguiente solo si el último segmento con eventos termina con un bloque', async () => {
+    const last = R_100.requests[R_100_PREVIOUS - 1];
+    if (last?.operation !== 'ticks_history') throw new TypeError('no es un tramo');
+    const page = {
+      atUtc: '2027-10-31T15:00:00.000Z',
+      texts: [historyPageText('R_100', last.start, last.end, [last.start])],
+    };
+    const due = { first: '2027-10-20T00:00:00.000Z', nextReadiness: 'ready' as const };
+    for (const [runs, expected] of [
+      [
+        [page],
+        [
+          ['completed', 2, { from: 1, to: 2 }],
+          ['completed', 2, null],
+        ],
+      ],
+      // Después del bloque, una conexión sin respuestas.
+      [
+        [page, { atUtc: '2027-10-31T15:01:00.000Z', texts: [] }],
+        [
+          ['completed', 1, null],
+          ['completed', 2, { from: 1, to: 2 }],
+        ],
+      ],
+    ] as const) {
+      const env = world({ logs: { lotes_historia_r_100: due } });
+      await seedGold(env);
+      await writeBatchLog({ ...env.storesOf(logLocation(1, HISTORY_R_100_SEQUENCE)), runs });
+      expect(await env.run()).toEqual({ exitCode: 0, stderr: null });
+      expect(r100Blocks(env.lines), String(runs.length)).toEqual(expected);
+    }
   });
 
   it('la configuración no admite la credencial dueña', async () => {

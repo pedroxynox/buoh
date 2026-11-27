@@ -145,8 +145,9 @@ function planOf(sequence: LogSequence): HistoryPlan {
 }
 
 /**
- * La primera petición que falta pedir de una historia, desde su log, o `null` si su log no tiene
- * ningún tramo respondido, y si lo último del log es un bloque terminado o nada (`clean`). Antes de leer cada log, cierra el segmento que pudo dejar abierto un
+ * Desde su log, la primera petición que falta pedir de una historia (`next`), o `null` si su log no
+ * tiene ningún tramo respondido. Dice además si lo último del log es un bloque terminado, o si no
+ * tiene nada (`clean`). Antes de leer cada log, cierra el segmento que pudo dejar abierto un
  * proceso anterior, como `runSequence`, para leer también lo que escribió. Lee los logs del activo
  * hacia atrás, y en cada uno los segmentos desde el último, hasta el primero con un tramo
  * respondido; las respuestas que siguen, de ese log o de otro posterior, también cuentan, como el
