@@ -1131,6 +1131,14 @@ El 2026-11-27, después de fusionar el PR #151, el propietario creó el token y 
 4. Los datasets: el primero de las cotizaciones, tras la siguiente de sus marcas de cada 3 horas desde la medianoche UTC; el de las velas, tras la medianoche UTC siguiente; y el de los horarios, tras el lunes a las 00:00 UTC (ADR-0021 §9, precisión del PR 5d2). El paso 6 los publica con la `duration_ms` de su proceso en `batch` del informe, el paso 7 los verifica en los dos modos y Datos los muestra en su tabla por secuencia.
 5. La memoria del paso `memory`, con el proceso `batch`, sigue por debajo de los 384 MB de las decisiones vigentes («Memoria medida de `buoh-operaciones`»).
 
+El PR #152 se fusionó el 2026-11-27 a las 04:35:52 UTC, y el agente lo comprobó con su acceso:
+
+- La ejecución de las 04:40 no dio `ConfigError`: `roles_and_logs` llevó `buoh_lotes` en `passwords_set` y el log 1 de las tres secuencias en `prepared`. Su `batch` llevó `lotes_horarios` `completed` con 11 de 11, `lotes_cotizaciones` `stopped` por `deadline` con 33 respondidas de 33 enviadas y `lotes_velas` `skipped` por `deadline`, sin `errors` ni `schema_failures`. A las 04:51, las tres secuencias tenían objetos bajo su prefijo, y la de las 04:45 preparó el log 2 de `lotes_horarios` y `lotes_cotizaciones`.
+- Las 18 ejecuciones de las 04:40 a las 06:05 guardaron su informe `batch`, así que en ninguna quedó `deferred`, y ningún informe falló. El último `batch` se guardó como mucho 166,9 s después del minuto programado, con los hasta 70 s del propio paso. Ninguna secuencia tuvo `rate_limit`, `errors` ni `schema_failures`. `lotes_velas` pidió las 15 peticiones de la vuelta del 2026-11-26 en la ejecución de las 04:50, la primera en que las cotizaciones terminaron lo suyo.
+- El primer dataset de los lotes, el de `lotes_cotizaciones` del log 1 con los segmentos 0 a 34, 378 elementos y sin incidencias, se publicó a las 06:06:38 con una `duration_ms` de 6417, y su verificación pasó en los dos modos 10,6 s después. Un dataset vivo de R_100 había tardado de 14,6 a 18,2 s en publicarse (PR #152, supuesto 4).
+- Con el lector de la API (`createDataReader`), contra producción con `buoh_agente`, `GET /api/v2/datos/datasets` daría 101 275 bytes de JSON, con los 104 datasets de R_100 y ese, y `GET /api/v2/datos/eventos`, 69 764. Hacia las 05:25, sin ningún dataset de los lotes, eran 100 124 y 69 540: cada dataset de los lotes suma unos 1,2 KB y 0,2 KB.
+- La memoria más alta del paso `memory`, el proceso principal más su hijo más grande, fue de 221,2 MB, por debajo de los 384 MB. La base medía 428 480 191 bytes, y la única sesión de `buoh_agente` era la del agente.
+
 Lo urgente: un `ConfigError`, un paso `batch` `failed` en todas las ejecuciones o un log de los lotes detenido (ver «Paso 6, `publication`»).
 
 ### Rotar credenciales
