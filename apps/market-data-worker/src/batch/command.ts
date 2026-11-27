@@ -19,7 +19,12 @@ import {
   type BatchStop,
 } from '../deriv/batch-client.js';
 import { encodeBatchRequest } from '../deriv/batch-requests.js';
-import { batchProfileKindOf, batchRound, type BatchCursor } from '../deriv/batch-rounds.js';
+import {
+  batchProfileKindOf,
+  batchRound,
+  type BatchCursor,
+  type BatchRound,
+} from '../deriv/batch-rounds.js';
 import { REQUEST_TIMEOUT_MS } from '../deriv/connection.js';
 import type { Scheduler } from '../deriv/ports.js';
 import { DERIV_PUBLIC_ENDPOINT, DERIV_SOURCE } from '../deriv/profile.js';
@@ -51,10 +56,10 @@ import {
   type SourceEventLog,
 } from '../source-log/source-event-log.js';
 import {
-  BATCH_SEQUENCES,
   logLocation,
   MAX_LOG_NUMBER,
   productionLogConfigErrors,
+  ROUND_BATCH_SEQUENCES,
   type LogLocation,
   type LogSequence,
 } from '../successive-logs.js';
@@ -66,7 +71,8 @@ import {
  * con `buoh_lotes` y el token `lotes`, y le pasa lo que ya pidió cada secuencia (`--state`); el
  * comando no guarda ese estado: lo escribe en su línea, y lo guarda quien lo lanza.
  *
- * Las secuencias van de una en una, en el orden de `BATCH_SEQUENCES`, cada una con su bloqueo, su
+ * Las secuencias van de una en una, en el orden de `ROUND_BATCH_SEQUENCES`, sin las dos historias,
+ * que pide su propio comando (`historyCommand`, que usa `runSequence`), cada una con su bloqueo, su
  * log y su conexión, y el ritmo de Deriv vale para todas: una petición cada `BATCH_PACING_MS` como
  * mucho. En cada una:
  *
@@ -176,7 +182,7 @@ export const BATCH_SEQUENCE_STATUSES = [
 type SequenceStatus = (typeof BATCH_SEQUENCE_STATUSES)[number];
 
 /** Lo que hizo el comando en una secuencia. */
-interface SequenceOutcome {
+export interface SequenceOutcome {
   readonly abandoned: { readonly remaining: number; readonly round: string } | null;
   readonly answered: number;
   readonly cut: { readonly from: number; readonly to: number } | null;
@@ -201,7 +207,7 @@ interface SequenceOutcome {
  * guarda `buoh-operaciones` (precisión del PR 5c2 de ADR-0021 §9).
  */
 export const batchStateSchema = z.partialRecord(
-  z.enum(BATCH_SEQUENCES.map((sequence) => sequence.name) as [string, ...string[]]),
+  z.enum(ROUND_BATCH_SEQUENCES.map((sequence) => sequence.name) as [string, ...string[]]),
   z.strictObject({
     next: z.number().int().min(0).max(100_000),
     round: z
@@ -243,7 +249,7 @@ function parseBatchArgs(argv: readonly string[]): { readonly state: BatchState }
 }
 
 /** La configuración: solo en `production`, donde están las secuencias por lotes, y sin esquema. */
-function loadBatchConfig(env: Readonly<Record<string, string | undefined>>): WorkerConfig {
+export function loadBatchConfig(env: Readonly<Record<string, string | undefined>>): WorkerConfig {
   const rejected = new Set<string>();
   let config: WorkerConfig | null = null;
   try {
@@ -269,7 +275,7 @@ function loadBatchConfig(env: Readonly<Record<string, string | undefined>>): Wor
 }
 
 /** Los esquemas de respuesta con que se cuentan los fallos de esquema (relevo del PR 5a). */
-type ResponseValidators = Readonly<Record<BatchOperation, (value: unknown) => boolean>>;
+export type ResponseValidators = Readonly<Record<BatchOperation, (value: unknown) => boolean>>;
 
 /**
  * Los validadores de respuesta de los lotes: los de la release, salvo `active_symbols`, con
@@ -277,7 +283,7 @@ type ResponseValidators = Readonly<Record<BatchOperation, (value: unknown) => bo
  * `relaxContractsForResponseSchema` (precisión del PR 5a de ADR-0012 §2), como los aplicarán las
  * reglas de los lotes.
  */
-function responseValidators(schemas: DerivSchemaSet<BatchOperation>): ResponseValidators {
+export function responseValidators(schemas: DerivSchemaSet<BatchOperation>): ResponseValidators {
   const catalog = createCatalogResponseSchema({
     source_schema_bytes: schemas.schema('active_symbols', 'response').bytes,
     source_schema_release: schemas.release,
@@ -306,6 +312,8 @@ const OPERATION_OF_MSG_TYPE: Readonly<Record<string, BatchOperation>> = {
   active_symbols: 'active_symbols',
   candles: 'ticks_history',
   contracts_for: 'contracts_for',
+  // Una página de ticks de la historia (precisión del PR 6a de ADR-0021 §9).
+  history: 'ticks_history',
   proposal: 'proposal',
   ticks_history: 'ticks_history',
   trading_times: 'trading_times',
@@ -345,11 +353,15 @@ function countResponse(text: string, validators: ResponseValidators, counts: Res
   }
 }
 
-/** Dónde escribe la secuencia: el log activo o, pasada su hora de corte, el siguiente preparado. */
+/**
+ * Dónde escribe la secuencia: el log activo o, pasada su hora de corte, el siguiente preparado. Sin
+ * `allowCut`, siempre el activo: el comando de la historia no corta un log a mitad de un bloque.
+ */
 async function targetLog(
   reads: StartupReads,
   sequence: LogSequence,
   nowUtc: string,
+  allowCut = true,
 ): Promise<
   | {
       readonly cut: SequenceOutcome['cut'];
@@ -367,7 +379,7 @@ async function targetLog(
     return { reason: 'log_not_prepared' };
   }
   const first = await reads.firstWrite(active);
-  if (first === null || Date.parse(nowUtc) < Date.parse(cutTimeOf(first))) {
+  if (!allowCut || first === null || Date.parse(nowUtc) < Date.parse(cutTimeOf(first))) {
     return { cut: null, cutBlocked: null, empty: first === null, log: active, previous: null };
   }
   if (active.number >= MAX_LOG_NUMBER) {
@@ -432,9 +444,10 @@ async function storeBatchSourceSchema(
   return null;
 }
 
-interface RunContext {
+export interface RunContext {
   readonly config: WorkerConfig;
-  readonly deadlineUtc: string;
+  /** Después de esto, no envía ni conecta; el comando de la historia lo pone en cada bloque. */
+  deadlineUtc: string;
   readonly deps: BatchDependencies;
   /**
    * `rate_limit` desde que una respuesta durable fue un `RateLimit`, o `deadline` desde que una
@@ -446,15 +459,20 @@ interface RunContext {
   readonly validators: ResponseValidators;
 }
 
-/** Una secuencia: su vuelta, su bloqueo, su log y su conexión. */
-async function runSequence(
+/**
+ * Una secuencia: lo que le toca pedir (`due`, de `due.from` a `due.until`), su bloqueo, su log y su
+ * conexión. El comando de los lotes le da su vuelta (`batchRound`), y el de la historia, lo que le
+ * falta de un bloque, sin `allowCut` si lo sigue a medias, y con `keepLock`, porque su bloqueo es de
+ * todo el proceso y no se suelta al terminar.
+ */
+export async function runSequence(
   context: RunContext,
   sequence: LogSequence,
-  cursor: BatchCursor | null,
+  due: BatchRound,
   skip: string | null,
+  options: { readonly allowCut?: boolean; readonly keepLock?: boolean } = {},
 ): Promise<SequenceOutcome> {
   const { config, deps } = context;
-  const due = batchRound(sequence, deps.now(), cursor);
   const counts: ResponseCounts = { errors: {}, schema_failures: {}, unexpected: 0 };
   let log: number | null = null;
   let cut: SequenceOutcome['cut'] = null;
@@ -514,7 +532,7 @@ async function runSequence(
     let previous: LogLocation | null;
     let empty: boolean;
     try {
-      const found = await targetLog(reads, sequence, deps.now());
+      const found = await targetLog(reads, sequence, deps.now(), options.allowCut ?? true);
       if ('reason' in found) {
         return outcome('failed', { reason: found.reason });
       }
@@ -663,15 +681,17 @@ async function runSequence(
   } finally {
     await handle?.close().catch(() => undefined);
     await reads.close().catch(() => undefined);
-    await lock.release();
+    if (options.keepLock !== true) {
+      await lock.release();
+    }
   }
 }
 
 const stopFields = (stop: BatchStop) => ({ detail: stop.detail, reason: stop.reason });
 
 /** Descarga y abre la release fijada con las operaciones de los lotes, con su plazo. */
-async function loadBatchSchemas(
-  deps: BatchDependencies,
+export async function loadBatchSchemas(
+  deps: Pick<BatchDependencies, 'expected' | 'fetch' | 'scheduler' | 'schemaUrl'>,
 ): Promise<
   | { readonly schemas: DerivSchemaSet<BatchOperation>; readonly status: 'loaded' }
   | { readonly detail: string | null; readonly reason: string; readonly status: 'failed' }
@@ -754,11 +774,12 @@ export async function batchCommand(
   const sequences: SequenceOutcome[] = [];
   const next: BatchState = { ...state };
   let skip: string | null = null;
-  for (const sequence of BATCH_SEQUENCES) {
+  for (const sequence of ROUND_BATCH_SEQUENCES) {
     if (skip === null && Date.parse(deps.now()) >= Date.parse(context.deadlineUtc)) {
       skip = 'deadline';
     }
-    const done = await runSequence(context, sequence, state[sequence.name] ?? null, skip);
+    const due = batchRound(sequence, deps.now(), state[sequence.name] ?? null);
+    const done = await runSequence(context, sequence, due, skip);
     sequences.push(done);
     // Lo respondido ya es durable, también si después algo falló; una vuelta nueva empieza en 0
     // aunque todavía no se pida nada, y la anterior queda en `abandoned`.

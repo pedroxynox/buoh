@@ -15,6 +15,7 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import {
+  batchLogConfigOptions,
   batchProfileBytes,
   DERIV_BATCH_CONNECTOR_VERSION,
   derivBatchLogProfileRow,
@@ -150,7 +151,13 @@ describe('perfiles de los lotes (ADR-0021 §3)', () => {
   });
 
   it('la fila de cada log lleva el SHA-256 del JCS de su perfil, que solo cambia con el perfil', () => {
-    for (const kind of ['candles', 'quotes', 'schedules'] as const) {
+    for (const kind of [
+      'candles',
+      'quotes',
+      'schedules',
+      'history_r_100',
+      'history_frxxauusd',
+    ] as const) {
       const row = derivBatchLogProfileRow(kind);
       const text = new TextDecoder().decode(batchProfileBytes(kind));
       expect(row.quality_profile_sha256).toMatch(SHA256);
@@ -162,14 +169,39 @@ describe('perfiles de los lotes (ADR-0021 §3)', () => {
     expect(derivBatchLogProfileRow('quotes').profile_id).toBe(
       'deriv_options-lotes-v1-cotizaciones',
     );
-    // Fijados: cambiar un perfil sin cambiar su `profile_id` haría fallar esta prueba.
+    // Lo que leen las reglas de los lotes de cada perfil, como en su publicación.
+    expect(batchLogConfigOptions('history_frxxauusd')).toEqual({
+      maximum_tick_gap_ms: { frxXAUUSD: 60_000 },
+      quality_rule_version: '4.1.0',
+      trading_times_symbols: ['frxXAUUSD'],
+    });
+    expect(batchLogConfigOptions('history_r_100')).toMatchObject({
+      maximum_tick_gap_ms: { R_100: 2_000 },
+      trading_times_symbols: ['R_100'],
+    });
+    expect(batchLogConfigOptions('quotes')).toEqual({
+      quality_rule_version: '4.0.0',
+      trading_times_symbols: [],
+    });
+    expect(derivBatchLogProfileRow('history_r_100').profile_id).toBe(
+      'deriv_options-lotes-v1-historia-r_100',
+    );
+    expect(derivBatchLogProfileRow('history_frxxauusd').profile_id).toBe(
+      'deriv_options-lotes-v1-historia-frxxauusd',
+    );
+    // Fijados: cambiar un perfil sin cambiar su `profile_id` haría fallar esta prueba. Los de las
+    // historias, desde que sus secuencias los usan (precisión del PR 6c de ADR-0021 §9).
     expect({
       candles: derivBatchLogProfileRow('candles').quality_profile_sha256,
+      history_frxxauusd: derivBatchLogProfileRow('history_frxxauusd').quality_profile_sha256,
+      history_r_100: derivBatchLogProfileRow('history_r_100').quality_profile_sha256,
       quotes: derivBatchLogProfileRow('quotes').quality_profile_sha256,
       schedules: derivBatchLogProfileRow('schedules').quality_profile_sha256,
     }).toMatchInlineSnapshot(`
       {
         "candles": "cfd28f452e86d54ec22e908a761ff6e53163bdbf1bcd14332941ce326dc3bbec",
+        "history_frxxauusd": "d5af3f7958bad3dd84f33ec76fdb27db0394e2972f4e691749eac611bbddee65",
+        "history_r_100": "0d98df1887311329290f3cc5ba72b1d7fbe6803ddcce3db24ca5c136f1ad8460",
         "quotes": "b678115c46608d9547349647cfdaca4a11f975bb68405a905ddd07237c8c71ad",
         "schedules": "ef33c15d14efdb75c86a14b77bd504bdb57b3bb358ca2e9f0b45003be37121c7",
       }

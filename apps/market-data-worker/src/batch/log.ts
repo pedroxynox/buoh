@@ -4,7 +4,9 @@ import type { WorkerConfig } from '../config.js';
 import { DERIV_SOURCE } from '../deriv/profile.js';
 import type { SessionLock } from '../deriv/session.js';
 import { openLockedSourceLog } from '../postgres/session-lock.js';
+import type { HistorySegments } from '../history/command.js';
 import { HEALTH_CONNECTION_TIMEOUT_MS, HEALTH_REQUEST_TIMEOUT_MS, openStores } from '../runtime.js';
+import { SourceEventLog } from '../source-log/source-event-log.js';
 import { withLog, type LogLocation } from '../successive-logs.js';
 import type { BatchLogHandle } from './command.js';
 
@@ -37,3 +39,28 @@ export async function openBatchLog(
     throw error;
   }
 }
+
+/**
+ * Las lecturas de los segmentos cerrados de un log de los lotes, para el comando de la historia
+ * (precisión del PR 6c de ADR-0021 §9): sus filas y sus source events, verificados, sobre los
+ * almacenes del log (`withLog`), con los plazos de `data:health`. No escribe nada.
+ */
+export function openHistorySegments(config: WorkerConfig, log: LogLocation): HistorySegments {
+  const stores = openStores(withLog(config, log), {
+    timeouts: { connectionMs: HEALTH_CONNECTION_TIMEOUT_MS, requestMs: HEALTH_REQUEST_TIMEOUT_MS },
+  });
+  const reader = SourceEventLog.closedSegmentReader({
+    objects: stores.objects,
+    source: DERIV_SOURCE,
+    store: stores.sourceLog,
+    zlibVersion: 'solo-lectura',
+  });
+  return {
+    close: stores.close,
+    closed: (from) => stores.sourceLog.listClosedSegments(DERIV_SOURCE, from, MAX_SEGMENT_INDEX),
+    read: async (index) => (await reader.readClosedSegment(index)).events,
+  };
+}
+
+/** El mayor índice de segmento que cabe en la columna `integer` de `closed_source_segments`. */
+const MAX_SEGMENT_INDEX = 2_147_483_647;

@@ -24,6 +24,7 @@
     "datasets:publish": "node --max-semi-space-size=1 --max-old-space-size=256 dist/cli/publish-dataset.js",
     "db:migrate": "node dist/cli/migrate.js",
     "fixture:publish": "node dist/cli/publish-fixture.js",
+    "history": "node --max-semi-space-size=1 --max-old-space-size=256 dist/cli/history.js",
     "ingest": "node --max-semi-space-size=1 --max-old-space-size=256 dist/cli/ingest.js",
     "operations": "node --max-semi-space-size=1 --max-old-space-size=256 dist/cli/operations.js",
     "replay": "node dist/cli/replay.js",

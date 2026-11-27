@@ -23,7 +23,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   batchProfileBytes,
   derivHistoryProfile,
-  type BatchProfileKind,
+  type RoundProfileKind,
 } from '../src/deriv/batch-profile.js';
 import {
   contentKey,
@@ -91,7 +91,7 @@ const pageText = (start: number, end: number, epochs: number[]) =>
     )}],"echo_req":{"end":"${String(end)}","granularity":60,"req_id":7,"start":${String(start)},"style":"candles","ticks_history":"frxXAUUSD"},"msg_type":"candles","pip_size":2,"req_id":7}`;
 
 /** Los segmentos de un log de cada clase, como los escribe el paso de los lotes. */
-function segmentsOf(kind: BatchProfileKind): RawSourceFrame[][] {
+function segmentsOf(kind: RoundProfileKind): RawSourceFrame[][] {
   switch (kind) {
     case 'schedules':
       return [[frame(sessionText, T), frame(catalogText, T + 2)], [frame(offerText, T + 4)]];
@@ -121,7 +121,7 @@ function stores() {
 
 async function publish(
   target: ReturnType<typeof stores>,
-  kind: BatchProfileKind | 'history',
+  kind: RoundProfileKind | 'history',
   schema = SOURCE_SCHEMA,
 ): Promise<BatchDatasetPublication> {
   const history = kind === 'history';

@@ -2,6 +2,8 @@ import {
   BATCH_CANDLES_SEQUENCE,
   BATCH_QUOTES_SEQUENCE,
   BATCH_SCHEDULES_SEQUENCE,
+  HISTORY_GOLD_SEQUENCE,
+  HISTORY_R_100_SEQUENCE,
   type LogSequence,
 } from '../successive-logs.js';
 import {
@@ -68,11 +70,16 @@ export interface BatchRound {
   readonly until: number;
 }
 
-/** El perfil de los lotes de cada secuencia por lotes del PR 5 (ADR-0021 §3). */
+/**
+ * El perfil de los lotes de cada secuencia por lotes: las tres del PR 5 (ADR-0021 §3) y las dos
+ * historias del PR 6c, que no van por vueltas (`batchRound` las rechaza).
+ */
 export const BATCH_SEQUENCE_PROFILES: ReadonlyMap<LogSequence, BatchProfileKind> = new Map([
   [BATCH_SCHEDULES_SEQUENCE, 'schedules'],
   [BATCH_QUOTES_SEQUENCE, 'quotes'],
   [BATCH_CANDLES_SEQUENCE, 'candles'],
+  [HISTORY_R_100_SEQUENCE, 'history_r_100'],
+  [HISTORY_GOLD_SEQUENCE, 'history_frxxauusd'],
 ]);
 
 /** El perfil de los lotes de la secuencia; lanza `TypeError` con una que no tiene ninguno. */
@@ -115,6 +122,10 @@ function roundAt(
         until: Math.ceil((requests.length * (part + 1)) / parts),
       };
     }
+    case 'history_frxxauusd':
+    case 'history_r_100':
+      // La historia la pide su comando, bloque a bloque (precisión del PR 6c de ADR-0021 §9).
+      throw new TypeError('La historia no va por vueltas.');
   }
 }
 

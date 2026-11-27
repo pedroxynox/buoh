@@ -124,3 +124,23 @@ export async function writeBatchLog(input: {
   }
   return events;
 }
+
+/**
+ * Una página de ticks de la historia de `symbol` (precisión del PR 6a de ADR-0021 §9), de `start` a
+ * `end`, con un tick en cada segundo de `epochs`, como responde Deriv con `style: ticks`.
+ */
+export const historyPageText = (
+  symbol: string,
+  start: number,
+  end: number,
+  epochs: readonly number[] = [],
+) =>
+  `{"echo_req":{"count":1000,"end":"${String(end)}","req_id":2,"start":${String(start)},"style":"ticks","ticks_history":"${symbol}"},"history":{"prices":[${epochs.map(() => '1').join(',')}],"times":[${epochs.join(',')}]},"msg_type":"history","pip_size":2,"req_id":2}`;
+
+/** Un `RateLimit` de Deriv a una página de ticks de la historia. */
+export const historyRateLimitText = (symbol: string, start: number, end: number) =>
+  `{"echo_req":{"count":1000,"end":"${String(end)}","req_id":3,"start":${String(start)},"style":"ticks","ticks_history":"${symbol}"},"error":{"code":"RateLimit","message":"x"},"msg_type":"ticks_history","req_id":3}`;
+
+/** Un error de Deriv que no es `RateLimit` a una página de ticks de la historia: cuenta como respondida. */
+export const historyErrorText = (symbol: string, start: number, end: number) =>
+  `{"echo_req":{"count":1000,"end":"${String(end)}","req_id":3,"start":${String(start)},"style":"ticks","ticks_history":"${symbol}"},"error":{"code":"InputValidationFailed","message":"x"},"msg_type":"ticks_history","req_id":3}`;

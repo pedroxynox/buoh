@@ -8,6 +8,9 @@ import {
   findActiveLog,
   firstWriteOf,
   GOLD_SEQUENCE,
+  HISTORY_GOLD_SEQUENCE,
+  HISTORY_R_100_SEQUENCE,
+  HISTORY_SEQUENCES,
   isLogExpired,
   isLogPrefix,
   listCaptureLogs,
@@ -23,6 +26,7 @@ import {
   MAX_LOG_NUMBER,
   productionLogConfigErrors,
   R_100_SEQUENCE,
+  ROUND_BATCH_SEQUENCES,
   selectActiveLog,
   withLog,
   type CaptureLog,
@@ -132,8 +136,27 @@ describe('las secuencias de logs (ADR-0021 §1)', () => {
         schema: 'buoh_lotes_cotizaciones_log_000001',
       },
       { number: 1, prefix: 'logs/lotes_velas/000001/', schema: 'buoh_lotes_velas_log_000001' },
+      {
+        number: 1,
+        prefix: 'logs/lotes_historia_r_100/000001/',
+        schema: 'buoh_lotes_historia_r_100_log_000001',
+      },
+      {
+        number: 1,
+        prefix: 'logs/lotes_historia_frxxauusd/000001/',
+        schema: 'buoh_lotes_historia_frxxauusd_log_000001',
+      },
     ]);
     expect(BATCH_SEQUENCES).toEqual([
+      BATCH_SCHEDULES_SEQUENCE,
+      BATCH_QUOTES_SEQUENCE,
+      BATCH_CANDLES_SEQUENCE,
+      HISTORY_R_100_SEQUENCE,
+      HISTORY_GOLD_SEQUENCE,
+    ]);
+    // Las historias (precisión del PR 6c) no van por vueltas: las demás, sí.
+    expect(HISTORY_SEQUENCES).toEqual([HISTORY_R_100_SEQUENCE, HISTORY_GOLD_SEQUENCE]);
+    expect(ROUND_BATCH_SEQUENCES).toEqual([
       BATCH_SCHEDULES_SEQUENCE,
       BATCH_QUOTES_SEQUENCE,
       BATCH_CANDLES_SEQUENCE,

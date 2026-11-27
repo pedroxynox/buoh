@@ -6,6 +6,7 @@ import { failureReason } from '../source-log/source-event-log.js';
 import {
   BATCH_SEQUENCES,
   isLogExpired,
+  ROUND_BATCH_SEQUENCES,
   R_100_SEQUENCE,
   selectActiveLog,
   type LogLocation,
@@ -61,7 +62,7 @@ const sequenceLineSchema = z.object({
   round,
   schema_failures: z.record(code, count),
   sent: count,
-  sequence: z.enum(BATCH_SEQUENCES.map((item) => item.name) as [string, ...string[]]),
+  sequence: z.enum(ROUND_BATCH_SEQUENCES.map((item) => item.name) as [string, ...string[]]),
   status: z.enum(BATCH_SEQUENCE_STATUSES),
   unexpected: count,
   until: count,

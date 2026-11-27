@@ -5,10 +5,13 @@ import type { LogQualityProfileRow } from '../src/deriv/log-profile.js';
 import { DERIV_SOURCE } from '../src/deriv/profile.js';
 import { DERIV_BATCH_OPERATIONS, schemaEntryName } from '../src/deriv/schema-release.js';
 import { BATCH_SOURCE_SCHEMA_ENTRIES } from '../src/deriv/stored-source-schema.js';
+import { derivHistoryProfile } from '../src/deriv/batch-profile.js';
+import { historyPlan } from '../src/deriv/history-pages.js';
 import {
   BATCH_CANDLES_SEQUENCE,
   BATCH_QUOTES_SEQUENCE,
   contentKey,
+  HISTORY_GOLD_SEQUENCE,
   DATASETS_PREFIX,
   InMemoryObjectStore,
   InMemorySourceLogStore,
@@ -22,6 +25,8 @@ import {
   type PublishCommandDependencies,
 } from '../src/index.js';
 import {
+  historyPageText,
+  historyRateLimitText,
   pageText,
   quoteText,
   sessionText,
@@ -329,11 +334,82 @@ describe('datasets:publish --sequence (precisión del PR 5d2 de ADR-0021 §9)', 
       expect(exitCode, argv.join(' ')).toBe(2);
       expect(report).toMatchObject({ code: 'UsageError', status: 'failed' });
     }
-    for (const name of ['lotes_horarios', 'lotes_cotizaciones', 'lotes_velas']) {
+    for (const name of [
+      'lotes_horarios',
+      'lotes_cotizaciones',
+      'lotes_velas',
+      'lotes_historia_r_100',
+      'lotes_historia_frxxauusd',
+    ]) {
       expect((await run(['--', '--sequence', name, '--skip', '1'])).report).toMatchObject({
         sequence: name,
         status: 'nothing_due',
       });
     }
+  });
+
+  it('la historia, un bloque por dataset, con las reglas 4.1.0 y su tick_gap, y un bloque a medias espera a su último tramo (precisión del PR 6c)', async () => {
+    const plan = historyPlan(derivHistoryProfile('frxXAUUSD'));
+    const last = plan.blocks.length - 1;
+    const previous = plan.blocks[last - 1];
+    const final = plan.blocks[last];
+    if (previous === undefined || final === undefined) throw new TypeError('sin bloques');
+    const day = new Date(previous.start * 1000).toISOString().slice(0, 10);
+    // Cada tramo con un tick por segundo, salvo el primero del bloque, con 120 s sin ticks.
+    const pages = (block: typeof previous) =>
+      block.requests.slice(1).map((request, offset) => {
+        if (request.operation !== 'ticks_history') throw new TypeError('no es un tramo');
+        const epochs = Array.from(
+          { length: request.end - request.start + 1 },
+          (_, second) => request.start + second,
+        ).filter((epoch) => offset > 0 || epoch >= request.start + 120);
+        return historyPageText('frxXAUUSD', request.start, request.end, epochs);
+      });
+    const [p1, ...rest] = pages(previous);
+    const firstTranche = previous.requests[2];
+    if (p1 === undefined || firstTranche?.operation !== 'ticks_history') throw new TypeError('x');
+    const at = (offsetMinutes: number) =>
+      new Date(Date.parse('2027-01-01T00:00:00.000Z') + offsetMinutes * 60_000).toISOString();
+    const runs: BatchRun[] = [
+      // Un RateLimit para la ejecución, y la siguiente sigue en ese tramo.
+      {
+        atUtc: at(0),
+        texts: [
+          sessionText(day),
+          p1,
+          historyRateLimitText('frxXAUUSD', firstTranche.start, firstTranche.end),
+        ],
+      },
+      { atUtc: at(5), texts: rest },
+      // El último bloque, a medias.
+      { atUtc: at(10), texts: [sessionText(day), ...pages(final).slice(0, 2)] },
+    ];
+    const one = await batchLog(HISTORY_GOLD_SEQUENCE, 1, 'history_frxxauusd', runs);
+    const { datasets, replay, run } = harness([one], at(20));
+    const first = await run(['--sequence', 'lotes_historia_frxxauusd']);
+    // El horario, la primera página y el RateLimit en el segmento 0, y las 15 páginas que faltan en
+    // el 1: el bloque entero, sin el horario del bloque siguiente.
+    expect(first.report).toMatchObject({
+      first_segment: 0,
+      incident_count: 2,
+      last_segment: 1,
+      sequence: 'lotes_historia_frxxauusd',
+      status: 'published',
+    });
+    const id = String(first.report['dataset_id']);
+    // El tramo sin ticks y el RateLimit, una respuesta con error.
+    expect(datasets.incidents.get(id)?.map((incident) => incident.incident_type)).toEqual([
+      'tick_gap',
+      'invalid_source_frame',
+    ]);
+    expect(coreOf(datasets, id)).toMatchObject({
+      normalized_tick_count: 14_400 - 120,
+      quality_rule_version: '4.1.0',
+    });
+    expect(await replay(id, 'recompute')).toMatchObject({ incident_count: 2 });
+    // El último bloque no tiene todavía su último tramo.
+    expect((await run(['--sequence', 'lotes_historia_frxxauusd'])).report).toMatchObject({
+      status: 'nothing_due',
+    });
   });
 });
