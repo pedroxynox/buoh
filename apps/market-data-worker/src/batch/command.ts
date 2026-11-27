@@ -71,7 +71,7 @@ import {
  * con `buoh_lotes` y el token `lotes`, y le pasa lo que ya pidió cada secuencia (`--state`); el
  * comando no guarda ese estado: lo escribe en su línea, y lo guarda quien lo lanza.
  *
- * Las secuencias van de una en una, en el orden de `ROUND_BATCH_SEQUENCES`, sin las dos historias,
+ * Las secuencias van de una en una, en el orden de `ROUND_BATCH_SEQUENCES`, sin las historias,
  * que pide su propio comando (`historyCommand`, que usa `runSequence`), cada una con su bloqueo, su
  * log y su conexión, y el ritmo de Deriv vale para todas: una petición cada `BATCH_PACING_MS` como
  * mucho. En cada una:

@@ -1,7 +1,12 @@
 import { BATCH_SEGMENT_POLICY } from '@buoh/domain';
 import { describe, expect, it } from 'vitest';
 
-import { derivBatchLogProfileRow, derivHistoryProfile } from '../src/deriv/batch-profile.js';
+import {
+  derivBatchLogProfileRow,
+  derivCandleHistoryProfile,
+  derivHistoryProfile,
+} from '../src/deriv/batch-profile.js';
+import { batchProfileKindOf } from '../src/deriv/batch-rounds.js';
 import { historyPlan } from '../src/deriv/history-pages.js';
 import { DERIV_SOURCE } from '../src/deriv/profile.js';
 import {
@@ -16,6 +21,7 @@ import {
   type HistoryDependencies,
 } from '../src/history/command.js';
 import {
+  HISTORY_CANDLES_SEQUENCE,
   HISTORY_GOLD_SEQUENCE,
   HISTORY_R_100_SEQUENCE,
   logLocation,
@@ -26,16 +32,23 @@ import {
 import type { LogReadiness } from '../src/log-cut.js';
 import type { ChildResult } from '../src/operations/child.js';
 import { answer, AnsweringSocket, BATCH_FIXTURE, type Respond } from './support/batch-fixtures.js';
-import { historyPageText, sessionText, writeBatchLog } from './support/batch-frames.js';
+import {
+  candlePageText,
+  historyPageText,
+  sessionText,
+  writeBatchLog,
+} from './support/batch-frames.js';
 import { uuid } from './support/connection-harness.js';
 import { ManualClock } from './support/deriv-fixtures.js';
 import { MemoryObjectStore, MemorySourceLogStore } from './support/memory-stores.js';
 
 // El comando de la historia (precisión del PR 6c de ADR-0021 §9) sin servicios: los logs en memoria,
 // un socket que responde solo, un reloj manual y `datasets:publish` falso. Los vectores salen de la
-// precisión: el bloque más antiguo de las dos historias primero, una petición cada 2,1 s, la historia
+// precisión: el bloque más antiguo de las historias primero, una petición cada 2,1 s, la historia
 // desde su log sin pedir nada dos veces, un bloque a medias sin cortar el log, cada bloque publicado
-// en cuanto termina, y el final cuando las dos están pedidas y publicadas.
+// en cuanto termina, y el final cuando todas están pedidas y publicadas. Desde el PR 6d, con la
+// historia de las velas, un día por bloque; salvo en sus pruebas (`candles: 'fresh'`), su log ya
+// tiene la última página, así que no pide nada.
 
 const ENV = {
   BUOH_DEPLOYMENT_ENVIRONMENT: 'production',
@@ -62,6 +75,13 @@ const GOLD = historyPlan(derivHistoryProfile('frxXAUUSD'));
 const GOLD_LAST = GOLD.firsts.at(-1) ?? 0;
 const R_100_LAST = R_100.firsts.at(-1) ?? 0;
 const R_100_PREVIOUS = R_100.firsts.at(-2) ?? 0;
+const CANDLES = historyPlan(derivCandleHistoryProfile());
+/** La historia de las velas, ya pedida entera: así la ve `history_started`. */
+const CANDLES_DONE = {
+  next: CANDLES.requests.length,
+  requests: CANDLES.requests.length,
+  sequence: 'lotes_historia_velas',
+};
 
 /**
  * 2027-10-31T16:00Z: el borde de los 365 días es el 2026-10-31T16:00Z, y el primer bloque de R_100
@@ -80,6 +100,8 @@ function world(
   options: {
     /** Cuántos intentos del bloqueo, por secuencia, dan `null`: con `true`, todos. */
     readonly busy?: boolean | number;
+    /** Con `fresh`, la historia de las velas sin nada pedido; si no, ya pedida entera. */
+    readonly candles?: 'done' | 'fresh';
     /** Cuántos intentos del bloqueo, por secuencia, fallan como un `28P01`: con `true`, todos. */
     readonly lockFails?: boolean | number;
     /** La única secuencia cuyos intentos fallan, si se da. */
@@ -205,12 +227,7 @@ function world(
           }
           return logLocation(number, sequence);
         },
-        logProfile: () =>
-          Promise.resolve(
-            derivBatchLogProfileRow(
-              sequence === HISTORY_R_100_SEQUENCE ? 'history_r_100' : 'history_frxxauusd',
-            ),
-          ),
+        logProfile: () => Promise.resolve(derivBatchLogProfileRow(batchProfileKindOf(sequence))),
         pendingMigrations: () => Promise.resolve(options.pending?.[sequence.name] ?? []),
         readiness: () =>
           Promise.resolve(options.readiness?.() ?? state?.nextReadiness ?? 'not_prepared'),
@@ -282,7 +299,23 @@ function world(
       }
     },
   };
+  let seeded = options.candles === 'fresh';
   const run = async (env: Record<string, string> = ENV) => {
+    if (!seeded) {
+      seeded = true;
+      // La última página de la historia de las velas, de un proceso anterior.
+      const last = CANDLES.requests.at(-1);
+      if (last?.operation !== 'ticks_history') throw new TypeError('no es una página');
+      await writeBatchLog({
+        ...storesOf(logLocation(1, HISTORY_CANDLES_SEQUENCE)),
+        runs: [
+          {
+            atUtc: '2027-10-31T14:00:00.000Z',
+            texts: [candlePageText(last.symbol, last.start, last.end)],
+          },
+        ],
+      });
+    }
     const done = { value: false };
     const result = historyCommand([], env, deps).finally(() => {
       done.value = true;
@@ -342,7 +375,7 @@ const r100Blocks = (lines: readonly Record<string, unknown>[]) =>
 const sequenceOf = (request: Record<string, unknown>) =>
   request['ticks_history'] ?? `trading_times:${String(request['trading_times'])}`;
 
-describe('historyCommand: las dos historias, bloque a bloque', () => {
+describe('historyCommand: las historias, bloque a bloque', () => {
   it('sigue cada historia desde su log o desde el borde de Deriv, el bloque más antiguo primero, a una petición cada 2,1 s, y publica cada bloque en cuanto termina', async () => {
     const env = world({
       logs: {
@@ -362,6 +395,7 @@ describe('historyCommand: las dos historias, bloque a bloque', () => {
           requests: GOLD.requests.length,
           sequence: 'lotes_historia_frxxauusd',
         },
+        CANDLES_DONE,
       ],
     });
     // Los dos bloques de R_100, más antiguos, y después lo que le falta al oro, sin su horario.
@@ -418,7 +452,11 @@ describe('historyCommand: las dos historias, bloque a bloque', () => {
     expect(await env.run()).toEqual({ exitCode: 0, stderr: null });
     expect(env.sent.length).toBe(before);
     expect(env.lines.findLast((line) => line['event'] === 'history_started')).toMatchObject({
-      sequences: [{ next: R_100.requests.length }, { next: GOLD.requests.length }],
+      sequences: [
+        { next: R_100.requests.length },
+        { next: GOLD.requests.length },
+        { next: CANDLES.requests.length },
+      ],
     });
   });
 
@@ -439,7 +477,9 @@ describe('historyCommand: las dos historias, bloque a bloque', () => {
       ],
     });
     expect(await env.run()).toEqual({ exitCode: 0, stderr: null });
-    expect(env.lines[0]).toMatchObject({ sequences: [{ next: old }, { next: GOLD_LAST + 3 }] });
+    expect(env.lines[0]).toMatchObject({
+      sequences: [{ next: old }, { next: GOLD_LAST + 3 }, CANDLES_DONE],
+    });
     expect(sequenceOf(env.sent[0]?.request ?? {})).toBe('trading_times:2026-10-31');
     expect(env.sent.filter(({ request }) => request['ticks_history'] === 'R_100')).toHaveLength(13);
   });
@@ -467,7 +507,7 @@ describe('historyCommand: las dos historias, bloque a bloque', () => {
       }
       expect(await env.run(), where).toEqual({ exitCode: 0, stderr: null });
       expect(env.lines[0], where).toMatchObject({
-        sequences: [{ next: R_100_PREVIOUS + 1 }, { next: GOLD_LAST + 3 }],
+        sequences: [{ next: R_100_PREVIOUS + 1 }, { next: GOLD_LAST + 3 }, CANDLES_DONE],
       });
       expect(
         env.sent.filter(({ request }) => request['trading_times'] === date.date),
@@ -603,16 +643,19 @@ describe('historyCommand: las dos historias, bloque a bloque', () => {
       ],
     });
     expect(await deploy.run()).toEqual({ exitCode: 0, stderr: null });
-    expect(deploy.sleeps.slice(0, 6)).toEqual(
-      Array.from({ length: 6 }, () => HISTORY_LOCK_RETRY_MS),
+    // Tres esperas en cada una de las tres secuencias.
+    expect(deploy.sleeps.slice(0, 9)).toEqual(
+      Array.from({ length: 9 }, () => HISTORY_LOCK_RETRY_MS),
     );
-    expect(deploy.sleeps[6]).not.toBe(HISTORY_LOCK_RETRY_MS);
+    expect(deploy.sleeps[9]).not.toBe(HISTORY_LOCK_RETRY_MS);
     // Una línea al empezar a esperar y otra cuando cambia el motivo, en cada secuencia.
     expect(deploy.lines.filter((line) => line['event'] === 'history_lock_waiting')).toEqual(
-      ['lotes_historia_r_100', 'lotes_historia_frxxauusd'].flatMap((sequence) => [
-        { detail: '28P01', event: 'history_lock_waiting', reason: 'lock_unavailable', sequence },
-        { event: 'history_lock_waiting', reason: 'lock_busy', sequence },
-      ]),
+      ['lotes_historia_r_100', 'lotes_historia_frxxauusd', 'lotes_historia_velas'].flatMap(
+        (sequence) => [
+          { detail: '28P01', event: 'history_lock_waiting', reason: 'lock_unavailable', sequence },
+          { event: 'history_lock_waiting', reason: 'lock_busy', sequence },
+        ],
+      ),
     );
     expect(deploy.lines.at(-1)).toMatchObject({ event: 'history_finished', status: 'completed' });
 
@@ -627,6 +670,119 @@ describe('historyCommand: las dos historias, bloque a bloque', () => {
     expect(result.stderr).toContain('BUOH_POSTGRES_USER');
     expect(result.stderr).not.toContain(ENV.BUOH_PUBLICACION_POSTGRES_PASSWORD);
     expect(HISTORY_BLOCK_DEADLINE_MS).toBeGreaterThan(17 * HISTORY_PACING_MS + 15_000);
+  });
+});
+
+describe('historyCommand: la historia de las velas (precisión del PR 6d de ADR-0021 §9)', () => {
+  it('pide cada día desde el primero que Deriv guarda, con su horario y sus 14 páginas, entre los bloques de ticks por antigüedad, y publica cada día', async () => {
+    const env = world({ candles: 'fresh' });
+    await seedGold(env);
+    expect(await env.run()).toEqual({ exitCode: 0, stderr: null });
+    // A las 16:00 del 2027-10-31, el primer día que empieza una hora después del borde de los 365
+    // días es el 2026-11-01, y el último es el 2026-11-25: 25 días.
+    const firstDay = CANDLES.blocks.findIndex(
+      (block) => block.start === Date.UTC(2026, 10, 1) / 1000,
+    );
+    expect(CANDLES.blocks.length - firstDay).toBe(25);
+    expect(env.lines[0]).toMatchObject({
+      sequences: [
+        { next: R_100_PREVIOUS },
+        { next: GOLD_LAST + 3 },
+        {
+          next: CANDLES.firsts[firstDay],
+          requests: CANDLES.requests.length,
+          sequence: 'lotes_historia_velas',
+        },
+      ],
+    });
+    const markets = [
+      'cryBTCUSD',
+      'cryETHUSD',
+      'frxEURUSD',
+      'frxGBPUSD',
+      'frxUSDJPY',
+      'frxXAGUSD',
+      'frxXAUUSD',
+    ];
+    const days = Array.from({ length: 25 }, (_, day) =>
+      new Date(Date.UTC(2026, 10, 1 + day)).toISOString().slice(0, 10),
+    );
+    // Los dos bloques de R_100, del 2026-10-31 a las 18:00 y del 2026-11-01 a las 00:00, que empata
+    // con el primer día de velas y va antes por el orden de las secuencias; los 25 días de velas, y
+    // el último bloque del oro, del 2026-11-25 a las 04:00.
+    expect(env.sent.map(({ request }) => sequenceOf(request))).toEqual([
+      'trading_times:2026-10-31',
+      ...Array.from({ length: 12 }, () => 'R_100'),
+      'trading_times:2026-11-01',
+      'R_100',
+      ...days.flatMap((day) => [
+        `trading_times:${day}`,
+        ...markets.flatMap((symbol) => [symbol, symbol]),
+      ]),
+      ...Array.from({ length: GOLD.requests.length - GOLD_LAST - 3 }, () => 'frxXAUUSD'),
+    ]);
+    // Cada página de velas pide 12 horas de velas de 1 minuto, con `style: candles`.
+    const pages = env.sent
+      .map(({ request }) => request)
+      .filter((request) => request['style'] === 'candles');
+    expect(pages).toHaveLength(25 * 14);
+    expect(pages[0]).toMatchObject({
+      count: 1000,
+      end: String(Date.UTC(2026, 10, 1, 12) / 1000 - 1),
+      granularity: 60,
+      start: Date.UTC(2026, 10, 1) / 1000,
+      ticks_history: 'cryBTCUSD',
+    });
+    // Un bloque terminado por día, en el log 1, y un dataset por cada uno.
+    const candleBlocks = env.lines.filter(
+      (line) => line['event'] === 'history_block' && line['sequence'] === 'lotes_historia_velas',
+    );
+    expect(candleBlocks.map((line) => [line['status'], line['log'], line['round']])).toEqual(
+      days.map((day) => ['completed', 1, `${day}T00:00:00.000Z`]),
+    );
+    for (const line of candleBlocks) {
+      expect(line).toMatchObject({ errors: {}, schema_failures: {}, unexpected: 0 });
+    }
+    expect(Object.fromEntries(env.published)).toEqual({
+      lotes_historia_frxxauusd: 1,
+      lotes_historia_r_100: 2,
+      lotes_historia_velas: 25,
+    });
+    expect(env.lines.at(-1)).toEqual({ event: 'history_finished', status: 'completed' });
+
+    // Otro proceso después sigue desde el log: nada que pedir.
+    const before = env.sent.length;
+    expect(await env.run()).toEqual({ exitCode: 0, stderr: null });
+    expect(env.sent.length).toBe(before);
+    expect(env.lines.findLast((line) => line['event'] === 'history_started')).toMatchObject({
+      sequences: [{}, {}, CANDLES_DONE],
+    });
+  });
+
+  it('sigue un día a medias después de su última página respondida, sin pedir otra vez su horario', async () => {
+    const env = world({ candles: 'fresh' });
+    await seedGold(env);
+    const day = CANDLES.blocks.length - 1;
+    const first = CANDLES.firsts[day] ?? 0;
+    const texts = [0, 1, 2, 3].map((offset) => {
+      const request = CANDLES.requests[first + offset];
+      if (request?.operation === 'trading_times') {
+        return sessionText(request.date, ['cryBTCUSD', 'cryETHUSD']);
+      }
+      if (request?.operation !== 'ticks_history') throw new TypeError('no es una página');
+      return candlePageText(request.symbol, request.start, request.end);
+    });
+    await writeBatchLog({
+      ...env.storesOf(logLocation(1, HISTORY_CANDLES_SEQUENCE)),
+      runs: [{ atUtc: '2027-10-31T15:00:00.000Z', texts }],
+    });
+    expect(await env.run()).toEqual({ exitCode: 0, stderr: null });
+    expect(env.lines[0]).toMatchObject({ sequences: [{}, {}, { next: first + 4 }] });
+    const candles = env.sent.filter(
+      ({ request }) => request['style'] === 'candles' || request['trading_times'] === '2026-11-25',
+    );
+    expect(candles).toHaveLength(11);
+    expect(candles[0]?.request).toMatchObject({ ticks_history: 'cryETHUSD' });
   });
 });
 
@@ -658,7 +814,9 @@ describe('historyCommand: lo que para, lo que se repite y el corte', () => {
       ],
     });
     expect(await env.run()).toEqual({ exitCode: 0, stderr: null });
-    expect(env.lines[0]).toMatchObject({ sequences: [{}, { next: GOLD_LAST + 3 }] });
+    expect(env.lines[0]).toMatchObject({
+      sequences: [{}, { next: GOLD_LAST + 3 }, CANDLES_DONE],
+    });
     expect(env.sent.filter(({ request }) => request['ticks_history'] === 'frxXAUUSD')).toHaveLength(
       GOLD.requests.length - GOLD_LAST - 3,
     );

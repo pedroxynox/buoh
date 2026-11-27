@@ -2,7 +2,7 @@ import type { SourceEvent } from '@buoh/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { planHistoryDataset } from '../src/datasets/batch-plan.js';
-import { derivHistoryProfile } from '../src/deriv/batch-profile.js';
+import { derivCandleHistoryProfile, derivHistoryProfile } from '../src/deriv/batch-profile.js';
 import type { BatchRequest } from '../src/deriv/batch-requests.js';
 import {
   blockOfRequest,
@@ -15,6 +15,8 @@ import {
 } from '../src/deriv/history-pages.js';
 import {
   batchFrame,
+  candleErrorText,
+  candlePageText,
   historyErrorText,
   historyPageText,
   historyRateLimitText,
@@ -57,53 +59,65 @@ const session = (index: number) => sessionText(dateOf(GOLD.requests[index]));
 describe('historyAnswerOf: qué petición de la historia respondió un frame', () => {
   it('una página o un error cuentan, un RateLimit no, y solo los de la historia del símbolo', () => {
     const { end, start } = tranche(GOLD.requests[lastFirst + 1]);
-    expect(historyAnswerOf(historyPageText('frxXAUUSD', start, end), 'frxXAUUSD')).toEqual({
+    expect(historyAnswerOf(historyPageText('frxXAUUSD', start, end), GOLD.profile)).toEqual({
       end,
       kind: 'tranche',
       start,
+      symbol: 'frxXAUUSD',
     });
-    expect(historyAnswerOf(historyErrorText('frxXAUUSD', start, end), 'frxXAUUSD')).toEqual({
+    expect(historyAnswerOf(historyErrorText('frxXAUUSD', start, end), GOLD.profile)).toEqual({
       end,
       kind: 'tranche',
       start,
+      symbol: 'frxXAUUSD',
     });
-    expect(historyAnswerOf(historyRateLimitText('frxXAUUSD', start, end), 'frxXAUUSD')).toBeNull();
-    expect(historyAnswerOf(historyPageText('R_100', start, end), 'frxXAUUSD')).toBeNull();
-    expect(historyAnswerOf(sessionText('2026-11-25'), 'frxXAUUSD')).toEqual({
+    expect(historyAnswerOf(historyRateLimitText('frxXAUUSD', start, end), GOLD.profile)).toBeNull();
+    expect(historyAnswerOf(historyPageText('R_100', start, end), GOLD.profile)).toBeNull();
+    expect(historyAnswerOf(sessionText('2026-11-25'), GOLD.profile)).toEqual({
       date: '2026-11-25',
       kind: 'schedule',
     });
-    expect(historyAnswerOf('no es JSON', 'frxXAUUSD')).toBeNull();
-    // Una página de velas no es de la historia.
+    expect(historyAnswerOf('no es JSON', GOLD.profile)).toBeNull();
+    // Una página de velas, o su error, no es de la historia de ticks.
     expect(
       historyAnswerOf(
         historyPageText('frxXAUUSD', start, end).replace('"style":"ticks"', '"style":"candles"'),
-        'frxXAUUSD',
+        GOLD.profile,
       ),
     ).toBeNull();
+    expect(historyAnswerOf(candlePageText('frxXAUUSD', start, end), GOLD.profile)).toBeNull();
+    expect(historyAnswerOf(candleErrorText('frxXAUUSD', start, end), GOLD.profile)).toBeNull();
   });
 });
 
 describe('las peticiones de la historia en una lista', () => {
   it('cada tramo tiene su índice, y el último de cada bloque lo cierra, también el último, corto', () => {
     const first = tranche(GOLD.requests[1]);
-    expect(trancheIndexOf(GOLD, first.start, first.end)).toBe(1);
+    expect(trancheIndexOf(GOLD, 'frxXAUUSD', first.start, first.end)).toBe(1);
     const lastOfFirst = tranche(GOLD.requests[16]);
-    expect(closesHistoryBlock(GOLD, lastOfFirst.start, lastOfFirst.end)).toBe(true);
-    expect(closesHistoryBlock(GOLD, first.start, first.end)).toBe(false);
+    expect(closesHistoryBlock(GOLD, 'frxXAUUSD', lastOfFirst.start, lastOfFirst.end)).toBe(true);
+    expect(closesHistoryBlock(GOLD, 'frxXAUUSD', first.start, first.end)).toBe(false);
     const final = tranche(GOLD.requests.at(-1));
     expect(final.end).toBe(GOLD.profile.end_epoch);
-    expect(trancheIndexOf(GOLD, final.start, final.end)).toBe(GOLD.requests.length - 1);
-    expect(closesHistoryBlock(GOLD, final.start, final.end)).toBe(true);
-    // Un tramo con otro final, o que no empieza en un tramo, no es de la historia.
-    expect(trancheIndexOf(GOLD, first.start, first.end + 1)).toBeNull();
-    expect(trancheIndexOf(GOLD, first.start + 1, first.end)).toBeNull();
+    expect(trancheIndexOf(GOLD, 'frxXAUUSD', final.start, final.end)).toBe(
+      GOLD.requests.length - 1,
+    );
+    expect(closesHistoryBlock(GOLD, 'frxXAUUSD', final.start, final.end)).toBe(true);
+    // Un tramo de otro símbolo, con otro final, o que no empieza en un tramo, no es de la historia.
+    expect(trancheIndexOf(GOLD, 'R_100', first.start, first.end)).toBeNull();
+    expect(trancheIndexOf(GOLD, 'frxXAUUSD', first.start, first.end + 1)).toBeNull();
+    expect(trancheIndexOf(GOLD, 'frxXAUUSD', first.start + 1, first.end)).toBeNull();
     expect(
-      trancheIndexOf(GOLD, GOLD.profile.start_epoch - 900, GOLD.profile.start_epoch - 1),
+      trancheIndexOf(
+        GOLD,
+        'frxXAUUSD',
+        GOLD.profile.start_epoch - 900,
+        GOLD.profile.start_epoch - 1,
+      ),
     ).toBeNull();
     // En R_100, bloques de 13 peticiones.
     const r100 = tranche(R_100.requests[13 + 12]);
-    expect(closesHistoryBlock(R_100, r100.start, r100.end)).toBe(true);
+    expect(closesHistoryBlock(R_100, 'R_100', r100.start, r100.end)).toBe(true);
     expect(blockOfRequest(R_100, 13)).toBe(1);
     expect(blockOfRequest(R_100, 25)).toBe(1);
     expect(blockOfRequest(R_100, 26)).toBe(2);
@@ -216,5 +230,138 @@ describe('planHistoryDataset: un bloque por dataset', () => {
     });
     expect(await plan([], { logTerminated: true }).result).toEqual({ status: 'nothing_due' });
     expect(await plan([]).result).toEqual({ reason: 'awaiting_segments', status: 'not_due' });
+  });
+});
+
+describe('la historia de las velas (precisión del PR 6d de ADR-0021 §9): un día por bloque', () => {
+  const CANDLES = historyPlan(derivCandleHistoryProfile());
+  const MARKETS = [
+    'cryBTCUSD',
+    'cryETHUSD',
+    'frxEURUSD',
+    'frxGBPUSD',
+    'frxUSDJPY',
+    'frxXAGUSD',
+    'frxXAUUSD',
+  ];
+  const DAY = 86_400;
+  const HALF = 43_200;
+  const candleFrame = (index: number) => {
+    const request = CANDLES.requests[index];
+    if (request?.operation === 'trading_times') {
+      return frame(sessionText(request.date, MARKETS));
+    }
+    const { end, start, symbol } = tranche(request);
+    return frame(candlePageText(symbol, start, end, [start]));
+  };
+
+  it('del 2025-11-26 al 2026-11-25: el horario de cada día y sus 14 páginas, de 12 horas por mercado', () => {
+    expect(CANDLES.blocks).toHaveLength(365);
+    expect(CANDLES.requests).toHaveLength(365 * 15);
+    expect(CANDLES.requests[0]).toEqual({ date: '2025-11-26', operation: 'trading_times' });
+    expect(CANDLES.requests.at(-15)).toEqual({ date: '2026-11-25', operation: 'trading_times' });
+    const first = CANDLES.profile.start_epoch;
+    expect(new Date(first * 1000).toISOString()).toBe('2025-11-26T00:00:00.000Z');
+    expect(new Date((CANDLES.profile.end_epoch + 1) * 1000).toISOString()).toBe(
+      '2026-11-26T00:00:00.000Z',
+    );
+    expect(CANDLES.requests.slice(1, 15)).toEqual(
+      MARKETS.flatMap((symbol) =>
+        [0, 1].map((page) => ({
+          count: 1000,
+          end: first + (page + 1) * HALF - 1,
+          granularity: 60,
+          operation: 'ticks_history',
+          start: first + page * HALF,
+          symbol,
+        })),
+      ),
+    );
+    expect(CANDLES.firsts.slice(0, 3)).toEqual([0, 15, 30]);
+    expect(CANDLES.blocks[1]?.start).toBe(first + DAY);
+  });
+
+  it('una página de velas de sus mercados, o su error, cuenta; un RateLimit, los ticks y otro mercado, no', () => {
+    const start = CANDLES.profile.start_epoch;
+    const end = start + HALF - 1;
+    expect(historyAnswerOf(candlePageText('cryETHUSD', start, end), CANDLES.profile)).toEqual({
+      end,
+      kind: 'tranche',
+      start,
+      symbol: 'cryETHUSD',
+    });
+    expect(historyAnswerOf(candleErrorText('frxEURUSD', start, end), CANDLES.profile)).toEqual({
+      end,
+      kind: 'tranche',
+      start,
+      symbol: 'frxEURUSD',
+    });
+    expect(
+      historyAnswerOf(candleErrorText('frxEURUSD', start, end, 'RateLimit'), CANDLES.profile),
+    ).toBeNull();
+    expect(historyAnswerOf(candlePageText('R_100', start, end), CANDLES.profile)).toBeNull();
+    expect(historyAnswerOf(historyPageText('frxXAUUSD', start, end), CANDLES.profile)).toBeNull();
+    expect(historyAnswerOf(historyErrorText('frxXAUUSD', start, end), CANDLES.profile)).toBeNull();
+    expect(
+      historyAnswerOf(
+        candlePageText('frxXAUUSD', start, end).replace('"granularity":60', '"granularity":120'),
+        CANDLES.profile,
+      ),
+    ).toBeNull();
+    expect(historyAnswerOf(sessionText('2025-11-26', MARKETS), CANDLES.profile)).toEqual({
+      date: '2025-11-26',
+      kind: 'schedule',
+    });
+  });
+
+  it('cada página tiene su índice por mercado, y la segunda del oro cierra el día', () => {
+    const start = CANDLES.profile.start_epoch;
+    expect(trancheIndexOf(CANDLES, 'cryBTCUSD', start, start + HALF - 1)).toBe(1);
+    expect(trancheIndexOf(CANDLES, 'cryETHUSD', start, start + HALF - 1)).toBe(3);
+    expect(trancheIndexOf(CANDLES, 'frxXAUUSD', start + HALF, start + DAY - 1)).toBe(14);
+    expect(trancheIndexOf(CANDLES, 'R_100', start, start + HALF - 1)).toBeNull();
+    expect(trancheIndexOf(CANDLES, 'cryBTCUSD', start, start + HALF)).toBeNull();
+    expect(closesHistoryBlock(CANDLES, 'frxXAUUSD', start + HALF, start + DAY - 1)).toBe(true);
+    expect(closesHistoryBlock(CANDLES, 'frxXAGUSD', start + HALF, start + DAY - 1)).toBe(false);
+    expect(closesHistoryBlock(CANDLES, 'frxXAUUSD', start, start + HALF - 1)).toBe(false);
+    const last = CANDLES.profile.end_epoch;
+    expect(trancheIndexOf(CANDLES, 'frxXAUUSD', last + 1 - HALF, last)).toBe(
+      CANDLES.requests.length - 1,
+    );
+    expect(blockOfRequest(CANDLES, 14)).toBe(0);
+    expect(blockOfRequest(CANDLES, 15)).toBe(1);
+  });
+
+  it('sigue después de la última página respondida, y del horario del día siguiente', () => {
+    const answers = (indexes: readonly number[]) =>
+      historyAnswersIn(indexes.map(candleFrame), CANDLES.profile);
+    expect(historyResumeIndex(CANDLES, answers([0, 1, 2, 3]))).toBe(4);
+    expect(historyResumeIndex(CANDLES, answers([13, 14, 15]))).toBe(16);
+    expect(historyResumeIndex(CANDLES, answers([14]))).toBe(15);
+    expect(historyResumeIndex(CANDLES, answers([0]))).toBeNull();
+  });
+
+  it('un dataset por día: termina en el segmento con la última página del oro', async () => {
+    const day = Array.from({ length: 15 }, (_, index) => candleFrame(15 + index));
+    const segments = [day.slice(0, 10), day.slice(10), [candleFrame(30)]];
+    const events = segments.map((items) => items as SourceEvent[]);
+    const reads: number[] = [];
+    const result = await planHistoryDataset({
+      closedSegments: events.map((items, index) => ({
+        first_event_time_utc: '2027-01-01T00:00:00.000Z',
+        raw_frame_count: items.length,
+        segment_index: index,
+      })),
+      elementsOf: (items) => items.length,
+      from: 0,
+      logTerminated: false,
+      plan: CANDLES,
+      readSegment: (index) => {
+        reads.push(index);
+        return Promise.resolve(events[index] ?? []);
+      },
+    });
+    expect(result).toMatchObject({ elements: 15, from: 0, status: 'due', to: 1 });
+    expect(reads).toEqual([0, 1]);
   });
 });

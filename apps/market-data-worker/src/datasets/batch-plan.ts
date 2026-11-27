@@ -184,7 +184,8 @@ export interface PlanHistoryDatasetInput extends Omit<PlanBatchDatasetInput, 'ki
  * ADR-0021 §9): un bloque cada uno. El comando de la historia cierra el segmento al terminar cada
  * bloque y antes de seguir uno que dejó a medias, así que ningún segmento mezcla dos bloques, y el
  * dataset termina en el primer segmento desde `from` con la respuesta del último tramo de un bloque
- * (`closesHistoryBlock`), sea una página o un error de Deriv. Termina antes, sin ella, en el último
+ * (`closesHistoryBlock`), sea una página o un error de Deriv; en la historia de las velas, la última
+ * página de su día (precisión del PR 6d). Termina antes, sin ella, en el último
  * segmento de un log terminado, en `BATCH_DATASET_SEGMENT_CEILING` segmentos o en el último que cabe
  * en el techo de elementos. Sin ninguno de esos finales, todavía no (`awaiting_segments`). Lee los
  * segmentos de uno en uno, solo hasta su final. Su derivación no deja nada abierto, como la de
@@ -224,7 +225,8 @@ export async function planHistoryDataset(input: PlanHistoryDatasetInput): Promis
     elements += added;
     closed = historyAnswersIn(events, input.plan.profile).some(
       (answer) =>
-        answer.kind === 'tranche' && closesHistoryBlock(input.plan, answer.start, answer.end),
+        answer.kind === 'tranche' &&
+        closesHistoryBlock(input.plan, answer.symbol, answer.start, answer.end),
     );
   }
   // Sin el último tramo, un log terminado ya está entero; en el techo, el resto va al siguiente.

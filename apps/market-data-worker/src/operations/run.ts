@@ -67,9 +67,9 @@ import {
 // salud, el informe final y la verificación siguen siendo de las secuencias en vivo. Desde el PR
 // 5c2, con la contraseña de `buoh_lotes` y el token `lotes`, `batch` y `batch_final` corren los
 // lotes y guardan el informe final de cada log de los lotes que terminó (`batch-steps.ts`). Desde el
-// PR 6c, el paso 1 prepara también los logs de las dos historias, y `batch_final` les deja su
-// informe final, pero `batch` y el paso 6 no las tocan: las pide y las publica el comando de la
-// historia (`history/command.ts`).
+// PR 6c, el paso 1 prepara también los logs de las historias, las dos de ticks y, desde el 6d, la
+// de las velas, y `batch_final` les deja su informe final, pero `batch` y el paso 6 no las tocan:
+// las pide y las publica el comando de la historia (`history/command.ts`).
 
 /**
  * Los pasos de una ejecución, en orden. `final_health` es la segunda parte del paso 2 de §11: el

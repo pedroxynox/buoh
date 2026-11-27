@@ -40,8 +40,8 @@ export const PUBLISHED_SEQUENCE = R_100_SEQUENCE;
  * Las secuencias por lotes que publica el paso 6 después de la de `PUBLISHED_SEQUENCE`, con el tiempo
  * que sobra (ADR-0021 §3; precisión del PR 5d2 de su §9): pasa su nombre a `datasets:publish`
  * (`--sequence`). Una por ejecución, por turnos (`BATCH_PUBLICATION_TURN_MS`), entre las que tienen
- * algún log que no venció. No están las dos historias, que publica su propio comando (precisión del
- * PR 6c de ADR-0021 §9).
+ * algún log que no venció. No están las historias, que publica su propio comando (precisiones de los
+ * PR 6c y 6d de ADR-0021 §9).
  */
 export const PUBLISHED_BATCH_SEQUENCES: readonly LogSequence[] = ROUND_BATCH_SEQUENCES;
 /** El turno de cada secuencia por lotes: el de cada ejecución de `buoh-operaciones`, cada 5 minutos. */

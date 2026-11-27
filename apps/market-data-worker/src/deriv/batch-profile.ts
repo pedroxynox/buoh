@@ -9,8 +9,10 @@ import { DERIV_SOURCE } from './profile.js';
  * y las velas (§3). Cada perfil dice qué pide su secuencia y cada cuánto, y con qué reglas se deriva
  * (las de los lotes 4.0.0). Sus bytes son su JCS, y cambiar una lista, la apuesta o el ritmo crea
  * otro perfil, con otro `profile_id` (§3: «La lista y la apuesta van en el perfil»). La historia de
- * R_100 y la del oro, las otras dos secuencias por lotes, tienen sus perfiles desde el PR 6a
- * (`derivHistoryProfile`), con las reglas 4.1.0 desde el 6b, y sus secuencias desde el 6c.
+ * R_100 y la del oro tienen sus perfiles desde el PR 6a (`derivHistoryProfile`), con las reglas
+ * 4.1.0 desde el 6b, y sus secuencias desde el 6c. La historia de las velas, la tercera, tiene su
+ * perfil y su secuencia desde el 6d (`derivCandleHistoryProfile`), con las reglas 4.0.0, como las
+ * velas de cada día.
  */
 
 /**
@@ -20,30 +22,47 @@ import { DERIV_SOURCE } from './profile.js';
 export const DERIV_BATCH_CONNECTOR_VERSION = 'deriv-options-lotes-1.0.0';
 
 /**
- * Las clases de las secuencias por lotes con perfil: las tres de las vueltas del PR 5 y, desde el
- * PR 6c de ADR-0021 §9, las dos historias (`HistoryProfileKind`).
+ * Las clases de las secuencias por lotes con perfil: las tres de las vueltas del PR 5 y las
+ * historias (`HistoryProfileKind`): desde el PR 6c de ADR-0021 §9, las de ticks, y desde el 6d, la
+ * de las velas.
  */
 export type BatchProfileKind = RoundProfileKind | HistoryProfileKind;
 
 /** Las clases de las secuencias por lotes que van por vueltas (PR 5 de ADR-0021 §9). */
 export type RoundProfileKind = 'candles' | 'quotes' | 'schedules';
 
-/** Las clases de las dos historias (precisión del PR 6c de ADR-0021 §9). */
-export type HistoryProfileKind = 'history_frxxauusd' | 'history_r_100';
+/** Las clases de las historias de ticks (precisión del PR 6c de ADR-0021 §9). */
+export type TickHistoryProfileKind = 'history_frxxauusd' | 'history_r_100';
+
+/**
+ * Las clases de las historias: las dos de ticks y, desde el PR 6d de ADR-0021 §9, la de las velas
+ * del último año de los siete mercados reales (`history_candles`).
+ */
+export type HistoryProfileKind = TickHistoryProfileKind | 'history_candles';
 
 /** La clase de la historia de cada símbolo. */
-export const HISTORY_PROFILE_KINDS: Readonly<Record<HistorySymbol, HistoryProfileKind>> = {
+export const HISTORY_PROFILE_KINDS: Readonly<Record<HistorySymbol, TickHistoryProfileKind>> = {
   R_100: 'history_r_100',
   frxXAUUSD: 'history_frxxauusd',
 };
 
-/** Si la clase es la de una historia. */
+/** Si la clase es la de una historia, de ticks o de velas. */
 export function isHistoryProfileKind(kind: BatchProfileKind): kind is HistoryProfileKind {
+  return kind === 'history_candles' || isTickHistoryProfileKind(kind);
+}
+
+/** Si la clase es la de una historia de ticks. */
+export function isTickHistoryProfileKind(kind: BatchProfileKind): kind is TickHistoryProfileKind {
   return kind === 'history_frxxauusd' || kind === 'history_r_100';
 }
 
 /** El perfil de la historia de una clase de historia. */
-export function historyProfileOf(kind: HistoryProfileKind): HistoryProfile {
+export function historyProfileOf(kind: TickHistoryProfileKind): HistoryProfile;
+export function historyProfileOf(kind: HistoryProfileKind): AnyHistoryProfile;
+export function historyProfileOf(kind: HistoryProfileKind): AnyHistoryProfile {
+  if (kind === 'history_candles') {
+    return derivCandleHistoryProfile();
+  }
   return derivHistoryProfile(kind === 'history_r_100' ? 'R_100' : 'frxXAUUSD');
 }
 
@@ -107,7 +126,31 @@ export type HistoryProfile = ProfileHeader & {
   readonly tranche_seconds: number;
 };
 
-/** Los símbolos con historia (ADR-0021 §4): los dos que se capturan en vivo. */
+/**
+ * La historia de las velas del último año (ADR-0021 §4; precisión del PR 6d de su §9): las velas de
+ * los siete mercados reales, un día UTC por bloque (`block_seconds`), desde `start_epoch` hasta
+ * `end_epoch`, los dos incluidos. Cada bloque pide lo mismo que las velas de cada día
+ * (`candleRequests`): el `trading_times` de su día y sus páginas, así que cada día tiene su horario.
+ */
+export type CandleHistoryProfile = CandlesProfile & {
+  readonly block_seconds: number;
+  /** El último segundo del día anterior al primero de las velas de cada día (`lotes_velas`). */
+  readonly end_epoch: number;
+  /** El comienzo del día 365 días antes del primero de las velas de cada día. */
+  readonly start_epoch: number;
+};
+
+/** El perfil de una historia, de ticks o de velas. */
+export type AnyHistoryProfile = CandleHistoryProfile | HistoryProfile;
+
+/** Si el perfil es el de la historia de las velas. */
+export function isCandleHistoryProfile(
+  profile: AnyHistoryProfile,
+): profile is CandleHistoryProfile {
+  return 'symbols' in profile;
+}
+
+/** Los símbolos con historia de ticks (ADR-0021 §4): los dos que se capturan en vivo. */
 export type HistorySymbol = 'R_100' | 'frxXAUUSD';
 
 /**
@@ -118,6 +161,14 @@ export type HistorySymbol = 'R_100' | 'frxXAUUSD';
 export const DERIV_HISTORY_DAYS = 365;
 
 const DAY_SECONDS = 86_400;
+
+/**
+ * El epoch en segundos de las 00:00 UTC del primer día de las velas de cada día, el 2026-11-26: el
+ * de la primera vuelta de `lotes_velas`, que el agente leyó en producción con su acceso el
+ * 2026-11-27 (su primer informe `batch` con peticiones, de las 04:52:17 UTC). Así la historia de las
+ * velas termina el día anterior, y las dos no se solapan.
+ */
+const FIRST_CANDLES_DAY_EPOCH = 1_795_651_200;
 
 /**
  * El epoch en segundos del primer tick en vivo de cada símbolo, el que leyó el agente en la captura
@@ -304,8 +355,26 @@ export function derivHistoryProfile(symbol: HistorySymbol): HistoryProfile {
   };
 }
 
+/**
+ * La historia de las velas (ADR-0021 §4; precisión del PR 6d de su §9): las de las velas de cada
+ * día (`derivCandlesProfile`), del año anterior al primer día de `lotes_velas`, un día por bloque.
+ * Lo que Deriv ya no guarda, también 365 días de velas (precisión del PR 6e), no se pide
+ * (`historyRequestsFrom`). Sigue con las reglas 4.0.0, las de las velas de cada día: el tramo sin
+ * ticks de las 4.1.0 es de los ticks.
+ */
+export function derivCandleHistoryProfile(): CandleHistoryProfile {
+  return {
+    ...derivCandlesProfile(),
+    ...header('historia-velas'),
+    block_seconds: DAY_SECONDS,
+    end_epoch: FIRST_CANDLES_DAY_EPOCH - 1,
+    start_epoch: FIRST_CANDLES_DAY_EPOCH - DERIV_HISTORY_DAYS * DAY_SECONDS,
+  };
+}
+
 const PROFILES = {
   candles: derivCandlesProfile,
+  history_candles: derivCandleHistoryProfile,
   history_frxxauusd: () => derivHistoryProfile('frxXAUUSD'),
   history_r_100: () => derivHistoryProfile('R_100'),
   quotes: derivQuotesProfile,
@@ -333,7 +402,7 @@ export function derivBatchLogProfileRow(kind: BatchProfileKind): LogQualityProfi
 /**
  * Los símbolos que buscan en `trading_times` las reglas de los lotes con el perfil de una clase,
  * como en su publicación (`buildBatchDatasetPublication`): sus `symbols`, el `symbol` de una
- * historia, o ninguno en las cotizaciones.
+ * historia de ticks, o ninguno en las cotizaciones.
  */
 export function batchTradingTimesSymbols(kind: BatchProfileKind): readonly string[] {
   const profile: ProfileHeader & {
@@ -355,7 +424,7 @@ export function batchLogConfigOptions(kind: BatchProfileKind): {
   readonly trading_times_symbols: readonly string[];
 } {
   const trading_times_symbols = batchTradingTimesSymbols(kind);
-  if (!isHistoryProfileKind(kind)) {
+  if (!isTickHistoryProfileKind(kind)) {
     return { quality_rule_version: BATCH_RULE_SET.quality_rule_version, trading_times_symbols };
   }
   const profile = historyProfileOf(kind);

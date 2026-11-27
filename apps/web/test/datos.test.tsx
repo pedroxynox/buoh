@@ -495,6 +495,10 @@ describe('los textos de cada dataset', () => {
     expect(sequenceInterval('lotes_historia_r_100')).toBe(
       'Cada dataset tiene un bloque de hasta 6 horas de ticks del año anterior a la captura en vivo, con el horario de su día.',
     );
+    expect(sequenceTitle('lotes_historia_velas')).toBe('Historia: velas de 1 minuto, un año');
+    expect(sequenceInterval('lotes_historia_velas')).toBe(
+      'Cada dataset tiene un día de velas de 1 minuto de los siete mercados reales, del año anterior a las velas de cada día, con el horario de ese día.',
+    );
     expect(sequenceInterval('frxXAUUSD')).toBeNull();
     expect(sequenceInterval('lotes_nuevos')).toBeNull();
   });

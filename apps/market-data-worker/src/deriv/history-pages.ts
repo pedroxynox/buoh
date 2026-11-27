@@ -1,8 +1,8 @@
 import type { SourceEvent } from '@buoh/contracts';
 
-import type { HistoryProfile } from './batch-profile.js';
+import { isCandleHistoryProfile, type AnyHistoryProfile } from './batch-profile.js';
 import { RATE_LIMIT } from './batch-client.js';
-import { historyBlocks, type BatchRequest, type HistoryBlock } from './batch-requests.js';
+import { historyBlocksOf, type BatchRequest, type HistoryBlock } from './batch-requests.js';
 
 /**
  * Las respuestas de la historia en su log (precisión del PR 6c de ADR-0021 §9): qué petición de la
@@ -10,13 +10,19 @@ import { historyBlocks, type BatchRequest, type HistoryBlock } from './batch-req
  * petición sigue el comando de la historia. Una respuesta cuenta si respondió, con datos o con un
  * error, como en el comando de los lotes; un `RateLimit` no, porque esa petición se vuelve a pedir.
  * Las peticiones se piden de una en una y en su orden (`runBatchExchange`), así que las respuestas
- * de un log van en el orden de las peticiones. Es pura.
+ * de un log van en el orden de las peticiones. Desde el PR 6d, también las de la historia de las
+ * velas, cuyas páginas son de varios símbolos. Es pura.
  */
 
-/** La petición de la historia que respondió un frame. */
+/** La petición de la historia que respondió un frame: un horario, o una página de un símbolo. */
 export type HistoryAnswer =
   | { readonly date: string; readonly kind: 'schedule' }
-  | { readonly end: number; readonly kind: 'tranche'; readonly start: number };
+  | {
+      readonly end: number;
+      readonly kind: 'tranche';
+      readonly start: number;
+      readonly symbol: string;
+    };
 
 type JsonRecord = Readonly<Record<string, unknown>>;
 
@@ -30,12 +36,25 @@ const epochOf = (value: unknown): number | null => {
   return typeof number === 'number' && Number.isSafeInteger(number) && number >= 0 ? number : null;
 };
 
+/** Lo que distingue las páginas de una historia: de ticks de un símbolo, o de velas de varios. */
+type HistoryPages =
+  | { readonly style: 'candles'; readonly granularity: number; readonly symbols: readonly string[] }
+  | { readonly style: 'ticks'; readonly symbols: readonly string[] };
+
+function pagesOf(profile: AnyHistoryProfile): HistoryPages {
+  return isCandleHistoryProfile(profile)
+    ? { granularity: profile.granularity_seconds, style: 'candles', symbols: profile.symbols }
+    : { style: 'ticks', symbols: [profile.symbol] };
+}
+
 /**
- * La petición de la historia de `symbol` que respondió el texto de un frame, por su `echo_req`, o
- * `null` si no es una respuesta de la historia de `symbol` o es un `RateLimit`. Una página de ticks
- * responde con `history`, o con `ticks_history` y un error; un horario, con `trading_times`.
+ * La petición de la historia del perfil que respondió el texto de un frame, por su `echo_req`, o
+ * `null` si no es una respuesta de esa historia o es un `RateLimit`. Una página de ticks responde con
+ * `history`, y una de velas, con `candles`, o las dos con `ticks_history` y un error; un horario,
+ * con `trading_times`.
  */
-export function historyAnswerOf(payload: string, symbol: string): HistoryAnswer | null {
+export function historyAnswerOf(payload: string, profile: AnyHistoryProfile): HistoryAnswer | null {
+  const pages = pagesOf(profile);
   let root: JsonRecord | null;
   try {
     root = recordOf(JSON.parse(payload));
@@ -56,14 +75,21 @@ export function historyAnswerOf(payload: string, symbol: string): HistoryAnswer 
       ? { date, kind: 'schedule' }
       : null;
   }
-  if (
-    (msgType === 'history' || msgType === 'ticks_history') &&
-    echo['ticks_history'] === symbol &&
-    echo['style'] === 'ticks'
-  ) {
+  const symbol = echo['ticks_history'];
+  const page =
+    pages.style === 'ticks'
+      ? msgType === 'history' && echo['style'] === 'ticks'
+      : msgType === 'candles' &&
+        echo['style'] === 'candles' &&
+        epochOf(echo['granularity']) === pages.granularity;
+  const error =
+    msgType === 'ticks_history' &&
+    echo['style'] === pages.style &&
+    (pages.style === 'ticks' || epochOf(echo['granularity']) === pages.granularity);
+  if ((page || error) && typeof symbol === 'string' && pages.symbols.includes(symbol)) {
     const start = epochOf(echo['start']);
     const end = epochOf(echo['end']);
-    return start === null || end === null ? null : { end, kind: 'tranche', start };
+    return start === null || end === null ? null : { end, kind: 'tranche', start, symbol };
   }
   return null;
 }
@@ -71,12 +97,12 @@ export function historyAnswerOf(payload: string, symbol: string): HistoryAnswer 
 /** Las respuestas de la historia de un perfil en unos source events, en su orden. */
 export function historyAnswersIn(
   events: readonly SourceEvent[],
-  profile: Pick<HistoryProfile, 'symbol'>,
+  profile: AnyHistoryProfile,
 ): HistoryAnswer[] {
   const answers: HistoryAnswer[] = [];
   for (const event of events) {
     if (event.kind === 'raw_source_frame') {
-      const answer = historyAnswerOf(event.payload_utf8, profile.symbol);
+      const answer = historyAnswerOf(event.payload_utf8, profile);
       if (answer !== null) {
         answers.push(answer);
       }
@@ -90,13 +116,13 @@ export interface HistoryPlan {
   readonly blocks: readonly HistoryBlock[];
   /** El índice de la primera petición de cada bloque. */
   readonly firsts: readonly number[];
-  readonly profile: HistoryProfile;
+  readonly profile: AnyHistoryProfile;
   readonly requests: readonly BatchRequest[];
 }
 
-/** Las peticiones de la historia de un perfil (`historyBlocks`), en una sola lista. */
-export function historyPlan(profile: HistoryProfile): HistoryPlan {
-  const blocks = historyBlocks(profile);
+/** Las peticiones de la historia de un perfil (`historyBlocksOf`), en una sola lista. */
+export function historyPlan(profile: AnyHistoryProfile): HistoryPlan {
+  const blocks = historyBlocksOf(profile);
   const firsts: number[] = [];
   const requests: BatchRequest[] = [];
   for (const block of blocks) {
@@ -115,27 +141,40 @@ function blockIndexOf(plan: HistoryPlan, start: number): number {
   return Math.floor((start - start_epoch) / block_seconds);
 }
 
-/** El índice de la petición del tramo de `start` a `end`, o `null` si no es un tramo de la historia. */
-export function trancheIndexOf(plan: HistoryPlan, start: number, end: number): number | null {
+/**
+ * El índice de la petición de la página de `symbol` de `start` a `end`, o `null` si no es una página
+ * de la historia. Un bloque tiene como mucho unas 17 peticiones, así que se busca en el suyo.
+ */
+export function trancheIndexOf(
+  plan: HistoryPlan,
+  symbol: string,
+  start: number,
+  end: number,
+): number | null {
   const block = blockIndexOf(plan, start);
   const first = plan.firsts[block];
   const found = plan.blocks[block];
   if (first === undefined || found === undefined) {
     return null;
   }
-  const offset = (start - found.start) / plan.profile.tranche_seconds;
-  const request = found.requests[1 + offset];
-  return Number.isInteger(offset) &&
-    request?.operation === 'ticks_history' &&
-    request.start === start &&
-    request.end === end
-    ? first + 1 + offset
-    : null;
+  const offset = found.requests.findIndex(
+    (request) =>
+      request.operation === 'ticks_history' &&
+      request.symbol === symbol &&
+      request.start === start &&
+      request.end === end,
+  );
+  return offset < 0 ? null : first + offset;
 }
 
-/** Si el tramo de `start` a `end` es el último de su bloque. */
-export function closesHistoryBlock(plan: HistoryPlan, start: number, end: number): boolean {
-  const index = trancheIndexOf(plan, start, end);
+/** Si la página de `symbol` de `start` a `end` es la última de su bloque. */
+export function closesHistoryBlock(
+  plan: HistoryPlan,
+  symbol: string,
+  start: number,
+  end: number,
+): boolean {
+  const index = trancheIndexOf(plan, symbol, start, end);
   if (index === null) {
     return false;
   }
@@ -171,7 +210,7 @@ export function historyResumeIndex(
   let next: number | null = null;
   for (const answer of answers) {
     if (answer.kind === 'tranche') {
-      const index = trancheIndexOf(plan, answer.start, answer.end);
+      const index = trancheIndexOf(plan, answer.symbol, answer.start, answer.end);
       next = index === null ? next : index + 1;
       continue;
     }

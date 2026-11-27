@@ -19,13 +19,16 @@ import {
   batchProfileBytes,
   DERIV_BATCH_CONNECTOR_VERSION,
   derivBatchLogProfileRow,
+  derivCandleHistoryProfile,
   derivCandlesProfile,
   derivHistoryProfile,
   derivQuotesProfile,
   derivSchedulesProfile,
+  type CandleHistoryProfile,
 } from '../src/deriv/batch-profile.js';
 import {
   batchRequestBody,
+  candleHistoryBlocks,
   candleRequests,
   dayStartEpoch,
   encodeBatchRequest,
@@ -157,6 +160,7 @@ describe('perfiles de los lotes (ADR-0021 §3)', () => {
       'schedules',
       'history_r_100',
       'history_frxxauusd',
+      'history_candles',
     ] as const) {
       const row = derivBatchLogProfileRow(kind);
       const text = new TextDecoder().decode(batchProfileBytes(kind));
@@ -189,10 +193,20 @@ describe('perfiles de los lotes (ADR-0021 §3)', () => {
     expect(derivBatchLogProfileRow('history_frxxauusd').profile_id).toBe(
       'deriv_options-lotes-v1-historia-frxxauusd',
     );
+    // La historia de las velas (precisión del PR 6d): las reglas 4.0.0 y los símbolos de las velas
+    // de cada día, sin umbral del tramo sin ticks.
+    expect(derivBatchLogProfileRow('history_candles').profile_id).toBe(
+      'deriv_options-lotes-v1-historia-velas',
+    );
+    expect(batchLogConfigOptions('history_candles')).toEqual({
+      quality_rule_version: '4.0.0',
+      trading_times_symbols: batchLogConfigOptions('candles').trading_times_symbols,
+    });
     // Fijados: cambiar un perfil sin cambiar su `profile_id` haría fallar esta prueba. Los de las
-    // historias, desde que sus secuencias los usan (precisión del PR 6c de ADR-0021 §9).
+    // historias, desde que sus secuencias los usan (precisiones de los PR 6c y 6d de ADR-0021 §9).
     expect({
       candles: derivBatchLogProfileRow('candles').quality_profile_sha256,
+      history_candles: derivBatchLogProfileRow('history_candles').quality_profile_sha256,
       history_frxxauusd: derivBatchLogProfileRow('history_frxxauusd').quality_profile_sha256,
       history_r_100: derivBatchLogProfileRow('history_r_100').quality_profile_sha256,
       quotes: derivBatchLogProfileRow('quotes').quality_profile_sha256,
@@ -200,6 +214,7 @@ describe('perfiles de los lotes (ADR-0021 §3)', () => {
     }).toMatchInlineSnapshot(`
       {
         "candles": "cfd28f452e86d54ec22e908a761ff6e53163bdbf1bcd14332941ce326dc3bbec",
+        "history_candles": "6dc952c6dccc19d2c9313e9556f9d67391af1cccb0d1a58f3b21e0404d4d10ca",
         "history_frxxauusd": "d5af3f7958bad3dd84f33ec76fdb27db0394e2972f4e691749eac611bbddee65",
         "history_r_100": "0d98df1887311329290f3cc5ba72b1d7fbe6803ddcce3db24ca5c136f1ad8460",
         "quotes": "b678115c46608d9547349647cfdaca4a11f975bb68405a905ddd07237c8c71ad",
@@ -835,5 +850,139 @@ describe('el umbral del tramo sin ticks de cada historia', () => {
       ],
     ]);
     expect(gapsOf('frxXAUUSD', [...before, ...after])).toHaveLength(1);
+  });
+});
+
+// La historia de las velas del PR 6d de ADR-0021 §9 (§4). El oráculo del primer día de las velas de
+// cada día, el 2026-11-26, es el de la primera vuelta de `lotes_velas` que leyó el agente en
+// producción el 2026-11-27, escrito aquí a mano, y el de los 365 días, el borde que dio
+// `ticks_history` con velas ese día (precisión del PR 6e).
+describe('la historia de las velas (ADR-0021 §4; precisión del PR 6d de su §9)', () => {
+  const utc = (iso: string) => Date.parse(iso) / 1000;
+  const OPEN = new TextEncoder().encode(
+    '{"$schema":"http://json-schema.org/draft-04/schema#","type":"object"}',
+  );
+  const sourceSchema = batchSourceSchemaBytes(
+    Object.fromEntries(
+      BATCH_SOURCE_SCHEMA_OPERATIONS.map((operation) => [operation, OPEN]),
+    ) as Parameters<typeof batchSourceSchemaBytes>[0],
+  );
+
+  it('pide lo de las velas de cada día, un día por bloque, del 2025-11-26 al 2026-11-25, con las reglas 4.0.0', () => {
+    expect(derivCandleHistoryProfile()).toEqual({
+      block_seconds: 86_400,
+      count: 1000,
+      end_epoch: utc('2026-11-26T00:00:00Z') - 1,
+      granularity_seconds: 60,
+      page_seconds: 43_200,
+      profile_id: 'deriv_options-lotes-v1-historia-velas',
+      quality_rule_version: '4.0.0',
+      source: 'deriv_options',
+      start_epoch: utc('2025-11-26T00:00:00Z'),
+      symbols: REAL_MARKETS,
+    });
+    const blocks = candleHistoryBlocks(derivCandleHistoryProfile());
+    expect(blocks).toHaveLength(365);
+    expect(blocks.flatMap((block) => block.requests)).toHaveLength(365 * 15);
+    let next = utc('2025-11-26T00:00:00Z');
+    for (const block of blocks) {
+      expect(block.start).toBe(next);
+      const date = new Date(block.start * 1000).toISOString().slice(0, 10);
+      expect(block.requests).toEqual(candleRequests(derivCandlesProfile(), date));
+      next += 86_400;
+    }
+    expect(blocks.at(-1)?.requests[0]).toEqual({ date: '2026-11-25', operation: 'trading_times' });
+  });
+
+  it('no pide lo que Deriv ya no guarda: empieza en el primer día que queda dentro de sus 365 días con una hora de margen', () => {
+    const blocks = candleHistoryBlocks(derivCandleHistoryProfile());
+    const requests = blocks.flatMap((block) => block.requests);
+    // El 2026-11-28 a las 12:00, el borde es el 2025-11-28 a las 12:00: el primer día que empieza
+    // una hora después o más es el 2025-11-29, el cuarto.
+    const from = historyRequestsFrom(blocks, Date.parse('2026-11-28T12:00:00Z'));
+    expect(from).toBe(3 * 15);
+    expect(requests[from]).toEqual({ date: '2025-11-29', operation: 'trading_times' });
+    // A las 23:00 del 2026-11-28, el 2025-11-29 todavía vale; un segundo después, ya no.
+    expect(historyRequestsFrom(blocks, Date.parse('2026-11-28T23:00:00Z'))).toBe(from);
+    expect(historyRequestsFrom(blocks, Date.parse('2026-11-28T23:00:01Z'))).toBe(from + 15);
+  });
+
+  it('rechaza una historia que no va de un comienzo de día a un final de día, o con días que pasan del techo', () => {
+    const profile = derivCandleHistoryProfile();
+    for (const [name, change] of [
+      ['bloque que no es un día', { block_seconds: 43_200 }],
+      ['comienzo fuera de día', { start_epoch: profile.start_epoch + 3_600 }],
+      ['final fuera de día', { end_epoch: profile.end_epoch - 3_600 }],
+      ['termina antes de empezar', { end_epoch: profile.start_epoch - 1 }],
+      ['sin mercados', { symbols: [] }],
+      // 12 mercados: 12 × 1441 = 17 292 elementos por día.
+      [
+        'día que pasa del techo',
+        { symbols: Array.from({ length: 12 }, (_, i) => `m${String(i)}`) },
+      ],
+      ['velas de 120 s', { granularity_seconds: 120 }],
+    ] as const satisfies readonly (readonly [string, Partial<CandleHistoryProfile>])[]) {
+      expect(() => candleHistoryBlocks({ ...profile, ...change }), name).toThrow(TypeError);
+    }
+    // 11 mercados: 15 851 elementos por día, por debajo del techo.
+    expect(() =>
+      candleHistoryBlocks({
+        ...profile,
+        symbols: Array.from({ length: 11 }, (_, i) => `m${String(i)}`),
+      }),
+    ).not.toThrow();
+  });
+
+  it('un día se publica con las reglas 4.0.0, como las velas de cada día: sus velas, su horario y las que faltan', () => {
+    const [block] = candleHistoryBlocks(derivCandleHistoryProfile());
+    const [times, page] = block?.requests ?? [];
+    if (times?.operation !== 'trading_times' || page?.operation !== 'ticks_history') {
+      throw new TypeError('falta el día');
+    }
+    const schedule = `{"echo_req":${JSON.stringify(batchRequestBody(times, 1))},"msg_type":"trading_times","req_id":1,"trading_times":{"markets":[{"name":"x","submarkets":[{"name":"x","symbols":[{"name":"x","times":{"close":["23:59:59"],"open":["00:00:00"]},"underlying_symbol":"cryBTCUSD"}]}]}]}}`;
+    // Las dos primeras velas de la página, sin la tercera ni las siguientes.
+    const candle = (epoch: number) =>
+      `{"close":2.50,"epoch":${String(epoch)},"high":2.75,"low":2.25,"open":2.40}`;
+    const candles = `{"candles":[${candle(page.start)},${candle(page.start + 60)}],"echo_req":${JSON.stringify(batchRequestBody(page, 2))},"msg_type":"candles","pip_size":2,"req_id":2}`;
+    const publication = buildBatchDatasetPublication({
+      connector_version: DERIV_BATCH_CONNECTOR_VERSION,
+      locateManifest: () => 's3://synthetic/manifest',
+      locateObject: (_id, { object_bytes_sha256 }) => `s3://synthetic/${object_bytes_sha256}`,
+      publication_id: '019b76da-a800-7000-8000-0000000000ab',
+      published_at_utc: '2026-11-28T12:10:00.000Z',
+      quality_profile_bytes: batchProfileBytes('history_candles'),
+      segments: [[frame(schedule), frame(candles)]],
+      source_schema_bytes: sourceSchema,
+      source_schema_release: 'synthetic-v1',
+    });
+    expect(publication.derived.candles).toHaveLength(2);
+    expect(publication.derived.sessions).toMatchObject([
+      { symbol: 'cryBTCUSD', trading_date: '2025-11-26' },
+    ]);
+    // El resto de las 12 horas pedidas falta, como en `lotes_velas`; los demás mercados, sin
+    // página, no se comprueban.
+    expect(
+      publication.derived.incidents.map((incident) => [incident.incident_type, incident.symbol]),
+    ).toEqual([['candle_missing', 'cryBTCUSD']]);
+    expect(publication.derived.ticks).toEqual([]);
+  });
+
+  it('una página más antigua que lo que guarda Deriv, con sus últimas velas, es incoherente y no da ninguna', () => {
+    const [block] = candleHistoryBlocks(derivCandleHistoryProfile());
+    const page = block?.requests[1];
+    if (page?.operation !== 'ticks_history') {
+      throw new TypeError('falta la página');
+    }
+    const recent = utc('2026-11-27T19:00:00Z');
+    const result = deriveMarketCandles(
+      frame(
+        `{"candles":[{"close":2.50,"epoch":${String(recent)},"high":2.75,"low":2.25,"open":2.40}],"echo_req":${JSON.stringify(batchRequestBody(page, 7))},"msg_type":"candles","pip_size":2,"req_id":7}`,
+      ),
+      accept,
+    );
+    expect(result.records).toEqual([]);
+    expect(result.incidents).toMatchObject([
+      { evidence: { reason: 'candles_inconsistent' }, incident_type: 'invalid_source_frame' },
+    ]);
   });
 });

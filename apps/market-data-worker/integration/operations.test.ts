@@ -1655,7 +1655,15 @@ describe('buoh-operaciones (ADR-0018 §11)', () => {
     expect(await roleOf()).toEqual([
       { can_login: true, create_role: false, memberships: [], superuser: false },
     ]);
-    const kinds = ['schedules', 'quotes', 'candles', 'history_r_100', 'history_frxxauusd'] as const;
+    const kinds = [
+      'schedules',
+      'quotes',
+      'candles',
+      'history_r_100',
+      'history_frxxauusd',
+      'history_candles',
+    ] as const;
+    expect(kinds).toHaveLength(BATCH_SEQUENCES.length);
     for (const [index, sequence] of BATCH_SEQUENCES.entries()) {
       const { schema } = logLocation(1, sequence);
       expect(report.prepared).toContainEqual({ log: 1, sequence: sequence.name });

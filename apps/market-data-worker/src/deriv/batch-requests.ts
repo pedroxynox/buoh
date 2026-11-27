@@ -3,6 +3,9 @@ import { canonicalJson, type ContractDuration, type JsonValue } from '@buoh/cont
 import { DATASET_ELEMENT_CEILING } from '../datasets/plan.js';
 import {
   DERIV_HISTORY_DAYS,
+  isCandleHistoryProfile,
+  type AnyHistoryProfile,
+  type CandleHistoryProfile,
   type CandlesProfile,
   type HistoryProfile,
   type QuotesProfile,
@@ -305,6 +308,48 @@ export function historyBlocks(profile: HistoryProfile): HistoryBlock[] {
   return blocks;
 }
 
+/**
+ * Los bloques de la historia de las velas (precisión del PR 6d de ADR-0021 §9), del día más antiguo
+ * al más reciente, como los de los ticks: un día UTC cada uno, con las peticiones de las velas de ese
+ * día (`candleRequests`), su `trading_times` y sus páginas. Lanza si la historia no empieza al
+ * comienzo de un día y termina al final de otro, no posterior, o si un día puede pasar del techo de un
+ * dataset: sus velas, una por minuto y símbolo, más un horario por símbolo.
+ */
+export function candleHistoryBlocks(profile: CandleHistoryProfile): HistoryBlock[] {
+  const { block_seconds, end_epoch, granularity_seconds, start_epoch, symbols } = profile;
+  if (block_seconds !== DAY_SECONDS) {
+    throw new TypeError('Un bloque de la historia de las velas es un día UTC.');
+  }
+  if (
+    !Number.isSafeInteger(start_epoch) ||
+    !Number.isSafeInteger(end_epoch) ||
+    start_epoch < 0 ||
+    start_epoch % DAY_SECONDS !== 0 ||
+    (end_epoch + 1) % DAY_SECONDS !== 0 ||
+    end_epoch < start_epoch
+  ) {
+    throw new TypeError('La historia de las velas va de un comienzo de día a un final de día.');
+  }
+  if (
+    symbols.length === 0 ||
+    symbols.length * (DAY_SECONDS / granularity_seconds + 1) > DATASET_ELEMENT_CEILING
+  ) {
+    throw new TypeError(
+      'Un día de la historia de las velas no puede pasar del techo de un dataset.',
+    );
+  }
+  const blocks: HistoryBlock[] = [];
+  for (let day = start_epoch; day <= end_epoch; day += DAY_SECONDS) {
+    blocks.push({ requests: candleRequests(profile, dayOf(day)), start: day });
+  }
+  return blocks;
+}
+
+/** Los bloques de una historia, de ticks (`historyBlocks`) o de velas (`candleHistoryBlocks`). */
+export function historyBlocksOf(profile: AnyHistoryProfile): HistoryBlock[] {
+  return isCandleHistoryProfile(profile) ? candleHistoryBlocks(profile) : historyBlocks(profile);
+}
+
 /** Lo que se deja de margen con el borde de lo que guarda Deriv, que avanza mientras se pide. */
 export const HISTORY_WINDOW_MARGIN_SECONDS = 3_600;
 
@@ -312,8 +357,9 @@ export const HISTORY_WINDOW_MARGIN_SECONDS = 3_600;
  * La primera petición de la historia que Deriv todavía guarda a la hora `nowMs`: la primera del
  * primer bloque que empieza al menos `HISTORY_WINDOW_MARGIN_SECONDS` después del borde de
  * `DERIV_HISTORY_DAYS` días. Un tramo más antiguo daría los últimos ticks del símbolo, fuera de lo
- * pedido, que las reglas 4.0.0 rechazan (`history_inconsistent`), así que no se pide. Si no queda
- * ninguno, el número de peticiones.
+ * pedido, que las reglas 4.0.0 rechazan (`history_inconsistent`), así que no se pide; con las velas,
+ * Deriv da las últimas 1000, que hacen la página `candles_inconsistent` (precisión del PR 6e de
+ * ADR-0021 §9). Si no queda ninguno, el número de peticiones.
  */
 export function historyRequestsFrom(blocks: readonly HistoryBlock[], nowMs: number): number {
   const edge = Math.floor(nowMs / 1000) - DERIV_HISTORY_DAYS * DAY_SECONDS;

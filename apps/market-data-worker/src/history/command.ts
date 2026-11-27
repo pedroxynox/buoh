@@ -38,13 +38,14 @@ import { loadHistoryConfig, type HistoryConfig } from './config.js';
 
 /**
  * El comando de la historia (precisión del PR 6c de ADR-0021 §9), para el proceso temporal que la
- * descarga y la publica (decisiones vigentes, «Proceso temporal de la historia»). En `production`,
- * con el bloqueo de las dos historias durante todo el proceso:
+ * descarga y la publica (decisiones vigentes, «Proceso temporal de la historia»). Desde el PR 6d,
+ * con tres historias: los ticks de R_100 y del oro y las velas de los siete mercados reales, un día
+ * por bloque. En `production`, con el bloqueo de las tres durante todo el proceso:
  *
  * 1. sigue cada historia desde su log (`historyResumeIndex`): después de la última página
  *    respondida que guarda, y del horario que le siguió, sin volver a pedir ninguna página; sin
  *    ninguna, desde el primer bloque que Deriv todavía guarda (`historyRequestsFrom`);
- * 2. pide un bloque cada vez, el más antiguo de las dos, porque Deriv borra primero lo más antiguo,
+ * 2. pide un bloque cada vez, el más antiguo de las tres, porque Deriv borra primero lo más antiguo,
  *    al ritmo que permite Deriv, una petición cada `HISTORY_PACING_MS`, con lo mismo que el comando
  *    de los lotes (`runSequence`): su log, su corte, su esquema de fuente, raw primero, y el
  *    segmento cerrado al terminar. Un bloque que empieza lo pide desde el primer bloque que Deriv
@@ -54,7 +55,7 @@ import { loadHistoryConfig, type HistoryConfig } from './config.js';
  * 3. publica cada bloque terminado sin esperar turnos: lanza `datasets:publish --sequence` en un
  *    proceso aparte, con `buoh_publicacion` y el token `operaciones`, uno cada vez y mientras sigue
  *    pidiendo, hasta que no queda nada que publicar (`planHistoryDataset`: un bloque por dataset);
- * 4. termina cuando las dos historias están pedidas y publicadas.
+ * 4. termina cuando las tres historias están pedidas y publicadas.
  *
  * Un `RateLimit` espera `HISTORY_RATE_LIMIT_WAIT_MS` y sigue. Un bloque que falla espera
  * `HISTORY_RETRY_WAIT_MS` y lo vuelve a intentar, y a los `HISTORY_MAX_FAILURES` fallos seguidos el
@@ -66,7 +67,10 @@ import { loadHistoryConfig, type HistoryConfig } from './config.js';
 
 /** Una petición cada 2,1 s: a ese ritmo, Deriv no respondió `RateLimit` a ninguna de 56 seguidas. */
 export const HISTORY_PACING_MS = 2_100;
-/** El plazo de un bloque: sus 17 peticiones como mucho, a su ritmo, caben de sobra. */
+/**
+ * El plazo de un bloque: sus 17 peticiones como mucho, las de un bloque del oro (las 15 de un día de
+ * velas), a su ritmo, caben de sobra.
+ */
 export const HISTORY_BLOCK_DEADLINE_MS = 10 * 60_000;
 /** Lo que espera después de un `RateLimit`. */
 export const HISTORY_RATE_LIMIT_WAIT_MS = 60_000;
@@ -406,7 +410,7 @@ function outcomeLine(outcome: SequenceOutcome): Record<string, JsonValue> {
 }
 
 /**
- * `history`: el proceso temporal de la historia. Devuelve 0 cuando las dos historias están pedidas
+ * `history`: el proceso temporal de la historia. Devuelve 0 cuando las tres historias están pedidas
  * y publicadas; 1 si para por sus fallos, sin los esquemas o sin el bloqueo, que intenta
  * `HISTORY_LOCK_ATTEMPTS` veces; 2 con un error de uso o de configuración, con su línea en stderr.
  */

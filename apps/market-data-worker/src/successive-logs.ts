@@ -123,12 +123,24 @@ export const HISTORY_GOLD_SEQUENCE: LogSequence = Object.freeze({
 });
 
 /**
+ * La secuencia por lotes de la historia de las velas (ADR-0021 §4; precisión del PR 6d de su §9):
+ * un año de velas de 1 minuto de los siete mercados reales, un día por bloque, con el perfil
+ * `deriv_options-lotes-v1-historia-velas`. La escribe el comando de la historia, como las de ticks.
+ */
+export const HISTORY_CANDLES_SEQUENCE: LogSequence = Object.freeze({
+  name: 'lotes_historia_velas',
+  prefixStem: 'logs/lotes_historia_velas/',
+  schemaStem: 'buoh_lotes_historia_velas_log_',
+  kind: 'batch',
+});
+
+/**
  * Las secuencias que existen (ADR-0021 §1: «su PR fija los nombres exactos»). Es una tabla fija, y
  * no una regla sobre el símbolo, para que dos símbolos que solo difieren en mayúsculas nunca
  * compartan un esquema ni un prefijo: una secuencia nueva entra aquí con su PR, y una prueba
  * comprueba que ninguna comparte su nombre, su esquema ni su prefijo con otra. Primero las de los
- * símbolos en vivo y después las de los lotes, con las dos historias del PR 6c de ADR-0021 §9 al
- * final.
+ * símbolos en vivo y después las de los lotes, con las historias al final: las dos de ticks del
+ * PR 6c de ADR-0021 §9 y la de las velas del 6d.
  */
 export const LOG_SEQUENCES: readonly LogSequence[] = Object.freeze([
   R_100_SEQUENCE,
@@ -138,6 +150,7 @@ export const LOG_SEQUENCES: readonly LogSequence[] = Object.freeze([
   BATCH_CANDLES_SEQUENCE,
   HISTORY_R_100_SEQUENCE,
   HISTORY_GOLD_SEQUENCE,
+  HISTORY_CANDLES_SEQUENCE,
 ]);
 
 /** Las secuencias de los símbolos en vivo, en el orden de `LOG_SEQUENCES`. */
@@ -154,13 +167,15 @@ export const BATCH_SEQUENCES: readonly LogSequence[] = Object.freeze(
 );
 
 /**
- * Las dos historias (precisión del PR 6c de ADR-0021 §9), en el orden de `LOG_SEQUENCES`: las
- * descarga y las publica el comando de la historia, en un proceso temporal, y no las vueltas de
- * `buoh-operaciones` (decisiones vigentes, «Proceso temporal de la historia»).
+ * Las historias, en el orden de `LOG_SEQUENCES`: las dos de ticks (precisión del PR 6c de ADR-0021
+ * §9) y, desde el 6d, la de las velas. Las descarga y las publica el comando de la historia, en un
+ * proceso temporal, y no las vueltas de `buoh-operaciones` (decisiones vigentes, «Proceso temporal
+ * de la historia»).
  */
 export const HISTORY_SEQUENCES: readonly LogSequence[] = Object.freeze([
   HISTORY_R_100_SEQUENCE,
   HISTORY_GOLD_SEQUENCE,
+  HISTORY_CANDLES_SEQUENCE,
 ]);
 
 /**

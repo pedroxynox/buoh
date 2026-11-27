@@ -2,6 +2,7 @@ import {
   BATCH_CANDLES_SEQUENCE,
   BATCH_QUOTES_SEQUENCE,
   BATCH_SCHEDULES_SEQUENCE,
+  HISTORY_CANDLES_SEQUENCE,
   HISTORY_GOLD_SEQUENCE,
   HISTORY_R_100_SEQUENCE,
   type LogSequence,
@@ -71,8 +72,9 @@ export interface BatchRound {
 }
 
 /**
- * El perfil de los lotes de cada secuencia por lotes: las tres del PR 5 (ADR-0021 §3) y las dos
- * historias del PR 6c, que no van por vueltas (`batchRound` las rechaza).
+ * El perfil de los lotes de cada secuencia por lotes: las tres del PR 5 (ADR-0021 §3), las dos
+ * historias de ticks del PR 6c y la de las velas del 6d, que no van por vueltas (`batchRound` las
+ * rechaza).
  */
 export const BATCH_SEQUENCE_PROFILES: ReadonlyMap<LogSequence, BatchProfileKind> = new Map([
   [BATCH_SCHEDULES_SEQUENCE, 'schedules'],
@@ -80,6 +82,7 @@ export const BATCH_SEQUENCE_PROFILES: ReadonlyMap<LogSequence, BatchProfileKind>
   [BATCH_CANDLES_SEQUENCE, 'candles'],
   [HISTORY_R_100_SEQUENCE, 'history_r_100'],
   [HISTORY_GOLD_SEQUENCE, 'history_frxxauusd'],
+  [HISTORY_CANDLES_SEQUENCE, 'history_candles'],
 ]);
 
 /** El perfil de los lotes de la secuencia; lanza `TypeError` con una que no tiene ninguno. */
@@ -122,6 +125,7 @@ function roundAt(
         until: Math.ceil((requests.length * (part + 1)) / parts),
       };
     }
+    case 'history_candles':
     case 'history_frxxauusd':
     case 'history_r_100':
       // La historia la pide su comando, bloque a bloque (precisión del PR 6c de ADR-0021 §9).
