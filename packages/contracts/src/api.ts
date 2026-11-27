@@ -738,8 +738,8 @@ const datasetVerificationSchema = z.strictObject({
 
 /**
  * Cuántas incidencias de calidad de un tipo y una gravedad tiene un dataset, con todos los tipos de
- * `DataQualityIncident`, también los de los lotes (`contract_rejected`, `candle_repeated` y
- * `candle_missing`).
+ * `DataQualityIncident`, también los de los lotes (`contract_rejected`, `candle_repeated`,
+ * `candle_missing` y `tick_gap`).
  */
 const datasetIncidentCountSchema = z.strictObject({
   incident_type: dataQualityIncidentTypeSchema,

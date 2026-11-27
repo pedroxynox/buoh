@@ -25,7 +25,7 @@ import {
   type StorageObjectRef,
 } from '@buoh/contracts';
 import {
-  BATCH_RULE_SET,
+  batchRuleSetFor,
   BATCH_SEGMENT_POLICY,
   buildBatchDatasetPublication,
   buildDatasetPublication,
@@ -418,16 +418,14 @@ function validateLogicalArtifacts(
 }
 
 /**
- * El conjunto de reglas que declara el core, si está implementado: el de los lotes (4.0.0) en un
- * core 1.1.0 y uno de `RULE_SETS` en un core 1.0.0; si no, `null`.
+ * El conjunto de reglas que declara el core, si está implementado: uno de los lotes (4.0.0 o, en la
+ * historia, 4.1.0) en un core 1.1.0 y uno de `RULE_SETS` en un core 1.0.0; si no, `null`.
  */
 function rulesOf(
   core: DatasetManifestCore,
 ): { readonly incident_schema_version: string; readonly normalizer_version: string } | null {
   if (isBatchManifestCore(core)) {
-    return core.quality_rule_version === BATCH_RULE_SET.quality_rule_version
-      ? BATCH_RULE_SET
-      : null;
+    return batchRuleSetFor(core.quality_rule_version);
   }
   return ruleSetFor(core.quality_rule_version);
 }
@@ -474,7 +472,7 @@ function contractVersionMismatches(
     .filter(([, declared, implemented]) => declared !== implemented)
     .map(([field]) => field);
   // Las reglas de los lotes solo van en un core 1.1.0, y un core 1.1.0 solo lleva esas reglas.
-  if (batch !== (core.quality_rule_version === BATCH_RULE_SET.quality_rule_version)) {
+  if (batch !== (batchRuleSetFor(core.quality_rule_version) !== null)) {
     mismatches.push('quality_rule_version');
   }
   // El esquema de incidencias depende del conjunto de reglas: debe tener lector y, si las reglas
