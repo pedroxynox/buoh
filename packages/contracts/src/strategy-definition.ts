@@ -202,12 +202,12 @@ const callputContractSchema = z.strictObject({
 
 /**
  * Texto libre con tope (ADR-0023 §5): sin caracteres de control salvo el salto de línea, sin los de
- * dirección del texto, que cambian cómo se ve en la web (U+200E, U+200F, U+202A a U+202E y U+2066
- * a U+2069), y sin sustitutos UTF-16 sueltos, que el JCS de la identidad no admite (RFC 8785, I-JSON).
+ * dirección del texto, que cambian cómo se ve en la web (`Bidi_Control` de Unicode: U+061C, U+200E,
+ * U+200F, U+202A a U+202E y U+2066 a U+2069), y sin sustitutos UTF-16 sueltos, que el JCS de la identidad no admite (RFC 8785, I-JSON).
  */
 const DESCRIPTION_PATTERN =
   // eslint-disable-next-line no-control-regex -- el patrón existe para rechazar esos caracteres.
-  /^[^\u0000-\u0009\u000B-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069\uD800-\uDFFF]*$/u;
+  /^[^\u0000-\u0009\u000B-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\uD800-\uDFFF]*$/u;
 
 export const strategyDefinitionStructuralSchema = z
   .strictObject({
@@ -477,7 +477,7 @@ function conditionErrors(
       );
     } else {
       used.add(right.index);
-      if (condition.left >= right.index) {
+      if (left !== undefined && condition.left >= right.index) {
         errors.push(
           error(
             'not_canonical',
@@ -795,7 +795,12 @@ export function validateStrategyDefinition(input: unknown): StrategyDefinitionVa
     ? semanticErrors(parsed.data)
     : structuralErrors(parsed.error.issues, input);
   if (errors.length > 0 || !parsed.success) {
-    return { errors: [...errors].sort(compareErrors), ok: false };
+    // Una misma regla rota dos veces en el mismo sitio, como una condición desordenada y con los
+    // lados cambiados, da un solo error.
+    const unique = new Map(
+      errors.map((item) => [`${item.code} ${JSON.stringify(item.path)}`, item]),
+    );
+    return { errors: [...unique.values()].sort(compareErrors), ok: false };
   }
   return { definition: parsed.data, ok: true, version_id: deriveStrategyVersionId(parsed.data) };
 }
