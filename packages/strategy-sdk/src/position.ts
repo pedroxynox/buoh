@@ -169,10 +169,9 @@ function durationMs(contract: CallPutContract): number | null {
 
 /**
  * La apuesta y los costos de una posición. La apuesta es un entero de USD, como los 10 de
- * `StrategyDefinition`, para que su producto con el cociente de 18 decimales sea exacto. Deriv no
- * vende un multiplicador con un stop loss que no pasa de la comisión (`validation_params` de
- * `proposal`), y una comisión que llega a la apuesta lo cerraría al entrar: la posición no abre
- * ninguno de los dos, y el evaluador omite esa señal.
+ * `StrategyDefinition`, para que su producto con el cociente de 18 decimales sea exacto. Si Deriv
+ * vendería el contrato, con los mínimos de su stop loss y de su take profit, lo comprueba el
+ * evaluador con la cotización (PR 3c).
  */
 function costsFor(
   contract: Contract,
@@ -186,13 +185,7 @@ function costsFor(
     if (!('commission' in costs)) {
       throw new RangeError('Un multiplicador lleva la comisión de su cotización.');
     }
-    const commission = nonNegative(costs.commission, 'La comisión');
-    if (commission >= parseFixed(stake)) {
-      throw new RangeError('La comisión es menor que la apuesta.');
-    }
-    if (contract.stop_loss !== null && parseFixed(contract.stop_loss) <= commission) {
-      throw new RangeError('Deriv no acepta un stop loss que no pasa de la comisión.');
-    }
+    nonNegative(costs.commission, 'La comisión');
     return { commission: costs.commission, payout: '0' };
   }
   if (!('payout' in costs)) {
@@ -272,10 +265,11 @@ function assertOpen(state: PositionState): void {
 /**
  * Abre una posición con ticks en su tick de entrada, el primero usado posterior al que decidió
  * con una hora de la fuente igual o posterior a la compra (ADR-0024 §6), que elige el evaluador.
- * En él ningún cierre de Deriv se cumple: el resultado es `−comisión`, mayor que `−apuesta` y que
- * `−stop loss`, y el take profit es positivo.
+ * En un multiplicador, el tick de entrada ya aplica los cierres de Deriv, con el resultado
+ * `−comisión`: con la comisión de una variante de costos mayor (ADR-0024 §6) puede cumplirse el
+ * stop loss.
  */
-export function openTickPosition(input: OpenTickPositionInput): PositionState {
+export function openTickPosition(input: OpenTickPositionInput): PositionStep {
   const { contract, entry, latencyMs, purchaseMs, stake } = input;
   checkTick(entry);
   checkTime(purchaseMs, 'La compra');
@@ -299,7 +293,9 @@ export function openTickPosition(input: OpenTickPositionInput): PositionState {
       latencyMs,
       saleAtMs: null,
     };
-    return { ...opened, lastPnl: formatFixed(multiplierPnl(opened, parseFixed(entry.price))) };
+    const pnl = multiplierPnl(opened, parseFixed(entry.price));
+    const closed = limitClose(opened, pnl, entry.price, entry.sourceTimeMs);
+    return { close: closed, state: { ...opened, closed, lastPnl: formatFixed(pnl) } };
   }
   const length = durationMs(contract);
   const expiryMs = length === null ? null : purchaseMs + length;
@@ -307,15 +303,18 @@ export function openTickPosition(input: OpenTickPositionInput): PositionState {
     throw new RangeError('El tick de entrada llega después del vencimiento.');
   }
   return {
-    ...common,
-    contract,
-    expiryMs,
-    kind: 'tick_callput',
-    lastPrice: entry.price,
-    lastTickAtOrBeforeExpiry: { price: entry.price, timeMs: entry.sourceTimeMs },
-    lastTimeMs: entry.sourceTimeMs,
-    payout: costs.payout,
-    ticksAfterEntry: 0,
+    close: null,
+    state: {
+      ...common,
+      contract,
+      expiryMs,
+      kind: 'tick_callput',
+      lastPrice: entry.price,
+      lastTickAtOrBeforeExpiry: { price: entry.price, timeMs: entry.sourceTimeMs },
+      lastTimeMs: entry.sourceTimeMs,
+      payout: costs.payout,
+      ticksAfterEntry: 0,
+    },
   };
 }
 

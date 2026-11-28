@@ -17,6 +17,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -84,6 +85,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -140,6 +142,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -15,
       "steps": [
         {
@@ -207,6 +210,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -263,6 +267,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -649,6 +654,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -705,6 +711,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -781,6 +788,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -846,6 +854,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -900,6 +909,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -976,6 +986,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -52,
       "steps": [
         {
@@ -1043,6 +1054,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -52,
       "steps": [
         {
@@ -1110,6 +1122,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -1166,6 +1179,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -1222,6 +1236,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -1278,6 +1293,7 @@
       "source_time_ms": 1767571204000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -1354,6 +1370,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -1729,6 +1746,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -2104,6 +2122,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -2169,6 +2188,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -2223,6 +2243,39 @@
       "contract_type": "MULTUP",
       "max_duration_ms": 3600000,
       "multiplier": 100,
+      "stop_loss": "0.5",
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.54"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": {
+        "cause": "stop_loss",
+        "exit_price": "1000",
+        "exit_time_ms": 1767571202000,
+        "result_cents": -54
+      },
+      "open_mark_cents": null,
+      "steps": []
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multup_stop_loss_at_entry_with_scaled_commission",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": []
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
       "stop_loss": null,
       "take_profit": "1"
     },
@@ -2236,6 +2289,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -36,
       "steps": [
         {
@@ -2281,6 +2335,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": null,
       "steps": [
         {
@@ -2371,6 +2426,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": null,
       "steps": [
         {
@@ -2461,6 +2517,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": null,
       "steps": [
         {
@@ -2551,6 +2608,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": null,
       "steps": [
         {
@@ -2674,6 +2732,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": null,
       "steps": [
         {
@@ -2720,6 +2779,7 @@
       "source_time_ms": 1767571202000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": null,
       "steps": [
         {
@@ -3084,6 +3144,7 @@
       "start_ms": 1767571200000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -20,
       "steps": [
         {
@@ -3143,6 +3204,7 @@
       "start_ms": 1767571200000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -20,
       "steps": [
         {
@@ -3202,6 +3264,7 @@
       "start_ms": 1767571200000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -20,
       "steps": [
         {
@@ -3261,6 +3324,7 @@
       "start_ms": 1767571200000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -20,
       "steps": [
         {
@@ -3320,6 +3384,7 @@
       "start_ms": 1767571200000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -20,
       "steps": [
         {
@@ -3364,6 +3429,52 @@
   },
   {
     "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": "0.5",
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.54"
+    },
+    "data": "deriv_candles",
+    "entry": {
+      "open": "2650.1",
+      "start_ms": 1767571200000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -54,
+      "steps": [
+        {
+          "close": {
+            "cause": "stop_loss",
+            "exit_price": "2650.1",
+            "exit_time_ms": 1767571200000,
+            "result_cents": -54
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "name": "candles/multup_stop_loss_at_entry_open_with_scaled_commission",
+    "stake": "10",
+    "steps": [
+      {
+        "candle": {
+          "close": "2650.8",
+          "end_ms": 1767571260000,
+          "high": "2651",
+          "low": "2649.5",
+          "open": "2650.1",
+          "start_ms": 1767571200000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
       "contract_type": "MULTDOWN",
       "max_duration_ms": 3600000,
       "multiplier": 500,
@@ -3379,6 +3490,7 @@
       "start_ms": 1767571200000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -100,
       "steps": [
         {
@@ -3438,6 +3550,7 @@
       "start_ms": 1767571200000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -20,
       "steps": [
         {
@@ -3497,6 +3610,7 @@
       "start_ms": 1767571200000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -20,
       "steps": [
         {
@@ -3556,6 +3670,7 @@
       "start_ms": 1767571200000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -20,
       "steps": [
         {
@@ -3629,6 +3744,7 @@
       "start_ms": 1767571200000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -20,
       "steps": [
         {
@@ -3702,6 +3818,7 @@
       "start_ms": 1767571200000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -20,
       "steps": [
         {
@@ -3775,6 +3892,7 @@
       "start_ms": 1767571200000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": -20,
       "steps": [
         {
@@ -3841,6 +3959,7 @@
       "start_ms": 1767571200000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": null,
       "steps": [
         {
@@ -3943,6 +4062,7 @@
       "start_ms": 1767571200000
     },
     "expected": {
+      "open_close": null,
       "open_mark_cents": null,
       "steps": [
         {
