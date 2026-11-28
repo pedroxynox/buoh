@@ -632,6 +632,122 @@ describe('la vista de cada instante (ADR-0024 §2)', () => {
     expect(emitted.filter(isTick)[2]?.unrecorded_since_utc).toBe(at(5));
     expectEquivalent(withEnd.events, v3, 'cierre pedido con el fin');
 
+    // Un cierre pedido con el fin conocido y el resultado antes del siguiente tick nuevo: la marca es
+    // del primer tick del flujo posterior al cierre, no del lote del resultado.
+    for (const [status, atResult] of [
+      [
+        'complete',
+        [
+          [2, [], at(7)],
+          [5, [], at(7)],
+        ],
+      ],
+      ['partial', [[5, ['after_unrecorded'], at(7)]]],
+    ] as const) {
+      const log = new Log()
+        .tick(A, 0, '100.100')
+        .closed(A, at(0, 500))
+        .opened(B, A, at(0, 600))
+        .tick(B, 5, '100.105')
+        .closed(B, at(5, 500), true)
+        .opened(C, B, at(6))
+        .tick(C, 5, '100.105', 1100);
+      if (status === 'complete') {
+        log
+          .page(C, 0, 5, [[2, '100.102']], at(6, 500))
+          .result(C, { from: 0, to: 5 }, { recovered_event_count: 1, status }, at(7));
+      } else {
+        log
+          .raw(C, '{"msg_type":"ping","ping":"pong"}', at(6, 500))
+          .result(
+            C,
+            { from: 0, to: 5 },
+            { reason: 'history_page_limit', recovered_event_count: 0, status },
+            at(7),
+          );
+      }
+      log.tick(C, 8, '100.108').tick(C, 10, '100.110');
+      const { perEvent } = run(log.events, v3);
+      expect(ticksOf(perEvent[8] ?? []), status).toEqual(atResult);
+      const next = perEvent[9] ?? [];
+      expect(ticksOf(next), status).toEqual([[8, ['after_unrecorded'], at(8, 100)]]);
+      expect(next.find(isTick)?.unrecorded_since_utc, status).toBe(at(5));
+      expectEquivalent(log.events, v3, `cierre pedido y resultado antes del tick, ${status}`);
+    }
+
+    // Un cierre no pedido del mismo hueco después del pedido: el rango de la historia crece y
+    // cubre también el intervalo del pedido, sin ticks entre los dos cierres o con uno.
+    const D = connection(3);
+    const noTickBetween = new Log()
+      .tick(A, 0, '100.100')
+      .closed(A, at(0, 500))
+      .opened(B, A, at(0, 600))
+      .tick(B, 5, '100.105')
+      .closed(B, at(5, 500), true)
+      .opened(C, B, at(6))
+      .closed(C, at(6, 500))
+      .opened(D, C, at(6, 600))
+      .tick(D, 9, '100.109')
+      .page(
+        D,
+        0,
+        9,
+        [
+          [2, '100.102'],
+          [5, '100.105'],
+          [7, '100.107'],
+        ],
+        at(10),
+      )
+      .result(D, { from: 0, to: 9 }, { recovered_event_count: 3, status: 'complete' }, at(10, 500));
+    expect(ticksOf(run(noTickBetween.events, v3).perEvent[10] ?? [])).toEqual([
+      [2, [], at(10, 500)],
+      [5, [], at(10, 500)],
+      [7, [], at(10, 500)],
+      [9, [], at(10, 500)],
+    ]);
+    expectEquivalent(noTickBetween.events, v3, 'dos cierres sin ticks entre ellos');
+
+    const widened = new Log()
+      .tick(A, 0, '100.100')
+      .closed(A, at(0, 500))
+      .opened(B, A, at(0, 600))
+      .tick(B, 5, '100.105')
+      .closed(B, at(5, 500), true)
+      .opened(C, B, at(6))
+      .tick(C, 8, '100.108')
+      .closed(C, at(8, 500))
+      .opened(D, C, at(8, 600))
+      .tick(D, 12, '100.112')
+      .page(
+        D,
+        0,
+        12,
+        [
+          [2, '100.102'],
+          [5, '100.105'],
+          [7, '100.107'],
+          [8, '100.108'],
+        ],
+        at(13),
+      )
+      .result(
+        D,
+        { from: 0, to: 12 },
+        { recovered_event_count: 4, status: 'complete' },
+        at(13, 500),
+      );
+    const widenedRun = run(widened.events, v3);
+    expect(ticksOf(widenedRun.perEvent[11] ?? [])).toEqual([
+      [2, [], at(13, 500)],
+      [5, [], at(13, 500)],
+      [7, [], at(13, 500)],
+      [8, [], at(13, 500)],
+      [12, [], at(13, 500)],
+    ]);
+    expect(widenedRun.state.unused_ticks.duplicate_exact).toBe(2);
+    expectEquivalent(widened.events, v3, 'cierre no pedido después del pedido');
+
     // Un cierre no pedido después de uno pedido, sin ticks entre los dos: la historia del hueco
     // cubre también el intervalo del pedido.
     const before = new Log()
@@ -707,11 +823,16 @@ describe('la vista de cada instante (ADR-0024 §2)', () => {
     for (let second = 5; second < 5 + DATA_VIEW_RETENTION_LIMIT + 1; second += 1) {
       log.tick(B, second, '100.100');
     }
+    // Pasado el techo, otro cierre no pedido del mismo hueco: el tick siguiente lleva la marca.
+    const last = 5 + DATA_VIEW_RETENTION_LIMIT;
     log
-      .page(B, 0, 5, [[2, '100.102']], at(20_000))
+      .closed(B, at(last, 500))
+      .opened(C, B, at(last, 600))
+      .tick(C, last + 5, '100.100')
+      .page(C, 0, last + 5, [[2, '100.102']], at(20_000))
       .result(
-        B,
-        { from: 0, to: 5 },
+        C,
+        { from: 0, to: last + 5 },
         { recovered_event_count: 1, status: 'complete' },
         at(20_000, 500),
       );
@@ -728,19 +849,27 @@ describe('la vista de cada instante (ADR-0024 §2)', () => {
     ).toBe(true);
     expect(flushed.slice(1).every((tick) => tick.quality_flags.length === 0)).toBe(true);
     // Pasado el techo, cada tick se da al llegar, y la historia no se usa.
-    expect(ticksOf(emitted[limitAt + 1] ?? [])).toEqual([
-      [5 + DATA_VIEW_RETENTION_LIMIT, [], at(5 + DATA_VIEW_RETENTION_LIMIT, 100)],
-    ]);
+    expect(ticksOf(emitted[limitAt + 1] ?? [])).toEqual([[last, [], at(last, 100)]]);
+    const afterClose = emitted[limitAt + 4] ?? [];
+    expect(ticksOf(afterClose)).toEqual([[last + 5, ['after_unrecorded'], at(last + 5, 100)]]);
+    expect(afterClose.find(isTick)?.unrecorded_since_utc).toBe(at(last));
     const atResult = emitted.at(-1) ?? [];
     expect(atResult.map((item) => item.kind)).toEqual(['health']);
     expect(healthOf(atResult)).toBe('healthy');
-    // La salud siguió la del log: `recovering` hasta el resultado.
+    // La salud siguió la del log: `recovering` hasta el resultado, sin cambiar con el techo.
     expect(
       emitted
-        .slice(3, -1)
+        .slice(3, limitAt + 2)
         .flat()
         .filter((item) => item.kind === 'health'),
     ).toHaveLength(0);
+    expect(
+      emitted
+        .slice(limitAt + 2, -1)
+        .flat()
+        .filter((item): item is DataViewHealth => item.kind === 'health')
+        .map((item) => item.report.service_health),
+    ).toEqual(['recovering', 'recovering']);
   });
 
   it('rechaza un estado de otra versión y un log que no se deriva', () => {

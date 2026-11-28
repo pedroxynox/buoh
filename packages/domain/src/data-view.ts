@@ -119,6 +119,8 @@ export interface DataViewRetention {
 export interface DataViewSymbolState {
   /** El próximo tick usado lleva `after_unrecorded`. */
   readonly after_unrecorded: boolean;
+  /** El próximo tick usable del flujo que llegue lleva `after_unrecorded`: lo deja un cierre pedido. */
+  readonly arrival_after_unrecorded: boolean;
   readonly last_used_event_time_utc: string | null;
   readonly retention: DataViewRetention | null;
   readonly symbol: string;
@@ -153,6 +155,7 @@ interface MutableRetention {
 
 interface MutableSymbol {
   afterUnrecorded: boolean;
+  arrivalAfterUnrecorded: boolean;
   lastUsed: string | null;
   retention: MutableRetention | null;
   watermarkFingerprints: string[];
@@ -208,6 +211,7 @@ export class DataView {
     for (const item of state.symbols) {
       this.symbols.set(item.symbol, {
         afterUnrecorded: item.after_unrecorded,
+        arrivalAfterUnrecorded: item.arrival_after_unrecorded,
         lastUsed: item.last_used_event_time_utc,
         retention:
           item.retention === null
@@ -250,6 +254,7 @@ export class DataView {
         .sort(([left], [right]) => compareStrings(left, right))
         .map(([symbol, item]) => ({
           after_unrecorded: item.afterUnrecorded,
+          arrival_after_unrecorded: item.arrivalAfterUnrecorded,
           last_used_event_time_utc: item.lastUsed,
           retention:
             item.retention === null
@@ -351,7 +356,13 @@ export class DataView {
     let item = this.symbols.get(symbol);
     if (item === undefined) {
       // El primer tick de cada log lleva `after_unrecorded`.
-      item = { afterUnrecorded: true, lastUsed: null, retention: null, watermarkFingerprints: [] };
+      item = {
+        afterUnrecorded: true,
+        arrivalAfterUnrecorded: false,
+        lastUsed: null,
+        retention: null,
+        watermarkFingerprints: [],
+      };
       this.symbols.set(symbol, item);
     }
     return item;
@@ -398,7 +409,7 @@ export class DataView {
     const held: HeldTick | null =
       unused === null
         ? {
-            after_unrecorded: false,
+            after_unrecorded: item.arrivalAfterUnrecorded,
             dataset_id: place.dataset_id,
             delivery_delayed:
               this.maximumDelay !== null &&
@@ -413,6 +424,9 @@ export class DataView {
             tick_fingerprint_sha256: fingerprint,
           }
         : null;
+    if (held !== null) {
+      item.arrivalAfterUnrecorded = false;
+    }
 
     if (!retaining) {
       if (pending === undefined) {
@@ -435,13 +449,7 @@ export class DataView {
       return;
     }
     if (held !== null) {
-      if (item.afterUnrecorded) {
-        // Un cierre pedido con el fin del hueco ya conocido: su intervalo no lo cubre la historia.
-        item.afterUnrecorded = false;
-        retention.retained.push({ ...held, after_unrecorded: true });
-      } else {
-        retention.retained.push(held);
-      }
+      retention.retained.push(held);
     }
     if (retention.arrived >= DATA_VIEW_RETENTION_LIMIT) {
       // El techo: da los retenidos, el primero con la marca, y el hueco cuenta como no recuperado.
@@ -468,15 +476,14 @@ export class DataView {
         continue;
       }
       if (event.closure_type === 'requested') {
-        // Un cierre pedido deja un intervalo sin datos, salvo dentro de un hueco cuyo fin todavía no
-        // se conoce: ese intervalo lo decide la historia del hueco.
-        if (!(
+        // Un cierre pedido deja un intervalo sin datos antes del próximo tick del flujo, salvo
+        // dentro de un hueco cuyo fin todavía no se conoce: ese intervalo lo decide su historia.
+        const insideOpenHole =
           pending !== undefined &&
           pending.end === undefined &&
-          item.retention !== null &&
-          !item.retention.overflowed
-        )) {
-          item.afterUnrecorded = true;
+          item.retention?.overflowed === false;
+        if (!insideOpenHole) {
+          item.arrivalAfterUnrecorded = true;
         }
         continue;
       }
@@ -487,11 +494,18 @@ export class DataView {
         // Un hueco nuevo: la historia decide todo lo posterior a su inicio, el último tick usado.
         item.retention = { arrived: 0, identities: [], overflowed: false, retained: [] };
         if (item.lastUsed === pending.watermark) {
-          item.afterUnrecorded = false;
+          item.arrivalAfterUnrecorded = false;
         }
       } else if (item.retention.overflowed) {
         // Pasado el techo, la historia de este hueco no se usa: este cierre deja otro intervalo.
-        item.afterUnrecorded = true;
+        item.arrivalAfterUnrecorded = true;
+      } else {
+        // El rango de la historia crece hasta el próximo tick: cubre también el intervalo de un
+        // cierre pedido anterior, el de los retenidos y el del próximo que llegue.
+        item.arrivalAfterUnrecorded = false;
+        item.retention.retained = item.retention.retained.map((held) =>
+          held.after_unrecorded ? { ...held, after_unrecorded: false } : held,
+        );
       }
     }
   }

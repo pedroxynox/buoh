@@ -76,12 +76,12 @@ La vista deriva cada log entero, a través de sus datasets, y no cada dataset de
 (Precisión del PR 2 de §12.) La vista es `DataView`, en `packages/domain`, y fija lo que esta sección no decía:
 
 - **El orden en un frame.** Con un frame, la vista da primero el cambio de salud y después su tick, que ya es durable con ella: así la estrategia decide con el tick que la devuelve a `healthy`. Con los demás eventos, primero los ticks.
-- **Un cierre pedido dentro de un hueco** cuyo fin todavía no se conoce no deja `after_unrecorded`, porque su intervalo queda dentro del rango que pide la historia y lo decide el resultado. Por lo mismo, un hueco nuevo quita la marca que dejó un cierre pedido si no se usó ningún tick después.
-- **Un `complete` sin los ticks de la historia**, con las reglas anteriores a las 3.0.0, cuenta como no recuperado si su `recovered_event_count` no es 0, porque la vista no tiene esos ticks.
+- **Un cierre pedido** deja `after_unrecorded` en el primer tick usable del flujo que llega después, no en uno que trae la historia. Dentro de un hueco cuyo fin todavía no se conoce no la deja, porque su intervalo queda dentro del rango que pide la historia y lo decide el resultado. Por lo mismo, la quitan un hueco nuevo, si no se usó ningún tick después del cierre, y otro cierre no pedido del mismo hueco, que alarga ese rango hasta el tick siguiente.
+- **Un `complete` cuyos ticks la vista no da**, con las reglas anteriores a las 3.0.0 o con un rango que no es exactamente el del hueco, cuenta como no recuperado si su `recovered_event_count` no es 0, porque la vista no tiene esos ticks.
 - **Al terminar el log** con la continuidad pendiente, el primero de los retenidos lleva `after_unrecorded`, porque ya no hay resultado que decida el hueco.
 - **El techo** cuenta cada tick del flujo que llega con la continuidad pendiente, se use o no. Pasado el techo, otro cierre no pedido del mismo hueco también deja `after_unrecorded`, porque la historia de ese hueco no se usa.
-- **El primer tick de un log** lleva `after_unrecorded` sin hora anterior: la vista no conoce el log anterior, y la da quien une la serie (§3).
-- **Un log que no se deriva** hace fallar la vista, como al pliegue, y quien la usa da su código (`log_not_derivable`, §7).
+- **El primer tick de un log** lleva `after_unrecorded` sin hora anterior: la vista no conoce el log anterior, y la da quien une los logs de la serie (§4).
+- **Un log que no se deriva** hace fallar la vista, como al pliegue, y quien la usa da su código (`log_not_derivable`, §7). La vista no vuelve a comprobar que no se repita un ID de source event, porque el índice del log no lo admite (`event_id` único).
 - **Lo medido.** En los logs de producción hasta el 2026-11-28, ninguna continuidad pendiente retuvo más de 41 ticks, así que el techo no cambia. Con 7 días sintéticos de R_100, la memoria de la vista queda dentro del 10 % de la de un día (§11). Las cifras están en la descripción del PR 2.
 
 ### 3. El orden y el instante de cada evento
