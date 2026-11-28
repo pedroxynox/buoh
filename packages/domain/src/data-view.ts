@@ -322,8 +322,8 @@ export class DataView {
 
   /**
    * El fin del log: con la continuidad pendiente, da los retenidos con `instantUtc`, el del primer
-   * evento del log siguiente, el primero con `after_unrecorded`, porque la historia ya no decide su
-   * hueco (ADR-0024 §2). Después la vista no acepta más eventos.
+   * evento del log siguiente, con las marcas de un hueco que la historia no recupera, porque ya no
+   * hay resultado que lo decida (ADR-0024 §2). Después la vista no acepta más eventos.
    */
   finish(instantUtc: string): DataViewTick[] {
     if (this.finished) {
@@ -454,7 +454,7 @@ export class DataView {
       retention.retained.push(held);
     }
     if (retention.arrived >= DATA_VIEW_RETENTION_LIMIT) {
-      // El techo: da los retenidos, el primero con la marca, y el hueco cuenta como no recuperado.
+      // El techo: da los retenidos, y el hueco cuenta como no recuperado.
       const retained = retention.retained;
       item.retention = {
         arrived: retention.arrived,
@@ -478,11 +478,9 @@ export class DataView {
       }
       if (event.closure_type === 'requested') {
         // Un cierre pedido deja un intervalo sin datos antes del próximo tick del flujo, salvo
-        // dentro de un hueco cuyo fin todavía no se conoce: ese intervalo lo decide su historia.
-        const insideOpenHole =
-          pending !== undefined &&
-          pending.end === undefined &&
-          item.retention?.overflowed === false;
+        // dentro de un hueco cuyo fin todavía no se conoce: ese intervalo es del hueco (`hole`),
+        // que también lo marca si pasó el techo.
+        const insideOpenHole = pending !== undefined && pending.end === undefined;
         if (!insideOpenHole) {
           item.nextGapBefore = 'unrecorded';
         }
@@ -494,11 +492,9 @@ export class DataView {
       if (item.retention === null) {
         // Un hueco nuevo: la historia decide todo lo posterior a su inicio, el último tick usado.
         item.retention = { arrived: 0, identities: [], overflowed: false, retained: [] };
-        // Desde el último tick usado, el inicio del hueco, todo cae en su rango, también el
-        // intervalo de un cierre pedido anterior sin ticks usados después.
-        if (item.nextGapBefore !== 'unrecorded' || item.lastUsed === pending.watermark) {
-          item.nextGapBefore = 'hole';
-        }
+        // El hueco empieza en el último tick usado, así que todo lo posterior cae en su rango,
+        // también el intervalo de un cierre pedido anterior.
+        item.nextGapBefore = 'hole';
       } else if (item.retention.overflowed) {
         // Pasado el techo, la historia de este hueco no se usa: este cierre deja otro intervalo.
         item.nextGapBefore = 'unrecorded';
