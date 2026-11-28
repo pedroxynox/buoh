@@ -9,7 +9,7 @@
 import { z } from 'zod';
 
 import { callputContractTypeSchema, multiplierContractTypeSchema } from './batch-records.js';
-import { canonicalJson, sha256Hex } from './identity.js';
+import { canonicalJson, sha256Hex, type JsonValue } from './identity.js';
 import { sha256HexSchema, uuidV7Schema } from './scalars.js';
 
 export const STRATEGY_SCHEMA_VERSION = '1.0.0';
@@ -107,9 +107,13 @@ const CANDLE_TIMEFRAMES: readonly string[] = ['1m', '5m', '15m', '60m'];
  * Un decimal en su única escritura: el `DecimalString` de los contratos sin ceros finales en los
  * decimales ni `-0`, para que un mismo valor dé siempre la misma identidad (§9).
  */
-const CANONICAL_DECIMAL_PATTERN = /^(?:-?(?:[1-9]\d*(?:\.\d*[1-9])?|0\.\d*[1-9])|0)$/u;
-/** Un importe en USD, de 0,01 a 999 999,99, con como mucho dos decimales y en su única escritura. */
-const AMOUNT_PATTERN = /^(?:[1-9]\d{0,5}(?:\.\d?[1-9])?|0\.(?:0[1-9]|[1-9]\d?))$/u;
+const CANONICAL_DECIMAL_PATTERN = /^(?:-?(?:[1-9][0-9]*(?:\.[0-9]*[1-9])?|0\.[0-9]*[1-9])|0)$/u;
+/**
+ * Un decimal de 0,01 a 999 999,99, con como mucho dos decimales y en su única escritura: un importe en
+ * USD o, en la caída máxima, un porcentaje. Los patrones usan `[0-9]` y no `\d`, que en otros
+ * motores de expresiones regulares acepta cifras de otros alfabetos.
+ */
+const AMOUNT_PATTERN = /^(?:[1-9][0-9]{0,5}(?:\.[0-9]?[1-9])?|0\.(?:0[1-9]|[1-9][1-9]?))$/u;
 
 const constantSchema = z.string().max(40).regex(CANONICAL_DECIMAL_PATTERN);
 const amountSchema = z.string().regex(AMOUNT_PATTERN);
@@ -196,9 +200,14 @@ const callputContractSchema = z.strictObject({
   }),
 });
 
-/** Texto libre con tope (ADR-0023 §5): sin caracteres de control salvo el salto de línea. */
-// eslint-disable-next-line no-control-regex -- el patrón existe para rechazar esos caracteres.
-const DESCRIPTION_PATTERN = /^[^\u0000-\u0009\u000B-\u001F\u007F-\u009F]*$/u;
+/**
+ * Texto libre con tope (ADR-0023 §5): sin caracteres de control salvo el salto de línea, sin los de
+ * dirección del texto, que cambian cómo se ve en la web (U+200E, U+200F, U+202A a U+202E y U+2066
+ * a U+2069), y sin sustitutos UTF-16 sueltos, que el JCS de la identidad no admite (RFC 8785, I-JSON).
+ */
+const DESCRIPTION_PATTERN =
+  // eslint-disable-next-line no-control-regex -- el patrón existe para rechazar esos caracteres.
+  /^[^\u0000-\u0009\u000B-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069\uD800-\uDFFF]*$/u;
 
 export const strategyDefinitionStructuralSchema = z
   .strictObject({
@@ -207,7 +216,7 @@ export const strategyDefinitionStructuralSchema = z
     strategy_id: z.string().regex(/^[a-z0-9][a-z0-9_-]{2,63}$/u),
     semantic_version: z
       .string()
-      .regex(/^(?:0|[1-9]\d{0,8})\.(?:0|[1-9]\d{0,8})\.(?:0|[1-9]\d{0,8})$/u),
+      .regex(/^(?:0|[1-9][0-9]{0,8})\.(?:0|[1-9][0-9]{0,8})\.(?:0|[1-9][0-9]{0,8})$/u),
     responsible: uuidV7Schema,
     origin: z.strictObject({
       kind: z.literal('research_engine'),
@@ -278,6 +287,7 @@ export const STRATEGY_DEFINITION_ERROR_CODES = [
   'missing_field',
   'multiplier_not_accepted',
   'no_conditions',
+  'not_canonical',
   'parameter_out_of_range',
   'promotion_reference_invalid',
   'shadow_requires_ticks',
@@ -330,12 +340,14 @@ function structuralCode(issue: z.core.$ZodIssue, input: unknown): StrategyDefini
       return path.length > 0 && !hasPath(input, path) ? 'missing_field' : 'invalid_type';
     case 'invalid_union':
     case 'invalid_value':
+      if (!hasPath(input, path)) return 'missing_field';
       if (field === 'indicator') return 'unknown_indicator';
       if (field === 'contract_type') return 'contract_not_allowed';
       if (field === 'symbol') return 'symbol_not_supported';
       if (field === 'timeframe') return 'timeframe_not_supported';
       if (field === 'execution_mode') return 'execution_mode_not_allowed';
       if (field === 'k') return 'parameter_out_of_range';
+      if (within(path, 'duration')) return 'duration_not_quoted';
       return 'invalid_value';
     case 'too_big':
     case 'too_small':
@@ -344,6 +356,8 @@ function structuralCode(issue: z.core.$ZodIssue, input: unknown): StrategyDefini
       if (path.length === 1 && field === 'indicators') {
         return issue.code === 'too_big' ? 'too_many_indicators' : 'invalid_value';
       }
+      if (field === 'left' || field === 'index') return 'indicator_reference_invalid';
+      if (field === 'value') return 'invalid_format';
       if (field === 'groups') return issue.code === 'too_big' ? 'too_many_groups' : 'no_conditions';
       if (within(path, 'groups') || within(path, 'exit')) {
         return issue.code === 'too_big' ? 'too_many_conditions' : 'no_conditions';
@@ -353,7 +367,6 @@ function structuralCode(issue: z.core.$ZodIssue, input: unknown): StrategyDefini
       if (['contract', 'position', 'signals', 'data_policy'].some((key) => within(path, key))) {
         return 'limit_out_of_range';
       }
-      if (within(path, 'left') || within(path, 'index')) return 'indicator_reference_invalid';
       return 'invalid_value';
     case 'invalid_format':
       return 'invalid_format';
@@ -419,8 +432,17 @@ function versionErrors(input: unknown): StrategyDefinitionError[] {
   return errors;
 }
 
-/** Decimal canónico a binario64: la misma conversión que hará el evaluador con las constantes. */
-const decimalValue = (value: string): number => Number(value);
+/**
+ * Compara un `DecimalString` con un entero, exacto, sin pasar por binario64: negativo si es menor,
+ * cero si es igual y positivo si es mayor.
+ */
+function compareDecimalToInteger(value: string, integer: number): number {
+  const negative = value.startsWith('-');
+  const [whole = '0', fraction = ''] = (negative ? value.slice(1) : value).split('.');
+  const scaled = BigInt(whole + fraction) * (negative ? -1n : 1n);
+  const bound = BigInt(integer) * 10n ** BigInt(fraction.length);
+  return scaled === bound ? 0 : scaled < bound ? -1 : 1;
+}
 
 function conditionErrors(
   definition: StrategyDefinition,
@@ -455,6 +477,15 @@ function conditionErrors(
       );
     } else {
       used.add(right.index);
+      if (condition.left >= right.index) {
+        errors.push(
+          error(
+            'not_canonical',
+            path,
+            'Con dos indicadores, el de la izquierda va antes en la lista: se escribe con el operador contrario.',
+          ),
+        );
+      }
       if (
         left !== undefined &&
         INDICATOR_UNITS[left.indicator] !== INDICATOR_UNITS[other.indicator]
@@ -484,8 +515,11 @@ function conditionErrors(
     return errors;
   }
   const range = CONSTANT_RANGES[left.indicator];
-  const value = decimalValue(right.value);
-  if (range !== undefined && (value < range[0] || value > range[1])) {
+  if (
+    range !== undefined &&
+    (compareDecimalToInteger(right.value, range[0]) < 0 ||
+      compareDecimalToInteger(right.value, range[1]) > 0)
+  ) {
     errors.push(
       error(
         'constant_out_of_range',
@@ -495,6 +529,22 @@ function conditionErrors(
     );
   }
   return errors;
+}
+
+/** El orden de dos valores por su JCS, en unidades UTF-16 (el `<` de JavaScript). */
+function compareCanonical(left: JsonValue, right: JsonValue): number {
+  const a = canonicalJson(left);
+  const b = canonicalJson(right);
+  return a === b ? 0 : a < b ? -1 : 1;
+}
+
+/** Cada elemento, después del anterior por su JCS y distinto de él. */
+function orderErrors(values: readonly JsonValue[], path: Path): StrategyDefinitionError[] {
+  return values.flatMap((value, index) =>
+    index > 0 && compareCanonical(values[index - 1] ?? null, value) >= 0
+      ? [error('not_canonical', [...path, index], 'Van en orden de su JCS y sin repetirse.')]
+      : [],
+  );
 }
 
 const isStrictlyAscending = (values: readonly number[]): boolean =>
@@ -540,21 +590,33 @@ function semanticErrors(definition: StrategyDefinition): StrategyDefinitionError
     );
   }
 
-  const seen = new Map<string, number>();
+  // Una sola escritura de cada regla (§9): los indicadores, las condiciones de cada grupo y los
+  // grupos van en orden de su JCS, sin repetirse.
   definition.indicators.forEach((indicator, index) => {
-    const key = canonicalJson(indicator);
-    if (seen.has(key)) {
+    const previous = definition.indicators[index - 1];
+    if (previous === undefined) {
+      return;
+    }
+    const order = compareCanonical(previous, indicator);
+    if (order >= 0) {
       errors.push(
-        error(
-          'duplicate_indicator',
-          ['indicators', index],
-          `Repite el indicador ${String(seen.get(key))}.`,
-        ),
+        order === 0
+          ? error('duplicate_indicator', ['indicators', index], 'Repite el indicador anterior.')
+          : error(
+              'not_canonical',
+              ['indicators', index],
+              'Los indicadores van en orden de su JCS.',
+            ),
       );
-    } else {
-      seen.set(key, index);
     }
   });
+  errors.push(...orderErrors(definition.entry.groups, ['entry', 'groups']));
+  definition.entry.groups.forEach((group, index) => {
+    errors.push(...orderErrors(group, ['entry', 'groups', index]));
+  });
+  if (definition.exit !== null) {
+    errors.push(...orderErrors(definition.exit.conditions, ['exit', 'conditions']));
+  }
 
   const used = new Set<number>();
   definition.entry.groups.forEach((group, groupIndex) => {
@@ -612,7 +674,7 @@ function semanticErrors(definition: StrategyDefinition): StrategyDefinitionError
         ),
       );
     }
-    if (contract.stop_loss !== null && decimalValue(contract.stop_loss) >= 10) {
+    if (contract.stop_loss !== null && compareDecimalToInteger(contract.stop_loss, 10) >= 0) {
       errors.push(
         error(
           'limit_out_of_range',
@@ -662,8 +724,7 @@ function semanticErrors(definition: StrategyDefinition): StrategyDefinitionError
     }
   }
 
-  const drawdown = decimalValue(definition.position.max_drawdown_percent);
-  if (drawdown > 50) {
+  if (compareDecimalToInteger(definition.position.max_drawdown_percent, 50) > 0) {
     errors.push(
       error(
         'limit_out_of_range',
@@ -694,11 +755,23 @@ function semanticErrors(definition: StrategyDefinition): StrategyDefinitionError
   return errors;
 }
 
-/** Orden fijo de los errores: por su ruta en JSON y después por su código. */
+/**
+ * Orden fijo de los errores: por su ruta, componente a componente (los índices por su número, antes
+ * que los nombres, y los nombres en unidades UTF-16; una ruta antes que las que la continúan), y
+ * después por su código.
+ */
 function compareErrors(left: StrategyDefinitionError, right: StrategyDefinitionError): number {
-  const leftPath = JSON.stringify(left.path);
-  const rightPath = JSON.stringify(right.path);
-  if (leftPath !== rightPath) return leftPath < rightPath ? -1 : 1;
+  const length = Math.min(left.path.length, right.path.length);
+  for (let index = 0; index < length; index += 1) {
+    const a = left.path[index];
+    const b = right.path[index];
+    if (a === b) continue;
+    if (typeof a === 'number' && typeof b === 'number') return a - b;
+    if (typeof a === 'number') return -1;
+    if (typeof b === 'number') return 1;
+    return String(a) < String(b) ? -1 : 1;
+  }
+  if (left.path.length !== right.path.length) return left.path.length - right.path.length;
   return left.code < right.code ? -1 : left.code > right.code ? 1 : 0;
 }
 

@@ -2,14 +2,14 @@
   "canonicalization": "RFC8785",
   "files": [
     {
-      "bytes": 146693,
+      "bytes": 190640,
       "path": "invalid.json",
-      "sha256": "d166ddb274a77f684cbde86f226ccc397247ce7276def2663b5d40c23c77795a"
+      "sha256": "c35405c4cdd9dba10564fbcbe0654d48b66e4aa291644aa5b1f788c81a67b29f"
     },
     {
       "bytes": 13205,
       "path": "valid.json",
-      "sha256": "a6fe16de4d13cd0b9a4cef53c77e64f8b695e8ed362ccce16f28dc3dbc92c3ae"
+      "sha256": "8dbe1416ab6f8130fc875292a1d5ab2aacf8097c44a60e24a5fed9521937d8b5"
     }
   ],
   "schema_version": "1.0.0",

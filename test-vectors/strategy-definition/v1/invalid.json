@@ -24,11 +24,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -41,7 +41,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -84,7 +84,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -150,11 +150,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -167,7 +167,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -210,7 +210,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -276,11 +276,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -293,7 +293,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -336,7 +336,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -402,11 +402,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -419,7 +419,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -462,7 +462,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -529,11 +529,11 @@
         "indicators": [
           {
             "indicator": "ema",
-            "n": 9
+            "n": 21
           },
           {
             "indicator": "ema",
-            "n": 21
+            "n": 9
           },
           {
             "indicator": "rsi",
@@ -546,7 +546,7 @@
             [
               {
                 "left": 0,
-                "operator": "crosses_above",
+                "operator": "crosses_below",
                 "right": {
                   "kind": "indicator",
                   "index": 1
@@ -589,7 +589,7 @@
           "conditions": [
             {
               "left": 0,
-              "operator": "crosses_below",
+              "operator": "crosses_above",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -654,11 +654,11 @@
       "indicators": [
         {
           "indicator": "macd",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -671,7 +671,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -714,7 +714,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -782,11 +782,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -799,7 +799,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -842,7 +842,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -914,7 +914,7 @@
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -927,7 +927,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -970,7 +970,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -1046,11 +1046,11 @@
           "k": "4"
         },
         {
-          "indicator": "price"
-        },
-        {
           "indicator": "lowest",
           "n": 20
+        },
+        {
+          "indicator": "price"
         }
       ],
       "side": "down",
@@ -1077,7 +1077,7 @@
             },
             {
               "left": 2,
-              "operator": "lt",
+              "operator": "gt",
               "right": {
                 "kind": "indicator",
                 "index": 3
@@ -1196,7 +1196,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -1239,7 +1239,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -1305,11 +1305,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -1381,7 +1381,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -1449,11 +1449,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -1466,20 +1466,10 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
-              }
-            }
-          ],
-          [
-            {
-              "left": 2,
-              "operator": "lt",
-              "right": {
-                "kind": "constant",
-                "value": "30"
               }
             }
           ],
@@ -1490,6 +1480,16 @@
               "right": {
                 "kind": "constant",
                 "value": "80"
+              }
+            }
+          ],
+          [
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "30"
               }
             }
           ]
@@ -1521,7 +1521,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -1588,11 +1588,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -1605,7 +1605,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -1649,7 +1649,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -1717,11 +1717,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -1734,18 +1734,18 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
               }
             },
             {
-              "left": 2,
+              "left": 0,
               "operator": "lt",
               "right": {
                 "kind": "indicator",
-                "index": 0
+                "index": 2
               }
             }
           ]
@@ -1777,7 +1777,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -1847,11 +1847,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -1864,7 +1864,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "constant",
                 "value": "100"
@@ -1907,7 +1907,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -1977,11 +1977,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -1994,7 +1994,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -2037,7 +2037,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -2108,11 +2108,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -2125,7 +2125,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -2168,7 +2168,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -2245,11 +2245,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "rsi",
@@ -2262,7 +2262,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -2305,7 +2305,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -2372,18 +2372,19 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
           "n": 14
         },
         {
-          "indicator": "price"
+          "indicator": "sma",
+          "n": 5
         }
       ],
       "side": "up",
@@ -2392,7 +2393,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -2435,7 +2436,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -2502,11 +2503,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -2519,7 +2520,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -2562,7 +2563,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -2629,11 +2630,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -2646,7 +2647,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -2689,7 +2690,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -2756,11 +2757,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -2773,7 +2774,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -2816,7 +2817,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -2883,11 +2884,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -2900,7 +2901,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -2943,7 +2944,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -3093,11 +3094,11 @@
       },
       "indicators": [
         {
-          "indicator": "zscore",
-          "n": 20
+          "indicator": "hour_utc"
         },
         {
-          "indicator": "hour_utc"
+          "indicator": "zscore",
+          "n": 20
         }
       ],
       "side": "down",
@@ -3106,18 +3107,18 @@
           [
             {
               "left": 0,
-              "operator": "gt",
-              "right": {
-                "kind": "constant",
-                "value": "2"
-              }
-            },
-            {
-              "left": 1,
               "operator": "gte",
               "right": {
                 "kind": "constant",
                 "value": "7"
+              }
+            },
+            {
+              "left": 1,
+              "operator": "gt",
+              "right": {
+                "kind": "constant",
+                "value": "2"
               }
             }
           ]
@@ -3152,7 +3153,7 @@
     },
     "errors": [
       {
-        "code": "invalid_value",
+        "code": "duration_not_quoted",
         "path": [
           "contract",
           "duration",
@@ -3194,11 +3195,11 @@
           "k": "2"
         },
         {
-          "indicator": "price"
-        },
-        {
           "indicator": "lowest",
           "n": 20
+        },
+        {
+          "indicator": "price"
         }
       ],
       "side": "down",
@@ -3225,7 +3226,7 @@
             },
             {
               "left": 2,
-              "operator": "lt",
+              "operator": "gt",
               "right": {
                 "kind": "indicator",
                 "index": 3
@@ -3299,11 +3300,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -3316,7 +3317,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -3359,7 +3360,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -3426,11 +3427,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -3443,7 +3444,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -3486,7 +3487,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -3553,11 +3554,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -3570,7 +3571,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -3613,7 +3614,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -3688,11 +3689,11 @@
           "k": "2"
         },
         {
-          "indicator": "price"
-        },
-        {
           "indicator": "lowest",
           "n": 20
+        },
+        {
+          "indicator": "price"
         }
       ],
       "side": "down",
@@ -3719,7 +3720,7 @@
             },
             {
               "left": 2,
-              "operator": "lt",
+              "operator": "gt",
               "right": {
                 "kind": "indicator",
                 "index": 3
@@ -4066,11 +4067,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -4083,7 +4084,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -4126,7 +4127,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -4193,11 +4194,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -4210,7 +4211,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -4253,7 +4254,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -4320,11 +4321,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -4337,7 +4338,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -4380,7 +4381,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -4447,11 +4448,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -4464,7 +4465,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -4507,7 +4508,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -4574,11 +4575,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -4591,7 +4592,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -4634,7 +4635,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -4701,11 +4702,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -4718,7 +4719,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -4750,7 +4751,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -4817,11 +4818,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -4834,7 +4835,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -4888,7 +4889,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -4955,11 +4956,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -4972,7 +4973,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -5011,7 +5012,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -5079,11 +5080,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -5096,7 +5097,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -5139,7 +5140,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -5206,11 +5207,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -5223,7 +5224,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -5266,7 +5267,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -5333,11 +5334,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -5350,7 +5351,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -5393,7 +5394,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -5459,11 +5460,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -5476,7 +5477,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -5519,7 +5520,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -5585,11 +5586,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -5602,7 +5603,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -5645,7 +5646,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -5676,7 +5677,7 @@
       },
       "execution_mode": "disabled",
       "promoted_from": {
-        "version_id": "sha256:0576a009f77c1f6f443431931cc8e4da3a5871a88eee691e1cfc3c027dc4a4f7",
+        "version_id": "sha256:1fc4dea6f5fbf559a9efee69254d5db55dff59a1743513fcdeee551d15a770f8",
         "evaluation_id": "01934f3a-7b2c-7d4e-9a11-112233445566"
       }
     },
@@ -5722,11 +5723,11 @@
           "k": "2"
         },
         {
-          "indicator": "price"
-        },
-        {
           "indicator": "lowest",
           "n": 20
+        },
+        {
+          "indicator": "price"
         }
       ],
       "side": "down",
@@ -5753,7 +5754,7 @@
             },
             {
               "left": 2,
-              "operator": "lt",
+              "operator": "gt",
               "right": {
                 "kind": "indicator",
                 "index": 3
@@ -5802,7 +5803,7 @@
       },
       "execution_mode": "shadow",
       "promoted_from": {
-        "version_id": "sha256:c0f63f8e2c669797381fc94945d3e0e3c9950a3b44588146647242b7a89c45ee",
+        "version_id": "sha256:d3f8aa3edc16805527db4dc30f34de268f92610d2665d9e6818775d099ac8a19",
         "evaluation_id": "01934f3a-7b2c-7d4e-9a11-112233445566"
       }
     },
@@ -5848,11 +5849,11 @@
           "k": "2"
         },
         {
-          "indicator": "price"
-        },
-        {
           "indicator": "lowest",
           "n": 20
+        },
+        {
+          "indicator": "price"
         }
       ],
       "side": "down",
@@ -5879,7 +5880,7 @@
             },
             {
               "left": 2,
-              "operator": "lt",
+              "operator": "gt",
               "right": {
                 "kind": "indicator",
                 "index": 3
@@ -5968,11 +5969,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -5985,7 +5986,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -6028,7 +6029,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -6099,11 +6100,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -6116,7 +6117,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -6159,7 +6160,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -6225,11 +6226,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -6242,7 +6243,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -6285,7 +6286,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -6322,6 +6323,1943 @@
         "code": "invalid_format",
         "path": [
           "responsible"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "amount-trailing-zero",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce de medias exponenciales con el RSI por debajo de 70.",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 0,
+              "operator": "crosses_below",
+              "right": {
+                "kind": "indicator",
+                "index": 1
+              }
+            },
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "0.10",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "invalid_format",
+        "path": [
+          "contract",
+          "stop_loss"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "left-past-six",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce de medias exponenciales con el RSI por debajo de 70.",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 0,
+              "operator": "crosses_below",
+              "right": {
+                "kind": "indicator",
+                "index": 1
+              }
+            },
+            {
+              "left": 6,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "indicator_reference_invalid",
+        "path": [
+          "entry",
+          "groups",
+          0,
+          1,
+          "left"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "right-index-negative",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce de medias exponenciales con el RSI por debajo de 70.",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 0,
+              "operator": "crosses_below",
+              "right": {
+                "kind": "indicator",
+                "index": -1
+              }
+            },
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "indicator_reference_invalid",
+        "path": [
+          "entry",
+          "groups",
+          0,
+          0,
+          "right",
+          "index"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "constant-too-long",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce de medias exponenciales con el RSI por debajo de 70.",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 0,
+              "operator": "crosses_below",
+              "right": {
+                "kind": "indicator",
+                "index": 1
+              }
+            },
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "11111111111111111111111111111111111111111"
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "invalid_format",
+        "path": [
+          "entry",
+          "groups",
+          0,
+          1,
+          "right",
+          "value"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "rsi-constant-just-over-100",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce de medias exponenciales con el RSI por debajo de 70.",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 0,
+              "operator": "crosses_below",
+              "right": {
+                "kind": "indicator",
+                "index": 1
+              }
+            },
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "100.00000000000000001"
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "constant_out_of_range",
+        "path": [
+          "entry",
+          "groups",
+          0,
+          1,
+          "right",
+          "value"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "description-lone-surrogate",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce \ud800",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 0,
+              "operator": "crosses_below",
+              "right": {
+                "kind": "indicator",
+                "index": 1
+              }
+            },
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "invalid_format",
+        "path": [
+          "description"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "description-bidi-override",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce \u202e07 ab",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 0,
+              "operator": "crosses_below",
+              "right": {
+                "kind": "indicator",
+                "index": 1
+              }
+            },
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "invalid_format",
+        "path": [
+          "description"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "contract-type-missing",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce de medias exponenciales con el RSI por debajo de 70.",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 0,
+              "operator": "crosses_below",
+              "right": {
+                "kind": "indicator",
+                "index": 1
+              }
+            },
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "missing_field",
+        "path": [
+          "contract",
+          "contract_type"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "indicators-out-of-order",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce de medias exponenciales con el RSI por debajo de 70.",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 0,
+              "operator": "crosses_below",
+              "right": {
+                "kind": "indicator",
+                "index": 1
+              }
+            },
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "not_canonical",
+        "path": [
+          "indicators",
+          1
+        ]
+      }
+    ]
+  },
+  {
+    "name": "conditions-out-of-order",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce de medias exponenciales con el RSI por debajo de 70.",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            },
+            {
+              "left": 0,
+              "operator": "crosses_below",
+              "right": {
+                "kind": "indicator",
+                "index": 1
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "not_canonical",
+        "path": [
+          "entry",
+          "groups",
+          0,
+          1
+        ]
+      }
+    ]
+  },
+  {
+    "name": "groups-out-of-order",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce de medias exponenciales con el RSI por debajo de 70.",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            }
+          ],
+          [
+            {
+              "left": 0,
+              "operator": "crosses_below",
+              "right": {
+                "kind": "indicator",
+                "index": 1
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "not_canonical",
+        "path": [
+          "entry",
+          "groups",
+          1
+        ]
+      }
+    ]
+  },
+  {
+    "name": "mirrored-condition",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce de medias exponenciales con el RSI por debajo de 70.",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 1,
+              "operator": "crosses_above",
+              "right": {
+                "kind": "indicator",
+                "index": 0
+              }
+            },
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "not_canonical",
+        "path": [
+          "entry",
+          "groups",
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "name": "same-operand",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce de medias exponenciales con el RSI por debajo de 70.",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 0,
+              "operator": "gt",
+              "right": {
+                "kind": "indicator",
+                "index": 0
+              }
+            },
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "not_canonical",
+        "path": [
+          "entry",
+          "groups",
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "name": "repeated-condition",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce de medias exponenciales con el RSI por debajo de 70.",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            },
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "not_canonical",
+        "path": [
+          "entry",
+          "groups",
+          0,
+          1
+        ]
+      }
+    ]
+  },
+  {
+    "name": "hours-out-of-range-in-order-of-index",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce de medias exponenciales con el RSI por debajo de 70.",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 0,
+              "operator": "crosses_below",
+              "right": {
+                "kind": "indicator",
+                "index": 1
+              }
+            },
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          0,
+          1,
+          24,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          25
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "window_invalid",
+        "path": [
+          "entry",
+          "hours_utc",
+          2
+        ]
+      },
+      {
+        "code": "window_invalid",
+        "path": [
+          "entry",
+          "hours_utc",
+          12
         ]
       }
     ]

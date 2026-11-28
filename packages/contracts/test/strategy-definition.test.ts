@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   deriveStrategyVersionId,
@@ -38,6 +38,26 @@ const manifest = JSON.parse(read('manifest.json').toString('utf8')) as {
   files: ManifestFile[];
   vector_id: string;
 };
+// Sin red, reloj real ni azar (ADR-0022 §12, como F1-VECTOR-001): las guardas se ponen después de
+// leer los vectores.
+beforeEach(() => {
+  vi.useFakeTimers({ now: new Date('2099-12-31T23:59:59.999Z'), toFake: ['Date'] });
+  vi.spyOn(Math, 'random').mockImplementation(() => {
+    throw new Error('Math.random no está permitido en la validación.');
+  });
+  vi.spyOn(globalThis.crypto, 'randomUUID').mockImplementation(() => {
+    throw new Error('crypto.randomUUID no está permitido en la validación.');
+  });
+  vi.stubGlobal('fetch', () => {
+    throw new Error('La red no está permitida en la validación.');
+  });
+});
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
 const valid = JSON.parse(read('valid.json').toString('utf8')) as ValidVector[];
 const invalid = JSON.parse(read('invalid.json').toString('utf8')) as InvalidVector[];
 

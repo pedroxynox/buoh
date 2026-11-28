@@ -24,11 +24,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -41,7 +41,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -84,7 +84,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -116,7 +116,7 @@
       "execution_mode": "disabled",
       "promoted_from": null
     },
-    "version_id": "sha256:0576a009f77c1f6f443431931cc8e4da3a5871a88eee691e1cfc3c027dc4a4f7"
+    "version_id": "sha256:1fc4dea6f5fbf559a9efee69254d5db55dff59a1743513fcdeee551d15a770f8"
   },
   {
     "name": "call-r100-5-ticks",
@@ -218,11 +218,11 @@
       },
       "indicators": [
         {
-          "indicator": "zscore",
-          "n": 20
+          "indicator": "hour_utc"
         },
         {
-          "indicator": "hour_utc"
+          "indicator": "zscore",
+          "n": 20
         }
       ],
       "side": "down",
@@ -231,18 +231,18 @@
           [
             {
               "left": 0,
-              "operator": "gt",
-              "right": {
-                "kind": "constant",
-                "value": "2"
-              }
-            },
-            {
-              "left": 1,
               "operator": "gte",
               "right": {
                 "kind": "constant",
                 "value": "7"
+              }
+            },
+            {
+              "left": 1,
+              "operator": "gt",
+              "right": {
+                "kind": "constant",
+                "value": "2"
               }
             }
           ]
@@ -275,7 +275,7 @@
       "execution_mode": "disabled",
       "promoted_from": null
     },
-    "version_id": "sha256:0f25b45338cdeda6358f7a374134d0ed3033c9cf42feba0beda8df8eb3d7ec7c"
+    "version_id": "sha256:56026ceaed3f6ad7c77b069b581d236858d382a51bc8a247859a2fbb6e67ebd4"
   },
   {
     "name": "multdown-bitcoin-velas",
@@ -310,11 +310,11 @@
           "k": "2"
         },
         {
-          "indicator": "price"
-        },
-        {
           "indicator": "lowest",
           "n": 20
+        },
+        {
+          "indicator": "price"
         }
       ],
       "side": "down",
@@ -341,7 +341,7 @@
             },
             {
               "left": 2,
-              "operator": "lt",
+              "operator": "gt",
               "right": {
                 "kind": "indicator",
                 "index": 3
@@ -391,7 +391,7 @@
       "execution_mode": "disabled",
       "promoted_from": null
     },
-    "version_id": "sha256:c0f63f8e2c669797381fc94945d3e0e3c9950a3b44588146647242b7a89c45ee"
+    "version_id": "sha256:d3f8aa3edc16805527db4dc30f34de268f92610d2665d9e6818775d099ac8a19"
   },
   {
     "name": "multup-r100-shadow",
@@ -418,11 +418,11 @@
       "indicators": [
         {
           "indicator": "ema",
-          "n": 9
+          "n": 21
         },
         {
           "indicator": "ema",
-          "n": 21
+          "n": 9
         },
         {
           "indicator": "rsi",
@@ -435,7 +435,7 @@
           [
             {
               "left": 0,
-              "operator": "crosses_above",
+              "operator": "crosses_below",
               "right": {
                 "kind": "indicator",
                 "index": 1
@@ -478,7 +478,7 @@
         "conditions": [
           {
             "left": 0,
-            "operator": "crosses_below",
+            "operator": "crosses_above",
             "right": {
               "kind": "indicator",
               "index": 1
@@ -509,10 +509,10 @@
       },
       "execution_mode": "shadow",
       "promoted_from": {
-        "version_id": "sha256:0576a009f77c1f6f443431931cc8e4da3a5871a88eee691e1cfc3c027dc4a4f7",
+        "version_id": "sha256:1fc4dea6f5fbf559a9efee69254d5db55dff59a1743513fcdeee551d15a770f8",
         "evaluation_id": "01934f3a-7b2c-7d4e-9a11-112233445566"
       }
     },
-    "version_id": "sha256:1fb5a890bb4b17acdbaef1e0f1f92535408a515d5300f53678d33a794d35c5fd"
+    "version_id": "sha256:55597404646ccf72fb645843b26076a4b96659618784cb831b38c097b2a26faf"
   }
 ]
