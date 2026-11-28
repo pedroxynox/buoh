@@ -150,3 +150,27 @@ export const historyRateLimitText = (symbol: string, start: number, end: number)
 /** Un error de Deriv que no es `RateLimit` a una página de ticks de la historia: cuenta como respondida. */
 export const historyErrorText = (symbol: string, start: number, end: number) =>
   `{"echo_req":{"count":1000,"end":"${String(end)}","req_id":3,"start":${String(start)},"style":"ticks","ticks_history":"${symbol}"},"error":{"code":"InputValidationFailed","message":"x"},"msg_type":"ticks_history","req_id":3}`;
+
+/**
+ * Una página de velas de 1 minuto de `symbol` (precisión del PR 6d de ADR-0021 §9), de `start` a
+ * `end`, con las de `epochs`, como `pageText` con otro símbolo.
+ */
+export const candlePageText = (
+  symbol: string,
+  start: number,
+  end: number,
+  epochs: readonly number[] = [],
+) =>
+  pageText(start, end, epochs).replace(
+    '"ticks_history":"frxXAUUSD"',
+    `"ticks_history":"${symbol}"`,
+  );
+
+/** Un error de Deriv a una página de velas de `symbol`: `RateLimit` u otro, que cuenta como respondida. */
+export const candleErrorText = (
+  symbol: string,
+  start: number,
+  end: number,
+  code = 'MarketIsClosed',
+) =>
+  `{"echo_req":{"count":1000,"end":"${String(end)}","granularity":60,"req_id":3,"start":${String(start)},"style":"candles","ticks_history":"${symbol}"},"error":{"code":"${code}","message":"x"},"msg_type":"ticks_history","req_id":3}`;

@@ -26,6 +26,7 @@ import {
   healthEnvironment,
   loadOperationsConfig,
   GOLD_SEQUENCE,
+  HISTORY_CANDLES_SEQUENCE,
   HISTORY_GOLD_SEQUENCE,
   HISTORY_R_100_SEQUENCE,
   LOG_SEQUENCES,
@@ -948,6 +949,7 @@ describe('runOperations: el orden de los pasos (ADR-0018 §11)', () => {
       'list:lotes_velas',
       'list:lotes_historia_r_100',
       'list:lotes_historia_frxxauusd',
+      'list:lotes_historia_velas',
       'list',
       'segments:1:120',
       'list',
@@ -1540,6 +1542,7 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
       'list:lotes_velas',
       'list:lotes_historia_r_100',
       'list:lotes_historia_frxxauusd',
+      'list:lotes_historia_velas',
       'list',
       'list',
       'list',
@@ -1616,6 +1619,7 @@ describe('runOperations: un paso que falla no impide los siguientes (ADR-0018 §
             { reason: 'ECONNREFUSED', sequence: 'lotes_velas' },
             { reason: 'ECONNREFUSED', sequence: 'lotes_historia_r_100' },
             { reason: 'ECONNREFUSED', sequence: 'lotes_historia_frxxauusd' },
+            { reason: 'ECONNREFUSED', sequence: 'lotes_historia_velas' },
           ],
         },
         status: 'failed',
@@ -5124,7 +5128,15 @@ describe('las secuencias por lotes en el paso 1 (ADR-0021 §3, precisión del PR
   const CANDLES_1 = schemaOf(BATCH_CANDLES_SEQUENCE);
   const HISTORY_R_100_1 = schemaOf(HISTORY_R_100_SEQUENCE);
   const HISTORY_GOLD_1 = schemaOf(HISTORY_GOLD_SEQUENCE);
-  const BATCH_1 = [SCHEDULES_1, QUOTES_1, CANDLES_1, HISTORY_R_100_1, HISTORY_GOLD_1];
+  const HISTORY_CANDLES_1 = schemaOf(HISTORY_CANDLES_SEQUENCE);
+  const BATCH_1 = [
+    SCHEDULES_1,
+    QUOTES_1,
+    CANDLES_1,
+    HISTORY_R_100_1,
+    HISTORY_GOLD_1,
+    HISTORY_CANDLES_1,
+  ];
 
   /** Las variables que rechaza `loadOperationsConfig` con esas, o `[]`. */
   const rejectedWith = (env: Record<string, string>): readonly string[] => {
@@ -5139,13 +5151,14 @@ describe('las secuencias por lotes en el paso 1 (ADR-0021 §3, precisión del PR
     }
   };
 
-  it('las cinco secuencias por lotes, con las dos historias del PR 6c, tienen sus nombres, y ninguna es un símbolo de BUOH_OPERACIONES_SIMBOLOS', () => {
+  it('las seis secuencias por lotes, con las dos historias de ticks del PR 6c y la de las velas del 6d, tienen sus nombres, y ninguna es un símbolo de BUOH_OPERACIONES_SIMBOLOS', () => {
     expect(BATCH_SEQUENCES).toEqual([
       BATCH_SCHEDULES_SEQUENCE,
       BATCH_QUOTES_SEQUENCE,
       BATCH_CANDLES_SEQUENCE,
       HISTORY_R_100_SEQUENCE,
       HISTORY_GOLD_SEQUENCE,
+      HISTORY_CANDLES_SEQUENCE,
     ]);
     expect(BATCH_1).toEqual([
       'buoh_lotes_horarios_log_000001',
@@ -5153,6 +5166,7 @@ describe('las secuencias por lotes en el paso 1 (ADR-0021 §3, precisión del PR
       'buoh_lotes_velas_log_000001',
       'buoh_lotes_historia_r_100_log_000001',
       'buoh_lotes_historia_frxxauusd_log_000001',
+      'buoh_lotes_historia_velas_log_000001',
     ]);
     for (const value of BATCH_SEQUENCES.map((item) => `R_100,${item.name}`)) {
       expect(rejectedWith({ BUOH_OPERACIONES_SIMBOLOS: value }), value).toEqual([
@@ -5236,6 +5250,11 @@ describe('las secuencias por lotes en el paso 1 (ADR-0021 §3, precisión del PR
         assigned_at_utc: NOW,
         run_id: uuid(1),
       },
+      [HISTORY_CANDLES_1]: {
+        ...derivBatchLogProfileRow('history_candles'),
+        assigned_at_utc: NOW,
+        run_id: uuid(1),
+      },
     });
     const ingest: LogWriterRole = 'buoh_ingesta';
     const batch: LogWriterRole = 'buoh_lotes';
@@ -5246,6 +5265,7 @@ describe('las secuencias por lotes en el paso 1 (ADR-0021 §3, precisión del PR
       [CANDLES_1]: { grant: batch, profile: batch },
       [HISTORY_R_100_1]: { grant: batch, profile: batch },
       [HISTORY_GOLD_1]: { grant: batch, profile: batch },
+      [HISTORY_CANDLES_1]: { grant: batch, profile: batch },
     });
     expect(
       children.runs.filter((item) => item.child === 'migrate').map((item) => item.env),
@@ -5314,6 +5334,7 @@ describe('las secuencias por lotes en el paso 1 (ADR-0021 §3, precisión del PR
       'list:lotes_velas',
       'list:lotes_historia_r_100',
       'list:lotes_historia_frxxauusd',
+      'list:lotes_historia_velas',
     ]);
     expect(db.calls.indexOf('list:lotes_horarios')).toBeGreaterThan(
       db.calls.indexOf('report:1:health'),
@@ -5769,6 +5790,7 @@ describe('los pasos de los lotes (ADR-0021 §3, precisión del PR 5c2 de su §9)
       },
       { log: null, sequence: 'lotes_historia_r_100' },
       { log: null, sequence: 'lotes_historia_frxxauusd' },
+      { log: null, sequence: 'lotes_historia_velas' },
     ]);
     expect(batchReports(db, 'batch_final').map((item) => item.schema)).toEqual([
       schedules1,
@@ -5780,6 +5802,7 @@ describe('los pasos de los lotes (ADR-0021 §3, precisión del PR 5c2 de su §9)
       null,
       null,
       2,
+      null,
       null,
       null,
     ]);

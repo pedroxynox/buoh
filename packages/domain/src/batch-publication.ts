@@ -134,8 +134,8 @@ export function createBatchLogConfig(input: {
 /**
  * Lo que las reglas de los lotes leen del perfil de una secuencia por lotes: su identidad, sus
  * reglas y, si pide `trading_times`, los símbolos que se buscan en él (`symbols`). El perfil de las
- * cotizaciones no tiene `symbols`: no pide horarios. El de una historia (PR 6b de ADR-0021 §9) tiene
- * un solo símbolo (`symbol`), que es el que se busca, y su umbral del tramo sin ticks
+ * cotizaciones no tiene `symbols`: no pide horarios. El de una historia de ticks (PR 6b de ADR-0021
+ * §9) tiene un solo símbolo (`symbol`), que es el que se busca, y su umbral del tramo sin ticks
  * (`maximum_tick_gap_ms`), con las reglas 4.1.0.
  */
 const batchProfileSchema = z

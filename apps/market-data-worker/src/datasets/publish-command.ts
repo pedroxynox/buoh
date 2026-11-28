@@ -403,7 +403,8 @@ async function logDerivation(
   const elementsOf = (events: readonly SourceEvent[]) => batchElementsOf(events, config);
   let plan: LogDerivation['plan'];
   if (isHistoryProfileKind(kind)) {
-    // Una historia, un bloque por dataset (precisión del PR 6c de ADR-0021 §9).
+    // Una historia, un bloque por dataset (precisión del PR 6c de ADR-0021 §9): en la de las velas,
+    // un día (precisión del PR 6d).
     const history = historyPlan(historyProfileOf(kind));
     plan = (input) => planHistoryDataset({ ...input, elementsOf, plan: history });
   } else {

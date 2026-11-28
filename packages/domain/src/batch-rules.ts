@@ -42,9 +42,9 @@ export const BATCH_RULE_SET = {
 /**
  * Reglas de los lotes 4.1.0 (PR 6b de ADR-0021 §9): las 4.0.0 más el tramo sin ticks de la historia
  * dentro del horario (`tick_gap`), con el umbral de cada símbolo que da el perfil, y sus incidencias
- * con el esquema 3.1.0. Las usan los perfiles de la historia; los de los horarios, las cotizaciones y
- * las velas siguen con las 4.0.0, que no cambian (contratos de dominio, «Versionado y
- * compatibilidad»).
+ * con el esquema 3.1.0. Las usan los perfiles de la historia de ticks; los de los horarios, las
+ * cotizaciones, las velas y, desde el PR 6d, la historia de las velas siguen con las 4.0.0, que no
+ * cambian (contratos de dominio, «Versionado y compatibilidad»).
  */
 export const BATCH_HISTORY_RULE_SET = {
   derived_part_records: 5000,

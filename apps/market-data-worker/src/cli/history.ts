@@ -12,10 +12,11 @@ import { realScheduler } from './scheduler.js';
 
 /**
  * `pnpm --filter @buoh/market-data-worker run history` (precisión del PR 6c de ADR-0021 §9): el
- * proceso temporal que descarga y publica la historia de R_100 y la del oro, en `production`. Escribe
- * en stdout una línea JSON por bloque, por publicación y al empezar y al terminar; en stderr, el
- * error de uso o de configuración. Salida 0: las dos historias pedidas y publicadas; 1: paró por sus
- * fallos, sin los esquemas o sin el bloqueo; 2: uso o configuración.
+ * proceso temporal que descarga y publica la historia de R_100, la del oro y, desde el PR 6d, la de
+ * las velas, en `production`. Escribe en stdout una línea JSON por bloque, por publicación y al
+ * empezar y al terminar; en stderr, el error de uso o de configuración. Salida 0: las tres historias
+ * pedidas y publicadas; 1: paró por sus fallos, sin los esquemas o sin el bloqueo; 2: uso o
+ * configuración.
  */
 const now = (): string => new Date().toISOString();
 const { exitCode, stderr } = await historyCommand(process.argv.slice(2), process.env, {
