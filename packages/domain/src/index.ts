@@ -122,6 +122,7 @@ export {
   DataView,
   emptyDataViewState,
   type DataViewEvent,
+  type DataViewGapBefore,
   type DataViewHealth,
   type DataViewPlace,
   type DataViewRetention,

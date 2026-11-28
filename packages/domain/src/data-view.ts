@@ -89,11 +89,18 @@ export interface DataViewHealth extends DataViewPlace {
 
 export type DataViewEvent = DataViewHealth | DataViewTick;
 
+/**
+ * Lo que hay entre un tick del flujo y el tick usado anterior (ADR-0024 §2): nada (`none`); un
+ * intervalo dentro del rango que pide la historia del hueco pendiente, sin datos registrados solo
+ * si la historia no lo recupera (`hole`); o un intervalo sin datos registrados (`unrecorded`).
+ */
+export type DataViewGapBefore = 'hole' | 'none' | 'unrecorded';
+
 /** Un tick usable que todavía no se dio. */
 interface HeldTick extends DataViewPlace {
-  readonly after_unrecorded: boolean;
   readonly delivery_delayed: boolean;
   readonly event_time_utc: string;
+  readonly gap_before: DataViewGapBefore;
   readonly observation_id: string;
   readonly origin: MarketTick['origin'];
   readonly quote_decimal: string;
@@ -117,11 +124,9 @@ export interface DataViewRetention {
 }
 
 export interface DataViewSymbolState {
-  /** El próximo tick usado lleva `after_unrecorded`. */
-  readonly after_unrecorded: boolean;
-  /** El próximo tick usable del flujo que llegue lleva `after_unrecorded`: lo deja un cierre pedido. */
-  readonly arrival_after_unrecorded: boolean;
   readonly last_used_event_time_utc: string | null;
+  /** Lo que hay antes del próximo tick usable del flujo que llegue. */
+  readonly next_gap_before: DataViewGapBefore;
   readonly retention: DataViewRetention | null;
   readonly symbol: string;
   /** Las huellas de los ticks con la hora del high-watermark, en orden de llegada. */
@@ -154,9 +159,8 @@ interface MutableRetention {
 }
 
 interface MutableSymbol {
-  afterUnrecorded: boolean;
-  arrivalAfterUnrecorded: boolean;
   lastUsed: string | null;
+  nextGapBefore: DataViewGapBefore;
   retention: MutableRetention | null;
   watermarkFingerprints: string[];
 }
@@ -210,9 +214,8 @@ export class DataView {
     this.lastInstant = state.last_instant_utc;
     for (const item of state.symbols) {
       this.symbols.set(item.symbol, {
-        afterUnrecorded: item.after_unrecorded,
-        arrivalAfterUnrecorded: item.arrival_after_unrecorded,
         lastUsed: item.last_used_event_time_utc,
+        nextGapBefore: item.next_gap_before,
         retention:
           item.retention === null
             ? null
@@ -253,9 +256,8 @@ export class DataView {
       symbols: [...this.symbols.entries()]
         .sort(([left], [right]) => compareStrings(left, right))
         .map(([symbol, item]) => ({
-          after_unrecorded: item.afterUnrecorded,
-          arrival_after_unrecorded: item.arrivalAfterUnrecorded,
           last_used_event_time_utc: item.lastUsed,
+          next_gap_before: item.nextGapBefore,
           retention:
             item.retention === null
               ? null
@@ -338,8 +340,7 @@ export class DataView {
       }
       item.retention = null;
       if (!retention.overflowed) {
-        item.afterUnrecorded = true;
-        this.emitBatch(item, retention.retained, instant, ticks);
+        this.emitBatch(item, retention.retained, false, instant, ticks);
       }
     }
     return ticks;
@@ -357,9 +358,8 @@ export class DataView {
     if (item === undefined) {
       // El primer tick de cada log lleva `after_unrecorded`.
       item = {
-        afterUnrecorded: true,
-        arrivalAfterUnrecorded: false,
         lastUsed: null,
+        nextGapBefore: 'unrecorded',
         retention: null,
         watermarkFingerprints: [],
       };
@@ -409,13 +409,13 @@ export class DataView {
     const held: HeldTick | null =
       unused === null
         ? {
-            after_unrecorded: item.arrivalAfterUnrecorded,
             dataset_id: place.dataset_id,
             delivery_delayed:
               this.maximumDelay !== null &&
               Date.parse(tick.received_at_utc) - Date.parse(tick.event_time_utc) >
                 this.maximumDelay,
             event_time_utc: tick.event_time_utc,
+            gap_before: item.nextGapBefore,
             observation_id: tick.observation_id,
             origin: tick.origin,
             quote_decimal: tick.quote_decimal,
@@ -425,7 +425,7 @@ export class DataView {
           }
         : null;
     if (held !== null) {
-      item.arrivalAfterUnrecorded = false;
+      item.nextGapBefore = 'none';
     }
 
     if (!retaining) {
@@ -433,7 +433,8 @@ export class DataView {
         item.retention = null;
       }
       if (held !== null) {
-        this.emitBatch(item, [held], instant, out);
+        // Pasado el techo, un intervalo del hueco tampoco tiene datos: su historia no se usa.
+        this.emitBatch(item, [held], false, instant, out);
       }
       return;
     }
@@ -443,6 +444,7 @@ export class DataView {
       this.emitBatch(
         item,
         held === null ? retention.retained : [...retention.retained, held],
+        true,
         instant,
         out,
       );
@@ -460,8 +462,7 @@ export class DataView {
         overflowed: true,
         retained: [],
       };
-      item.afterUnrecorded = true;
-      this.emitBatch(item, retained, instant, out);
+      this.emitBatch(item, retained, false, instant, out);
     }
   }
 
@@ -483,7 +484,7 @@ export class DataView {
           pending.end === undefined &&
           item.retention?.overflowed === false;
         if (!insideOpenHole) {
-          item.arrivalAfterUnrecorded = true;
+          item.nextGapBefore = 'unrecorded';
         }
         continue;
       }
@@ -493,18 +494,20 @@ export class DataView {
       if (item.retention === null) {
         // Un hueco nuevo: la historia decide todo lo posterior a su inicio, el último tick usado.
         item.retention = { arrived: 0, identities: [], overflowed: false, retained: [] };
-        if (item.lastUsed === pending.watermark) {
-          item.arrivalAfterUnrecorded = false;
+        // Desde el último tick usado, el inicio del hueco, todo cae en su rango, también el
+        // intervalo de un cierre pedido anterior sin ticks usados después.
+        if (item.nextGapBefore !== 'unrecorded' || item.lastUsed === pending.watermark) {
+          item.nextGapBefore = 'hole';
         }
       } else if (item.retention.overflowed) {
         // Pasado el techo, la historia de este hueco no se usa: este cierre deja otro intervalo.
-        item.arrivalAfterUnrecorded = true;
+        item.nextGapBefore = 'unrecorded';
       } else {
-        // El rango de la historia crece hasta el próximo tick: cubre también el intervalo de un
-        // cierre pedido anterior, el de los retenidos y el del próximo que llegue.
-        item.arrivalAfterUnrecorded = false;
+        // El rango de la historia crece hasta el próximo tick: cubre el intervalo de este cierre y
+        // el de un cierre pedido anterior, en los retenidos o antes del próximo que llegue.
+        item.nextGapBefore = 'hole';
         item.retention.retained = item.retention.retained.map((held) =>
-          held.after_unrecorded ? { ...held, after_unrecorded: false } : held,
+          held.gap_before === 'unrecorded' ? { ...held, gap_before: 'hole' } : held,
         );
       }
     }
@@ -543,12 +546,10 @@ export class DataView {
       // Sin los ticks de la historia, la vista no tiene los que recuperó.
       recovered = event.recovered_event_count === 0;
     }
-    if (!recovered) {
-      item.afterUnrecorded = true;
-    }
     this.emitBatch(
       item,
       batch.sort((left, right) => compareStrings(left.event_time_utc, right.event_time_utc)),
+      recovered,
       instant,
       out,
     );
@@ -600,10 +601,10 @@ export class DataView {
         throw new TypeError(`Tick de historia sin su página: ${tick.observation_id}.`);
       }
       held.push({
-        after_unrecorded: false,
         dataset_id: place.dataset_id,
         delivery_delayed: false,
         event_time_utc: tick.event_time_utc,
+        gap_before: 'none',
         observation_id: tick.observation_id,
         origin: tick.origin,
         quote_decimal: tick.quote_decimal,
@@ -615,16 +616,20 @@ export class DataView {
     return held;
   }
 
-  /** Da unos ticks usables en su orden, con el instante y la marca de cada uno. */
+  /**
+   * Da unos ticks usables en su orden, con el instante y la marca de cada uno: `after_unrecorded`
+   * con un intervalo sin datos antes, o con uno del hueco si la historia no lo recuperó.
+   */
   private emitBatch(
     item: MutableSymbol,
     batch: readonly HeldTick[],
+    recovered: boolean,
     instant: string,
     out: DataViewTick[],
   ): void {
     for (const held of batch) {
-      const flagged = held.after_unrecorded || item.afterUnrecorded;
-      item.afterUnrecorded = false;
+      const flagged =
+        held.gap_before === 'unrecorded' || (held.gap_before === 'hole' && !recovered);
       const flags: DataViewTickFlag[] = [];
       if (flagged) {
         flags.push('after_unrecorded');

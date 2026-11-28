@@ -547,6 +547,19 @@ describe('la vista de cada instante (ADR-0024 §2)', () => {
     expectEquivalent(log.events, v3, 'historia contra out_of_order');
   });
 
+  it('si la separación demuestra la continuidad, el tick que la decide no lleva la marca', () => {
+    const log = new Log()
+      .tick(A, 0, '100.100')
+      .closed(A, at(0, 500))
+      .opened(B, A, at(0, 600))
+      .tick(B, 2, '100.102');
+    const { perEvent } = run(log.events, v3);
+    expect(perEvent[3]?.map((item) => item.kind)).toEqual(['health', 'tick']);
+    expect(healthOf(perEvent[3] ?? [])).toBe('healthy');
+    expect(ticksOf(perEvent[3] ?? [])).toEqual([[2, [], at(2, 100)]]);
+    expectEquivalent(log.events, v3, 'separación');
+  });
+
   it('un tick con la hora del high-watermark es un duplicado o un conflicto', () => {
     const log = new Log()
       .tick(A, 0, '100.100')
@@ -595,6 +608,51 @@ describe('la vista de cada instante (ADR-0024 §2)', () => {
     ]);
     expect(healthOf(perEvent[9] ?? [])).toBe('healthy');
     expectEquivalent(log.events, v3, 'conexión que cae');
+
+    // Sin recuperar el hueco, cada desconexión deja su intervalo sin datos: el primer tick después
+    // de cada una lleva la marca. Con un partial, con un complete de las reglas 2.0.0 y al terminar
+    // el log.
+    const dropped = (profile: PipelineProfile) =>
+      new Log()
+        .tick(A, 0, '100.100')
+        .closed(A, at(0, 500))
+        .opened(B, A, at(0, 600))
+        .tick(B, 5, '100.105')
+        .tick(B, 6, '100.106')
+        .closed(B, at(7, 500))
+        .opened(C, B, at(8))
+        .tick(C, 9, '100.109')
+        .result(
+          C,
+          { from: 0, to: 9 },
+          profile === v2
+            ? { recovered_event_count: 3, status: 'complete' }
+            : { reason: 'history_page_limit', recovered_event_count: 0, status: 'partial' },
+          at(11, 500),
+        );
+    const expected = (instant: string) => [
+      [5, ['after_unrecorded'], instant],
+      [6, [], instant],
+      [9, ['after_unrecorded'], instant],
+    ];
+    for (const profile of [v3, v2]) {
+      const events = dropped(profile).events;
+      const result = run(events, profile).perEvent[8] ?? [];
+      expect(ticksOf(result)).toEqual(expected(at(11, 500)));
+      expect(result.filter(isTick).map((tick) => tick.unrecorded_since_utc)).toEqual([
+        at(0),
+        undefined,
+        at(6),
+      ]);
+      expectEquivalent(
+        events,
+        profile,
+        `conexión que cae sin recuperar (${profile.rules.quality_rule_version})`,
+      );
+    }
+    const unfinished = dropped(v3).events.slice(0, -1);
+    expect(ticksOf(run(unfinished, v3).tail)).toEqual(expected(END_OF_LOG));
+    expectEquivalent(unfinished, v3, 'conexión que cae y fin del log');
   });
 
   it('after_unrecorded tras un cierre pedido, salvo dentro de un hueco cuyo fin no se conoce', () => {
@@ -747,6 +805,28 @@ describe('la vista de cada instante (ADR-0024 §2)', () => {
     ]);
     expect(widenedRun.state.unused_ticks.duplicate_exact).toBe(2);
     expectEquivalent(widened.events, v3, 'cierre no pedido después del pedido');
+    // Si la historia no lo recupera, los tres intervalos del hueco quedan sin datos.
+    const widenedPartial = [
+      ...widened.events.slice(0, 10),
+      sourceEventSchema.parse({
+        ...widened.events[11],
+        reason: 'history_page_limit',
+        recovered_event_count: 0,
+        status: 'partial',
+      }),
+    ];
+    const partialAtResult = run(widenedPartial, v3).perEvent[10] ?? [];
+    expect(ticksOf(partialAtResult)).toEqual([
+      [5, ['after_unrecorded'], at(13, 500)],
+      [8, ['after_unrecorded'], at(13, 500)],
+      [12, ['after_unrecorded'], at(13, 500)],
+    ]);
+    expect(partialAtResult.filter(isTick).map((tick) => tick.unrecorded_since_utc)).toEqual([
+      at(0),
+      at(5),
+      at(8),
+    ]);
+    expectEquivalent(widenedPartial, v3, 'cierre no pedido después del pedido, partial');
 
     // Un cierre no pedido después de uno pedido, sin ticks entre los dos: la historia del hueco
     // cubre también el intervalo del pedido.
