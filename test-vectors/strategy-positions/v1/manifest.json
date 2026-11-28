@@ -6,9 +6,9 @@
       "sha256": "82591f74def460d332101bb051a5a9c4c4fa469e61c0c684e4c1f4996a654917"
     },
     {
-      "bytes": 63919,
+      "bytes": 84000,
       "path": "positions.json",
-      "sha256": "d47737e4db4fb68b236bcb777b0c2ab5b07074fa2656ea5e39c0a1543bd66005"
+      "sha256": "7972bed3780fe7f8d0620e9797254475b049b71f9aa80fd17184a2ad80895cc7"
     }
   ],
   "schema_version": "1.0.0",

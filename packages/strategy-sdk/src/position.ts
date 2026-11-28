@@ -73,7 +73,7 @@ interface Common {
 interface MultiplierFields extends Common {
   readonly commission: string;
   readonly contract: MultiplierContract;
-  /** El resultado sin redondear con el último precio, para la caída máxima. */
+  /** El resultado sin redondear con el último precio, para la caída máxima (con velas, el extremo adverso). */
   readonly lastPnl: string;
 }
 
@@ -167,15 +167,32 @@ function durationMs(contract: CallPutContract): number | null {
   return unit === 't' ? null : duration * (unit === 's' ? 1000 : MINUTE_MS);
 }
 
+/**
+ * La apuesta y los costos de una posición. La apuesta es un entero de USD, como los 10 de
+ * `StrategyDefinition`, para que su producto con el cociente de 18 decimales sea exacto. Deriv no
+ * vende un multiplicador con un stop loss que no pasa de la comisión (`validation_params` de
+ * `proposal`), y una comisión que llega a la apuesta lo cerraría al entrar: la posición no abre
+ * ninguno de los dos, y el evaluador omite esa señal.
+ */
 function costsFor(
   contract: Contract,
   costs: PositionCosts,
+  stake: string,
 ): { commission: string; payout: string } {
+  if (!/^[1-9][0-9]*$/u.test(stake)) {
+    throw new RangeError('La apuesta es un entero de USD mayor que cero.');
+  }
   if (isMultiplier(contract)) {
     if (!('commission' in costs)) {
       throw new RangeError('Un multiplicador lleva la comisión de su cotización.');
     }
-    nonNegative(costs.commission, 'La comisión');
+    const commission = nonNegative(costs.commission, 'La comisión');
+    if (commission >= parseFixed(stake)) {
+      throw new RangeError('La comisión es menor que la apuesta.');
+    }
+    if (contract.stop_loss !== null && parseFixed(contract.stop_loss) <= commission) {
+      throw new RangeError('Deriv no acepta un stop loss que no pasa de la comisión.');
+    }
     return { commission: costs.commission, payout: '0' };
   }
   if (!('payout' in costs)) {
@@ -255,21 +272,21 @@ function assertOpen(state: PositionState): void {
 /**
  * Abre una posición con ticks en su tick de entrada, el primero usado posterior al que decidió
  * con una hora de la fuente igual o posterior a la compra (ADR-0024 §6), que elige el evaluador.
- * En un multiplicador, el tick de entrada ya aplica los cierres de Deriv.
+ * En él ningún cierre de Deriv se cumple: el resultado es `−comisión`, mayor que `−apuesta` y que
+ * `−stop loss`, y el take profit es positivo.
  */
-export function openTickPosition(input: OpenTickPositionInput): PositionStep {
+export function openTickPosition(input: OpenTickPositionInput): PositionState {
   const { contract, entry, latencyMs, purchaseMs, stake } = input;
   checkTick(entry);
   checkTime(purchaseMs, 'La compra');
   checkTime(latencyMs, 'La latencia');
-  positive(stake, 'La apuesta');
   if (entry.fromRecovery) {
     throw new RangeError('Una posición nunca empieza con un tick de la recuperación de un hueco.');
   }
   if (entry.sourceTimeMs < purchaseMs) {
     throw new RangeError('El tick de entrada es igual o posterior a la compra.');
   }
-  const costs = costsFor(contract, input.costs);
+  const costs = costsFor(contract, input.costs, stake);
   const common = { closed: null, entryPrice: entry.price, entryTimeMs: entry.sourceTimeMs, stake };
   if (isMultiplier(contract)) {
     const opened = {
@@ -282,9 +299,7 @@ export function openTickPosition(input: OpenTickPositionInput): PositionStep {
       latencyMs,
       saleAtMs: null,
     };
-    const pnl = multiplierPnl(opened, parseFixed(entry.price));
-    const closed = limitClose(opened, pnl, entry.price, entry.sourceTimeMs);
-    return { close: closed, state: { ...opened, closed, lastPnl: formatFixed(pnl) } };
+    return { ...opened, lastPnl: formatFixed(multiplierPnl(opened, parseFixed(entry.price))) };
   }
   const length = durationMs(contract);
   const expiryMs = length === null ? null : purchaseMs + length;
@@ -292,18 +307,15 @@ export function openTickPosition(input: OpenTickPositionInput): PositionStep {
     throw new RangeError('El tick de entrada llega después del vencimiento.');
   }
   return {
-    close: null,
-    state: {
-      ...common,
-      contract,
-      expiryMs,
-      kind: 'tick_callput',
-      lastPrice: entry.price,
-      lastTickAtOrBeforeExpiry: { price: entry.price, timeMs: entry.sourceTimeMs },
-      lastTimeMs: entry.sourceTimeMs,
-      payout: costs.payout,
-      ticksAfterEntry: 0,
-    },
+    ...common,
+    contract,
+    expiryMs,
+    kind: 'tick_callput',
+    lastPrice: entry.price,
+    lastTickAtOrBeforeExpiry: { price: entry.price, timeMs: entry.sourceTimeMs },
+    lastTimeMs: entry.sourceTimeMs,
+    payout: costs.payout,
+    ticksAfterEntry: 0,
   };
 }
 
@@ -409,8 +421,7 @@ export function openCandlePosition(input: OpenCandlePositionInput): PositionStat
   const { contract, entryOpen, entryStartMs, stake } = input;
   checkTime(entryStartMs, 'El inicio de la vela de entrada');
   positive(entryOpen, 'La apertura');
-  positive(stake, 'La apuesta');
-  const costs = costsFor(contract, input.costs);
+  const costs = costsFor(contract, input.costs, stake);
   const common = {
     closed: null,
     entryPrice: entryOpen,
@@ -440,7 +451,9 @@ export function openCandlePosition(input: OpenCandlePositionInput): PositionStat
  * con la apertura de la primera vela que empieza en él o después, con la precedencia de §5. Si no,
  * se mira el máximo y el mínimo: la pérdida de la apuesta da `−apuesta`; si la vela toca el stop
  * loss y el take profit, cuenta el stop loss; y un umbral tocado da su valor exacto, o el de la
- * apertura si la vela ya abre más allá de él.
+ * apertura si la vela ya abre más allá de él. Los extremos van antes que la apertura, que es la
+ * lectura prudente: una vela que abre más allá del take profit y toca el stop loss da el stop loss,
+ * y una que abre más allá del stop loss y llega a la pérdida de la apuesta, `−apuesta`.
  */
 function candleMultiplierClose(
   state: MultiplierFields & { readonly kind: 'candle_multiplier' },
@@ -498,8 +511,9 @@ export function stepCandlePosition(state: PositionState, candle: PositionCandle)
   const lastCandle = { close: candle.close, endMs: candle.endMs };
   if (state.kind === 'candle_multiplier') {
     const closed = candleMultiplierClose(state, candle, values);
-    const lastPnl =
-      closed === null ? formatFixed(multiplierPnl(state, values.close)) : state.lastPnl;
+    // Para la caída máxima, el resultado con el extremo adverso de la vela, el prudente.
+    const adverse = state.contract.contract_type === 'MULTUP' ? values.low : values.high;
+    const lastPnl = closed === null ? formatFixed(multiplierPnl(state, adverse)) : state.lastPnl;
     return { close: closed, state: { ...state, closed, lastCandle, lastPnl } };
   }
   const atOrBefore = candle.endMs <= state.expiryMs ? lastCandle : state.lastCandle;
@@ -529,7 +543,8 @@ export function sellCandlePositionAtClose(state: PositionState): PositionStep {
 
 /**
  * El resultado de un multiplicador abierto con su último precio, en centavos redondeados al par:
- * el que suma la curva de resultados para la caída máxima (§5). `null` si está cerrada o es un
+ * el que suma la curva de resultados para la caída máxima (§5). Con velas de Deriv, el del extremo
+ * adverso de la última vela. `null` si está cerrada o es un
  * sube/baja, que solo cuenta al vencer.
  */
 export function positionMarkCents(state: PositionState): number | null {

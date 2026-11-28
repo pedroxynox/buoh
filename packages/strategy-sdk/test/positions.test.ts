@@ -68,7 +68,6 @@ interface PositionVector {
   data: 'deriv_candles' | 'ticks';
   entry: VectorTick | { open: string; start_ms: number };
   expected: {
-    open_close: VectorClose | null;
     open_mark_cents: number | null;
     steps: { close: VectorClose | null; mark_cents: number | null }[];
   };
@@ -132,7 +131,6 @@ function run(vector: PositionVector): PositionVector['expected'] {
   const persist = (state: PositionState): PositionState =>
     deepFreeze(JSON.parse(JSON.stringify(state)) as PositionState);
   let state: PositionState;
-  let openClose: PositionClose | null = null;
   if (vector.data === 'ticks') {
     const opened = openTickPosition(
       deepFreeze({
@@ -144,8 +142,7 @@ function run(vector: PositionVector): PositionVector['expected'] {
         stake: vector.stake,
       }),
     );
-    state = persist(opened.state);
-    openClose = opened.close;
+    state = persist(opened);
   } else {
     const entry = vector.entry as { open: string; start_ms: number };
     state = persist(
@@ -186,7 +183,7 @@ function run(vector: PositionVector): PositionVector['expected'] {
     state = persist(result.state);
     return { close: toVector(result.close), mark_cents: positionMarkCents(state) };
   });
-  return { open_close: toVector(openClose), open_mark_cents: openMark, steps };
+  return { open_mark_cents: openMark, steps };
 }
 
 // Sin red, reloj real ni azar (ADR-0022 §12, como F1-VECTOR-001).
@@ -228,9 +225,7 @@ describe('vectores de los importes y la posición', () => {
         new Set(['MULTUP', 'MULTDOWN', 'CALL', 'PUT']),
       );
       const causes = vectors.flatMap((vector) =>
-        [vector.expected.open_close, ...vector.expected.steps.map((step) => step.close)]
-          .filter((close) => close !== null)
-          .map((close) => close.cause),
+        vector.expected.steps.flatMap((step) => (step.close === null ? [] : [step.close.cause])),
       );
       expect(new Set(causes)).toEqual(
         new Set(['exit_rule', 'expiry', 'max_duration', 'stop_loss', 'stop_out', 'take_profit']),
@@ -309,7 +304,7 @@ const openTicks = (contract: Contract, costs = { commission: '0.36' } as const) 
     latencyMs: 1000,
     purchaseMs: 1000,
     stake: '10',
-  }).state;
+  });
 
 describe('importes de punto fijo', () => {
   it('son exactos en el producto y rechazan lo que no cabe', () => {
@@ -343,8 +338,18 @@ describe('la posición rechaza lo que no puede pasar', () => {
     expect(() => openTickPosition({ ...base, purchaseMs: 2001 })).toThrow(/compra/u);
     expect(() => openTickPosition({ ...base, costs: { payout: '19' } })).toThrow(/comisión/u);
     expect(() => openTickPosition({ ...base, costs: { commission: '-0.1' } })).toThrow(RangeError);
+    expect(() => openTickPosition({ ...base, costs: { commission: '10' } })).toThrow(/menor/u);
     expect(() => openTickPosition({ ...base, entry: tick('0', 2000) })).toThrow(RangeError);
     expect(() => openTickPosition({ ...base, latencyMs: -1 })).toThrow(RangeError);
+    expect(() => openTickPosition({ ...base, stake: '10.5' })).toThrow(/entero/u);
+    expect(() => openTickPosition({ ...base, stake: '0' })).toThrow(/entero/u);
+    // Deriv no vende un stop loss que no pasa de la comisión (`validation_params` de `proposal`).
+    expect(() =>
+      openTickPosition({ ...base, contract: multiplier({ stop_loss: '0.36' }) }),
+    ).toThrow(/stop loss/u);
+    expect(
+      positionMarkCents(openTickPosition({ ...base, contract: multiplier({ stop_loss: '0.37' }) })),
+    ).toBe(-36);
     expect(() =>
       openTickPosition({ ...base, contract: callput(15, 's'), costs: { commission: '1' } }),
     ).toThrow(/pago/u);
@@ -401,6 +406,15 @@ describe('la posición rechaza lo que no puede pasar', () => {
     expect(() => stepCandlePosition(state, { ...candle, high: '2650.4' })).toThrow(/máximo/u);
     expect(() => stepCandlePosition(state, { ...candle, open: '2650.2' })).toThrow(/entrada/u);
     expect(() => sellCandlePositionAtClose(state)).toThrow(RangeError);
+    expect(() =>
+      openCandlePosition({
+        contract: multiplier({ stop_loss: '0.2' }),
+        costs: { commission: '0.2' },
+        entryOpen: '2650.1',
+        entryStartMs: 60_000,
+        stake: '10',
+      }),
+    ).toThrow(/stop loss/u);
     const next = stepCandlePosition(state, candle).state;
     expect(() => stepCandlePosition(next, { ...candle, endMs: 119_000, startMs: 59_000 })).toThrow(
       /orden/u,
