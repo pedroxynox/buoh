@@ -101,7 +101,12 @@ describe('vectores de StrategyDefinition', () => {
       for (const item of errors) {
         expect(item.message.length).toBeGreaterThan(0);
       }
-      expect(strategyDefinitionSchema.safeParse(vector.input).success).toBe(false);
+      const parsed = strategyDefinitionSchema.safeParse(vector.input);
+      expect(parsed.success).toBe(false);
+      const issues = (parsed.error?.issues ?? []).map(
+        (issue) => `${issue.message.split(':')[0] ?? ''} ${JSON.stringify(issue.path)}`,
+      );
+      expect(new Set(issues).size).toBe(issues.length);
     },
   );
 

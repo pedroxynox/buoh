@@ -775,6 +775,16 @@ function compareErrors(left: StrategyDefinitionError, right: StrategyDefinitionE
   return left.code < right.code ? -1 : left.code > right.code ? 1 : 0;
 }
 
+/**
+ * Una misma regla rota dos veces en el mismo sitio, como una condición desordenada y con los lados
+ * cambiados, da un solo error.
+ */
+function uniqueErrors(errors: readonly StrategyDefinitionError[]): StrategyDefinitionError[] {
+  return [
+    ...new Map(errors.map((item) => [`${item.code} ${JSON.stringify(item.path)}`, item])).values(),
+  ];
+}
+
 /** El identificador de una versión: `sha256:` y el SHA-256 de su JCS entera (§9). */
 export function deriveStrategyVersionId(definition: StrategyDefinition): `sha256:${string}` {
   return `sha256:${sha256Hex(canonicalJson(definition))}`;
@@ -795,12 +805,7 @@ export function validateStrategyDefinition(input: unknown): StrategyDefinitionVa
     ? semanticErrors(parsed.data)
     : structuralErrors(parsed.error.issues, input);
   if (errors.length > 0 || !parsed.success) {
-    // Una misma regla rota dos veces en el mismo sitio, como una condición desordenada y con los
-    // lados cambiados, da un solo error.
-    const unique = new Map(
-      errors.map((item) => [`${item.code} ${JSON.stringify(item.path)}`, item]),
-    );
-    return { errors: [...unique.values()].sort(compareErrors), ok: false };
+    return { errors: uniqueErrors(errors).sort(compareErrors), ok: false };
   }
   return { definition: parsed.data, ok: true, version_id: deriveStrategyVersionId(parsed.data) };
 }
@@ -808,7 +813,7 @@ export function validateStrategyDefinition(input: unknown): StrategyDefinitionVa
 /** El esquema runtime: la forma y las reglas entre campos, con el código de cada error en su mensaje. */
 export const strategyDefinitionSchema = strategyDefinitionStructuralSchema.superRefine(
   (value, context) => {
-    for (const item of semanticErrors(value)) {
+    for (const item of uniqueErrors(semanticErrors(value))) {
       context.addIssue({
         code: 'custom',
         message: `${item.code}: ${item.message}`,

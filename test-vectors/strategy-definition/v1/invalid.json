@@ -8889,6 +8889,258 @@
     ]
   },
   {
+    "name": "description-right-to-left-mark",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce \u200f",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 0,
+              "operator": "crosses_below",
+              "right": {
+                "kind": "indicator",
+                "index": 1
+              }
+            },
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "invalid_format",
+        "path": [
+          "description"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "description-left-to-right-embedding",
+    "input": {
+      "strategy_schema_version": "1.0.0",
+      "indicator_library_version": "1.0.0",
+      "strategy_id": "busqueda-1f1f-c0",
+      "semantic_version": "1.0.0",
+      "responsible": "01934f3a-7b2c-7d4e-8f60-0a1b2c3d4e5f",
+      "origin": {
+        "kind": "research_engine",
+        "search_id": "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+        "candidate_number": 0
+      },
+      "description": "Cruce \u202ax",
+      "market": {
+        "source": "deriv_options",
+        "symbol": "R_100",
+        "data": "ticks",
+        "quality_profile_id": "deriv_options-publication-v1-R_100",
+        "quality_profile_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "timeframe": "1m"
+      },
+      "indicators": [
+        {
+          "indicator": "ema",
+          "n": 21
+        },
+        {
+          "indicator": "ema",
+          "n": 9
+        },
+        {
+          "indicator": "rsi",
+          "n": 14
+        }
+      ],
+      "side": "up",
+      "entry": {
+        "groups": [
+          [
+            {
+              "left": 0,
+              "operator": "crosses_below",
+              "right": {
+                "kind": "indicator",
+                "index": 1
+              }
+            },
+            {
+              "left": 2,
+              "operator": "lt",
+              "right": {
+                "kind": "constant",
+                "value": "70"
+              }
+            }
+          ]
+        ],
+        "hours_utc": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "weekdays_utc": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "exit": {
+        "conditions": [
+          {
+            "left": 0,
+            "operator": "crosses_above",
+            "right": {
+              "kind": "indicator",
+              "index": 1
+            }
+          }
+        ]
+      },
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 3600000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": "7.5"
+      },
+      "position": {
+        "currency": "USD",
+        "initial_capital": "1000",
+        "stake": "10",
+        "max_drawdown_percent": "50"
+      },
+      "signals": {
+        "signal_expiry_ms": 5000,
+        "min_seconds_between_entries": 60,
+        "max_entries_per_day": 20
+      },
+      "data_policy": {
+        "max_data_age_ms": 5000
+      },
+      "execution_mode": "disabled",
+      "promoted_from": null
+    },
+    "errors": [
+      {
+        "code": "invalid_format",
+        "path": [
+          "description"
+        ]
+      }
+    ]
+  },
+  {
     "name": "description-isolate",
     "input": {
       "strategy_schema_version": "1.0.0",

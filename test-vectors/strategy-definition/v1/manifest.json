@@ -2,9 +2,9 @@
   "canonicalization": "RFC8785",
   "files": [
     {
-      "bytes": 214024,
+      "bytes": 219724,
       "path": "invalid.json",
-      "sha256": "529eb4b430bdbd3f584393a4c1524ee96ba7a6d8ae88ae9faa614ce5b7184b74"
+      "sha256": "df838c747eb800a9a7bd2b610e5b5c2c1847c5bf1c32177936099317eb3dbaf7"
     },
     {
       "bytes": 13205,
