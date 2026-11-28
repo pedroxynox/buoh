@@ -359,11 +359,39 @@ describe('las entradas', () => {
       expect(() => decimalToBinary64(value), value).toThrow(RangeError);
     }
     const state = initialIndicatorState({ indicator: 'sma', n: 2 });
-    for (const close of [-0, Number.POSITIVE_INFINITY, Number.NaN]) {
-      expect(() =>
-        stepIndicator({ indicator: 'sma', n: 2 }, state, { close, high: 1, instantMs: 0, low: 1 }),
-      ).toThrow(RangeError);
+    const point = { close: 1, high: 1, instantMs: 0, low: 1 };
+    for (const value of [-0, Number.POSITIVE_INFINITY, Number.NaN]) {
+      for (const field of ['close', 'high', 'low'] as const) {
+        expect(
+          () => stepIndicator({ indicator: 'sma', n: 2 }, state, { ...point, [field]: value }),
+          field,
+        ).toThrow(RangeError);
+      }
     }
+  });
+
+  it('rechaza un cálculo que deja en el estado un valor no finito o -0', () => {
+    const run = (indicator: StrategyIndicator, closes: number[]): void => {
+      let state = initialIndicatorState(indicator);
+      for (const close of closes) {
+        state = stepIndicator(indicator, state, {
+          close,
+          high: close,
+          instantMs: 0,
+          low: close,
+        }).state;
+      }
+    };
+    // El desborde de la media y del movimiento, y el -0 de una media de -5e-324 y 0.
+    expect(() => {
+      run({ indicator: 'ema', n: 2 }, [1e308, 1e308]);
+    }).toThrow(RangeError);
+    expect(() => {
+      run({ indicator: 'rsi', n: 2 }, [-1e308, 1e308]);
+    }).toThrow(RangeError);
+    expect(() => {
+      run({ indicator: 'ema', n: 2 }, [-5e-324, 0]);
+    }).toThrow(RangeError);
   });
 
   it('rechaza el estado de otro indicador', () => {

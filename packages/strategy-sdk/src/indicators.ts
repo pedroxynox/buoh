@@ -298,7 +298,26 @@ export function stepIndicator(
     throw new RangeError('El punto tiene un precio no finito o -0.');
   }
   const step = advance(indicator, state, point);
+  if ((step.value !== null && !isUsable(step.value)) || !bodyIsUsable(step.state)) {
+    throw new RangeError('El indicador dio un valor no finito o -0.');
+  }
   return { state: { ...step.state, indicator: key }, value: step.value };
+}
+
+/** Todos los números del estado son finitos y distintos de `-0`, para que JSON los guarde. */
+function bodyIsUsable(body: IndicatorBody): boolean {
+  switch (body.kind) {
+    case 'stateless':
+      return true;
+    case 'window':
+      return body.values.every(isUsable);
+    case 'ema':
+      return body.seed.every(isUsable) && (body.level === null || isUsable(body.level));
+    case 'wilder':
+      return [...body.seedUp, ...body.seedDown, body.previous, body.up, body.down].every(
+        (value) => value === null || isUsable(value),
+      );
+  }
 }
 
 function advance(
