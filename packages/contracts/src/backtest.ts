@@ -104,6 +104,10 @@ const STAKE_CENTS = 1000;
 const HOUR_MS = 3_600_000;
 
 const prefixedSha256Schema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
+/** Una secuencia de `dataset_log_ranges`, como `R_100` o `lotes_cotizaciones`. */
+const sequenceSchema = z.string().regex(/^[A-Za-z0-9_]{1,64}$/u);
+/** El número de un log de su secuencia, como en `dataset_log_ranges`. */
+const logNumberSchema = z.number().int().min(1).max(999_999);
 const centsSchema = z.number().int().min(-Number.MAX_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER);
 /** Una fracción no negativa con 6 decimales exactos, como `12.500000`. */
 const fixed6Schema = z.string().regex(/^(?:0|[1-9][0-9]{0,14})\.[0-9]{6}$/u);
@@ -136,7 +140,7 @@ export const backtestSpecStructuralSchema = z
     series: z
       .array(
         z.strictObject({
-          sequence: z.string().regex(/^[A-Za-z0-9_]{1,64}$/u),
+          sequence: sequenceSchema,
           dataset_ids: z.array(datasetIdSchema).min(1).max(10_000),
         }),
       )
@@ -202,11 +206,14 @@ export function deriveBacktestId(spec: BacktestSpec): `sha256:${string}` {
 }
 
 /**
- * El dato de la serie que decidió o con el que entra o sale una posición: su dataset, el
- * `observation_id` de su frame y su hora de la fuente (la de un tick; de una vela, su apertura).
+ * El dato de la serie que decidió o con el que entra o sale una posición: su secuencia, su log, el
+ * `observation_id` de su frame y su hora de la fuente (la de un tick; de una vela, su apertura). Se
+ * nombra por el log, no por el dataset, para que valga igual en `shadow`, que decide antes de que
+ * se publique el dataset (ADR-0026 §2 y §7).
  */
 const placeSchema = z.strictObject({
-  dataset_id: datasetIdSchema,
+  sequence: sequenceSchema,
+  log_number: logNumberSchema,
   observation_id: uuidV7Schema,
   source_time_utc: utcTimestampMsSchema,
 });
@@ -233,6 +240,8 @@ export const backtestDecisionStructuralSchema = z
       ...decisionCommon,
       decision: z.literal('entrar'),
       cause: z.literal('entry_rule'),
+      /** La abre siempre un dato: un tick o el cierre de una vela. */
+      place: placeSchema,
       contract: strategyContractSchema,
       stake: z.literal(STAKE),
       /** La hora de la fuente del tick que decidió más la latencia (§6). */
@@ -251,6 +260,7 @@ export const backtestDecisionStructuralSchema = z
       decision: z.literal('liquidar'),
       cause: z.enum(BACKTEST_CLOSE_CAUSES),
       position_number: nonNegativeIntegerSchema,
+      contract: strategyContractSchema,
       result_cents: centsSchema,
     }),
     z.strictObject({
@@ -287,7 +297,7 @@ export const backtestDecisionSchema = backtestDecisionStructuralSchema.superRefi
       }
     }
     if (value.decision === 'entrar') {
-      if (value.place !== null && value.purchase_utc < value.place.source_time_utc) {
+      if (value.purchase_utc < value.place.source_time_utc) {
         context.addIssue({
           code: 'custom',
           message: 'La compra no es anterior al tick que decidió.',
@@ -341,7 +351,8 @@ export const backtestPositionStructuralSchema = z
       /** La cotización más reciente anterior a la entrada, o la primera, aplicada hacia atrás. */
       basis: z.enum(['quote', 'first_quote_backwards']),
       quote: z.strictObject({
-        dataset_id: datasetIdSchema,
+        sequence: sequenceSchema,
+        log_number: logNumberSchema,
         observation_id: uuidV7Schema,
         received_at_utc: utcTimestampMsSchema,
       }),
@@ -571,7 +582,7 @@ const environmentSchema = z.strictObject({
 
 /**
  * `BacktestResult` 1.0.0 (ADR-0024 §10): el manifiesto, en JCS y de 1 MiB como mucho, con sus
- * métricas, sus supuestos y sus partes. Su hash lógico es el de su JCS sin `environment`
+ * métricas, sus supuestos y sus partes. Su hash lógico deja fuera `environment` y los bytes del gzip
  * (`deriveBacktestResultLogicalSha256`).
  */
 export const backtestResultStructuralSchema = z
@@ -703,6 +714,12 @@ export const backtestResultSchema = backtestResultStructuralSchema.superRefine((
       ]);
     }
   }
+  if (
+    metrics.trade_count === 0 &&
+    (metrics.commissions_paid_cents !== 0 || metrics.mean_quoted_payout_cents !== null)
+  ) {
+    issue('Sin operaciones no hay comisiones ni pago medio.', ['metrics', 'trade_count']);
+  }
   if ((metrics.hit_rate_percent === null) !== (metrics.trade_count === 0)) {
     issue('hit_rate_percent es null solo sin operaciones.', ['metrics', 'hit_rate_percent']);
   }
@@ -744,10 +761,27 @@ export const backtestResultSchema = backtestResultStructuralSchema.superRefine((
 
 export type BacktestResult = z.infer<typeof backtestResultStructuralSchema>;
 
-/** El hash lógico de un manifiesto: el SHA-256 de su JCS sin `environment` (§7). */
+/**
+ * El hash lógico de un manifiesto (§7): el SHA-256 de su JCS sin `environment` ni, en cada parte,
+ * `object_sha256` y `object_bytes`, que son del gzip y cambian con el compresor aunque las filas
+ * sean las mismas. Como el `dataset_id` de un dataset, solo depende de los hashes lógicos.
+ */
 export function deriveBacktestResultLogicalSha256(result: BacktestResult): string {
   const logical = Object.fromEntries(
-    Object.entries(result).filter(([key]) => key !== 'environment'),
+    Object.entries(result)
+      .filter(([key]) => key !== 'environment')
+      .map(([key, value]) => [
+        key,
+        key === 'parts'
+          ? result.parts.map((part) =>
+              Object.fromEntries(
+                Object.entries(part).filter(
+                  ([field]) => field !== 'object_sha256' && field !== 'object_bytes',
+                ),
+              ),
+            )
+          : value,
+      ]),
   ) as JsonValue;
   return sha256Hex(canonicalJson(logical));
 }

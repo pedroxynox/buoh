@@ -22,7 +22,10 @@
     "indicators_from_utc": "2026-11-01T00:00:00.000Z",
     "window_from_utc": "2026-11-02T00:00:00.000Z",
     "window_to_utc": "2026-11-09T00:00:00.000Z",
-    "execution": { "latency_ms": 1000, "cost_scale": "1" },
+    "execution": {
+      "latency_ms": 1000,
+      "cost_scale": "1"
+    },
     "versions": {
       "backtest": "backtest-1.0.0",
       "data_view": "data-view-1.0.0",
@@ -38,7 +41,8 @@
       "cause": "entry_rule",
       "instant_utc": "2026-11-02T00:00:10.037Z",
       "place": {
-        "dataset_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "sequence": "R_100",
+        "log_number": 1,
         "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e5f",
         "source_time_utc": "2026-11-02T00:00:10.000Z"
       },
@@ -62,13 +66,21 @@
       "cause": "stop_loss",
       "instant_utc": "2026-11-02T00:00:30.040Z",
       "place": {
-        "dataset_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "sequence": "R_100",
+        "log_number": 1,
         "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e60",
         "source_time_utc": "2026-11-02T00:00:30.000Z"
       },
       "quality_profile_id": "deriv-r100-live",
       "quality_profile_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
       "position_number": 0,
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 60000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": null
+      },
       "result_cents": -500
     },
     {
@@ -81,7 +93,8 @@
       "instant_utc": "2026-11-02T00:01:00.040Z",
       "last_instant_utc": "2026-11-02T00:01:04.040Z",
       "place": {
-        "dataset_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "sequence": "R_100",
+        "log_number": 1,
         "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e61",
         "source_time_utc": "2026-11-02T00:01:00.000Z"
       },
@@ -95,7 +108,8 @@
       "cause": "exit_rule",
       "instant_utc": "2026-11-02T00:02:00.040Z",
       "place": {
-        "dataset_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "sequence": "R_100",
+        "log_number": 2,
         "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e62",
         "source_time_utc": "2026-11-02T00:02:00.000Z"
       },
@@ -120,7 +134,8 @@
       "cause": "data_policy_met",
       "instant_utc": "2026-11-02T00:03:09.040Z",
       "place": {
-        "dataset_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "sequence": "R_100",
+        "log_number": 2,
         "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e63",
         "source_time_utc": "2026-11-02T00:03:09.000Z"
       },
@@ -145,7 +160,8 @@
       "purchase_utc": "2026-11-02T00:00:11.000Z",
       "entry": {
         "place": {
-          "dataset_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "sequence": "R_100",
+          "log_number": 1,
           "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e64",
           "source_time_utc": "2026-11-02T00:00:12.000Z"
         },
@@ -154,7 +170,8 @@
       "exit": {
         "cause": "stop_loss",
         "place": {
-          "dataset_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "sequence": "R_100",
+          "log_number": 1,
           "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e60",
           "source_time_utc": "2026-11-02T00:00:30.000Z"
         },
@@ -168,7 +185,8 @@
         "applied": "0.36",
         "basis": "quote",
         "quote": {
-          "dataset_id": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "sequence": "lotes_cotizaciones",
+          "log_number": 1,
           "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e65",
           "received_at_utc": "2026-11-01T23:55:00.000Z"
         }
@@ -183,12 +201,19 @@
       "position_number": 1,
       "entry_decision_number": 6,
       "close_decision_number": 7,
-      "contract": { "contract_type": "CALL", "duration": { "duration": 5, "duration_unit": "t" } },
+      "contract": {
+        "contract_type": "CALL",
+        "duration": {
+          "duration": 5,
+          "duration_unit": "t"
+        }
+      },
       "stake": "10",
       "purchase_utc": "2026-11-03T00:00:11.000Z",
       "entry": {
         "place": {
-          "dataset_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "sequence": "R_100",
+          "log_number": 2,
           "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e66",
           "source_time_utc": "2026-11-03T00:00:12.000Z"
         },
@@ -197,7 +222,8 @@
       "exit": {
         "cause": "expiry",
         "place": {
-          "dataset_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "sequence": "R_100",
+          "log_number": 2,
           "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e67",
           "source_time_utc": "2026-11-03T00:00:22.000Z"
         },
@@ -211,7 +237,8 @@
         "applied": "19.5",
         "basis": "first_quote_backwards",
         "quote": {
-          "dataset_id": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "sequence": "lotes_cotizaciones",
+          "log_number": 1,
           "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e68",
           "received_at_utc": "2026-11-05T10:00:00.000Z"
         }
@@ -228,11 +255,22 @@
     "status": "completed",
     "error_code": null,
     "metrics": {
-      "sample": { "event_count": 1000, "used_ticks": 900, "used_candles": 0, "days_with_data": 7 },
+      "sample": {
+        "event_count": 1000,
+        "used_ticks": 900,
+        "used_candles": 0,
+        "days_with_data": 7
+      },
       "trade_count": 2,
       "trades_by_close_cause": [
-        { "cause": "expiry", "count": 1 },
-        { "cause": "stop_loss", "count": 1 }
+        {
+          "cause": "expiry",
+          "count": 1
+        },
+        {
+          "cause": "stop_loss",
+          "count": 1
+        }
       ],
       "net_result_cents": 450,
       "net_result_percent": "0.450000",
@@ -261,18 +299,39 @@
         "largest_cents": -500
       },
       "hit_rate_percent": "50.000000",
-      "omitted_by_cause": [{ "cause": "signal_pending", "count": 3 }],
-      "stopped_ms_by_cause": [{ "cause": "data_stale", "ms": 4040 }],
+      "omitted_by_cause": [
+        {
+          "cause": "signal_pending",
+          "count": 3
+        }
+      ],
+      "stopped_ms_by_cause": [
+        {
+          "cause": "data_stale",
+          "ms": 4040
+        }
+      ],
       "estimated_positions": 0,
       "window_close_positions": 0,
       "stale_quote_positions": 0,
       "cost_assumption_positions": 1,
       "offer_assumption_positions": 1,
-      "dataset_incidents": [{ "incident_type": "delivery_delayed", "count": 2 }]
+      "dataset_incidents": [
+        {
+          "incident_type": "delivery_delayed",
+          "count": 2
+        }
+      ]
     },
     "assumptions": [
-      { "assumption": "first_offer_backwards", "decisions": 2 },
-      { "assumption": "first_quote_backwards", "decisions": 2 }
+      {
+        "assumption": "first_offer_backwards",
+        "decisions": 2
+      },
+      {
+        "assumption": "first_quote_backwards",
+        "decisions": 2
+      }
     ],
     "parts": [
       {
@@ -299,8 +358,14 @@
       "node_version": "v24.22.0",
       "cpu_model": "AMD EPYC Processor",
       "packages": [
-        { "name": "@buoh/backtest", "version": "0.0.0" },
-        { "name": "@buoh/contracts", "version": "0.0.0" }
+        {
+          "name": "@buoh/backtest",
+          "version": "0.0.0"
+        },
+        {
+          "name": "@buoh/contracts",
+          "version": "0.0.0"
+        }
       ]
     }
   },
@@ -316,7 +381,12 @@
       "runner": "vps",
       "node_version": "v24.22.0",
       "cpu_model": "AMD EPYC Processor",
-      "packages": [{ "name": "@buoh/backtest", "version": "0.0.0" }]
+      "packages": [
+        {
+          "name": "@buoh/backtest",
+          "version": "0.0.0"
+        }
+      ]
     }
   },
   "view": {

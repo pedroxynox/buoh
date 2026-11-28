@@ -97,6 +97,31 @@ function expectRuntimeOnly(kind: Kind, value: unknown, label: string): void {
 }
 
 const [tickPosition, callputPosition] = fixtures.positions;
+
+/** Las métricas de una ventana sin operaciones. */
+const noOutcome = {
+  count: 0,
+  sum_cents: 0,
+  mean_cents: null,
+  median_cents: null,
+  largest_cents: null,
+};
+const zeroTrades = {
+  trade_count: 0,
+  trades_by_close_cause: [],
+  net_result_cents: 0,
+  net_result_percent: '0.000000',
+  commissions_paid_cents: 0,
+  mean_quoted_payout_cents: null,
+  max_drawdown: { percent: '0.000000', peak_utc: null, trough_utc: null, recovery_ms: null },
+  exposure_percent: '0.000000',
+  trades_per_day: '0.000000',
+  wins: noOutcome,
+  losses: noOutcome,
+  hit_rate_percent: null,
+  cost_assumption_positions: 0,
+  offer_assumption_positions: 0,
+};
 const result = fixtures.result;
 
 describe('BacktestSpec 1.0.0 (ADR-0024 §1 y §7)', () => {
@@ -191,6 +216,14 @@ describe('BacktestDecision 1.0.0 (ADR-0024 §10)', () => {
     expectStructural('decision', { ...entrar, decision: 'vender' }, 'clase');
     expectStructural('decision', { ...omitir, count: 0 }, 'sin omisiones');
     expectStructural('decision', { ...entrar, stake: '20' }, 'apuesta');
+    expectStructural('decision', { ...entrar, place: null }, 'entrar sin dato');
+    expectStructural(
+      'decision',
+      edit(liquidar, (copy) => {
+        delete copy['contract'];
+      }),
+      'liquidar sin contrato',
+    );
   });
 
   it('rechaza en runtime los instantes inconsistentes', () => {
@@ -326,7 +359,7 @@ describe('BacktestResult 1.0.0 (ADR-0024 §7 y §10)', () => {
     expectValid('result', result, 'completo');
     expectValid('result', fixtures.failed, 'fallido');
     expect(deriveBacktestResultLogicalSha256(result)).toBe(
-      '2f56cd5e0dc74a118db4ef078442f8f8bc7a1610fc65e6fd393568cea291f426',
+      '149654724457122405b163969f7fe5762580a7100d28983c5cbec5b5a3cfea96',
     );
     expect(deriveBacktestResultLogicalSha256(fixtures.failed)).toBe(
       '436acb5778004fd0c7023cc23f15eab9f902ec21379827071bb6cc542c68af65',
@@ -335,6 +368,19 @@ describe('BacktestResult 1.0.0 (ADR-0024 §7 y §10)', () => {
       Object.assign(at(copy, 'environment'), { runner: 'api', cpu_model: 'Otro' });
     }) as BacktestResult;
     expect(deriveBacktestResultLogicalSha256(elsewhere)).toBe(
+      deriveBacktestResultLogicalSha256(result),
+    );
+    // Otro compresor da otro gzip con las mismas filas: el hash lógico no cambia.
+    const recompressed = edit(result, (copy) => {
+      Object.assign(at(copy, 'parts', 0), { object_sha256: '9'.repeat(64), object_bytes: 1300 });
+    }) as BacktestResult;
+    expect(deriveBacktestResultLogicalSha256(recompressed)).toBe(
+      deriveBacktestResultLogicalSha256(result),
+    );
+    const otherRows = edit(result, (copy) => {
+      at(copy, 'parts', 0)['logical_sha256'] = '9'.repeat(64);
+    }) as BacktestResult;
+    expect(deriveBacktestResultLogicalSha256(otherRows)).not.toBe(
       deriveBacktestResultLogicalSha256(result),
     );
   });
@@ -395,6 +441,17 @@ describe('BacktestResult 1.0.0 (ADR-0024 §7 y §10)', () => {
       ['exposición de más del 100 %', metrics({ exposure_percent: '100.000001' })],
       ['estimadas de más', metrics({ estimated_positions: 3 })],
       [
+        'comisiones sin operaciones',
+        edit(fixtures.failed, (copy) => {
+          Object.assign(copy, {
+            status: 'completed',
+            error_code: null,
+            assumptions: [],
+            metrics: { ...result.metrics, ...zeroTrades, commissions_paid_cents: 36 },
+          });
+        }),
+      ],
+      [
         'caída sin máximo',
         metrics({
           max_drawdown: {
@@ -427,6 +484,17 @@ describe('BacktestResult 1.0.0 (ADR-0024 §7 y §10)', () => {
       'una parte llena antes de la última',
     );
     expectValid('result', metrics({ exposure_percent: '100.000000' }), 'exposición del 100 %');
+    expectValid(
+      'result',
+      {
+        ...fixtures.failed,
+        status: 'completed',
+        error_code: null,
+        assumptions: [],
+        metrics: { ...result.metrics, ...zeroTrades },
+      },
+      'sin operaciones',
+    );
   });
 });
 

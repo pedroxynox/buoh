@@ -135,9 +135,14 @@
             "place": {
               "type": "object",
               "properties": {
-                "dataset_id": {
+                "sequence": {
                   "type": "string",
-                  "pattern": "^sha256:[0-9a-f]{64}$"
+                  "pattern": "^[A-Za-z0-9_]{1,64}$"
+                },
+                "log_number": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 999999
                 },
                 "observation_id": {
                   "type": "string",
@@ -150,7 +155,8 @@
                 }
               },
               "required": [
-                "dataset_id",
+                "sequence",
+                "log_number",
                 "observation_id",
                 "source_time_utc"
               ],
@@ -185,9 +191,14 @@
             "place": {
               "type": "object",
               "properties": {
-                "dataset_id": {
+                "sequence": {
                   "type": "string",
-                  "pattern": "^sha256:[0-9a-f]{64}$"
+                  "pattern": "^[A-Za-z0-9_]{1,64}$"
+                },
+                "log_number": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 999999
                 },
                 "observation_id": {
                   "type": "string",
@@ -200,7 +211,8 @@
                 }
               },
               "required": [
-                "dataset_id",
+                "sequence",
+                "log_number",
                 "observation_id",
                 "source_time_utc"
               ],
@@ -264,9 +276,14 @@
             "quote": {
               "type": "object",
               "properties": {
-                "dataset_id": {
+                "sequence": {
                   "type": "string",
-                  "pattern": "^sha256:[0-9a-f]{64}$"
+                  "pattern": "^[A-Za-z0-9_]{1,64}$"
+                },
+                "log_number": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 999999
                 },
                 "observation_id": {
                   "type": "string",
@@ -279,7 +296,8 @@
                 }
               },
               "required": [
-                "dataset_id",
+                "sequence",
+                "log_number",
                 "observation_id",
                 "received_at_utc"
               ],
