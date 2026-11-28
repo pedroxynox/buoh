@@ -453,6 +453,12 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  packages/strategy-sdk:
+    dependencies:
+      '@buoh/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+
 packages:
 
   2g@1.0.1:

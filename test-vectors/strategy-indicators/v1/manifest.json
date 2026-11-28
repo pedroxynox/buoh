@@ -1,0 +1,17 @@
+{
+  "files": [
+    {
+      "bytes": 489506,
+      "path": "indicators.json",
+      "sha256": "8d102d2b60fc291e8dc808033452fac2d9b068bf45b02ae0d764b33abf2153bb"
+    },
+    {
+      "bytes": 114193,
+      "path": "series.json",
+      "sha256": "fdc52ac49d32e149c5252679ae0afae0ef97298146c43ed719541c60f283d8a0"
+    }
+  ],
+  "indicator_library_version": "1.0.0",
+  "schema_version": "1.0.0",
+  "vector_id": "strategy-indicators-v1"
+}

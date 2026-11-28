@@ -55,6 +55,12 @@
       "requires_any": ["docs/arquitectura/adr/0019-api-cuentas-y-auditoria.md"]
     },
     {
+      "id": "strategy-sdk",
+      "description": "El modelo de estrategia, sus indicadores y su evaluador deben seguir su ADR.",
+      "includes": ["packages/strategy-sdk/**"],
+      "requires_any": ["docs/arquitectura/adr/0022-modelo-de-estrategia.md"]
+    },
+    {
       "id": "infrastructure",
       "description": "Persistencia y despliegue requieren revisar arquitectura u operación.",
       "includes": ["infra/**"],
