@@ -1,14 +1,14 @@
 {
   "files": [
     {
-      "bytes": 479503,
+      "bytes": 489506,
       "path": "indicators.json",
-      "sha256": "b069fcfbf0fe3e7da17474ec181bd25fc003fb2c03d836e36dc3f46e248f3410"
+      "sha256": "8d102d2b60fc291e8dc808033452fac2d9b068bf45b02ae0d764b33abf2153bb"
     },
     {
-      "bytes": 107891,
+      "bytes": 114193,
       "path": "series.json",
-      "sha256": "b2b641f0a25fb2a35f85ce42010090324d0895521ffb4e146cf3772f86c447aa"
+      "sha256": "fdc52ac49d32e149c5252679ae0afae0ef97298146c43ed719541c60f283d8a0"
     }
   ],
   "indicator_library_version": "1.0.0",

@@ -227,6 +227,81 @@ describe('vectores de la biblioteca de indicadores 1.0.0', () => {
   });
 });
 
+describe('la semilla de Wilder', () => {
+  // `rsi` y `atr` empiezan con una media simple: en `magnitudes`, sumarla al revés o compensada
+  // cambia los bits (ADR-0022 §11). Esta copia de las dos fórmulas solo cambia cómo se suma.
+  type Sum = (values: readonly number[]) => number;
+  const leftToRight: Sum = (values) => values.reduce((total, value) => total + value);
+  const reversed: Sum = (values) => leftToRight([...values].reverse());
+  const kahan: Sum = (values) => {
+    let sum = 0;
+    let compensation = 0;
+    for (const value of values) {
+      const corrected = value - compensation;
+      const next = sum + corrected;
+      compensation = next - sum - corrected;
+      sum = next;
+    }
+    return sum;
+  };
+
+  function wilder(name: 'atr' | 'rsi', n: number, sum: Sum): (string | null)[] {
+    const points = pointsOf('magnitudes');
+    const up: number[] = [];
+    const down: number[] = [];
+    let gain = 0;
+    let loss = 0;
+    return points.map((point, index) => {
+      if (index === 0) {
+        return null;
+      }
+      const previous = points[index - 1]?.close ?? Number.NaN;
+      const moveUp =
+        name === 'rsi'
+          ? Math.max(point.close - previous, 0)
+          : Math.max(
+              point.high - point.low,
+              Math.abs(point.high - previous),
+              Math.abs(point.low - previous),
+            );
+      const moveDown = name === 'rsi' ? Math.max(previous - point.close, 0) : 0;
+      if (index < n) {
+        up.push(moveUp);
+        down.push(moveDown);
+        return null;
+      }
+      if (index === n) {
+        up.push(moveUp);
+        down.push(moveDown);
+        gain = sum(up) / n;
+        loss = sum(down) / n;
+      } else {
+        gain = (gain * (n - 1) + moveUp) / n;
+        loss = (loss * (n - 1) + moveDown) / n;
+      }
+      if (name === 'atr') {
+        return binary64Bits(gain);
+      }
+      if (gain === 0 && loss === 0) {
+        return binary64Bits(50);
+      }
+      return binary64Bits(loss === 0 ? 100 : 100 - 100 / (1 + gain / loss));
+    });
+  }
+
+  it.each([
+    ['rsi', 5],
+    ['rsi', 14],
+    ['atr', 5],
+    ['atr', 14],
+  ] as const)('%s(%i) cambia de bits con otra suma', (name, n) => {
+    const expected = cases.find((item) => item.name === `magnitudes/${name}_${String(n)}`)?.values;
+    expect(wilder(name, n, leftToRight)).toEqual(expected);
+    expect(wilder(name, n, reversed)).not.toEqual(expected);
+    expect(wilder(name, n, kahan)).not.toEqual(expected);
+  });
+});
+
 describe('el estado de un indicador', () => {
   it('no cambia al dar el paso siguiente', () => {
     for (const item of cases) {
@@ -279,8 +354,41 @@ describe('las entradas', () => {
     }
   });
 
+  it('rechaza -0 y lo que no cabe en binario64', () => {
+    for (const value of ['-0', '-0.0', `1${'0'.repeat(400)}`]) {
+      expect(() => decimalToBinary64(value), value).toThrow(RangeError);
+    }
+    const state = initialIndicatorState({ indicator: 'sma', n: 2 });
+    for (const close of [-0, Number.POSITIVE_INFINITY, Number.NaN]) {
+      expect(() =>
+        stepIndicator({ indicator: 'sma', n: 2 }, state, { close, high: 1, instantMs: 0, low: 1 }),
+      ).toThrow(RangeError);
+    }
+  });
+
   it('rechaza el estado de otro indicador', () => {
     const point = { close: 1, high: 1, instantMs: 0, low: 1 };
+    expect(() =>
+      stepIndicator(
+        { indicator: 'sma', n: 2 },
+        initialIndicatorState({ indicator: 'sma', n: 3 }),
+        point,
+      ),
+    ).toThrow(TypeError);
+    expect(() =>
+      stepIndicator(
+        { indicator: 'sma', n: 500 },
+        initialIndicatorState({ indicator: 'return', n: 499 }),
+        point,
+      ),
+    ).toThrow(TypeError);
+    expect(() =>
+      stepIndicator(
+        { indicator: 'bollinger_pct', k: '2', n: 20 },
+        initialIndicatorState({ indicator: 'bollinger_pct', k: '2.5', n: 20 }),
+        point,
+      ),
+    ).toThrow(TypeError);
     expect(() =>
       stepIndicator(
         { indicator: 'ema', n: 2 },

@@ -27,7 +27,7 @@ export interface IndicatorPoint {
 }
 
 /** Los valores que guarda cada indicador entre dos puntos. */
-export type IndicatorState =
+type IndicatorBody =
   | { readonly kind: 'stateless' }
   | { readonly kind: 'window'; readonly values: readonly number[] }
   | { readonly kind: 'ema'; readonly seed: readonly number[]; readonly level: number | null }
@@ -39,6 +39,14 @@ export type IndicatorState =
       readonly up: number | null;
       readonly down: number | null;
     };
+
+/** El estado, con el indicador al que pertenece, como `sma(20)` o `bollinger_pct(20, 2)`. */
+export type IndicatorState = IndicatorBody & { readonly indicator: string };
+
+interface BodyStep {
+  readonly state: IndicatorBody;
+  readonly value: number | null;
+}
 
 export interface IndicatorStep {
   readonly state: IndicatorState;
@@ -57,7 +65,27 @@ export function decimalToBinary64(value: string): number {
   if (!decimalStringSchema.safeParse(value).success) {
     throw new RangeError('El valor no es un decimal canónico.');
   }
-  return Number(value);
+  const number = Number(value);
+  if (!isUsable(number)) {
+    throw new RangeError('El decimal no cabe en binario64 o es -0.');
+  }
+  return number;
+}
+
+/** Finito y distinto de `-0`: así el estado se guarda en JSON sin perder nada. */
+function isUsable(value: number): boolean {
+  return Number.isFinite(value) && !Object.is(value, -0);
+}
+
+/** El nombre del indicador con sus parámetros, el que lleva su estado. */
+export function indicatorKey(indicator: StrategyIndicator): string {
+  if (!('n' in indicator)) {
+    return indicator.indicator;
+  }
+  if (indicator.indicator === 'bollinger_pct') {
+    return `bollinger_pct(${String(indicator.n)}, ${indicator.k})`;
+  }
+  return `${indicator.indicator}(${String(indicator.n)})`;
 }
 
 /** Los 64 bits de un binario64, en hexadecimal y en el orden de la red, como en los vectores. */
@@ -69,6 +97,10 @@ export function binary64Bits(value: number): string {
 
 /** El estado de un indicador antes de su primer punto. */
 export function initialIndicatorState(indicator: StrategyIndicator): IndicatorState {
+  return { ...initialBody(indicator), indicator: indicatorKey(indicator) };
+}
+
+function initialBody(indicator: StrategyIndicator): IndicatorBody {
   switch (indicator.indicator) {
     case 'price':
     case 'hour_utc':
@@ -136,7 +168,7 @@ function instantOf(point: IndicatorPoint): number {
   return point.instantMs;
 }
 
-function windowValues(state: IndicatorState): readonly number[] {
+function windowValues(state: IndicatorBody): readonly number[] {
   if (state.kind !== 'window') {
     throw new TypeError('El estado no es el de este indicador.');
   }
@@ -155,11 +187,11 @@ function simpleReturns(values: readonly number[]): number[] {
 /** `zscore` y `bollinger_pct`: indefinidos si los `n` valores son todos iguales (§3). */
 function deviationIndicator(
   indicator: Extract<StrategyIndicator, { indicator: 'bollinger_pct' | 'zscore' }>,
-  state: IndicatorState,
+  state: IndicatorBody,
   point: IndicatorPoint,
-): IndicatorStep {
+): BodyStep {
   const values = push(windowValues(state), point.close, indicator.n);
-  const next: IndicatorState = { kind: 'window', values };
+  const next: IndicatorBody = { kind: 'window', values };
   if (values.length < indicator.n || values.every((value) => value === values[0])) {
     return { state: next, value: null };
   }
@@ -180,9 +212,9 @@ function deviationIndicator(
  */
 function wilderIndicator(
   indicator: Extract<StrategyIndicator, { indicator: 'atr' | 'rsi' }>,
-  state: IndicatorState,
+  state: IndicatorBody,
   point: IndicatorPoint,
-): IndicatorStep {
+): BodyStep {
   if (state.kind !== 'wilder') {
     throw new TypeError('El estado no es el de este indicador.');
   }
@@ -206,7 +238,7 @@ function wilderIndicator(
   }
 
   // Con la media ya empezada, `up` y `down` siempre tienen valor.
-  let next: Extract<IndicatorState, { kind: 'wilder' }> & { up: number; down: number };
+  let next: Extract<IndicatorBody, { kind: 'wilder' }> & { up: number; down: number };
   if (state.up === null || state.down === null) {
     const seedUp = [...state.seedUp, up];
     const seedDown = [...state.seedDown, down];
@@ -258,6 +290,22 @@ export function stepIndicator(
   state: IndicatorState,
   point: IndicatorPoint,
 ): IndicatorStep {
+  const key = indicatorKey(indicator);
+  if (state.indicator !== key) {
+    throw new TypeError('El estado no es el de este indicador.');
+  }
+  if (!isUsable(point.close) || !isUsable(point.high) || !isUsable(point.low)) {
+    throw new RangeError('El punto tiene un precio no finito o -0.');
+  }
+  const step = advance(indicator, state, point);
+  return { state: { ...step.state, indicator: key }, value: step.value };
+}
+
+function advance(
+  indicator: StrategyIndicator,
+  state: IndicatorBody,
+  point: IndicatorPoint,
+): BodyStep {
   switch (indicator.indicator) {
     case 'price':
       return { state, value: point.close };
