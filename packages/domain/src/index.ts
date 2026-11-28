@@ -116,6 +116,23 @@ export {
   type LiveDerivationView,
 } from './live-derivation.js';
 export {
+  DATA_VIEW_RETENTION_LIMIT,
+  DATA_VIEW_UNUSED_FLAGS,
+  DATA_VIEW_VERSION,
+  DataView,
+  emptyDataViewState,
+  type DataViewEvent,
+  type DataViewGapBefore,
+  type DataViewHealth,
+  type DataViewPlace,
+  type DataViewRetention,
+  type DataViewState,
+  type DataViewSymbolState,
+  type DataViewTick,
+  type DataViewTickFlag,
+  type DataViewUnusedFlag,
+} from './data-view.js';
+export {
   appendSegmentStats,
   BATCH_SEGMENT_POLICY,
   EMPTY_SEGMENT_STATS,

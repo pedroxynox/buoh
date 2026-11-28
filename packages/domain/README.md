@@ -15,6 +15,7 @@ estado durable ─ deriveHealthReport ─▶ HealthReport
 vista del estado vivo ─ deriveLiveHealthReport ─▶ HealthReport
 estado vivo + source events ─ foldLiveDerivation ─▶ estado vivo nuevo ─ buildLiveDerivationCheckpoint ─▶
                                                     LiveDerivationCheckpoint
+source events de un log, uno a uno ─ DataView ─▶ ticks usables y cambios de salud, en su instante
 ```
 
 - `createPipelineProfile`: esquema de fuente y perfil de calidad firmados, con sus digests JCS. El perfil elige el conjunto de reglas (`RULE_SETS`): 1.0.0 para los vectores v1 y 2.0.0 para fuentes como Deriv, que mezclan varios tipos de mensaje. Un perfil con `purpose: "measurement"` no lleva umbrales y nunca publica (`publicationThresholds`; ADR-0012 §8); desde F1.5 deriva el estado vivo sin umbrales (`derivationThresholds`; ADR-0015 §2).
@@ -24,6 +25,7 @@ estado vivo + source events ─ foldLiveDerivation ─▶ estado vivo nuevo ─ 
 - `normalizeRawFrame`: valida el payload exacto y conserva el lexema numérico de la cotización. Con reglas 2.0.0, además separa los mensajes declarados en `non_tick_msg_types`, reconoce errores de la fuente y atribuye el símbolo por `echo_req`.
 - `deriveMarketData`: reglas del perfil (1.0.0 o 2.0.0) en orden de observación; recomputar desde source events persistidos da el mismo resultado. Con un perfil de medición, la continuidad tras un cierre no pedido solo la decide la historia, y `pendingGaps` da el rango de cada hueco pendiente (ADR-0015 §2).
 - `foldLiveDerivation`: derivación en pliegue del estado vivo desde un punto de control, o desde el log vacío, con las mismas reglas que `deriveMarketData` (`derivation-rules.ts`). `liveDerivationView` da lo que usan los lectores en vivo, y `buildLiveDerivationCheckpoint` y `liveCheckpointDigests`, el punto de control y sus SHA-256 ([ADR-0017](../../docs/arquitectura/adr/0017-punto-de-control-de-la-derivacion-en-vivo.md)).
+- `DataView`: la vista de cada instante (F2.7, [ADR-0024](../../docs/arquitectura/adr/0024-semantica-del-backtest.md) §2), sobre el mismo pliegue (`LiveFolder`): aplica los source events de un log de uno en uno y da cada tick usable, con sus marcas al llegar y `after_unrecorded`, y la salud del log cada vez que cambia. Retiene los ticks del flujo con la continuidad pendiente, hasta `DATA_VIEW_RETENTION_LIMIT`, y su estado se guarda en JSON (`state()`) para seguir después.
 - `deriveHealthReport`: salud del estado durable, con entradas opcionales para las condiciones del registro operativo, la conexión observada y una salud mínima; `unobservedHealthReport`, el informe cuando nada de lo observado es fiable (ADR-0015 §8). `deriveLiveHealthReport` da el mismo informe desde la vista del estado vivo (`liveDerivationView`), sin derivar el log entero (ADR-0017 §4).
 - `evaluateSourceLimit`: matriz de límites de ADR-0004 §7.
 - `evaluateSegmentRotation`: política `segment_policy_version = 1.0.0` (bytes, frames y ventana; ADR-0005 §5), evaluada antes de añadir cada source event.

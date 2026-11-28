@@ -75,7 +75,7 @@ function tickKey(tick: Pick<UnflaggedTick, 'event_time_utc' | 'observation_id'>)
  * su inicio + 1 ms y su fin − 1 ms (`pendingGapOf`; ADR-0020 §3). `pending` es la continuidad
  * pendiente antes de aplicarlo.
  */
-function resolvesExactly(
+export function resolvesExactly(
   event: { from_event_time_utc: string; symbol: string; to_event_time_utc: string },
   pending: Parameters<typeof pendingGapOf>[1] | undefined,
 ): boolean {

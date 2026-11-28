@@ -18,6 +18,7 @@ import {
   type LiveDerivationCheckpoint,
   type LiveDerivationState,
   type OperationalConditionEvent,
+  type SourceEvent,
 } from '@buoh/contracts';
 
 import {
@@ -36,8 +37,10 @@ import {
   type PendingGap,
   type RuleSink,
   type RuleState,
+  type WatermarkEntry,
 } from './derivation-rules.js';
-import { normalizeRawFrame, type UnflaggedTick } from './normalizer.js';
+import { type HealthLogFacts } from './health.js';
+import { normalizeRawFrame, type NormalizationResult, type UnflaggedTick } from './normalizer.js';
 import {
   CONTRACT_SCHEMA_VERSION,
   derivationThresholds,
@@ -260,143 +263,137 @@ function rangeEnd(symbol: string, pending: ContinuityEntry): string {
   return gap.to_event_time_utc;
 }
 
+/** Lo que deja aplicar un source event: el evento validado y, si es un frame, su normalización. */
+export interface FoldedEvent {
+  readonly event: SourceEvent;
+  readonly normalized: NormalizationResult | null;
+  /** Con un resultado de historia, la continuidad pendiente de su símbolo antes de aplicarlo. */
+  readonly pendingBefore: ContinuityEntry | undefined;
+}
+
 /**
- * Aplica los source events, en el orden del log, sobre un estado vivo y devuelve el nuevo. Falla
- * igual que `deriveMarketData` donde ella falla, y además con un resultado `partial` o
- * `unavailable` que no cubre exactamente el hueco pendiente de su símbolo (ADR-0017 §3, «Dominio de
- * la equivalencia»).
+ * El pliegue de un estado vivo, evento a evento (ADR-0017 §3). Lo usan `foldLiveDerivation` y la
+ * vista de cada instante (`data-view.ts`, ADR-0024 §2), que lee sus hechos después de cada evento.
  */
-export function foldLiveDerivation(
-  state: LiveDerivationState,
-  events: readonly unknown[],
-  profile: PipelineProfile,
-): LiveDerivationState {
-  const { maximum_event_gap_ms: maximumGap } = derivationThresholds(profile);
-  const working = new WorkingState(state);
+export class LiveFolder {
+  private readonly maximumGap: number | null;
+  private readonly working: WorkingState;
   /** Las aperturas vistas, por su ID, para comprobar que su resolución va después (ADR-0017 §3). */
-  const openings = new Map<string, OperationalConditionEvent>(
-    [...working.rules.openConnection.values(), ...working.rules.openGap.values()].map(
-      (condition) => [condition.condition_event_id, condition],
-    ),
-  );
-  let lastIncident: DataQualityIncident | null = null;
-  const sink: RuleSink = {
-    condition: (condition) => {
-      if (condition.action === 'opened') {
-        if (lastIncident === null || !condition.cause_refs.includes(lastIncident.incident_id)) {
-          throw new TypeError(`Apertura sin incidencia causal: ${condition.condition_key}.`);
+  private readonly openings: Map<string, OperationalConditionEvent>;
+  private lastIncident: DataQualityIncident | null = null;
+  private readonly sink: RuleSink;
+
+  constructor(
+    state: LiveDerivationState,
+    private readonly profile: PipelineProfile,
+  ) {
+    this.maximumGap = derivationThresholds(profile).maximum_event_gap_ms;
+    const working = new WorkingState(state);
+    this.working = working;
+    const openings = new Map<string, OperationalConditionEvent>(
+      [...working.rules.openConnection.values(), ...working.rules.openGap.values()].map(
+        (condition) => [condition.condition_event_id, condition],
+      ),
+    );
+    this.openings = openings;
+    this.sink = {
+      condition: (condition) => {
+        const lastIncident = this.lastIncident;
+        if (condition.action === 'opened') {
+          if (lastIncident === null || !condition.cause_refs.includes(lastIncident.incident_id)) {
+            throw new TypeError(`Apertura sin incidencia causal: ${condition.condition_key}.`);
+          }
+          openings.set(condition.condition_event_id, condition);
+          working.openIncidents.set(condition.condition_event_id, lastIncident);
+          return;
         }
-        openings.set(condition.condition_event_id, condition);
-        working.openIncidents.set(condition.condition_event_id, lastIncident);
-        return;
-      }
-      const opening = condition.cause_refs
-        .map((reference) => openings.get(reference))
-        .find((item) => item !== undefined);
-      if (opening === undefined) {
-        throw new TypeError(`Resolución sin apertura: ${condition.condition_key}.`);
-      }
-      // `validateConditionCausality` ordena por `occurred_at_utc` y después por
-      // `condition_event_id`: una resolución que quedaría antes que su apertura no la supera.
-      const order =
-        compareStrings(opening.occurred_at_utc, condition.occurred_at_utc) ||
-        compareStrings(opening.condition_event_id, condition.condition_event_id);
-      if (order >= 0) {
-        throw new TypeError(
-          `La resolución quedaría antes que su apertura: ${condition.condition_key}.`,
-        );
-      }
-      openings.delete(opening.condition_event_id);
-      working.openIncidents.delete(opening.condition_event_id);
-    },
-    incident: (incident) => {
-      lastIncident = incident;
-    },
-  };
-
-  const onTick = (tick: UnflaggedTick) => {
-    const { symbol } = tick;
-    const reference = canonicalOf(tick);
-    const watermark = working.rules.highWatermark.get(symbol);
-    if (watermark === undefined || tick.event_time_utc > watermark.eventTime) {
-      working.watermarkCanonical.set(symbol, reference);
-    } else if (tick.event_time_utc === watermark.eventTime) {
-      working.watermarkCanonical.set(
-        symbol,
-        canonicalFirst(working.watermarkCanonical.get(symbol) ?? null, reference),
-      );
-    }
-    applyTickWatermark(working.rules, tick);
-
-    const before = working.rules.pendingContinuity.get(symbol);
-    const tracking = working.gaps.get(symbol);
-    if (before !== undefined && tracking !== undefined) {
-      if (tick.event_time_utc === before.watermark) {
-        tracking.start_canonical_tick = canonicalFirst(tracking.start_canonical_tick, reference);
-      }
-      if (before.end !== undefined) {
-        const to = rangeEnd(symbol, before);
-        if (
-          tick.event_time_utc > to &&
-          (tracking.after_tick === null || tick.event_time_utc < tracking.after_tick.event_time_utc)
-        ) {
-          tracking.after_tick = {
-            event_time_utc: tick.event_time_utc,
-            observation_id: tick.observation_id,
-          };
+        const opening = condition.cause_refs
+          .map((reference) => openings.get(reference))
+          .find((item) => item !== undefined);
+        if (opening === undefined) {
+          throw new TypeError(`Resolución sin apertura: ${condition.condition_key}.`);
         }
-        if (tick.event_time_utc === shift(to, 1)) {
-          tracking.end_canonical_tick = canonicalFirst(tracking.end_canonical_tick, reference);
+        // `validateConditionCausality` ordena por `occurred_at_utc` y después por
+        // `condition_event_id`: una resolución que quedaría antes que su apertura no la supera.
+        const order =
+          compareStrings(opening.occurred_at_utc, condition.occurred_at_utc) ||
+          compareStrings(opening.condition_event_id, condition.condition_event_id);
+        if (order >= 0) {
+          throw new TypeError(
+            `La resolución quedaría antes que su apertura: ${condition.condition_key}.`,
+          );
         }
-      }
-    }
-
-    applyTickContinuity(working.rules, tick, maximumGap);
-    const after = working.rules.pendingContinuity.get(symbol);
-    if (after === undefined) {
-      working.gaps.delete(symbol);
-    } else if (before?.end === undefined && after.end !== undefined && tracking !== undefined) {
-      // Este tick fijó el fin del hueco.
-      const to = rangeEnd(symbol, after);
-      tracking.after_tick =
-        tick.event_time_utc > to
-          ? { event_time_utc: tick.event_time_utc, observation_id: tick.observation_id }
-          : null;
-      tracking.end_canonical_tick = tick.event_time_utc === shift(to, 1) ? reference : null;
-    }
-  };
-
-  const boundariesFor =
-    (event: HistoryRecoveryResult) =>
-    (pending: ContinuityEntry | undefined): GapBoundaries => {
-      const tracking = working.gaps.get(event.symbol);
-      if (
-        pending?.end === undefined ||
-        tracking === undefined ||
-        event.from_event_time_utc !== pendingGapOf(event.symbol, pending).from_event_time_utc ||
-        event.to_event_time_utc !== rangeEnd(event.symbol, pending)
-      ) {
-        throw new TypeError(
-          `El resultado ${event.event_id} no cubre exactamente el hueco pendiente de ${event.symbol} (ADR-0017 §3).`,
-        );
-      }
-      return {
-        ...(tracking.after_tick === null ? {} : { after: tracking.after_tick.observation_id }),
-        before: tracking.watermark_observation_id,
-      };
+        openings.delete(opening.condition_event_id);
+        working.openIncidents.delete(opening.condition_event_id);
+      },
+      incident: (incident) => {
+        this.lastIncident = incident;
+      },
     };
+  }
 
-  const seenIds = new Set<string>();
-  for (const value of events) {
+  /** La continuidad pendiente de un símbolo, si la hay. */
+  pendingOf(symbol: string): ContinuityEntry | undefined {
+    return this.working.rules.pendingContinuity.get(symbol);
+  }
+
+  /** El high-watermark de un símbolo, si tiene. */
+  watermarkOf(symbol: string): WatermarkEntry | undefined {
+    return this.working.rules.highWatermark.get(symbol);
+  }
+
+  /**
+   * Los hechos del log para su salud (`HealthLogFacts`), los de `liveDerivationView` del estado
+   * actual, y las condiciones abiertas, en orden de `condition_key`.
+   */
+  facts(): HealthLogFacts & { readonly openConditions: readonly OperationalConditionEvent[] } {
+    const { rules } = this.working;
+    const openConditions = [...rules.openConnection.values(), ...rules.openGap.values()].sort(
+      (left, right) => compareStrings(left.condition_key, right.condition_key),
+    );
+    let lastEventTimeUtc: string | null = null;
+    for (const entry of rules.highWatermark.values()) {
+      if (lastEventTimeUtc === null || entry.eventTime > lastEventTimeUtc) {
+        lastEventTimeUtc = entry.eventTime;
+      }
+    }
+    return {
+      connectedInLog: this.working.connectedInLog,
+      lastEventTimeUtc,
+      lastRaw: this.working.lastRaw,
+      openConditions,
+      openConditionTypes: [...new Set(openConditions.map((item) => item.condition_type))].sort(),
+      pendingContinuitySymbols: [...rules.pendingContinuity.keys()].sort(),
+    };
+  }
+
+  /** El estado vivo actual. */
+  state(): LiveDerivationState {
+    return this.working.toState();
+  }
+
+  /**
+   * Aplica un source event, en el orden del log. Con `seenIds`, falla con un ID ya visto en ese
+   * conjunto, como `deriveMarketData`, y lo añade.
+   */
+  apply(value: unknown, seenIds?: Set<string>): FoldedEvent {
+    const { profile, sink, working } = this;
     const event = sourceEventSchema.parse(value);
     assertProvenance(event, profile);
-    const id = sourceEventKey(event);
-    if (seenIds.has(id)) {
-      throw new TypeError(`ID de source event repetido: ${id}`);
+    if (seenIds !== undefined) {
+      const id = sourceEventKey(event);
+      if (seenIds.has(id)) {
+        throw new TypeError(`ID de source event repetido: ${id}`);
+      }
+      seenIds.add(id);
     }
-    seenIds.add(id);
-    lastIncident = null;
+    this.lastIncident = null;
 
+    let normalized: NormalizationResult | null = null;
+    const pendingBefore =
+      event.kind === 'history_recovery_result'
+        ? working.rules.pendingContinuity.get(event.symbol)
+        : undefined;
     switch (event.kind) {
       case 'raw_source_frame': {
         working.lastRaw = {
@@ -404,10 +401,10 @@ export function foldLiveDerivation(
           received_at_utc: event.received_at_utc,
         };
         working.connectedInLog = true;
-        const result = normalizeRawFrame(event, profile);
-        if (result.ok) {
-          onTick(result.tick);
-        } else if (result.reason === 'symbol_not_allowed') {
+        normalized = normalizeRawFrame(event, profile);
+        if (normalized.ok) {
+          this.onTick(normalized.tick);
+        } else if (normalized.reason === 'symbol_not_allowed') {
           working.symbolNotAllowedSeen = true;
         }
         break;
@@ -459,15 +456,109 @@ export function foldLiveDerivation(
         applyConnectionOpened(working.rules, event, profile, sink);
         break;
       case 'history_recovery_result':
-        applyHistoryRecovery(working.rules, event, profile, sink, boundariesFor(event));
+        applyHistoryRecovery(working.rules, event, profile, sink, this.boundariesFor(event));
         if (!working.rules.pendingContinuity.has(event.symbol)) {
           working.gaps.delete(event.symbol);
         }
         break;
     }
     working.lastEventConnectionId = event.connection_id;
+    return { event, normalized, pendingBefore };
   }
-  return working.toState();
+
+  private onTick(tick: UnflaggedTick): void {
+    const { working } = this;
+    const { symbol } = tick;
+    const reference = canonicalOf(tick);
+    const watermark = working.rules.highWatermark.get(symbol);
+    if (watermark === undefined || tick.event_time_utc > watermark.eventTime) {
+      working.watermarkCanonical.set(symbol, reference);
+    } else if (tick.event_time_utc === watermark.eventTime) {
+      working.watermarkCanonical.set(
+        symbol,
+        canonicalFirst(working.watermarkCanonical.get(symbol) ?? null, reference),
+      );
+    }
+    applyTickWatermark(working.rules, tick);
+
+    const before = working.rules.pendingContinuity.get(symbol);
+    const tracking = working.gaps.get(symbol);
+    if (before !== undefined && tracking !== undefined) {
+      if (tick.event_time_utc === before.watermark) {
+        tracking.start_canonical_tick = canonicalFirst(tracking.start_canonical_tick, reference);
+      }
+      if (before.end !== undefined) {
+        const to = rangeEnd(symbol, before);
+        if (
+          tick.event_time_utc > to &&
+          (tracking.after_tick === null || tick.event_time_utc < tracking.after_tick.event_time_utc)
+        ) {
+          tracking.after_tick = {
+            event_time_utc: tick.event_time_utc,
+            observation_id: tick.observation_id,
+          };
+        }
+        if (tick.event_time_utc === shift(to, 1)) {
+          tracking.end_canonical_tick = canonicalFirst(tracking.end_canonical_tick, reference);
+        }
+      }
+    }
+
+    applyTickContinuity(working.rules, tick, this.maximumGap);
+    const after = working.rules.pendingContinuity.get(symbol);
+    if (after === undefined) {
+      working.gaps.delete(symbol);
+    } else if (before?.end === undefined && after.end !== undefined && tracking !== undefined) {
+      // Este tick fijó el fin del hueco.
+      const to = rangeEnd(symbol, after);
+      tracking.after_tick =
+        tick.event_time_utc > to
+          ? { event_time_utc: tick.event_time_utc, observation_id: tick.observation_id }
+          : null;
+      tracking.end_canonical_tick = tick.event_time_utc === shift(to, 1) ? reference : null;
+    }
+  }
+
+  private boundariesFor(
+    event: HistoryRecoveryResult,
+  ): (pending: ContinuityEntry | undefined) => GapBoundaries {
+    return (pending) => {
+      const tracking = this.working.gaps.get(event.symbol);
+      if (
+        pending?.end === undefined ||
+        tracking === undefined ||
+        event.from_event_time_utc !== pendingGapOf(event.symbol, pending).from_event_time_utc ||
+        event.to_event_time_utc !== rangeEnd(event.symbol, pending)
+      ) {
+        throw new TypeError(
+          `El resultado ${event.event_id} no cubre exactamente el hueco pendiente de ${event.symbol} (ADR-0017 §3).`,
+        );
+      }
+      return {
+        ...(tracking.after_tick === null ? {} : { after: tracking.after_tick.observation_id }),
+        before: tracking.watermark_observation_id,
+      };
+    };
+  }
+}
+
+/**
+ * Aplica los source events, en el orden del log, sobre un estado vivo y devuelve el nuevo. Falla
+ * igual que `deriveMarketData` donde ella falla, y además con un resultado `partial` o
+ * `unavailable` que no cubre exactamente el hueco pendiente de su símbolo (ADR-0017 §3, «Dominio de
+ * la equivalencia»).
+ */
+export function foldLiveDerivation(
+  state: LiveDerivationState,
+  events: readonly unknown[],
+  profile: PipelineProfile,
+): LiveDerivationState {
+  const folder = new LiveFolder(state, profile);
+  const seenIds = new Set<string>();
+  for (const value of events) {
+    folder.apply(value, seenIds);
+  }
+  return folder.state();
 }
 
 /** La vista viva (ADR-0017 §4) de un estado vivo. */

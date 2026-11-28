@@ -73,6 +73,18 @@ Un recorrido de los datos puede evaluar a la vez varios `BacktestSpec` de la mis
 
 La vista deriva cada log entero, a través de sus datasets, y no cada dataset desde el estado vacío, como la publicación (ADR-0020 §7). Es lo que ve en vivo quien lee la captura desde el punto de control: un duplicado o un hueco que cruza dos datasets se ve igual que en `shadow`. Por eso sus marcas pueden diferir de las de `normalized_ticks`, que el backtest no lee. Su estado se serializa en JSON canónico, como el del pliegue, para que el motor `shadow` lo guarde y siga después de un reinicio.
 
+(Precisión del PR 2 de §12.) La vista es `DataView`, en `packages/domain`, y fija lo que esta sección no decía:
+
+- **El orden en un frame.** Con un frame, la vista da primero el cambio de salud y después su tick, que ya es durable con ella: así la estrategia decide con el tick que la devuelve a `healthy`. Con los demás eventos, primero los ticks.
+- **Un cierre pedido** deja `after_unrecorded` en el primer tick usable del flujo que llega después, no en uno que trae la historia. Dentro de un hueco cuyo fin todavía no se conoce no la deja, porque su intervalo queda dentro del rango que pide la historia y lo decide el resultado, o la separación. Por lo mismo, su intervalo pasa a ser del hueco si después empieza uno, sin ningún tick usado en medio, o si otro cierre no pedido del mismo hueco alarga ese rango hasta el tick siguiente.
+- **Un hueco que la historia no recupera** deja `after_unrecorded` en el primer tick del flujo después de cada intervalo de su rango: el de su inicio y el de cada cierre que lo alargó. Así son también los retenidos que da el techo, y los del fin del log (abajo), en lugar de solo el primero.
+- **Un `complete` cuyos ticks la vista no da**, con las reglas anteriores a las 3.0.0 o con un rango que no es exactamente el del hueco, cuenta como no recuperado si su `recovered_event_count` no es 0, porque la vista no tiene esos ticks.
+- **Al terminar el log** con la continuidad pendiente, los retenidos llevan las marcas de un hueco que la historia no recupera, porque ya no hay resultado que lo decida.
+- **El techo** cuenta cada tick del flujo que llega con la continuidad pendiente, se use o no. Pasado el techo, otro cierre no pedido del mismo hueco también deja `after_unrecorded`, porque la historia de ese hueco no se usa.
+- **El primer tick de un log** lleva `after_unrecorded` sin hora anterior: la vista no conoce el log anterior, y la da quien une los logs de la serie (§4).
+- **Un log que no se deriva** hace fallar la vista, como al pliegue, y quien la usa da su código (`log_not_derivable`, §7). La vista no vuelve a comprobar que no se repita un ID de source event, porque el índice del log no lo admite (`event_id` único).
+- **Lo medido.** En los logs de producción hasta el 2026-11-28, ninguna continuidad pendiente retuvo más de 41 ticks, así que el techo no cambia. Con 7 días sintéticos de R_100, la memoria de la vista queda dentro del 10 % de la de un día (§11). Las cifras están en la descripción del PR 2.
+
 ### 3. El orden y el instante de cada evento
 
 - **El instante de cada evento de la vista** es la hora de recepción de su frame, `received_at_utc`, o la de ocurrencia de los demás source events, `occurred_at_utc`. Los ticks que se dan con un resultado de la historia llevan el instante del resultado. El reloj de la serie nunca retrocede, ni dentro de un log ni al pasar de la historia descargada a la captura (§4): si una hora es anterior al instante del evento previo de la serie, el evento lleva el del previo.
