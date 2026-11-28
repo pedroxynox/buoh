@@ -19,6 +19,7 @@ import { marketCandleStructuralSchema } from '../src/market-candle.js';
 import { marketTickStructuralSchema } from '../src/market-tick.js';
 import { sourceCatalogSnapshotStructuralSchema } from '../src/source-catalog.js';
 import { ingestionCursorSchema, sourceEventStructuralSchema } from '../src/source-events.js';
+import { strategyDefinitionStructuralSchema } from '../src/strategy-definition.js';
 import { tradingSessionStructuralSchema } from '../src/trading-session.js';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -40,6 +41,7 @@ const schemas = [
   ['published-manifest-record.schema.json', publishedManifestRecordStructuralSchema],
   ['source-catalog-snapshot.schema.json', sourceCatalogSnapshotStructuralSchema],
   ['source-event.schema.json', sourceEventStructuralSchema],
+  ['strategy-definition.schema.json', strategyDefinitionStructuralSchema],
   ['trading-session.schema.json', tradingSessionStructuralSchema],
 ] as const;
 

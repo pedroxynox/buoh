@@ -6,13 +6,13 @@ Desde F1.1, [`packages/contracts`](../../packages/contracts/) es canónico para 
 
 Las validaciones que JSON Schema no expresa —hashes derivados, orden, cardinalidad entre artifacts y relaciones entre campos— permanecen en los esquemas runtime y sus pruebas. Un consumidor no debe sustituir la validación runtime por validar únicamente el JSON Schema. Las invariantes entre artefactos de un dataset (conteos, orden canónico, unión tick→raw, referencias de incidencias, procedencia y extremos temporales) están en `validateDatasetConsistency`, que usan el verificador de vectores y `data:replay` en ambos modos.
 
-Fase 1 implementa `SourceEvent`, `MarketTick`, `DataQualityIncident`, `OperationalConditionEvent`, `IngestionCursor`, `DatasetManifest`, `PublishedManifestRecord` y `HealthReport`. F1.4b añade `SourceCatalogSnapshot` ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md)); F2.1, `LiveDerivationCheckpoint` ([ADR-0017](adr/0017-punto-de-control-de-la-derivacion-en-vivo.md)); F2.3, los mensajes de la API y `AuditEvent` ([ADR-0019](adr/0019-api-cuentas-y-auditoria.md)); y F2.5b, los [registros de los lotes](#registros-de-los-lotes) y `MarketTick` 1.1.0 ([ADR-0021](adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §4). Estrategias, señales y ejecución permanecen conceptuales.
+Fase 1 implementa `SourceEvent`, `MarketTick`, `DataQualityIncident`, `OperationalConditionEvent`, `IngestionCursor`, `DatasetManifest`, `PublishedManifestRecord` y `HealthReport`. F1.4b añade `SourceCatalogSnapshot` ([ADR-0012](adr/0012-catalogo-y-adaptador-publico-de-deriv.md)); F2.1, `LiveDerivationCheckpoint` ([ADR-0017](adr/0017-punto-de-control-de-la-derivacion-en-vivo.md)); F2.3, los mensajes de la API y `AuditEvent` ([ADR-0019](adr/0019-api-cuentas-y-auditoria.md)); y F2.5b, los [registros de los lotes](#registros-de-los-lotes) y `MarketTick` 1.1.0 ([ADR-0021](adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §4); y F2.6, [`StrategyDefinition`](#strategydefinition) ([ADR-0022](adr/0022-modelo-de-estrategia.md)). Señales y ejecución permanecen conceptuales.
 
 ## Evidencia de F1.1
 
 - Zod 4 mantiene contratos estrictos y uniones discriminadas.
 - `canonicalize` implementa RFC 8785 para IDs y hashes estructurados.
-- `pnpm run schemas:generate` produjo ocho JSON Schema en F1.1, nueve desde F1.4b con `SourceCatalogSnapshot`, diez desde F2.1 con `LiveDerivationCheckpoint`, once desde F2.3 con `AuditEvent` y quince desde el PR 4b de ADR-0021 con los registros de los lotes; `schemas:check` detecta deriva.
+- `pnpm run schemas:generate` produjo ocho JSON Schema en F1.1, nueve desde F1.4b con `SourceCatalogSnapshot`, diez desde F2.1 con `LiveDerivationCheckpoint`, once desde F2.3 con `AuditEvent`, quince desde el PR 4b de ADR-0021 con los registros de los lotes y dieciséis desde el PR 2 de ADR-0022 con `StrategyDefinition`; `schemas:check` detecta deriva.
 - `pnpm run test:vectors` verifica manifiestos, raw hashes, IDs derivados, publicaciones y escenarios principal/cero-ticks sin red.
 - Desde F1.2, `test:vectors` además regenera con `packages/domain` todos los artefactos de ambos escenarios y los compara byte a byte.
 
@@ -1050,9 +1050,64 @@ AuditObject = { kind: "account" | "credential" | "link" | "session", id: UuidV7 
 - **Validación runtime:** el JSON Schema describe la forma de cada acción. Solo `auditEventSchema` comprueba el orden de los objetos, que haya al menos uno salvo en `login_failures` y ninguno en una entrada sin cuenta, la cuenta de los objetos, la pareja de autor y motivo de los cierres, la petición de `sessions_closed` y las reglas de `login_failures`.
 - **Persistencia:** la fila guarda el documento en JCS (`event_jcs`) con su identificador, su cuenta, su hora y su acción en columnas, y la base comprueba que esas columnas son iguales a los campos del documento (migración `0001_auditoria.sql` de `apps/api`).
 
+## StrategyDefinition
+
+Una estrategia como documento declarativo, sin código ([ADR-0022](adr/0022-modelo-de-estrategia.md) §1 a §7 y §9), en `packages/contracts/src/strategy-definition.ts` desde el PR 2 de su §13.
+
+```text
+strategy_schema_version: "1.0.0"            # la gramática
+indicator_library_version: "1.0.0"          # la biblioteca de §3
+strategy_id: string                         # la familia: [a-z0-9][a-z0-9_-]{2,63}
+semantic_version: SchemaVersion
+responsible: UuidV7                         # el account_id de la cuenta responsable (ADR-0019 §4)
+origin: { kind: "research_engine", search_id: "sha256:<Sha256Hex>", candidate_number: NonNegativeInteger }
+description: string                         # 1..1000, sin caracteres de control salvo \n
+market: { source: "deriv_options", symbol, data: "ticks" | "deriv_candles",
+          quality_profile_id: string, quality_profile_sha256: Sha256Hex,
+          timeframe: "tick" | "5s" | "15s" | "1m" | "5m" | "15m" | "60m" }
+indicators: Indicator[]                     # 1..6
+side: "up" | "down"
+entry: { groups: Condition[][],             # 1..2 grupos de 1..3 condiciones
+         hours_utc: entero[] | null,        # 0..23, en orden, de 1 a 23 horas
+         weekdays_utc: entero[] | null }    # 0 (lunes)..6, en orden, de 1 a 6 días
+exit: { conditions: Condition[] } | null    # 1..3; solo multiplicadores
+contract: MultiplierContract | CallPutContract
+position: { currency: "USD", initial_capital: "1000", stake: "10", max_drawdown_percent: Amount }
+signals: { signal_expiry_ms: 1000..60000, min_seconds_between_entries: 0..86400,
+           max_entries_per_day: 1..500 }    # el día es el UTC
+data_policy: { max_data_age_ms: 1000..60000 }
+execution_mode: "disabled" | "shadow"
+promoted_from: { version_id: "sha256:<Sha256Hex>", evaluation_id: UuidV7 } | null
+```
+
+```text
+Indicator: { indicator: "price" | "hour_utc" | "weekday_utc" }
+         | { indicator: "return", n: 1..500 }
+         | { indicator: "sma" | "ema" | "volatility" | "highest" | "lowest" | "zscore", n: 2..500 }
+         | { indicator: "rsi" | "atr", n: 2..100 }
+         | { indicator: "bollinger_pct", n: 2..500, k: "1" | "1.5" | "2" | "2.5" | "3" }
+Condition: { left: índice de indicators,
+             operator: "gt" | "gte" | "lt" | "lte" | "crosses_above" | "crosses_below",
+             right: { kind: "indicator", index } | { kind: "constant", value: decimal } }
+MultiplierContract: { contract_type: "MULTUP" | "MULTDOWN", multiplier: entero,
+                      stop_loss: Amount | null, take_profit: Amount | null,
+                      max_duration_ms: 1000..86400000 }
+CallPutContract: { contract_type: "CALL" | "PUT", duration: { duration, duration_unit: "t" | "s" | "m" } }
+```
+
+- **Mercados.** Con `ticks`, R_100 y el oro (`frxXAUUSD`), los que se capturan en vivo; con `deriv_candles`, los siete de las velas de los lotes, desde 1 minuto. Solo una estrategia de `ticks` puede estar en `shadow` (ADR-0022 §2). Los multiplicadores y las duraciones de sube/baja son los de las cotizaciones de los lotes en cada mercado (ADR-0021 §3; `STRATEGY_MARKETS`, la misma lista que `quoteMarkets` en el worker), así que una duración se escribe como en ellas: 60 minutos es `{60, "m"}`, no `{1, "h"}`. Bitcoin y Ethereum no tienen sube/baja.
+- **Indicadores y reglas.** Una condición nombra sus indicadores por su índice en `indicators`. Cada instancia se usa en alguna condición y no se repite. Los dos lados de una condición tienen la misma unidad (§3); un nivel de precio (`price`, `sma`, `ema`, `highest` y `lowest`) no se compara con una constante, y las constantes de `rsi`, `hour_utc` y `weekday_utc` caben en su rango.
+- **Decimales en su única escritura.** Las constantes y los importes son `DecimalString` sin ceros finales en los decimales, sin `-0` y de como mucho 40 caracteres, para que un mismo valor dé siempre la misma versión. `Amount` es un importe en USD de 0,01 a 999 999,99, con como mucho dos decimales.
+- **Contrato y posición.** `side` y el tipo de contrato van en la misma dirección (`MULTUP` y `CALL` suben). La apuesta es fija, 10 USD de un capital de 1000 USD (§5). El stop loss es menor que la apuesta, que se pierde entera antes; la caída máxima es como mucho el 50 %. En sube/baja, `exit` es `null`, y la señal vence antes que el contrato: con 5 ticks, como mucho 5000 ms, y con una duración de tiempo, antes de que se cumpla (§6).
+- **Modo y promoción.** `execution_mode` es `disabled` o `shadow`: el modo más alto de la Fase 2. Solo una versión en `shadow` lleva `promoted_from`, con la versión congelada y su evaluación (§10), y siempre lo lleva. La forma de `origin`, el hash JCS de la `ResearchSearchSpec` y el número de la candidata (ADR-0023 §6), y la de `evaluation_id` son supuestos de este PR que los contratos de la investigación y de la evaluación confirman o cambian con otra versión.
+- **Identidad.** El identificador de una versión es `sha256:` más el SHA-256 del JCS de la definición entera (`deriveStrategyVersionId`): cambiar cualquier campo, también la descripción, da otra versión (§9).
+- **Errores.** `validateStrategyDefinition` devuelve la definición y su identificador, o la lista de sus errores, cada uno con un código de `STRATEGY_DEFINITION_ERROR_CODES`, la ruta del campo y un mensaje, en orden por la ruta en JSON y después por el código. Una versión de la gramática o de la biblioteca que no conoce da solo `version_unsupported`. Las reglas entre campos solo se comprueban con la forma correcta. Los mensajes no son contrato: los vectores fijan el código y la ruta.
+- **Validación runtime:** el JSON Schema, que usa el motor de investigación (ADR-0023 §13), describe la forma. Solo el runtime comprueba lo que relaciona campos: el mercado y sus datos, la temporalidad, los multiplicadores y las duraciones, las referencias y las unidades de las condiciones, las ventanas en orden, la dirección, los límites relativos a la apuesta y a la señal y la promoción.
+- **Vectores.** [`test-vectors/strategy-definition/v1`](../../test-vectors/strategy-definition/v1/) tiene definiciones válidas con su identificador, calculado fuera de `packages/contracts`, e inválidas con sus errores, escritos desde ADR-0022, y cubre cada código.
+
 ## Contratos futuros
 
-`StrategyDefinition`, `SignalEvent`, `RiskPolicy`, `ExecutionIntent` y `ExecutionEvent` se definirán en sus fases. [ADR-0022](adr/0022-modelo-de-estrategia.md) fija `StrategyDefinition` 1.0.0, que llega a `packages/contracts` con el PR 2 de su §13, y [ADR-0023](adr/0023-motor-de-investigacion.md), los de la investigación (`ResearchSearchSpec`, `ResearchSearchSummary`, `ResearchCandidateList`, `ResearchCandidateFreeze`, `ResearchEngineStatus` y `ResearchWeeklyReport`), que llegan con el PR 3 de su §14, salvo `ResearchCandidateFreeze`, que llega con F2.8. [ADR-0024](adr/0024-semantica-del-backtest.md) fija los del backtest (`DataViewEvent`, el evento de la vista de cada instante, y `BacktestSpec`, `BacktestResult`, `BacktestDecision` y `BacktestPosition`), que llegan con el PR 3 de su §12. [ADR-0025](adr/0025-protocolo-estadistico.md) fija los de la evaluación (`StrategyPreRegistration`, `ResearchFamilyStats` y `EvidenceReport`), con los campos de `ResearchCandidateFreeze`, que llegan con el PR 3 de su §15, y suma `validation_finalists` por serie a `ResearchSearchSpec`, y los estadísticos suficientes por serie y la PBO a `ResearchSearchSummary`, que llegan antes, en su versión 1.0.0, con el PR 3 de ADR-0023. [ADR-0026](adr/0026-motor-de-senales-shadow.md) fija los del motor `shadow` (`ShadowInput`, `ShadowDecision`, `SignalEvent` y `ShadowEngineStatus`), que llegan con el PR 2 de su §13, y `ShadowPosition`, que llega con su PR 7. Sus conceptos no autorizan crear tablas, APIs o servicios en Fase 1.
+`SignalEvent`, `RiskPolicy`, `ExecutionIntent` y `ExecutionEvent` se definirán en sus fases. [ADR-0023](adr/0023-motor-de-investigacion.md), los de la investigación (`ResearchSearchSpec`, `ResearchSearchSummary`, `ResearchCandidateList`, `ResearchCandidateFreeze`, `ResearchEngineStatus` y `ResearchWeeklyReport`), que llegan con el PR 3 de su §14, salvo `ResearchCandidateFreeze`, que llega con F2.8. [ADR-0024](adr/0024-semantica-del-backtest.md) fija los del backtest (`DataViewEvent`, el evento de la vista de cada instante, y `BacktestSpec`, `BacktestResult`, `BacktestDecision` y `BacktestPosition`), que llegan con el PR 3 de su §12. [ADR-0025](adr/0025-protocolo-estadistico.md) fija los de la evaluación (`StrategyPreRegistration`, `ResearchFamilyStats` y `EvidenceReport`), con los campos de `ResearchCandidateFreeze`, que llegan con el PR 3 de su §15, y suma `validation_finalists` por serie a `ResearchSearchSpec`, y los estadísticos suficientes por serie y la PBO a `ResearchSearchSummary`, que llegan antes, en su versión 1.0.0, con el PR 3 de ADR-0023. [ADR-0026](adr/0026-motor-de-senales-shadow.md) fija los del motor `shadow` (`ShadowInput`, `ShadowDecision`, `SignalEvent` y `ShadowEngineStatus`), que llegan con el PR 2 de su §13, y `ShadowPosition`, que llega con su PR 7. Sus conceptos no autorizan crear tablas, APIs o servicios en Fase 1.
 
 ## Versionado y compatibilidad
 
@@ -1064,4 +1119,4 @@ AuditObject = { kind: "account" | "credential" | "link" | "session", id: UuidV7 
 
 ## Oráculo inicial
 
-[`test-vectors/market-data/v1`](../../test-vectors/market-data/v1/) es normativo para serialización lógica, hashes, calidad, salud y fallo de persistencia. Sus datos son sintéticos. Las reglas 3.0.0 tienen su propio vector sintético, con las expectativas escritas a mano y el `dataset_id` fijado, en [`packages/domain/test/rules-3-0-0.test.ts`](../../packages/domain/test/rules-3-0-0.test.ts), que corre con `pnpm run test:vectors` bajo las mismas guardas de reloj, azar y red, como los de las reglas de los lotes 4.0.0 y 4.1.0, en [`packages/domain/test/batch-rules.test.ts`](../../packages/domain/test/batch-rules.test.ts) y [`batch-series.test.ts`](../../packages/domain/test/batch-series.test.ts), y el de la publicación de sus datasets, en [`batch-publication.test.ts`](../../packages/domain/test/batch-publication.test.ts). El verificador limita cada archivo a 8 MiB y cada manifiesto a 64 MiB declarados, rechaza paths absolutos, traversal y symlinks, y valida expectativas/perfiles además de checksums.
+[`test-vectors/market-data/v1`](../../test-vectors/market-data/v1/) es normativo para serialización lógica, hashes, calidad, salud y fallo de persistencia. Sus datos son sintéticos. Las reglas 3.0.0 tienen su propio vector sintético, con las expectativas escritas a mano y el `dataset_id` fijado, en [`packages/domain/test/rules-3-0-0.test.ts`](../../packages/domain/test/rules-3-0-0.test.ts), que corre con `pnpm run test:vectors` bajo las mismas guardas de reloj, azar y red, como los de las reglas de los lotes 4.0.0 y 4.1.0, en [`packages/domain/test/batch-rules.test.ts`](../../packages/domain/test/batch-rules.test.ts) y [`batch-series.test.ts`](../../packages/domain/test/batch-series.test.ts), y el de la publicación de sus datasets, en [`batch-publication.test.ts`](../../packages/domain/test/batch-publication.test.ts). Los de `StrategyDefinition`, en [`test-vectors/strategy-definition/v1`](../../test-vectors/strategy-definition/v1/), los comprueba `packages/contracts/test/strategy-definition.test.ts`, con su manifiesto, también con `pnpm run test:vectors`. El verificador limita cada archivo a 8 MiB y cada manifiesto a 64 MiB declarados, rechaza paths absolutos, traversal y symlinks, y valida expectativas/perfiles además de checksums.

@@ -1,0 +1,17 @@
+{
+  "canonicalization": "RFC8785",
+  "files": [
+    {
+      "bytes": 146693,
+      "path": "invalid.json",
+      "sha256": "d166ddb274a77f684cbde86f226ccc397247ce7276def2663b5d40c23c77795a"
+    },
+    {
+      "bytes": 13205,
+      "path": "valid.json",
+      "sha256": "a6fe16de4d13cd0b9a4cef53c77e64f8b695e8ed362ccce16f28dc3dbc92c3ae"
+    }
+  ],
+  "schema_version": "1.0.0",
+  "vector_id": "strategy-definition-v1"
+}

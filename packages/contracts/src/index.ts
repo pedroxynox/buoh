@@ -204,6 +204,22 @@ export {
   type SourceEvent,
 } from './source-events.js';
 export {
+  deriveStrategyVersionId,
+  INDICATOR_LIBRARY_VERSION,
+  STRATEGY_DEFINITION_ERROR_CODES,
+  STRATEGY_MARKETS,
+  STRATEGY_SCHEMA_VERSION,
+  strategyDefinitionSchema,
+  validateStrategyDefinition,
+  type StrategyCondition,
+  type StrategyDefinition,
+  type StrategyDefinitionError,
+  type StrategyDefinitionErrorCode,
+  type StrategyDefinitionValidation,
+  type StrategyIndicator,
+  type StrategyIndicatorName,
+} from './strategy-definition.js';
+export {
   tradingDateSchema,
   tradingIntervalSchema,
   tradingSessionSchema,

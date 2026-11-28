@@ -1,0 +1,807 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/StrategyDefinition",
+  "$defs": {
+    "StrategyDefinition": {
+      "type": "object",
+      "properties": {
+        "strategy_schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "indicator_library_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "strategy_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{2,63}$"
+        },
+        "semantic_version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d{0,8})\\.(?:0|[1-9]\\d{0,8})\\.(?:0|[1-9]\\d{0,8})$"
+        },
+        "responsible": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "origin": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "research_engine"
+            },
+            "search_id": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "candidate_number": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "kind",
+            "search_id",
+            "candidate_number"
+          ],
+          "additionalProperties": false
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "pattern": "^[^\\u0000-\\u0009\\u000B-\\u001F\\u007F-\\u009F]*$"
+        },
+        "market": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string",
+              "const": "deriv_options"
+            },
+            "symbol": {
+              "type": "string",
+              "enum": [
+                "R_100",
+                "cryBTCUSD",
+                "cryETHUSD",
+                "frxEURUSD",
+                "frxGBPUSD",
+                "frxUSDJPY",
+                "frxXAGUSD",
+                "frxXAUUSD"
+              ]
+            },
+            "data": {
+              "type": "string",
+              "enum": [
+                "ticks",
+                "deriv_candles"
+              ]
+            },
+            "quality_profile_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+            },
+            "quality_profile_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "timeframe": {
+              "type": "string",
+              "enum": [
+                "tick",
+                "5s",
+                "15s",
+                "1m",
+                "5m",
+                "15m",
+                "60m"
+              ]
+            }
+          },
+          "required": [
+            "source",
+            "symbol",
+            "data",
+            "quality_profile_id",
+            "quality_profile_sha256",
+            "timeframe"
+          ],
+          "additionalProperties": false
+        },
+        "indicators": {
+          "minItems": 1,
+          "maxItems": 6,
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "indicator": {
+                    "type": "string",
+                    "const": "price"
+                  }
+                },
+                "required": [
+                  "indicator"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "indicator": {
+                    "type": "string",
+                    "const": "return"
+                  },
+                  "n": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 500
+                  }
+                },
+                "required": [
+                  "indicator",
+                  "n"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "indicator": {
+                    "type": "string",
+                    "const": "sma"
+                  },
+                  "n": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 500
+                  }
+                },
+                "required": [
+                  "indicator",
+                  "n"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "indicator": {
+                    "type": "string",
+                    "const": "ema"
+                  },
+                  "n": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 500
+                  }
+                },
+                "required": [
+                  "indicator",
+                  "n"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "indicator": {
+                    "type": "string",
+                    "const": "rsi"
+                  },
+                  "n": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 100
+                  }
+                },
+                "required": [
+                  "indicator",
+                  "n"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "indicator": {
+                    "type": "string",
+                    "const": "atr"
+                  },
+                  "n": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 100
+                  }
+                },
+                "required": [
+                  "indicator",
+                  "n"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "indicator": {
+                    "type": "string",
+                    "const": "volatility"
+                  },
+                  "n": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 500
+                  }
+                },
+                "required": [
+                  "indicator",
+                  "n"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "indicator": {
+                    "type": "string",
+                    "const": "highest"
+                  },
+                  "n": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 500
+                  }
+                },
+                "required": [
+                  "indicator",
+                  "n"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "indicator": {
+                    "type": "string",
+                    "const": "lowest"
+                  },
+                  "n": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 500
+                  }
+                },
+                "required": [
+                  "indicator",
+                  "n"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "indicator": {
+                    "type": "string",
+                    "const": "zscore"
+                  },
+                  "n": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 500
+                  }
+                },
+                "required": [
+                  "indicator",
+                  "n"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "indicator": {
+                    "type": "string",
+                    "const": "bollinger_pct"
+                  },
+                  "k": {
+                    "type": "string",
+                    "enum": [
+                      "1",
+                      "2",
+                      "3",
+                      "1.5",
+                      "2.5"
+                    ]
+                  },
+                  "n": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 500
+                  }
+                },
+                "required": [
+                  "indicator",
+                  "k",
+                  "n"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "indicator": {
+                    "type": "string",
+                    "const": "hour_utc"
+                  }
+                },
+                "required": [
+                  "indicator"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "indicator": {
+                    "type": "string",
+                    "const": "weekday_utc"
+                  }
+                },
+                "required": [
+                  "indicator"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "side": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down"
+          ]
+        },
+        "entry": {
+          "type": "object",
+          "properties": {
+            "groups": {
+              "minItems": 1,
+              "maxItems": 2,
+              "type": "array",
+              "items": {
+                "minItems": 1,
+                "maxItems": 3,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 5
+                    },
+                    "operator": {
+                      "type": "string",
+                      "enum": [
+                        "gt",
+                        "gte",
+                        "lt",
+                        "lte",
+                        "crosses_above",
+                        "crosses_below"
+                      ]
+                    },
+                    "right": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "indicator"
+                            },
+                            "index": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 5
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "index"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "constant"
+                            },
+                            "value": {
+                              "type": "string",
+                              "maxLength": 40,
+                              "pattern": "^(?:-?(?:[1-9]\\d*(?:\\.\\d*[1-9])?|0\\.\\d*[1-9])|0)$"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "value"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "operator",
+                    "right"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "hours_utc": {
+              "anyOf": [
+                {
+                  "minItems": 1,
+                  "maxItems": 23,
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 23
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "weekdays_utc": {
+              "anyOf": [
+                {
+                  "minItems": 1,
+                  "maxItems": 6,
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 6
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "groups",
+            "hours_utc",
+            "weekdays_utc"
+          ],
+          "additionalProperties": false
+        },
+        "exit": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "conditions": {
+                  "minItems": 1,
+                  "maxItems": 3,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "left": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 5
+                      },
+                      "operator": {
+                        "type": "string",
+                        "enum": [
+                          "gt",
+                          "gte",
+                          "lt",
+                          "lte",
+                          "crosses_above",
+                          "crosses_below"
+                        ]
+                      },
+                      "right": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "indicator"
+                              },
+                              "index": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "index"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "constant"
+                              },
+                              "value": {
+                                "type": "string",
+                                "maxLength": 40,
+                                "pattern": "^(?:-?(?:[1-9]\\d*(?:\\.\\d*[1-9])?|0\\.\\d*[1-9])|0)$"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "left",
+                      "operator",
+                      "right"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "conditions"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contract": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "contract_type": {
+                  "type": "string",
+                  "enum": [
+                    "MULTUP",
+                    "MULTDOWN"
+                  ]
+                },
+                "max_duration_ms": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 86400000
+                },
+                "multiplier": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000
+                },
+                "stop_loss": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^(?:[1-9]\\d{0,5}(?:\\.\\d?[1-9])?|0\\.(?:0[1-9]|[1-9]\\d?))$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "take_profit": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^(?:[1-9]\\d{0,5}(?:\\.\\d?[1-9])?|0\\.(?:0[1-9]|[1-9]\\d?))$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "contract_type",
+                "max_duration_ms",
+                "multiplier",
+                "stop_loss",
+                "take_profit"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "contract_type": {
+                  "type": "string",
+                  "enum": [
+                    "CALL",
+                    "PUT"
+                  ]
+                },
+                "duration": {
+                  "type": "object",
+                  "properties": {
+                    "duration": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 240
+                    },
+                    "duration_unit": {
+                      "type": "string",
+                      "enum": [
+                        "t",
+                        "s",
+                        "m"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "duration",
+                    "duration_unit"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "contract_type",
+                "duration"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "position": {
+          "type": "object",
+          "properties": {
+            "currency": {
+              "type": "string",
+              "const": "USD"
+            },
+            "initial_capital": {
+              "type": "string",
+              "const": "1000"
+            },
+            "stake": {
+              "type": "string",
+              "const": "10"
+            },
+            "max_drawdown_percent": {
+              "type": "string",
+              "pattern": "^(?:[1-9]\\d{0,5}(?:\\.\\d?[1-9])?|0\\.(?:0[1-9]|[1-9]\\d?))$"
+            }
+          },
+          "required": [
+            "currency",
+            "initial_capital",
+            "stake",
+            "max_drawdown_percent"
+          ],
+          "additionalProperties": false
+        },
+        "signals": {
+          "type": "object",
+          "properties": {
+            "signal_expiry_ms": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 60000
+            },
+            "min_seconds_between_entries": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "max_entries_per_day": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          "required": [
+            "signal_expiry_ms",
+            "min_seconds_between_entries",
+            "max_entries_per_day"
+          ],
+          "additionalProperties": false
+        },
+        "data_policy": {
+          "type": "object",
+          "properties": {
+            "max_data_age_ms": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 60000
+            }
+          },
+          "required": [
+            "max_data_age_ms"
+          ],
+          "additionalProperties": false
+        },
+        "execution_mode": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "shadow"
+          ]
+        },
+        "promoted_from": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "version_id": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "evaluation_id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              },
+              "required": [
+                "version_id",
+                "evaluation_id"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "strategy_schema_version",
+        "indicator_library_version",
+        "strategy_id",
+        "semantic_version",
+        "responsible",
+        "origin",
+        "description",
+        "market",
+        "indicators",
+        "side",
+        "entry",
+        "exit",
+        "contract",
+        "position",
+        "signals",
+        "data_policy",
+        "execution_mode",
+        "promoted_from"
+      ],
+      "additionalProperties": false,
+      "title": "StrategyDefinition"
+    }
+  }
+}

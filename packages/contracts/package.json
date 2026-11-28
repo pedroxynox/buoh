@@ -20,7 +20,7 @@
     "schemas:check": "tsx scripts/generate-json-schemas.ts --check",
     "schemas:generate": "tsx scripts/generate-json-schemas.ts",
     "test": "vitest run",
-    "test:vectors": "vitest run test/vector-integrity.test.ts",
+    "test:vectors": "vitest run test/vector-integrity.test.ts test/strategy-definition.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
