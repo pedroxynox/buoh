@@ -12,7 +12,9 @@ import {
   marketTickSchema,
   sourceCatalogSnapshotSchema,
   sourceEventSchema,
+  strategyDefinitionSchema,
 } from '../src/index.js';
+import { strategyDefinitionStructuralSchema } from '../src/strategy-definition.js';
 
 function loadExportedSchema(name: string): object {
   const url = import.meta.resolve(`@buoh/contracts/json-schema/${name}`);
@@ -112,5 +114,36 @@ describe('JSON Schema exportado', () => {
     const wrongHash = { ...snapshot, content_sha256: '0'.repeat(64) };
     expect(catalogValidator(wrongHash)).toBe(true);
     expect(sourceCatalogSnapshotSchema.safeParse(wrongHash).success).toBe(false);
+  });
+
+  it('describe la gramática de StrategyDefinition y deja al runtime las reglas entre campos', () => {
+    const strategyValidator = ajv.compile(loadExportedSchema('strategy-definition'));
+    const read = (name: string): unknown =>
+      JSON.parse(
+        readFileSync(
+          new URL(`../../../test-vectors/strategy-definition/v1/${name}`, import.meta.url),
+          'utf8',
+        ),
+      ) as unknown;
+    const valid = read('valid.json') as { definition: unknown; name: string }[];
+    const invalid = read('invalid.json') as {
+      errors: { code: string }[];
+      input: unknown;
+      name: string;
+    }[];
+    for (const vector of valid) {
+      expect(strategyValidator(vector.definition), vector.name).toBe(true);
+    }
+    // JSON Schema rechaza lo mismo que la forma de Zod; las reglas entre campos (ADR-0022 §4 a §7 y
+    // §10), como el multiplicador del mercado, solo las comprueba el runtime.
+    let runtimeOnly = 0;
+    for (const vector of invalid) {
+      const structural = strategyDefinitionStructuralSchema.safeParse(vector.input).success;
+      expect(strategyValidator(vector.input), vector.name).toBe(structural);
+      expect(strategyDefinitionSchema.safeParse(vector.input).success, vector.name).toBe(false);
+      runtimeOnly += structural ? 1 : 0;
+    }
+    expect(runtimeOnly).toBeGreaterThan(0);
+    expect(runtimeOnly).toBeLessThan(invalid.length);
   });
 });
