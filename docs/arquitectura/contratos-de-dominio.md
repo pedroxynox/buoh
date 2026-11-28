@@ -1106,9 +1106,76 @@ CallPutContract: { contract_type: "CALL" | "PUT", duration: { duration, duration
 - **Validación runtime:** el JSON Schema, que usa el motor de investigación (ADR-0023 §13), describe la forma. Solo el runtime comprueba lo que relaciona campos: el mercado y sus datos, la temporalidad, los multiplicadores y las duraciones, la dirección, que el sube/baja exista en el mercado y no tenga salida, las referencias, el orden y las unidades de las condiciones, los indicadores en orden y usados, el rango de las constantes, las ventanas en orden, el stop loss y la caída máxima, el vencimiento de la señal y la promoción. Los patrones usan `[0-9]` y no `\d`. Un validador de JSON Schema en Python, como `jsonschema`, los aplica con `re.search`, en el que `$` admite un salto de línea final: el runtime, que la API vuelve a aplicar, rechaza ese texto.
 - **Vectores.** [`test-vectors/strategy-definition/v1`](../../test-vectors/strategy-definition/v1/) tiene definiciones válidas con su identificador, calculado fuera de `packages/contracts`, e inválidas con sus errores, escritos desde ADR-0022, y cubre cada código.
 
+## DataViewEvent
+
+Lo que da la vista de cada instante (`DataView`, `data-view-1.0.0`, en `packages/domain`) después de cada source event de un log ([ADR-0024](adr/0024-semantica-del-backtest.md) §2), en `packages/contracts/src/data-view-event.ts` desde el PR 3 de su §12. Es también cada línea de las partes que escribe `apps/backtest` para el motor (ADR-0024 §9). Su equivalencia con `deriveMarketData` y el pliegue la prueba el dominio (ADR-0024 §11), y esa prueba valida cada evento con este contrato.
+
+```text
+común: { schema_version: "1.0.0", dataset_id: DatasetId, segment_index: 0..999999,
+         instant_utc: UtcTimestampMs }                    # el lugar en el log y el instante (§3)
+tick:   { kind: "tick", observation_id: UuidV7, symbol, event_time_utc, quote_decimal: DecimalString,
+          origin: el de MarketTick, tick_fingerprint_sha256: Sha256Hex,
+          quality_flags: ("after_unrecorded" | "delivery_delayed")[],
+          unrecorded_since_utc?: UtcTimestampMs | null }
+health: { kind: "health", source_event_id: EventRef, report: HealthReport, connected_in_log: boolean,
+          open_conditions: { condition_key: ConditionKey, condition_type, symbol | null }[],
+          pending_continuity_symbols: string[] }
+```
+
+- **Marcas.** Un tick de la vista solo lleva `after_unrecorded` y `delivery_delayed`, en orden: los que llevarían `out_of_order`, `duplicate_exact` o `source_time_conflict` no se dan, y `event_gap_unresolved` no se añade (ADR-0024 §2). `unrecorded_since_utc` va solo, y siempre, con `after_unrecorded`: la hora de la fuente del último tick usado antes, que es anterior, o `null` en el primero del log.
+- **Salud.** `open_conditions` va en orden de `condition_key`, cada clave de su tipo, y los tipos son los de `report.open_condition_types`; `pending_continuity_symbols` va en orden, sin repetir; y `report` cumple `HealthReport`.
+- **Validación runtime:** el JSON Schema describe la forma; las reglas de los dos puntos anteriores, que relacionan campos, solo las comprueba el runtime.
+
+## Backtest
+
+Los contratos del backtest ([ADR-0024](adr/0024-semantica-del-backtest.md) §1, §6, §7 y §10), en `packages/contracts/src/backtest.ts` desde el PR 3 de su §12, todos en su versión `1.0.0`. Los importes van en centavos enteros, y los porcentajes y las fracciones, en texto con 6 decimales exactos (`Fixed6`, como `12.500000`, sin `-0.000000`): ninguna cifra usa binario64 (§10).
+
+```text
+BacktestSpec: {
+  schema_version: "1.0.0",
+  strategy_version_id: "sha256:<Sha256Hex>",           # deriveStrategyVersionId
+  series: { sequence: [A-Za-z0-9_]{1,64}, dataset_ids: DatasetId[] }[],   # 1..8 secuencias
+  indicators_from_utc, window_from_utc, window_to_utc: UtcTimestampMs,
+  execution: { latency_ms: 0..5000, cost_scale: "1" | "1.5" | "2" },
+  versions: { backtest: "backtest-1.0.0", data_view: "data-view-1.0.0",
+              strategy_evaluator: "strategy-evaluator-1.0.0", strategy_host: "strategy-host-1.0.0" } }
+Place: { sequence, log_number: 1..999999, observation_id: UuidV7, source_time_utc }   # un tick, o una vela por su apertura
+BacktestDecision: { schema_version, decision_number, instant_utc, place: Place | null,
+                    quality_profile_id, quality_profile_sha256 } y, según decision:
+  entrar:   { cause: "entry_rule", place: Place, contract, stake: "10", purchase_utc, signal_expires_utc | null }
+  salir:    { cause: "exit_rule", position_number }
+  liquidar: { cause: CloseCause, position_number, contract, result_cents }
+  omitir:   { cause: OmitCause, omitted: "entrar" | "salir", count: 1.., last_instant_utc }
+  detener:  { cause: StopCause }
+  reanudar: { cause: "data_policy_met" }
+BacktestPosition: { schema_version, position_number, entry_decision_number, close_decision_number,
+  contract, stake: "10", purchase_utc, entry: { place, price }, exit: { cause: CloseCause, place, price | null },
+  result_cents, won: boolean | null,
+  costs: { kind: "commission" | "payout", quoted, applied, basis: "quote" | "first_quote_backwards",
+           quote: { sequence, log_number, observation_id, received_at_utc } },
+  offer_basis: "offer" | "first_offer_backwards", estimated, liquidated_at_window_close, stale_quote }
+BacktestResult: { schema_version, backtest_id: "sha256:<Sha256Hex>", status: "completed" | "failed",
+  error_code: ErrorCode | null, metrics: Metrics | null,
+  assumptions: { assumption, decisions }[] | null,
+  parts: { part_class: "decisions" | "positions", part_index: 0..19, row_count: 1..50000,
+           object_sha256, object_bytes: ..16 MiB, logical_sha256, logical_bytes: ..64 MiB }[],
+  environment: { runner: "vps" | "api", node_version, cpu_model, packages: { name, version }[] } }
+```
+
+- **Causas** (`BACKTEST_STOP_CAUSES`, `BACKTEST_OMIT_CAUSES` y `BACKTEST_CLOSE_CAUSES`). `StopCause`: `connection_lost`, `data_stale`, `event_gap_unresolved`, `health_not_healthy`, `max_drawdown` y `pending_continuity`. `OmitCause`: esas, más `candle_incomplete`, `contract_not_offered`, `market_closed`, `max_entries_per_day`, `min_seconds_between_entries`, `schedule_unknown`, `signal_expired`, `signal_pending`, `stop_loss_below_minimum`, `take_profit_below_minimum` y `window_closing`. Las dos `…_below_minimum` son las de un stop loss o un take profit que Deriv no acepta (ADR-0022 §13, precisión del PR 3b). `CloseCause`: las seis de `packages/strategy-sdk` (`exit_rule`, `expiry`, `max_duration`, `stop_loss`, `stop_out` y `take_profit`) y `window_close`. Las causas de `shadow`, como `engine_unavailable`, son de su ADR.
+- **Errores** (`BACKTEST_ERROR_CODES`): los de ADR-0024 §7 e `interrupted`, el de una unidad que termina con una señal o un reinicio (§9).
+- **Identidad.** `deriveBacktestId` da `sha256:` y el SHA-256 del JCS del `BacktestSpec`, que es su `backtest_id`. `deriveBacktestResultLogicalSha256` da el hash lógico del manifiesto: el SHA-256 de su JCS sin `environment`, que queda fuera de la comparación (§7), ni `object_sha256` y `object_bytes` de sus partes, que son del gzip y cambian con el compresor aunque las filas sean las mismas. El manifiesto en JCS no pasa de 1 MiB (`BACKTEST_RESULT_MAX_BYTES`).
+- **Spec.** Las secuencias son las de `dataset_log_ranges`, en orden de nombre, con sus datasets en su orden; un dataset aparece una sola vez, y la serie tiene como mucho 10 000. `indicators_from_utc ≤ window_from_utc < window_to_utc`. Si la serie es continua lo comprueba el backtest (`series_not_contiguous`, §4).
+- **Decisiones.** `decision_number` cuenta las filas desde 0. `place` es el dato que decidió, nombrado por su secuencia y su log, como en `dataset_log_ranges`, y no por su dataset, para que valga igual en `shadow`, que decide antes de que se publique el dataset (ADR-0026 §2 y §7); es `null` si decidió el paso del tiempo, la apertura o el cierre de la ventana, nunca en `entrar`. `liquidar` repite el contrato de su posición (§10). Una fila `omitir` agrupa las omisiones seguidas de la misma decisión con la misma causa, con su número, su primer instante (`instant_utc`) y el último (§10). En `entrar`, la compra no es anterior al dato que decidió, y la señal vence después de la compra; con velas de Deriv, que entran sin latencia, `signal_expires_utc` es `null`.
+- **Posiciones.** Un multiplicador paga comisión y un sube/baja cobra un pago; `applied` es el de `cost_scale` (§6): una comisión que no baja y un pago que no sube ni baja de la apuesta. Un multiplicador no vence, no lleva `won`, no pierde más que la apuesta y la pierde entera con `stop_out`; `stop_loss` y `take_profit` solo con el suyo en el contrato. Un sube/baja sale con `expiry` o `window_close`, y si pierde, pierde la apuesta. Solo un umbral exacto de una vela sale sin precio. `estimated` marca la posición y no la cierra: tras un intervalo sin datos registrados, la posición sigue con los ticks que llegan (precisión de ADR-0024 en ADR-0022 §7). `window_close` lleva `liquidated_at_window_close`, que también puede llevar un sube/baja con su vencimiento cumplido (`expiry`). La entrada no es anterior a la compra, ni la salida a la entrada, y la liquidación va después de la entrada. `stale_quote`: con `basis` `quote`, una cotización de más de 1 hora antes de la hora de la fuente de la entrada; con el supuesto, nunca.
+- **Métricas** (§10). La muestra (`event_count`, `used_ticks`, `used_candles` y `days_with_data`); `trade_count`, que es el número de posiciones, y `trades_by_close_cause`; `net_result_cents`, la suma de `wins` y `losses`, y `net_result_percent`, sobre el capital de 1000 USD; `commissions_paid_cents` y `mean_quoted_payout_cents`, 0 y `null` sin operaciones; `max_drawdown`, con su `percent`, su máximo y su valle, o ninguno sin caída, y `recovery_ms`, `null` sin caída o sin recuperar; `exposure_percent` y `hit_rate_percent`, de 0 a 100, y `trades_per_day`; `wins` y `losses`, con su número, su suma, su media, su mediana y la mayor, `null` sin operaciones; `omitted_by_cause` y `stopped_ms_by_cause`; las posiciones estimadas, liquidadas al cerrar la ventana, con una cotización vieja y con un supuesto de costos o de contratos; y `dataset_incidents`, por `incident_type`. Las listas van en orden de su causa o su tipo, solo con los que se dieron. Una ganancia es un resultado positivo y una pérdida uno negativo. Las medias y las medianas se redondean al centavo, al par.
+- **Supuestos** (`BACKTEST_ASSUMPTIONS`), los que usó la ventana, en orden, con las decisiones que se tomaron con cada uno (§4 y §6): `deriv_candles_decision_price`, entrar y salir con velas de Deriv al precio del instante de la decisión (§6); `first_offer_backwards`, los contratos del primer `ContractOffer` y los multiplicadores de la primera cotización o del primer rechazo, aplicados hacia atrás (§4); `first_quote_backwards`, el costo de la primera cotización, aplicado hacia atrás (§6); `history_profile`, la historia descargada, con su perfil equivalente y su instante, que es su hora de la fuente (§4); y `schedule_from_midnight`, el horario de cada día desde las 00:00 UTC antes del paso de los lotes (§4).
+- **Resultado.** Uno `completed` no tiene `error_code` y tiene métricas y supuestos; uno `failed` tiene su código y no tiene métricas, supuestos ni partes (§9). Las partes van primero las de decisiones y después las de posiciones, cada clase desde el índice 0, y todas tienen 50 000 filas salvo la última de su clase: así el reparto, y con él los hashes, es el mismo en cualquier máquina. El resultado tiene como mucho 1 000 000 de filas. El `failed` que escribe el motor cuando la unidad termina sin resultado (§9) lleva `runner: "vps"` y el entorno de la versión de `apps/backtest` que lanzó. `object_sha256` es el del objeto en gzip, que es su nombre (ADR-0023 §7), y `logical_sha256`, el de su NDJSON, una fila en JCS por línea.
+- **Validación runtime:** el JSON Schema describe la forma; las reglas entre campos de los puntos anteriores solo las comprueba el runtime. Las pruebas de `packages/contracts/test/backtest.test.ts` fijan los hashes con valores calculados fuera del paquete.
+
 ## Contratos futuros
 
-`SignalEvent`, `RiskPolicy`, `ExecutionIntent` y `ExecutionEvent` se definirán en sus fases. [ADR-0023](adr/0023-motor-de-investigacion.md) fija los de la investigación (`ResearchSearchSpec`, `ResearchSearchSummary`, `ResearchCandidateList`, `ResearchCandidateFreeze`, `ResearchEngineStatus` y `ResearchWeeklyReport`), que llegan con el PR 3 de su §14, salvo `ResearchCandidateFreeze`, que llega con F2.8. [ADR-0024](adr/0024-semantica-del-backtest.md) fija los del backtest (`DataViewEvent`, el evento de la vista de cada instante, y `BacktestSpec`, `BacktestResult`, `BacktestDecision` y `BacktestPosition`), que llegan con el PR 3 de su §12. Desde su PR 2, la vista está en `packages/domain` (`DataView`, `data-view-1.0.0`), con sus tipos de TypeScript, y su equivalencia con `deriveMarketData` y el pliegue la prueba el dominio (ADR-0024 §2 y §11). [ADR-0025](adr/0025-protocolo-estadistico.md) fija los de la evaluación (`StrategyPreRegistration`, `ResearchFamilyStats` y `EvidenceReport`), con los campos de `ResearchCandidateFreeze`, que llegan con el PR 3 de su §15, y suma `validation_finalists` por serie a `ResearchSearchSpec`, y los estadísticos suficientes por serie y la PBO a `ResearchSearchSummary`, que llegan antes, en su versión 1.0.0, con el PR 3 de ADR-0023. [ADR-0026](adr/0026-motor-de-senales-shadow.md) fija los del motor `shadow` (`ShadowInput`, `ShadowDecision`, `SignalEvent` y `ShadowEngineStatus`), que llegan con el PR 2 de su §13, y `ShadowPosition`, que llega con su PR 7. Sus conceptos no autorizan crear tablas, APIs o servicios en Fase 1.
+`SignalEvent`, `RiskPolicy`, `ExecutionIntent` y `ExecutionEvent` se definirán en sus fases. [ADR-0023](adr/0023-motor-de-investigacion.md) fija los de la investigación (`ResearchSearchSpec`, `ResearchSearchSummary`, `ResearchCandidateList`, `ResearchCandidateFreeze`, `ResearchEngineStatus` y `ResearchWeeklyReport`), que llegan con el PR 3 de su §14, salvo `ResearchCandidateFreeze`, que llega con F2.8. Los del backtest de [ADR-0024](adr/0024-semantica-del-backtest.md) están en «DataViewEvent» y «Backtest». [ADR-0025](adr/0025-protocolo-estadistico.md) fija los de la evaluación (`StrategyPreRegistration`, `ResearchFamilyStats` y `EvidenceReport`), con los campos de `ResearchCandidateFreeze`, que llegan con el PR 3 de su §15, y suma `validation_finalists` por serie a `ResearchSearchSpec`, y los estadísticos suficientes por serie y la PBO a `ResearchSearchSummary`, que llegan antes, en su versión 1.0.0, con el PR 3 de ADR-0023. [ADR-0026](adr/0026-motor-de-senales-shadow.md) fija los del motor `shadow` (`ShadowInput`, `ShadowDecision`, `SignalEvent` y `ShadowEngineStatus`), que llegan con el PR 2 de su §13, y `ShadowPosition`, que llega con su PR 7. Sus conceptos no autorizan crear tablas, APIs o servicios en Fase 1.
 
 ## Versionado y compatibilidad
 

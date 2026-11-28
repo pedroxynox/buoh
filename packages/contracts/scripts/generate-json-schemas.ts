@@ -5,10 +5,17 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
 import { auditEventStructuralSchema } from '../src/audit.js';
+import {
+  backtestDecisionStructuralSchema,
+  backtestPositionStructuralSchema,
+  backtestResultStructuralSchema,
+  backtestSpecStructuralSchema,
+} from '../src/backtest.js';
 import { operationalConditionEventStructuralSchema } from '../src/conditions.js';
 import { contractOfferStructuralSchema } from '../src/contract-offer.js';
 import { contractQuoteStructuralSchema } from '../src/contract-quote.js';
 import { dataQualityIncidentStructuralSchema } from '../src/data-quality.js';
+import { dataViewEventStructuralSchema } from '../src/data-view-event.js';
 import {
   datasetManifestStructuralSchema,
   publishedManifestRecordStructuralSchema,
@@ -28,9 +35,14 @@ const checkOnly = process.argv.includes('--check');
 
 const schemas = [
   ['audit-event.schema.json', auditEventStructuralSchema],
+  ['backtest-decision.schema.json', backtestDecisionStructuralSchema],
+  ['backtest-position.schema.json', backtestPositionStructuralSchema],
+  ['backtest-result.schema.json', backtestResultStructuralSchema],
+  ['backtest-spec.schema.json', backtestSpecStructuralSchema],
   ['contract-offer.schema.json', contractOfferStructuralSchema],
   ['contract-quote.schema.json', contractQuoteStructuralSchema],
   ['data-quality-incident.schema.json', dataQualityIncidentStructuralSchema],
+  ['data-view-event.schema.json', dataViewEventStructuralSchema],
   ['dataset-manifest.schema.json', datasetManifestStructuralSchema],
   ['health-report.schema.json', healthReportStructuralSchema],
   ['ingestion-cursor.schema.json', ingestionCursorSchema],

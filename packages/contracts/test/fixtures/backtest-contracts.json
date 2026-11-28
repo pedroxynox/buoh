@@ -1,0 +1,440 @@
+{
+  "spec": {
+    "schema_version": "1.0.0",
+    "strategy_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "series": [
+      {
+        "sequence": "R_100",
+        "dataset_ids": [
+          "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        ]
+      },
+      {
+        "sequence": "lotes_cotizaciones",
+        "dataset_ids": ["sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"]
+      },
+      {
+        "sequence": "lotes_historia_r_100",
+        "dataset_ids": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+      }
+    ],
+    "indicators_from_utc": "2026-11-01T00:00:00.000Z",
+    "window_from_utc": "2026-11-02T00:00:00.000Z",
+    "window_to_utc": "2026-11-09T00:00:00.000Z",
+    "execution": {
+      "latency_ms": 1000,
+      "cost_scale": "1"
+    },
+    "versions": {
+      "backtest": "backtest-1.0.0",
+      "data_view": "data-view-1.0.0",
+      "strategy_evaluator": "strategy-evaluator-1.0.0",
+      "strategy_host": "strategy-host-1.0.0"
+    }
+  },
+  "decisions": [
+    {
+      "schema_version": "1.0.0",
+      "decision_number": 0,
+      "decision": "entrar",
+      "cause": "entry_rule",
+      "instant_utc": "2026-11-02T00:00:10.037Z",
+      "place": {
+        "sequence": "R_100",
+        "log_number": 1,
+        "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e5f",
+        "source_time_utc": "2026-11-02T00:00:10.000Z"
+      },
+      "quality_profile_id": "deriv-r100-live",
+      "quality_profile_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 60000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": null
+      },
+      "stake": "10",
+      "purchase_utc": "2026-11-02T00:00:11.000Z",
+      "signal_expires_utc": "2026-11-02T00:00:16.000Z"
+    },
+    {
+      "schema_version": "1.0.0",
+      "decision_number": 1,
+      "decision": "liquidar",
+      "cause": "stop_loss",
+      "instant_utc": "2026-11-02T00:00:30.040Z",
+      "place": {
+        "sequence": "R_100",
+        "log_number": 1,
+        "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e60",
+        "source_time_utc": "2026-11-02T00:00:30.000Z"
+      },
+      "quality_profile_id": "deriv-r100-live",
+      "quality_profile_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "position_number": 0,
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 60000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": null
+      },
+      "result_cents": -500
+    },
+    {
+      "schema_version": "1.0.0",
+      "decision_number": 2,
+      "decision": "omitir",
+      "cause": "signal_pending",
+      "omitted": "entrar",
+      "count": 3,
+      "instant_utc": "2026-11-02T00:01:00.040Z",
+      "last_instant_utc": "2026-11-02T00:01:04.040Z",
+      "place": {
+        "sequence": "R_100",
+        "log_number": 1,
+        "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e61",
+        "source_time_utc": "2026-11-02T00:01:00.000Z"
+      },
+      "quality_profile_id": "deriv-r100-live",
+      "quality_profile_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "schema_version": "1.0.0",
+      "decision_number": 3,
+      "decision": "salir",
+      "cause": "exit_rule",
+      "instant_utc": "2026-11-02T00:02:00.040Z",
+      "place": {
+        "sequence": "R_100",
+        "log_number": 2,
+        "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e62",
+        "source_time_utc": "2026-11-02T00:02:00.000Z"
+      },
+      "quality_profile_id": "deriv-r100-live",
+      "quality_profile_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "position_number": 1
+    },
+    {
+      "schema_version": "1.0.0",
+      "decision_number": 4,
+      "decision": "detener",
+      "cause": "data_stale",
+      "instant_utc": "2026-11-02T00:03:05.000Z",
+      "place": null,
+      "quality_profile_id": "deriv-r100-live",
+      "quality_profile_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "schema_version": "1.0.0",
+      "decision_number": 5,
+      "decision": "reanudar",
+      "cause": "data_policy_met",
+      "instant_utc": "2026-11-02T00:03:09.040Z",
+      "place": {
+        "sequence": "R_100",
+        "log_number": 2,
+        "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e63",
+        "source_time_utc": "2026-11-02T00:03:09.000Z"
+      },
+      "quality_profile_id": "deriv-r100-live",
+      "quality_profile_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  ],
+  "positions": [
+    {
+      "schema_version": "1.0.0",
+      "position_number": 0,
+      "entry_decision_number": 0,
+      "close_decision_number": 1,
+      "contract": {
+        "contract_type": "MULTUP",
+        "max_duration_ms": 60000,
+        "multiplier": 100,
+        "stop_loss": "5",
+        "take_profit": null
+      },
+      "stake": "10",
+      "purchase_utc": "2026-11-02T00:00:11.000Z",
+      "entry": {
+        "place": {
+          "sequence": "R_100",
+          "log_number": 1,
+          "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e64",
+          "source_time_utc": "2026-11-02T00:00:12.000Z"
+        },
+        "price": "1234.56"
+      },
+      "exit": {
+        "cause": "stop_loss",
+        "place": {
+          "sequence": "R_100",
+          "log_number": 1,
+          "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e60",
+          "source_time_utc": "2026-11-02T00:00:30.000Z"
+        },
+        "price": "1228.07"
+      },
+      "result_cents": -500,
+      "won": null,
+      "costs": {
+        "kind": "commission",
+        "quoted": "0.36",
+        "applied": "0.36",
+        "basis": "quote",
+        "quote": {
+          "sequence": "lotes_cotizaciones",
+          "log_number": 1,
+          "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e65",
+          "received_at_utc": "2026-11-01T23:55:00.000Z"
+        }
+      },
+      "offer_basis": "offer",
+      "estimated": false,
+      "liquidated_at_window_close": false,
+      "stale_quote": false
+    },
+    {
+      "schema_version": "1.0.0",
+      "position_number": 1,
+      "entry_decision_number": 6,
+      "close_decision_number": 7,
+      "contract": {
+        "contract_type": "CALL",
+        "duration": {
+          "duration": 5,
+          "duration_unit": "t"
+        }
+      },
+      "stake": "10",
+      "purchase_utc": "2026-11-03T00:00:11.000Z",
+      "entry": {
+        "place": {
+          "sequence": "R_100",
+          "log_number": 2,
+          "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e66",
+          "source_time_utc": "2026-11-03T00:00:12.000Z"
+        },
+        "price": "1240.10"
+      },
+      "exit": {
+        "cause": "expiry",
+        "place": {
+          "sequence": "R_100",
+          "log_number": 2,
+          "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e67",
+          "source_time_utc": "2026-11-03T00:00:22.000Z"
+        },
+        "price": "1241.05"
+      },
+      "result_cents": 950,
+      "won": true,
+      "costs": {
+        "kind": "payout",
+        "quoted": "19.5",
+        "applied": "19.5",
+        "basis": "first_quote_backwards",
+        "quote": {
+          "sequence": "lotes_cotizaciones",
+          "log_number": 1,
+          "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e68",
+          "received_at_utc": "2026-11-05T10:00:00.000Z"
+        }
+      },
+      "offer_basis": "first_offer_backwards",
+      "estimated": false,
+      "liquidated_at_window_close": false,
+      "stale_quote": false
+    }
+  ],
+  "result": {
+    "schema_version": "1.0.0",
+    "backtest_id": "sha256:19bf111b6df1e98eccd4746ee46e23d67a66af01b14edf38f221642e518c1b55",
+    "status": "completed",
+    "error_code": null,
+    "metrics": {
+      "sample": {
+        "event_count": 1000,
+        "used_ticks": 900,
+        "used_candles": 0,
+        "days_with_data": 7
+      },
+      "trade_count": 2,
+      "trades_by_close_cause": [
+        {
+          "cause": "expiry",
+          "count": 1
+        },
+        {
+          "cause": "stop_loss",
+          "count": 1
+        }
+      ],
+      "net_result_cents": 450,
+      "net_result_percent": "0.450000",
+      "commissions_paid_cents": 36,
+      "mean_quoted_payout_cents": 1950,
+      "max_drawdown": {
+        "percent": "0.500000",
+        "peak_utc": "2026-11-02T00:00:12.000Z",
+        "trough_utc": "2026-11-02T00:00:30.000Z",
+        "recovery_ms": null
+      },
+      "exposure_percent": "0.004960",
+      "trades_per_day": "0.285714",
+      "wins": {
+        "count": 1,
+        "sum_cents": 950,
+        "mean_cents": 950,
+        "median_cents": 950,
+        "largest_cents": 950
+      },
+      "losses": {
+        "count": 1,
+        "sum_cents": -500,
+        "mean_cents": -500,
+        "median_cents": -500,
+        "largest_cents": -500
+      },
+      "hit_rate_percent": "50.000000",
+      "omitted_by_cause": [
+        {
+          "cause": "signal_pending",
+          "count": 3
+        }
+      ],
+      "stopped_ms_by_cause": [
+        {
+          "cause": "data_stale",
+          "ms": 4040
+        }
+      ],
+      "estimated_positions": 0,
+      "window_close_positions": 0,
+      "stale_quote_positions": 0,
+      "cost_assumption_positions": 1,
+      "offer_assumption_positions": 1,
+      "dataset_incidents": [
+        {
+          "incident_type": "delivery_delayed",
+          "count": 2
+        }
+      ]
+    },
+    "assumptions": [
+      {
+        "assumption": "first_offer_backwards",
+        "decisions": 2
+      },
+      {
+        "assumption": "first_quote_backwards",
+        "decisions": 2
+      }
+    ],
+    "parts": [
+      {
+        "part_class": "decisions",
+        "part_index": 0,
+        "row_count": 8,
+        "object_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "object_bytes": 1200,
+        "logical_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+        "logical_bytes": 4800
+      },
+      {
+        "part_class": "positions",
+        "part_index": 0,
+        "row_count": 2,
+        "object_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "object_bytes": 700,
+        "logical_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+        "logical_bytes": 2100
+      }
+    ],
+    "environment": {
+      "runner": "vps",
+      "node_version": "v24.22.0",
+      "cpu_model": "AMD EPYC Processor",
+      "packages": [
+        {
+          "name": "@buoh/backtest",
+          "version": "0.0.0"
+        },
+        {
+          "name": "@buoh/contracts",
+          "version": "0.0.0"
+        }
+      ]
+    }
+  },
+  "failed": {
+    "schema_version": "1.0.0",
+    "backtest_id": "sha256:c035e3c09b03c2778474337b47a260858b21d388c4fe98937dcc629bb280a454",
+    "status": "failed",
+    "error_code": "interrupted",
+    "metrics": null,
+    "assumptions": null,
+    "parts": [],
+    "environment": {
+      "runner": "vps",
+      "node_version": "v24.22.0",
+      "cpu_model": "AMD EPYC Processor",
+      "packages": [
+        {
+          "name": "@buoh/backtest",
+          "version": "0.0.0"
+        }
+      ]
+    }
+  },
+  "view": {
+    "tick": {
+      "schema_version": "1.0.0",
+      "kind": "tick",
+      "dataset_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "segment_index": 3,
+      "instant_utc": "2026-11-02T00:00:10.037Z",
+      "observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e5f",
+      "symbol": "R_100",
+      "event_time_utc": "2026-11-02T00:00:10.000Z",
+      "quote_decimal": "1234.56",
+      "origin": "stream",
+      "tick_fingerprint_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+      "quality_flags": ["after_unrecorded", "delivery_delayed"],
+      "unrecorded_since_utc": "2026-11-02T00:00:02.000Z"
+    },
+    "health": {
+      "schema_version": "1.0.0",
+      "kind": "health",
+      "dataset_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "segment_index": 3,
+      "instant_utc": "2026-11-02T00:00:09.000Z",
+      "source_event_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e69",
+      "report": {
+        "schema_version": "1.0.0",
+        "source": "deriv_options",
+        "execution_mode": "disabled",
+        "service_health": "degraded",
+        "connection_state": "disconnected",
+        "backlog_count": 0,
+        "backlog_bytes": 0,
+        "last_observation_id": "01890a5d-ac96-7c4b-9f2e-3a1b2c3d4e5e",
+        "last_received_at_utc": "2026-11-02T00:00:02.037Z",
+        "last_event_time_utc": "2026-11-02T00:00:02.000Z",
+        "last_published_dataset_id": null,
+        "open_condition_types": ["connection_lost"]
+      },
+      "connected_in_log": false,
+      "open_conditions": [
+        {
+          "condition_key": "connection_lost:sha256:8888888888888888888888888888888888888888888888888888888888888888",
+          "condition_type": "connection_lost",
+          "symbol": null
+        }
+      ],
+      "pending_continuity_symbols": ["R_100"]
+    }
+  }
+}
