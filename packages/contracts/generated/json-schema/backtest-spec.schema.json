@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/BacktestSpec",
+  "$defs": {
+    "BacktestSpec": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "strategy_version_id": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "series": {
+          "minItems": 1,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sequence": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_]{1,64}$"
+              },
+              "dataset_ids": {
+                "minItems": 1,
+                "maxItems": 10000,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              }
+            },
+            "required": [
+              "sequence",
+              "dataset_ids"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "indicators_from_utc": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+        },
+        "window_from_utc": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+        },
+        "window_to_utc": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+        },
+        "execution": {
+          "type": "object",
+          "properties": {
+            "latency_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5000
+            },
+            "cost_scale": {
+              "type": "string",
+              "enum": [
+                "1",
+                "2",
+                "1.5"
+              ]
+            }
+          },
+          "required": [
+            "latency_ms",
+            "cost_scale"
+          ],
+          "additionalProperties": false
+        },
+        "versions": {
+          "type": "object",
+          "properties": {
+            "backtest": {
+              "type": "string",
+              "const": "backtest-1.0.0"
+            },
+            "data_view": {
+              "type": "string",
+              "const": "data-view-1.0.0"
+            },
+            "strategy_evaluator": {
+              "type": "string",
+              "const": "strategy-evaluator-1.0.0"
+            },
+            "strategy_host": {
+              "type": "string",
+              "const": "strategy-host-1.0.0"
+            }
+          },
+          "required": [
+            "backtest",
+            "data_view",
+            "strategy_evaluator",
+            "strategy_host"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "schema_version",
+        "strategy_version_id",
+        "series",
+        "indicators_from_utc",
+        "window_from_utc",
+        "window_to_utc",
+        "execution",
+        "versions"
+      ],
+      "additionalProperties": false,
+      "title": "BacktestSpec"
+    }
+  }
+}

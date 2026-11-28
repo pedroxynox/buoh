@@ -200,6 +200,15 @@ const callputContractSchema = z.strictObject({
   }),
 });
 
+/** El contrato de una estrategia (§5), que repiten las decisiones y las posiciones del backtest. */
+export const strategyContractSchema = z.discriminatedUnion('contract_type', [
+  multiplierContractSchema,
+  callputContractSchema,
+]);
+
+/** El perfil de calidad que declara una estrategia, y con el que decide cada decisión. */
+export const qualityProfileIdSchema = z.string().regex(/^[A-Za-z0-9_.-]{1,128}$/u);
+
 /**
  * Texto libre con tope (ADR-0023 §5): sin caracteres de control salvo el salto de línea, sin los de
  * dirección del texto, que cambian cómo se ve en la web (`Bidi_Control` de Unicode: U+061C, U+200E,
@@ -228,7 +237,7 @@ export const strategyDefinitionStructuralSchema = z
       source: z.literal(DERIV_SOURCE),
       symbol: z.enum(STRATEGY_SYMBOLS),
       data: z.enum(['ticks', 'deriv_candles']),
-      quality_profile_id: z.string().regex(/^[A-Za-z0-9_.-]{1,128}$/u),
+      quality_profile_id: qualityProfileIdSchema,
       quality_profile_sha256: sha256HexSchema,
       timeframe: z.enum(TICK_TIMEFRAMES),
     }),
@@ -240,10 +249,7 @@ export const strategyDefinitionStructuralSchema = z
       weekdays_utc: z.array(z.number().int().min(0).max(6)).min(1).max(6).nullable(),
     }),
     exit: z.strictObject({ conditions: conditionGroupSchema }).nullable(),
-    contract: z.discriminatedUnion('contract_type', [
-      multiplierContractSchema,
-      callputContractSchema,
-    ]),
+    contract: strategyContractSchema,
     position: z.strictObject({
       currency: z.literal('USD'),
       initial_capital: z.literal('1000'),

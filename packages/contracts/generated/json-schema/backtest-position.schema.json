@@ -1,0 +1,337 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/BacktestPosition",
+  "$defs": {
+    "BacktestPosition": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "position_number": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "entry_decision_number": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "close_decision_number": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "contract": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "contract_type": {
+                  "type": "string",
+                  "enum": [
+                    "MULTUP",
+                    "MULTDOWN"
+                  ]
+                },
+                "max_duration_ms": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 86400000
+                },
+                "multiplier": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000
+                },
+                "stop_loss": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^(?:[1-9][0-9]{0,5}(?:\\.[0-9]?[1-9])?|0\\.(?:0[1-9]|[1-9][1-9]?))$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "take_profit": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^(?:[1-9][0-9]{0,5}(?:\\.[0-9]?[1-9])?|0\\.(?:0[1-9]|[1-9][1-9]?))$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "contract_type",
+                "max_duration_ms",
+                "multiplier",
+                "stop_loss",
+                "take_profit"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "contract_type": {
+                  "type": "string",
+                  "enum": [
+                    "CALL",
+                    "PUT"
+                  ]
+                },
+                "duration": {
+                  "type": "object",
+                  "properties": {
+                    "duration": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 240
+                    },
+                    "duration_unit": {
+                      "type": "string",
+                      "enum": [
+                        "t",
+                        "s",
+                        "m"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "duration",
+                    "duration_unit"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "contract_type",
+                "duration"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "stake": {
+          "type": "string",
+          "const": "10"
+        },
+        "purchase_utc": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+        },
+        "entry": {
+          "type": "object",
+          "properties": {
+            "place": {
+              "type": "object",
+              "properties": {
+                "dataset_id": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "observation_id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "source_time_utc": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+                }
+              },
+              "required": [
+                "dataset_id",
+                "observation_id",
+                "source_time_utc"
+              ],
+              "additionalProperties": false
+            },
+            "price": {
+              "type": "string",
+              "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+            }
+          },
+          "required": [
+            "place",
+            "price"
+          ],
+          "additionalProperties": false
+        },
+        "exit": {
+          "type": "object",
+          "properties": {
+            "cause": {
+              "type": "string",
+              "enum": [
+                "exit_rule",
+                "expiry",
+                "max_duration",
+                "stop_loss",
+                "stop_out",
+                "take_profit",
+                "window_close"
+              ]
+            },
+            "place": {
+              "type": "object",
+              "properties": {
+                "dataset_id": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "observation_id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "source_time_utc": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+                }
+              },
+              "required": [
+                "dataset_id",
+                "observation_id",
+                "source_time_utc"
+              ],
+              "additionalProperties": false
+            },
+            "price": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "cause",
+            "place",
+            "price"
+          ],
+          "additionalProperties": false
+        },
+        "result_cents": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "won": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "costs": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "commission",
+                "payout"
+              ]
+            },
+            "quoted": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{0,17}[1-9])?$"
+            },
+            "applied": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{0,17}[1-9])?$"
+            },
+            "basis": {
+              "type": "string",
+              "enum": [
+                "quote",
+                "first_quote_backwards"
+              ]
+            },
+            "quote": {
+              "type": "object",
+              "properties": {
+                "dataset_id": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "observation_id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "received_at_utc": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+                }
+              },
+              "required": [
+                "dataset_id",
+                "observation_id",
+                "received_at_utc"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "kind",
+            "quoted",
+            "applied",
+            "basis",
+            "quote"
+          ],
+          "additionalProperties": false
+        },
+        "offer_basis": {
+          "type": "string",
+          "enum": [
+            "offer",
+            "first_offer_backwards"
+          ]
+        },
+        "estimated": {
+          "type": "boolean"
+        },
+        "liquidated_at_window_close": {
+          "type": "boolean"
+        },
+        "stale_quote": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "schema_version",
+        "position_number",
+        "entry_decision_number",
+        "close_decision_number",
+        "contract",
+        "stake",
+        "purchase_utc",
+        "entry",
+        "exit",
+        "result_cents",
+        "won",
+        "costs",
+        "offer_basis",
+        "estimated",
+        "liquidated_at_window_close",
+        "stale_quote"
+      ],
+      "additionalProperties": false,
+      "title": "BacktestPosition"
+    }
+  }
+}

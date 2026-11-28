@@ -11,7 +11,11 @@
  * red ni aleatoriedad. Falla donde falla el pliegue (ADR-0017 §3): un log que no se deriva.
  */
 import {
-  type HealthReport,
+  DATA_VIEW_EVENT_SCHEMA_VERSION,
+  type DataViewEvent,
+  type DataViewHealth,
+  type DataViewTick,
+  type DataViewTickFlag,
   type LiveDerivationState,
   type MarketTick,
   type RawSourceFrame,
@@ -40,54 +44,14 @@ export const DATA_VIEW_UNUSED_FLAGS = [
 
 export type DataViewUnusedFlag = (typeof DATA_VIEW_UNUSED_FLAGS)[number];
 
-/** Las marcas de un tick de la vista: la de la derivación que puede tener uno usado y la propia. */
-export type DataViewTickFlag = 'after_unrecorded' | 'delivery_delayed';
+/** Los eventos de la vista son los del contrato `DataViewEvent` 1.0.0 (contratos de dominio). */
+export type { DataViewEvent, DataViewHealth, DataViewTick, DataViewTickFlag };
 
 /** Dónde está un source event en el log: el dataset y el segmento. */
 export interface DataViewPlace {
   readonly dataset_id: string;
   readonly segment_index: number;
 }
-
-/** Un tick que se puede usar, con su lugar en el log. */
-export interface DataViewTick extends DataViewPlace {
-  readonly event_time_utc: string;
-  /** El instante en que la vista lo da (ADR-0024 §3). */
-  readonly instant_utc: string;
-  readonly kind: 'tick';
-  readonly observation_id: string;
-  readonly origin: MarketTick['origin'];
-  /** Ordenadas. */
-  readonly quality_flags: readonly DataViewTickFlag[];
-  readonly quote_decimal: string;
-  readonly symbol: string;
-  readonly tick_fingerprint_sha256: string;
-  /**
-   * Solo con `after_unrecorded`: la hora de la fuente del último tick usado antes, del mismo símbolo
-   * y del mismo log, o `null` si es el primero del log.
-   */
-  readonly unrecorded_since_utc?: string | null;
-}
-
-/** La salud del log y lo que la impone, cada vez que cambian (ADR-0024 §2). */
-export interface DataViewHealth extends DataViewPlace {
-  readonly connected_in_log: boolean;
-  readonly instant_utc: string;
-  readonly kind: 'health';
-  /** Las condiciones abiertas, en orden de `condition_key`. */
-  readonly open_conditions: readonly {
-    readonly condition_key: string;
-    readonly condition_type: string;
-    readonly symbol: string | null;
-  }[];
-  readonly pending_continuity_symbols: readonly string[];
-  /** `deriveLiveHealthReport` de los hechos del log, sin lo que solo ve quien ingiere. */
-  readonly report: HealthReport;
-  /** El `observation_id` o el `event_id` del source event que la cambió. */
-  readonly source_event_id: string;
-}
-
-export type DataViewEvent = DataViewHealth | DataViewTick;
 
 /**
  * Lo que hay entre un tick del flujo y el tick usado anterior (ADR-0024 §2): nada (`none`); un
@@ -634,6 +598,7 @@ export class DataView {
         flags.push('delivery_delayed');
       }
       out.push({
+        schema_version: DATA_VIEW_EVENT_SCHEMA_VERSION,
         dataset_id: held.dataset_id,
         event_time_utc: held.event_time_utc,
         instant_utc: instant,
@@ -674,12 +639,13 @@ export class DataView {
     }
     this.healthKey = key;
     return {
+      schema_version: DATA_VIEW_EVENT_SCHEMA_VERSION,
       connected_in_log: facts.connectedInLog,
       dataset_id: place.dataset_id,
       instant_utc: instant,
       kind: 'health',
       open_conditions: openConditions,
-      pending_continuity_symbols: facts.pendingContinuitySymbols,
+      pending_continuity_symbols: [...facts.pendingContinuitySymbols],
       report: deriveLiveHealthReport({
         backlog_bytes: 0,
         backlog_count: 0,

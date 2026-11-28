@@ -204,6 +204,37 @@ export {
   type SourceEvent,
 } from './source-events.js';
 export {
+  BACKTEST_ASSUMPTIONS,
+  BACKTEST_CLOSE_CAUSES,
+  BACKTEST_ERROR_CODES,
+  BACKTEST_MAX_ROWS,
+  BACKTEST_OMIT_CAUSES,
+  BACKTEST_PART_ROWS,
+  BACKTEST_RESULT_MAX_BYTES,
+  BACKTEST_SCHEMA_VERSION,
+  BACKTEST_STOP_CAUSES,
+  BACKTEST_VERSIONS,
+  backtestDecisionSchema,
+  backtestPositionSchema,
+  backtestResultSchema,
+  backtestSpecSchema,
+  deriveBacktestId,
+  deriveBacktestResultLogicalSha256,
+  type BacktestDecision,
+  type BacktestPosition,
+  type BacktestResult,
+  type BacktestSpec,
+} from './backtest.js';
+export {
+  DATA_VIEW_EVENT_SCHEMA_VERSION,
+  DATA_VIEW_TICK_FLAGS,
+  dataViewEventSchema,
+  type DataViewEvent,
+  type DataViewHealth,
+  type DataViewTick,
+  type DataViewTickFlag,
+} from './data-view-event.js';
+export {
   deriveStrategyVersionId,
   INDICATOR_LIBRARY_VERSION,
   STRATEGY_DEFINITION_ERROR_CODES,

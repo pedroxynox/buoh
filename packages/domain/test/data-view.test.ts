@@ -2,8 +2,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
+  BACKTEST_VERSIONS,
   canonicalJson,
   connectionClosedSchema,
+  dataViewEventSchema,
   connectionOpenedSchema,
   historyRecoveryResultSchema,
   rawSourceFrameSchema,
@@ -18,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createPipelineProfile,
   DATA_VIEW_RETENTION_LIMIT,
+  DATA_VIEW_VERSION,
   DATA_VIEW_UNUSED_FLAGS,
   DataView,
   deriveLiveHealthReport,
@@ -223,7 +226,8 @@ class Log {
 /** Cuatro eventos por segmento y tres segmentos por dataset: el log cruza varios datasets. */
 function placeOf(index: number): DataViewPlace {
   const segment = Math.floor(index / 4);
-  return { dataset_id: `dataset-${String(Math.floor(segment / 3))}`, segment_index: segment };
+  const dataset = `dataset-${String(Math.floor(segment / 3))}`;
+  return { dataset_id: `sha256:${sha256Hex(dataset)}`, segment_index: segment };
 }
 
 function run(events: readonly SourceEvent[], profile: PipelineProfile) {
@@ -303,6 +307,12 @@ function expectEquivalent(
   });
   for (const item of tail) {
     given.push({ at: events.length, tick: item });
+  }
+
+  // Cada evento cumple el contrato `DataViewEvent` 1.0.0, con sus reglas entre campos.
+  for (const item of [...perEvent.flat(), ...tail]) {
+    const parsed = dataViewEventSchema.safeParse(item);
+    expect(parsed.success, `${label}: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
   }
 
   // Cada tick, con las marcas de la derivación hasta el source event que lo trajo.
@@ -459,6 +469,10 @@ function reconnection(log = new Log()): Log {
 }
 
 describe('la vista de cada instante (ADR-0024 §2)', () => {
+  it('es la versión que nombra BacktestSpec', () => {
+    expect(DATA_VIEW_VERSION).toBe(BACKTEST_VERSIONS.data_view);
+  });
+
   it('con un complete, da los ticks de la historia y los retenidos juntos, en orden', () => {
     const log = reconnection()
       .page(
