@@ -1,0 +1,3053 @@
+[
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": null,
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.36"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -36,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": -86
+        },
+        {
+          "close": null,
+          "mark_cents": -536
+        },
+        {
+          "close": {
+            "cause": "stop_out",
+            "exit_price": "990.3",
+            "exit_time_ms": 1767571208000,
+            "result_cents": -1000
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multup_stop_out",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "995",
+          "source_time_ms": 1767571206000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "990.3",
+          "source_time_ms": 1767571208000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": "5",
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.36"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -36,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": -236
+        },
+        {
+          "close": {
+            "cause": "stop_loss",
+            "exit_price": "994.7",
+            "exit_time_ms": 1767571206000,
+            "result_cents": -566
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multup_stop_loss_with_tick_result",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "998",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "994.7",
+          "source_time_ms": 1767571206000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTDOWN",
+      "max_duration_ms": 3600000,
+      "multiplier": 40,
+      "stop_loss": null,
+      "take_profit": "2.5"
+    },
+    "costs": {
+      "commission": "0.15"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -15,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": 25
+        },
+        {
+          "close": null,
+          "mark_cents": 249
+        },
+        {
+          "close": {
+            "cause": "take_profit",
+            "exit_price": "993.3",
+            "exit_time_ms": 1767571208000,
+            "result_cents": 253
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multdown_take_profit",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "993.4",
+          "source_time_ms": 1767571206000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "993.3",
+          "source_time_ms": 1767571208000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": "5",
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.36"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -36,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": -56
+        },
+        {
+          "close": {
+            "cause": "stop_out",
+            "exit_price": "989",
+            "exit_time_ms": 1767571206000,
+            "result_cents": -1000
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multup_stop_out_before_stop_loss",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.8",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "989",
+          "source_time_ms": 1767571206000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 60000,
+      "multiplier": 100,
+      "stop_loss": null,
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.36"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -36,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": -26
+        },
+        {
+          "close": null,
+          "mark_cents": -46
+        },
+        {
+          "close": null,
+          "mark_cents": -16
+        },
+        {
+          "close": null,
+          "mark_cents": -56
+        },
+        {
+          "close": null,
+          "mark_cents": -6
+        },
+        {
+          "close": null,
+          "mark_cents": -26
+        },
+        {
+          "close": null,
+          "mark_cents": -46
+        },
+        {
+          "close": null,
+          "mark_cents": -16
+        },
+        {
+          "close": null,
+          "mark_cents": -56
+        },
+        {
+          "close": null,
+          "mark_cents": -6
+        },
+        {
+          "close": null,
+          "mark_cents": -26
+        },
+        {
+          "close": null,
+          "mark_cents": -46
+        },
+        {
+          "close": null,
+          "mark_cents": -16
+        },
+        {
+          "close": null,
+          "mark_cents": -56
+        },
+        {
+          "close": null,
+          "mark_cents": -6
+        },
+        {
+          "close": null,
+          "mark_cents": -26
+        },
+        {
+          "close": null,
+          "mark_cents": -46
+        },
+        {
+          "close": null,
+          "mark_cents": -16
+        },
+        {
+          "close": null,
+          "mark_cents": -56
+        },
+        {
+          "close": null,
+          "mark_cents": -6
+        },
+        {
+          "close": null,
+          "mark_cents": -26
+        },
+        {
+          "close": null,
+          "mark_cents": -46
+        },
+        {
+          "close": null,
+          "mark_cents": -16
+        },
+        {
+          "close": null,
+          "mark_cents": -56
+        },
+        {
+          "close": null,
+          "mark_cents": -6
+        },
+        {
+          "close": null,
+          "mark_cents": -26
+        },
+        {
+          "close": null,
+          "mark_cents": -46
+        },
+        {
+          "close": null,
+          "mark_cents": -16
+        },
+        {
+          "close": null,
+          "mark_cents": -56
+        },
+        {
+          "close": null,
+          "mark_cents": -6
+        },
+        {
+          "close": null,
+          "mark_cents": 4
+        },
+        {
+          "close": {
+            "cause": "max_duration",
+            "exit_price": "1000.25",
+            "exit_time_ms": 1767571266000,
+            "result_cents": -11
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multup_max_duration_with_latency_not_on_recovered_tick",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.1",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.9",
+          "source_time_ms": 1767571206000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.2",
+          "source_time_ms": 1767571208000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.8",
+          "source_time_ms": 1767571210000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.3",
+          "source_time_ms": 1767571212000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.1",
+          "source_time_ms": 1767571214000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.9",
+          "source_time_ms": 1767571216000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.2",
+          "source_time_ms": 1767571218000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.8",
+          "source_time_ms": 1767571220000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.3",
+          "source_time_ms": 1767571222000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.1",
+          "source_time_ms": 1767571224000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.9",
+          "source_time_ms": 1767571226000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.2",
+          "source_time_ms": 1767571228000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.8",
+          "source_time_ms": 1767571230000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.3",
+          "source_time_ms": 1767571232000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.1",
+          "source_time_ms": 1767571234000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.9",
+          "source_time_ms": 1767571236000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.2",
+          "source_time_ms": 1767571238000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.8",
+          "source_time_ms": 1767571240000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.3",
+          "source_time_ms": 1767571242000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.1",
+          "source_time_ms": 1767571244000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.9",
+          "source_time_ms": 1767571246000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.2",
+          "source_time_ms": 1767571248000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.8",
+          "source_time_ms": 1767571250000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.3",
+          "source_time_ms": 1767571252000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.1",
+          "source_time_ms": 1767571254000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.9",
+          "source_time_ms": 1767571256000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.2",
+          "source_time_ms": 1767571258000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.8",
+          "source_time_ms": 1767571260000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.3",
+          "source_time_ms": 1767571262000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": true,
+          "price": "1000.4",
+          "source_time_ms": 1767571264000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.25",
+          "source_time_ms": 1767571266000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": "3",
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.36"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -36,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": -46
+        },
+        {
+          "close": {
+            "cause": "stop_loss",
+            "exit_price": "996.5",
+            "exit_time_ms": 1767571206000,
+            "result_cents": -386
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multup_stop_loss_on_recovered_tick",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.9",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": true,
+          "price": "996.5",
+          "source_time_ms": 1767571206000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": null,
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.36"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -36,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": -16
+        },
+        {
+          "close": null,
+          "mark_cents": -16
+        },
+        {
+          "close": null,
+          "mark_cents": -6
+        },
+        {
+          "close": {
+            "cause": "exit_rule",
+            "exit_price": "1000.4",
+            "exit_time_ms": 1767571208000,
+            "result_cents": 4
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multup_exit_rule_with_latency",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.2",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "sale": {
+          "deciding_source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": true,
+          "price": "1000.3",
+          "source_time_ms": 1767571206000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.4",
+          "source_time_ms": 1767571208000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": null,
+      "take_profit": "1"
+    },
+    "costs": {
+      "commission": "0.36"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -36,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": -16
+        },
+        {
+          "close": null,
+          "mark_cents": -16
+        },
+        {
+          "close": {
+            "cause": "take_profit",
+            "exit_price": "1001.4",
+            "exit_time_ms": 1767571206000,
+            "result_cents": 104
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multup_take_profit_before_pending_sale",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.2",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "sale": {
+          "deciding_source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1001.4",
+          "source_time_ms": 1767571206000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 1000,
+      "multiplier": 100,
+      "stop_loss": null,
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.36"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -36,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": -36
+        },
+        {
+          "close": {
+            "cause": "max_duration",
+            "exit_price": "1000.1",
+            "exit_time_ms": 1767571204000,
+            "result_cents": -26
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 0,
+    "name": "ticks/multup_max_duration_before_sale",
+    "purchase_ms": 1767571200000,
+    "stake": "10",
+    "steps": [
+      {
+        "sale": {
+          "deciding_source_time_ms": 1767571202000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.1",
+          "source_time_ms": 1767571204000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": null,
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.36"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -36,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": -36
+        },
+        {
+          "close": null,
+          "mark_cents": -34
+        },
+        {
+          "close": null,
+          "mark_cents": -34
+        },
+        {
+          "close": {
+            "cause": "exit_rule",
+            "exit_price": "1000.015",
+            "exit_time_ms": 1767571208000,
+            "result_cents": -34
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multup_cents_half_even",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.005",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.015",
+          "source_time_ms": 1767571206000
+        }
+      },
+      {
+        "sale": {
+          "deciding_source_time_ms": 1767571206000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.015",
+          "source_time_ms": 1767571208000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 500,
+      "stop_loss": null,
+      "take_profit": "3"
+    },
+    "costs": {
+      "commission": "0.52"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "2650.123",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -52,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": 71
+        },
+        {
+          "close": null,
+          "mark_cents": 115
+        },
+        {
+          "close": {
+            "cause": "take_profit",
+            "exit_price": "2651.991",
+            "exit_time_ms": 1767571208000,
+            "result_cents": 300
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multup_quotient_18_decimals",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "2650.777",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "2651.007",
+          "source_time_ms": 1767571206000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "2651.991",
+          "source_time_ms": 1767571208000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTDOWN",
+      "max_duration_ms": 3600000,
+      "multiplier": 500,
+      "stop_loss": "2",
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.52"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "2650.123",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -52,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": -6
+        },
+        {
+          "close": null,
+          "mark_cents": -89
+        },
+        {
+          "close": {
+            "cause": "stop_loss",
+            "exit_price": "2650.951",
+            "exit_time_ms": 1767571208000,
+            "result_cents": -208
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multdown_quotient_18_decimals",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "2649.881",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "2650.317",
+          "source_time_ms": 1767571206000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "2650.951",
+          "source_time_ms": 1767571208000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": null,
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.36"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -36,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": -536
+        },
+        {
+          "close": {
+            "cause": "stop_out",
+            "exit_price": "990.36",
+            "exit_time_ms": 1767571206000,
+            "result_cents": -1000
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multup_stop_out_at_exact_stake",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "995",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "990.36",
+          "source_time_ms": 1767571206000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": "5",
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.36"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -36,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": -336
+        },
+        {
+          "close": {
+            "cause": "stop_loss",
+            "exit_price": "995.36",
+            "exit_time_ms": 1767571206000,
+            "result_cents": -500
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multup_stop_loss_at_exact_amount",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "997",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "995.36",
+          "source_time_ms": 1767571206000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": null,
+      "take_profit": "1"
+    },
+    "costs": {
+      "commission": "0.36"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -36,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": 64
+        },
+        {
+          "close": {
+            "cause": "take_profit",
+            "exit_price": "1001.36",
+            "exit_time_ms": 1767571206000,
+            "result_cents": 100
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multup_take_profit_at_exact_amount",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1001",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1001.36",
+          "source_time_ms": 1767571206000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": null,
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.36"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571204000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -36,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": -26
+        },
+        {
+          "close": null,
+          "mark_cents": -26
+        },
+        {
+          "close": null,
+          "mark_cents": -16
+        },
+        {
+          "close": {
+            "cause": "exit_rule",
+            "exit_price": "1000.5",
+            "exit_time_ms": 1767571210000,
+            "result_cents": 14
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 3000,
+    "name": "ticks/multup_exit_rule_waits_for_latency",
+    "purchase_ms": 1767571203000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.1",
+          "source_time_ms": 1767571206000
+        }
+      },
+      {
+        "sale": {
+          "deciding_source_time_ms": 1767571206000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.2",
+          "source_time_ms": 1767571208000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571210000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": "0.1",
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.36"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": {
+        "cause": "stop_loss",
+        "exit_price": "1000",
+        "exit_time_ms": 1767571202000,
+        "result_cents": -36
+      },
+      "open_mark_cents": null,
+      "steps": []
+    },
+    "latency_ms": 1000,
+    "name": "ticks/multup_stop_loss_at_entry",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": []
+  },
+  {
+    "contract": {
+      "contract_type": "CALL",
+      "duration": {
+        "duration": 5,
+        "duration_unit": "t"
+      }
+    },
+    "costs": {
+      "payout": "19.51"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": null,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": {
+            "cause": "expiry",
+            "exit_price": "1000.01",
+            "exit_time_ms": 1767571212000,
+            "result_cents": 951,
+            "won": true
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/call_5_ticks_wins",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1001",
+          "source_time_ms": 1767571206000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "998",
+          "source_time_ms": 1767571208000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1002",
+          "source_time_ms": 1767571210000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.01",
+          "source_time_ms": 1767571212000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "PUT",
+      "duration": {
+        "duration": 5,
+        "duration_unit": "t"
+      }
+    },
+    "costs": {
+      "payout": "19.51"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": null,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": {
+            "cause": "expiry",
+            "exit_price": "1000",
+            "exit_time_ms": 1767571212000,
+            "result_cents": -1000,
+            "won": false
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/put_5_ticks_tie_loses",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "998",
+          "source_time_ms": 1767571206000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "997",
+          "source_time_ms": 1767571208000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "996",
+          "source_time_ms": 1767571210000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000",
+          "source_time_ms": 1767571212000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "CALL",
+      "duration": {
+        "duration": 5,
+        "duration_unit": "t"
+      }
+    },
+    "costs": {
+      "payout": "19.51"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": null,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": {
+            "cause": "expiry",
+            "exit_price": "999.99",
+            "exit_time_ms": 1767571212000,
+            "result_cents": -1000,
+            "won": false
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/call_5_ticks_counts_recovered_ticks",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1001",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": true,
+          "price": "1002",
+          "source_time_ms": 1767571206000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": true,
+          "price": "1003",
+          "source_time_ms": 1767571208000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1001",
+          "source_time_ms": 1767571210000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.99",
+          "source_time_ms": 1767571212000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "CALL",
+      "duration": {
+        "duration": 15,
+        "duration_unit": "s"
+      }
+    },
+    "costs": {
+      "payout": "19.36"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": null,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": {
+            "cause": "expiry",
+            "exit_price": "1000.01",
+            "exit_time_ms": 1767571216000,
+            "result_cents": 936,
+            "won": true
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/call_15s_exit_tick_at_expiry",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "998",
+          "source_time_ms": 1767571206000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571208000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571210000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999",
+          "source_time_ms": 1767571212000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.2",
+          "source_time_ms": 1767571214000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.01",
+          "source_time_ms": 1767571216000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "900",
+          "source_time_ms": 1767571218000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "PUT",
+      "duration": {
+        "duration": 1,
+        "duration_unit": "m"
+      }
+    },
+    "costs": {
+      "payout": "19.03"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": null,
+      "steps": [
+        {
+          "close": {
+            "cause": "expiry",
+            "exit_price": "1000",
+            "exit_time_ms": 1767571202000,
+            "result_cents": -1000,
+            "won": false
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/put_1m_gap_exit_is_entry",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "990",
+          "source_time_ms": 1767571270000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "PUT",
+      "duration": {
+        "duration": 1,
+        "duration_unit": "m"
+      }
+    },
+    "costs": {
+      "payout": "19.03"
+    },
+    "data": "ticks",
+    "entry": {
+      "from_recovery": false,
+      "price": "1000",
+      "source_time_ms": 1767571202000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": null,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": {
+            "cause": "expiry",
+            "exit_price": "999.99",
+            "exit_time_ms": 1767571260000,
+            "result_cents": 903,
+            "won": true
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "latency_ms": 1000,
+    "name": "ticks/put_1m_wins",
+    "purchase_ms": 1767571201000,
+    "stake": "10",
+    "steps": [
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571204000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571206000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571208000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571210000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571212000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571214000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571216000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571218000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571220000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571222000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571224000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571226000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571228000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571230000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571232000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571234000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571236000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571238000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571240000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571242000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571244000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571246000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571248000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571250000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571252000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571254000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.5",
+          "source_time_ms": 1767571256000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1000.5",
+          "source_time_ms": 1767571258000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "999.99",
+          "source_time_ms": 1767571260000
+        }
+      },
+      {
+        "tick": {
+          "from_recovery": false,
+          "price": "1100",
+          "source_time_ms": 1767571262000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": "4",
+      "take_profit": "6"
+    },
+    "costs": {
+      "commission": "0.2"
+    },
+    "data": "deriv_candles",
+    "entry": {
+      "open": "2650.1",
+      "start_ms": 1767571200000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -20,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": 6
+        },
+        {
+          "close": {
+            "cause": "stop_loss",
+            "exit_price": null,
+            "exit_time_ms": 1767571320000,
+            "result_cents": -400
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "name": "candles/multup_stop_loss_inside_candle",
+    "stake": "10",
+    "steps": [
+      {
+        "candle": {
+          "close": "2650.8",
+          "end_ms": 1767571260000,
+          "high": "2651",
+          "low": "2649.5",
+          "open": "2650.1",
+          "start_ms": 1767571200000
+        }
+      },
+      {
+        "candle": {
+          "close": "2645",
+          "end_ms": 1767571320000,
+          "high": "2651.2",
+          "low": "2639",
+          "open": "2650.8",
+          "start_ms": 1767571260000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": "4",
+      "take_profit": "6"
+    },
+    "costs": {
+      "commission": "0.2"
+    },
+    "data": "deriv_candles",
+    "entry": {
+      "open": "2650.1",
+      "start_ms": 1767571200000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -20,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": 6
+        },
+        {
+          "close": {
+            "cause": "stop_loss",
+            "exit_price": "2639",
+            "exit_time_ms": 1767571260000,
+            "result_cents": -439
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "name": "candles/multup_opens_beyond_stop_loss",
+    "stake": "10",
+    "steps": [
+      {
+        "candle": {
+          "close": "2650.8",
+          "end_ms": 1767571260000,
+          "high": "2651",
+          "low": "2649.5",
+          "open": "2650.1",
+          "start_ms": 1767571200000
+        }
+      },
+      {
+        "candle": {
+          "close": "2640",
+          "end_ms": 1767571320000,
+          "high": "2641",
+          "low": "2638",
+          "open": "2639",
+          "start_ms": 1767571260000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": "4",
+      "take_profit": "6"
+    },
+    "costs": {
+      "commission": "0.2"
+    },
+    "data": "deriv_candles",
+    "entry": {
+      "open": "2650.1",
+      "start_ms": 1767571200000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -20,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": 6
+        },
+        {
+          "close": {
+            "cause": "stop_loss",
+            "exit_price": null,
+            "exit_time_ms": 1767571320000,
+            "result_cents": -400
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "name": "candles/multup_both_touched_counts_stop_loss",
+    "stake": "10",
+    "steps": [
+      {
+        "candle": {
+          "close": "2650.8",
+          "end_ms": 1767571260000,
+          "high": "2651",
+          "low": "2649.5",
+          "open": "2650.1",
+          "start_ms": 1767571200000
+        }
+      },
+      {
+        "candle": {
+          "close": "2660",
+          "end_ms": 1767571320000,
+          "high": "2667",
+          "low": "2639",
+          "open": "2650.8",
+          "start_ms": 1767571260000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTDOWN",
+      "max_duration_ms": 3600000,
+      "multiplier": 500,
+      "stop_loss": "8",
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "1"
+    },
+    "data": "deriv_candles",
+    "entry": {
+      "open": "2650.1",
+      "start_ms": 1767571200000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -100,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": -232
+        },
+        {
+          "close": {
+            "cause": "stop_out",
+            "exit_price": null,
+            "exit_time_ms": 1767571320000,
+            "result_cents": -1000
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "name": "candles/multdown_stop_out",
+    "stake": "10",
+    "steps": [
+      {
+        "candle": {
+          "close": "2650.8",
+          "end_ms": 1767571260000,
+          "high": "2651",
+          "low": "2649.5",
+          "open": "2650.1",
+          "start_ms": 1767571200000
+        }
+      },
+      {
+        "candle": {
+          "close": "2651",
+          "end_ms": 1767571320000,
+          "high": "2656.8",
+          "low": "2650",
+          "open": "2650.8",
+          "start_ms": 1767571260000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": "4",
+      "take_profit": "6"
+    },
+    "costs": {
+      "commission": "0.2"
+    },
+    "data": "deriv_candles",
+    "entry": {
+      "open": "2650.1",
+      "start_ms": 1767571200000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -20,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": 6
+        },
+        {
+          "close": {
+            "cause": "take_profit",
+            "exit_price": null,
+            "exit_time_ms": 1767571320000,
+            "result_cents": 600
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "name": "candles/multup_take_profit_inside_candle",
+    "stake": "10",
+    "steps": [
+      {
+        "candle": {
+          "close": "2650.8",
+          "end_ms": 1767571260000,
+          "high": "2651",
+          "low": "2649.5",
+          "open": "2650.1",
+          "start_ms": 1767571200000
+        }
+      },
+      {
+        "candle": {
+          "close": "2655",
+          "end_ms": 1767571320000,
+          "high": "2667",
+          "low": "2649",
+          "open": "2650.8",
+          "start_ms": 1767571260000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": "4",
+      "take_profit": "6"
+    },
+    "costs": {
+      "commission": "0.2"
+    },
+    "data": "deriv_candles",
+    "entry": {
+      "open": "2650.1",
+      "start_ms": 1767571200000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -20,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": 6
+        },
+        {
+          "close": {
+            "cause": "take_profit",
+            "exit_price": "2668",
+            "exit_time_ms": 1767571260000,
+            "result_cents": 655
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "name": "candles/multup_opens_beyond_take_profit",
+    "stake": "10",
+    "steps": [
+      {
+        "candle": {
+          "close": "2650.8",
+          "end_ms": 1767571260000,
+          "high": "2651",
+          "low": "2649.5",
+          "open": "2650.1",
+          "start_ms": 1767571200000
+        }
+      },
+      {
+        "candle": {
+          "close": "2669",
+          "end_ms": 1767571320000,
+          "high": "2670",
+          "low": "2667",
+          "open": "2668",
+          "start_ms": 1767571260000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 180000,
+      "multiplier": 100,
+      "stop_loss": "4",
+      "take_profit": "6"
+    },
+    "costs": {
+      "commission": "0.2"
+    },
+    "data": "deriv_candles",
+    "entry": {
+      "open": "2650.1",
+      "start_ms": 1767571200000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -20,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": 6
+        },
+        {
+          "close": null,
+          "mark_cents": 14
+        },
+        {
+          "close": {
+            "cause": "max_duration",
+            "exit_price": "2651",
+            "exit_time_ms": 1767571800000,
+            "result_cents": 14
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "name": "candles/multup_max_duration_after_closed_market",
+    "stake": "10",
+    "steps": [
+      {
+        "candle": {
+          "close": "2650.8",
+          "end_ms": 1767571260000,
+          "high": "2651",
+          "low": "2649.5",
+          "open": "2650.1",
+          "start_ms": 1767571200000
+        }
+      },
+      {
+        "candle": {
+          "close": "2651",
+          "end_ms": 1767571320000,
+          "high": "2651.1",
+          "low": "2650.2",
+          "open": "2650.8",
+          "start_ms": 1767571260000
+        }
+      },
+      {
+        "candle": {
+          "close": "2651.5",
+          "end_ms": 1767571860000,
+          "high": "2652",
+          "low": "2650.6",
+          "open": "2651",
+          "start_ms": 1767571800000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 120000,
+      "multiplier": 100,
+      "stop_loss": "4",
+      "take_profit": "6"
+    },
+    "costs": {
+      "commission": "0.2"
+    },
+    "data": "deriv_candles",
+    "entry": {
+      "open": "2650.1",
+      "start_ms": 1767571200000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -20,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": 6
+        },
+        {
+          "close": null,
+          "mark_cents": 14
+        },
+        {
+          "close": {
+            "cause": "take_profit",
+            "exit_price": "2669",
+            "exit_time_ms": 1767571320000,
+            "result_cents": 693
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "name": "candles/multup_max_duration_open_beyond_take_profit",
+    "stake": "10",
+    "steps": [
+      {
+        "candle": {
+          "close": "2650.8",
+          "end_ms": 1767571260000,
+          "high": "2651",
+          "low": "2649.5",
+          "open": "2650.1",
+          "start_ms": 1767571200000
+        }
+      },
+      {
+        "candle": {
+          "close": "2651",
+          "end_ms": 1767571320000,
+          "high": "2651.1",
+          "low": "2650.2",
+          "open": "2650.8",
+          "start_ms": 1767571260000
+        }
+      },
+      {
+        "candle": {
+          "close": "2669",
+          "end_ms": 1767571380000,
+          "high": "2670",
+          "low": "2668",
+          "open": "2669",
+          "start_ms": 1767571320000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 120000,
+      "multiplier": 100,
+      "stop_loss": "4",
+      "take_profit": "6"
+    },
+    "costs": {
+      "commission": "0.2"
+    },
+    "data": "deriv_candles",
+    "entry": {
+      "open": "2650.1",
+      "start_ms": 1767571200000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -20,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": 6
+        },
+        {
+          "close": null,
+          "mark_cents": 14
+        },
+        {
+          "close": {
+            "cause": "max_duration",
+            "exit_price": "2651",
+            "exit_time_ms": 1767571320000,
+            "result_cents": 14
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "name": "candles/multup_max_duration_at_exact_start",
+    "stake": "10",
+    "steps": [
+      {
+        "candle": {
+          "close": "2650.8",
+          "end_ms": 1767571260000,
+          "high": "2651",
+          "low": "2649.5",
+          "open": "2650.1",
+          "start_ms": 1767571200000
+        }
+      },
+      {
+        "candle": {
+          "close": "2651",
+          "end_ms": 1767571320000,
+          "high": "2651.1",
+          "low": "2650.2",
+          "open": "2650.8",
+          "start_ms": 1767571260000
+        }
+      },
+      {
+        "candle": {
+          "close": "2651.5",
+          "end_ms": 1767571380000,
+          "high": "2652",
+          "low": "2650.6",
+          "open": "2651",
+          "start_ms": 1767571320000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "MULTUP",
+      "max_duration_ms": 3600000,
+      "multiplier": 100,
+      "stop_loss": null,
+      "take_profit": null
+    },
+    "costs": {
+      "commission": "0.2"
+    },
+    "data": "deriv_candles",
+    "entry": {
+      "open": "2650.1",
+      "start_ms": 1767571200000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": -20,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": 6
+        },
+        {
+          "close": null,
+          "mark_cents": 40
+        },
+        {
+          "close": {
+            "cause": "exit_rule",
+            "exit_price": "2651.7",
+            "exit_time_ms": 1767571320000,
+            "result_cents": 40
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "name": "candles/multup_exit_rule_at_close",
+    "stake": "10",
+    "steps": [
+      {
+        "candle": {
+          "close": "2650.8",
+          "end_ms": 1767571260000,
+          "high": "2651",
+          "low": "2649.5",
+          "open": "2650.1",
+          "start_ms": 1767571200000
+        }
+      },
+      {
+        "candle": {
+          "close": "2651.7",
+          "end_ms": 1767571320000,
+          "high": "2652",
+          "low": "2650.3",
+          "open": "2650.8",
+          "start_ms": 1767571260000
+        }
+      },
+      {
+        "sell_at_close": true
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "CALL",
+      "duration": {
+        "duration": 5,
+        "duration_unit": "m"
+      }
+    },
+    "costs": {
+      "payout": "18.2"
+    },
+    "data": "deriv_candles",
+    "entry": {
+      "open": "2650.1",
+      "start_ms": 1767571200000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": null,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": {
+            "cause": "expiry",
+            "exit_price": "2650.3",
+            "exit_time_ms": 1767571440000,
+            "result_cents": 820,
+            "won": true
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "name": "candles/call_5m_last_candle_missing",
+    "stake": "10",
+    "steps": [
+      {
+        "candle": {
+          "close": "2650.8",
+          "end_ms": 1767571260000,
+          "high": "2651",
+          "low": "2649.5",
+          "open": "2650.1",
+          "start_ms": 1767571200000
+        }
+      },
+      {
+        "candle": {
+          "close": "2650.4",
+          "end_ms": 1767571320000,
+          "high": "2651",
+          "low": "2650",
+          "open": "2650.8",
+          "start_ms": 1767571260000
+        }
+      },
+      {
+        "candle": {
+          "close": "2650.2",
+          "end_ms": 1767571380000,
+          "high": "2650.9",
+          "low": "2650.1",
+          "open": "2650.4",
+          "start_ms": 1767571320000
+        }
+      },
+      {
+        "candle": {
+          "close": "2650.3",
+          "end_ms": 1767571440000,
+          "high": "2650.7",
+          "low": "2649.9",
+          "open": "2650.2",
+          "start_ms": 1767571380000
+        }
+      },
+      {
+        "candle": {
+          "close": "2641",
+          "end_ms": 1767571560000,
+          "high": "2650.4",
+          "low": "2640",
+          "open": "2650.3",
+          "start_ms": 1767571500000
+        }
+      }
+    ]
+  },
+  {
+    "contract": {
+      "contract_type": "PUT",
+      "duration": {
+        "duration": 5,
+        "duration_unit": "m"
+      }
+    },
+    "costs": {
+      "payout": "18.2"
+    },
+    "data": "deriv_candles",
+    "entry": {
+      "open": "2650.1",
+      "start_ms": 1767571200000
+    },
+    "expected": {
+      "open_close": null,
+      "open_mark_cents": null,
+      "steps": [
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": null,
+          "mark_cents": null
+        },
+        {
+          "close": {
+            "cause": "expiry",
+            "exit_price": "2650.1",
+            "exit_time_ms": 1767571500000,
+            "result_cents": -1000,
+            "won": false
+          },
+          "mark_cents": null
+        }
+      ]
+    },
+    "name": "candles/put_5m_tie_loses_at_expiry",
+    "stake": "10",
+    "steps": [
+      {
+        "candle": {
+          "close": "2650.8",
+          "end_ms": 1767571260000,
+          "high": "2651",
+          "low": "2649.5",
+          "open": "2650.1",
+          "start_ms": 1767571200000
+        }
+      },
+      {
+        "candle": {
+          "close": "2650.4",
+          "end_ms": 1767571320000,
+          "high": "2651",
+          "low": "2650",
+          "open": "2650.8",
+          "start_ms": 1767571260000
+        }
+      },
+      {
+        "candle": {
+          "close": "2650.2",
+          "end_ms": 1767571380000,
+          "high": "2650.9",
+          "low": "2650.1",
+          "open": "2650.4",
+          "start_ms": 1767571320000
+        }
+      },
+      {
+        "candle": {
+          "close": "2650.3",
+          "end_ms": 1767571440000,
+          "high": "2650.7",
+          "low": "2649.9",
+          "open": "2650.2",
+          "start_ms": 1767571380000
+        }
+      },
+      {
+        "candle": {
+          "close": "2650.1",
+          "end_ms": 1767571500000,
+          "high": "2650.4",
+          "low": "2649",
+          "open": "2650.3",
+          "start_ms": 1767571440000
+        }
+      }
+    ]
+  }
+]

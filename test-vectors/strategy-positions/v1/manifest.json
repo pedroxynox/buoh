@@ -1,0 +1,17 @@
+{
+  "files": [
+    {
+      "bytes": 4266,
+      "path": "amounts.json",
+      "sha256": "82591f74def460d332101bb051a5a9c4c4fa469e61c0c684e4c1f4996a654917"
+    },
+    {
+      "bytes": 63919,
+      "path": "positions.json",
+      "sha256": "d47737e4db4fb68b236bcb777b0c2ab5b07074fa2656ea5e39c0a1543bd66005"
+    }
+  ],
+  "schema_version": "1.0.0",
+  "strategy_schema_version": "1.0.0",
+  "vector_id": "strategy-positions-v1"
+}

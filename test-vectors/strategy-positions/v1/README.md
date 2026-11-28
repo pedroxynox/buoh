@@ -1,0 +1,9 @@
+# Vectores de los importes y la posición
+
+Vectores compartidos de [ADR-0022](../../../docs/arquitectura/adr/0022-modelo-de-estrategia.md) §11 para los importes de punto fijo y la posición hipotética de §5, con sus precisiones de ADR-0024 §6 y la del PR 3b en §13, en TypeScript (`packages/strategy-sdk`) y, con el motor de investigación, en Python. Los datos son sintéticos: ningún precio es de Deriv.
+
+- `positions.json`: cada caso da el contrato, con la forma de `StrategyDefinition`, la apuesta, la comisión o el pago, la entrada y los pasos: un tick (`price`, `source_time_ms` y `from_recovery`), una vela de 1 minuto de Deriv, una venta por reglas decidida con el último tick (`sale`) o una venta al cierre de la última vela (`sell_at_close`). Con ticks llevan también la latencia y la hora de la compra. `expected` da el cierre al abrir, si lo hay, y después de cada paso el cierre (su causa, su resultado en centavos, el precio y la hora de salida y, en un sube/baja, si ganó) y el resultado del multiplicador abierto en centavos, o `null`.
+- `amounts.json`: cocientes con 18 decimales, redondeos al centavo, los dos al par, y curvas de la caída máxima, con la caída en centavos y si llega a su tope en cada punto.
+- `manifest.json`: el tamaño y el SHA-256 de los bytes de cada archivo. Cambiar un vector cambia su hash, y la prueba falla hasta actualizar el manifiesto.
+
+Cubren los cuatro tipos de contrato con ticks y con velas, cada causa de cierre y su precedencia, los límites exactos, la latencia, los ticks de la recuperación de un hueco, el empate de un sube/baja, el tick a la hora del vencimiento, el mercado cerrado y los empates del redondeo. Los resultados los calculó una implementación de referencia en Python escrita desde la ADR, con fracciones exactas, fuera de `packages/strategy-sdk`. Los comprueba `packages/strategy-sdk/test/positions.test.ts`.

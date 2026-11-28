@@ -1,7 +1,7 @@
 ---
 schema_version: "1.0.0"
-status_version: 127
-updated_at_utc: "2026-11-28T02:30:00.000Z"
+status_version: 128
+updated_at_utc: "2026-11-28T15:00:00.000Z"
 current_phase: "Fase 2 — Laboratorio y bot shadow para uso propio"
 phase_status: "active"
 active_work: null
@@ -39,7 +39,7 @@ Transformar una hipótesis en una estrategia viva, explicable y no ejecutora, pa
 | F2.4 Datos reales en pantalla | Hecha, con el 7b | [Evidencia de F2.4](docs/operacion/evidencia-datos-f2-4.md) |
 | F2.5 Datasets vivos | Hecha, con el PR 6 de ADR-0020 | [Evidencia de los datasets vivos](docs/operacion/evidencia-datasets-f2-5.md) |
 | F2.5b Mercados reales | En curso: hechos los PR 2 a 5 de [ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md), el 5 en seis partes, del 5a al 5f, y el 6 en cinco, del 6a al 6e. Siguen quitar `buoh-historia` y los PR 7 y 8 (ADR-0021 §9; «Siguiente tarea autorizada») | [Evidencia del PR 2d](docs/operacion/evidencia-memoria-f2-5b.md) |
-| F2.6 Estrategias | En curso: hechos el PR 2 de [ADR-0022](docs/arquitectura/adr/0022-modelo-de-estrategia.md), `StrategyDefinition` 1.0.0 en `packages/contracts`, y el 3a, la biblioteca de indicadores en `packages/strategy-sdk`. Siguen el 3b y el 3c (ADR-0022 §13) | [Contratos de dominio](docs/arquitectura/contratos-de-dominio.md#strategydefinition) |
+| F2.6 Estrategias | En curso: hechos el PR 2 de [ADR-0022](docs/arquitectura/adr/0022-modelo-de-estrategia.md), `StrategyDefinition` 1.0.0 en `packages/contracts`, el 3a, la biblioteca de indicadores en `packages/strategy-sdk`, y el 3b, los importes y la posición. Siguen el 3c y comprobar el stop out del oro (ADR-0022 §13) | [Contratos de dominio](docs/arquitectura/contratos-de-dominio.md#strategydefinition) |
 | F2.6b y F2.7 a F2.10 | Sin empezar: las cinco ADR del laboratorio, de ADR-0022 a ADR-0026, están fusionadas | — |
 | F2.11 Puerta de salida | Sin empezar | — |
 
@@ -61,7 +61,7 @@ Cerrar V1, con su prototipo de escritorio, no autoriza la app real de Windows: l
 
 1. **2026-12-02 a las 00:00:03 UTC:** vence el log 1, y el agente comprueba su borrado (runbook de ingesta, «Operaciones (`buoh-operaciones`)», «El primer borrado»). Vuelve a contar los objetos de `logs/000002/`, que tienen que ser los 317 068 de la [evidencia de producción de F2.2](docs/operacion/evidencia-produccion-f2-2.md). Ese día, el agente le pide además al propietario el uso de `buoh-operaciones` en la facturación de Render, para saber si el cron job pasa del mínimo de 1 USD al mes con lo que suman los datasets vivos ([evidencia de los datasets vivos](docs/operacion/evidencia-datasets-f2-5.md), «El costo»).
 2. **Quitar `buoh-historia`**, cuando sus tres historias, los ticks de R_100 y del oro y, desde el PR 6d, las velas del último año, estén pedidas y publicadas ([ADR-0021](docs/arquitectura/adr/0021-mercados-reales-y-fuentes-de-investigacion.md) §9, precisiones del PR 6d y del 6e): antes, el agente comprueba en producción la historia de las velas, y después un PR quita `buoh-historia` de `render-datos.yaml` y el propietario lo borra en Render (runbook de ingesta, «La historia en producción (PR 6e de ADR-0021)», «Con el PR 6d»).
-3. **Mientras la historia se descarga y se publica:** los PR 3b y 3c de [ADR-0022](docs/arquitectura/adr/0022-modelo-de-estrategia.md), los PR 2 a 4 de [ADR-0024](docs/arquitectura/adr/0024-semantica-del-backtest.md) y los PR 2 a 4 de [ADR-0023](docs/arquitectura/adr/0023-motor-de-investigacion.md). Dónde van los PR 4 y 5 de ADR-0022 lo dice el plan (§9).
+3. **Mientras la historia se descarga y se publica:** el PR 3c de [ADR-0022](docs/arquitectura/adr/0022-modelo-de-estrategia.md), que antes comprueba con `proposal` el stop out del oro, con su mercado abierto (ADR-0022 §13, precisión del PR 3b), los PR 2 a 4 de [ADR-0024](docs/arquitectura/adr/0024-semantica-del-backtest.md) y los PR 2 a 4 de [ADR-0023](docs/arquitectura/adr/0023-motor-de-investigacion.md). Dónde van los PR 4 y 5 de ADR-0022 lo dice el plan (§9).
 4. **El PR 7 de ADR-0021**, los umbrales y la publicación del oro, en su fecha, sin esperar a los pasos 2 y 3 (ADR-0021 §2): fija los umbrales desde el 2026-12-02 a las 05:09:43.577 UTC, a los 7 días del primer tick del oro, y tiene que estar en producción antes del 2026-12-23, 7 días antes de que venza, hacia el 2026-12-30, el primer log del oro, que se corta el lunes 2026-11-30 (runbook de ingesta, «El oro (PR 3 de ADR-0021)»).
 5. **El PR 8 de ADR-0021**, cuando la historia esté publicada, y después el VPS, el PR 5 de ADR-0023.
 
