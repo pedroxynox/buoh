@@ -1,4 +1,13 @@
 export {
+  centsToFixed,
+  FIXED_DECIMALS,
+  fixedProduct,
+  fixedQuotient,
+  fixedToCents,
+  formatFixed,
+  parseFixed,
+} from './amounts.js';
+export {
   binary64Bits,
   decimalToBinary64,
   INDICATOR_LIBRARY_VERSION,
@@ -9,3 +18,26 @@ export {
   type IndicatorState,
   type IndicatorStep,
 } from './indicators.js';
+export {
+  drawdownReached,
+  initialDrawdownState,
+  openCandlePosition,
+  openTickPosition,
+  positionMarkCents,
+  requestTickSale,
+  sellCandlePositionAtClose,
+  stepCandlePosition,
+  stepDrawdown,
+  stepTickPosition,
+  type DrawdownState,
+  type DrawdownStep,
+  type OpenCandlePositionInput,
+  type OpenTickPositionInput,
+  type PositionCandle,
+  type PositionClose,
+  type PositionCloseCause,
+  type PositionCosts,
+  type PositionState,
+  type PositionStep,
+  type PositionTick,
+} from './position.js';

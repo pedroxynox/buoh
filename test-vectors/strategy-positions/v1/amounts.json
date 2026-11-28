@@ -1,0 +1,227 @@
+{
+  "cents": [
+    {
+      "cents": 0,
+      "value": "0.005"
+    },
+    {
+      "cents": 2,
+      "value": "0.015"
+    },
+    {
+      "cents": 2,
+      "value": "0.025"
+    },
+    {
+      "cents": 0,
+      "value": "-0.005"
+    },
+    {
+      "cents": -36,
+      "value": "-0.355"
+    },
+    {
+      "cents": -34,
+      "value": "-0.345"
+    },
+    {
+      "cents": 123,
+      "value": "1.2345"
+    },
+    {
+      "cents": -1000,
+      "value": "-10"
+    },
+    {
+      "cents": 1951,
+      "value": "19.51"
+    },
+    {
+      "cents": 0,
+      "value": "0.004999999999999999"
+    },
+    {
+      "cents": -2,
+      "value": "-0.015000000000000001"
+    }
+  ],
+  "drawdowns": [
+    {
+      "equity_cents": [
+        0,
+        -1000,
+        500,
+        -20000,
+        -49499,
+        -49500,
+        -60000
+      ],
+      "expected": [
+        {
+          "drawdown_cents": 0,
+          "reached": false
+        },
+        {
+          "drawdown_cents": 1000,
+          "reached": false
+        },
+        {
+          "drawdown_cents": 0,
+          "reached": false
+        },
+        {
+          "drawdown_cents": 20500,
+          "reached": false
+        },
+        {
+          "drawdown_cents": 49999,
+          "reached": false
+        },
+        {
+          "drawdown_cents": 50000,
+          "reached": true
+        },
+        {
+          "drawdown_cents": 60500,
+          "reached": true
+        }
+      ],
+      "initial_capital": "1000",
+      "max_drawdown_percent": "50",
+      "name": "fifty_percent_reached_at_exact_limit",
+      "start_equity_cents": 0
+    },
+    {
+      "equity_cents": [
+        300,
+        250,
+        -12000,
+        -12199,
+        -12200,
+        1000
+      ],
+      "expected": [
+        {
+          "drawdown_cents": 0,
+          "reached": false
+        },
+        {
+          "drawdown_cents": 50,
+          "reached": false
+        },
+        {
+          "drawdown_cents": 12300,
+          "reached": false
+        },
+        {
+          "drawdown_cents": 12499,
+          "reached": false
+        },
+        {
+          "drawdown_cents": 12500,
+          "reached": true
+        },
+        {
+          "drawdown_cents": 0,
+          "reached": false
+        }
+      ],
+      "initial_capital": "1000",
+      "max_drawdown_percent": "12.5",
+      "name": "twelve_and_a_half_percent",
+      "start_equity_cents": 0
+    },
+    {
+      "equity_cents": [
+        -50000,
+        -40000,
+        -89999,
+        -90000
+      ],
+      "expected": [
+        {
+          "drawdown_cents": 0,
+          "reached": false
+        },
+        {
+          "drawdown_cents": 0,
+          "reached": false
+        },
+        {
+          "drawdown_cents": 49999,
+          "reached": false
+        },
+        {
+          "drawdown_cents": 50000,
+          "reached": true
+        }
+      ],
+      "initial_capital": "1000",
+      "max_drawdown_percent": "50",
+      "name": "after_manual_resume",
+      "start_equity_cents": -50000
+    }
+  ],
+  "quotients": [
+    {
+      "dividend": "1",
+      "divisor": "3",
+      "quotient": "0.333333333333333333"
+    },
+    {
+      "dividend": "2",
+      "divisor": "3",
+      "quotient": "0.666666666666666667"
+    },
+    {
+      "dividend": "-1",
+      "divisor": "3",
+      "quotient": "-0.333333333333333333"
+    },
+    {
+      "dividend": "-2",
+      "divisor": "3",
+      "quotient": "-0.666666666666666667"
+    },
+    {
+      "dividend": "1",
+      "divisor": "2000000000000000000",
+      "quotient": "0"
+    },
+    {
+      "dividend": "3",
+      "divisor": "2000000000000000000",
+      "quotient": "0.000000000000000002"
+    },
+    {
+      "dividend": "5",
+      "divisor": "2000000000000000000",
+      "quotient": "0.000000000000000002"
+    },
+    {
+      "dividend": "-5",
+      "divisor": "2000000000000000000",
+      "quotient": "-0.000000000000000002"
+    },
+    {
+      "dividend": "2651.007",
+      "divisor": "2650.123",
+      "quotient": "1.00033356942300414"
+    },
+    {
+      "dividend": "2649.881",
+      "divisor": "2650.123",
+      "quotient": "0.999908683483747735"
+    },
+    {
+      "dividend": "1000.015",
+      "divisor": "1000",
+      "quotient": "1.000015"
+    },
+    {
+      "dividend": "0.000000000000000001",
+      "divisor": "3",
+      "quotient": "0"
+    }
+  ]
+}
